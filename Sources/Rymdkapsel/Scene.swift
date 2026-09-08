@@ -760,6 +760,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return n
     }
 
+    /// Flame on, a slow climb that carries the rocket out of the frame, then gone.
+    private func liftOff(_ node: SCNNode) {
+        node.childNode(withName: "flame", recursively: false)?.opacity = 1
+        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
+        rise.timingMode = .easeIn
+        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
+        node.runAction(.sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])]), .removeFromParentNode()]))
+    }
+
     /// Rockets on the pad for open release pull requests; a merged one lifts off.
     private func rebuildRockets() {
         for launch in github.takeLaunches() {
@@ -771,17 +780,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 rocketRoot.addChildNode(n)
                 return n
             }()
-            node.childNode(withName: "flame", recursively: false)?.opacity = 1
-            let up = SCNAction.moveBy(x: 0, y: 14, z: 0, duration: 3.0)
-            up.timingMode = .easeIn
-            node.runAction(.sequence([.wait(duration: 0.6), .group([up, .sequence([.wait(duration: 2), .fadeOut(duration: 1)])]), .removeFromParentNode()]))
+            liftOff(node)
             logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
             ringBell(seed: launch.pr.number)
         }
         var live = Set<String>()
         for (root, info) in repoRoots {
             guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
-            for pr in open {
+            let hasProduction = open.contains(where: \.isProduction)
+            for pr in open where pr.isProduction || !hasProduction {
                 let key = "\(info.station)|\(pr.number)"
                 live.insert(key)
                 if rockets[key] != nil { continue }
@@ -1356,9 +1363,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 ringBell(seed: m.id.hashValue)
             }
             if clock > 12, let r = rockets["work|1"], !r.hasActions, r.parent != nil {
-                r.childNode(withName: "flame", recursively: false)?.opacity = 1
-                let up = SCNAction.moveBy(x: 0, y: 14, z: 0, duration: 3.0); up.timingMode = .easeIn
-                r.runAction(.sequence([.group([up, .sequence([.wait(duration: 2), .fadeOut(duration: 1)])]), .removeFromParentNode()]))
+                liftOff(r)
                 logEvent("tattoodo-web launched to production: release 2.14")
             }
             if clock > 6, !minions.keys.contains("demo-new") {
