@@ -240,6 +240,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private let pitchNode = SCNNode()
     private let cameraNode = SCNNode()
     private var roomTiles: [String: [SCNNode]] = [:]
+    /// Doorways: pairs of cells whose shared edge has no dark border, keyed "x,y|x,y" in both orders.
+    private var openEdges: Set<String> = []
     private var roomLabels: [String: SCNNode] = [:]
     private var floorLabels: [(node: SCNNode, baseYaw: Double)] = []
     /// Rooms whose office has not been delivered yet, keyed by "station|room".
@@ -414,13 +416,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return station.room(at: c)?.key
     }
 
+    private func joined(_ station: Station, _ a: Cell, _ b: Cell, _ key: String) -> Bool {
+        owner(station, b) == key || openEdges.contains("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
+    }
+
     @discardableResult
     private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String) -> SCNNode {
         let g = 0.075
-        let l = owner(station, Cell(x: cell.x - 1, y: cell.y)) == key ? 0 : g
-        let r = owner(station, Cell(x: cell.x + 1, y: cell.y)) == key ? 0 : g
-        let b = owner(station, Cell(x: cell.x, y: cell.y - 1)) == key ? 0 : g
-        let f = owner(station, Cell(x: cell.x, y: cell.y + 1)) == key ? 0 : g
+        let l = joined(station, cell, Cell(x: cell.x - 1, y: cell.y), key) ? 0 : g
+        let r = joined(station, cell, Cell(x: cell.x + 1, y: cell.y), key) ? 0 : g
+        let b = joined(station, cell, Cell(x: cell.x, y: cell.y - 1), key) ? 0 : g
+        let f = joined(station, cell, Cell(x: cell.x, y: cell.y + 1), key) ? 0 : g
         let x0 = Double(cell.x) - 0.5 + l, x1 = Double(cell.x) + 0.5 - r
         let z0 = Double(cell.y) - 0.5 + b, z1 = Double(cell.y) + 0.5 - f
         let plane = SCNPlane(width: x1 - x0, height: z1 - z0)
@@ -471,6 +477,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         fleet.arrange()
         staticRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomTiles = [:]
+        openEdges = []
+        for station in fleet.stations.values {
+            for room in station.rooms.values {
+                guard let d = station.doorCell(of: room.key), let o = station.doorOutside(of: room.key) else { continue }
+                openEdges.insert("\(station.name):\(d.x),\(d.y)|\(o.x),\(o.y)")
+                openEdges.insert("\(station.name):\(o.x),\(o.y)|\(d.x),\(d.y)")
+            }
+        }
 
         for station in fleet.stations.values {
             for c in station.corridorCells + station.coreCells {
@@ -512,17 +526,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let t = addTile(station: station, cell: c, owner: room.key, color: NSColor(room.color), name: "room:" + key)
                     if undelivered.contains(key) { t.opacity = 0 }
                     tiles.append(t)
-                }
-                if let d = station.doorCell(of: room.key), let o = station.doorOutside(of: room.key) {
-                    let dx = Double(o.x - d.x), dz = Double(o.y - d.y)
-                    let door = SCNNode(geometry: SCNPlane(width: dx == 0 ? 0.42 : 0.2, height: dx == 0 ? 0.2 : 0.42))
-                    door.geometry!.firstMaterial = flat(NSColor(room.color))
-                    door.eulerAngles.x = -.pi / 2
-                    door.position = v3(station.offset.x + Double(d.x) + dx * 0.5, 0.003, station.offset.y + Double(d.y) + dz * 0.5)
-                    door.name = "room:" + key
-                    if undelivered.contains(key) { door.opacity = 0 }
-                    staticRoot.addChildNode(door)
-                    tiles.append(door)
                 }
                 roomTiles[key] = tiles
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
