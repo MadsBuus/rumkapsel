@@ -620,26 +620,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in station.rooms.values {
                 let key = roomKey(station, room)
                 var tiles: [SCNNode] = []
+                // Construction progress: no branch = empty grey floor; a local branch starts the tiling,
+                // commits add more, and pushing finishes it.
                 let local = localState(room)
-                let sketch = room.key.hasPrefix("proj:") || (local.local && local.commits == 0)   // nothing shared yet: an unbuilt slot
-                let tileColor = sketch ? NSColor(rgb: (0.27, 0.28, 0.33)) : (room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color))
-                if sketch || local.local {
-                    let o = outline(station: station, room: room)
-                    o.name = "room:" + key
-                    staticRoot.addChildNode(o)
+                let progress: Double
+                if room.key.hasPrefix("proj:") { progress = 0 }
+                else if local.local { progress = local.commits == 0 ? 0.35 : min(0.9, 0.35 + Double(local.commits) * 0.12) }
+                else { progress = 1 }
+                let grey = NSColor(rgb: (0.27, 0.28, 0.33))
+                let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
+                let ordered = room.cells.sorted { (a, b) in
+                    let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
+                    let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
+                    return da != db ? da < db : (a.y, a.x) < (b.y, b.x)
                 }
-                for c in room.cells {
-                    let t = addTile(station: station, cell: c, owner: room.key, color: tileColor, name: "room:" + key)
-                    if undelivered.contains(key) { t.opacity = 0 }
+                let tiled = Int((Double(ordered.count) * progress).rounded())
+                let pending = undelivered.contains(key)
+                for (i, c) in ordered.enumerated() {
+                    if pending {
+                        addTile(station: station, cell: c, owner: room.key, color: grey, name: "room:" + key)
+                    }
+                    let t = addTile(station: station, cell: c, owner: room.key, color: i < tiled ? full : grey, name: "room:" + key)
+                    if pending { t.opacity = 0; t.position.y = 0.003 }
                     tiles.append(t)
                 }
                 roomTiles[key] = tiles
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
-                if undelivered.contains(key) {
-                    let o = outline(station: station, room: room)
-                    propRoot.addChildNode(o)
-                    outlines[key] = o
-                }
             }
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
