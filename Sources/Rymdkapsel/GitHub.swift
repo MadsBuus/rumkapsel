@@ -54,6 +54,14 @@ final class GitHubResolver {
         let out = stateChanges; stateChanges = []; return out
     }
 
+    /// Forgets cache ages for one repository so its next refresh hits GitHub again.
+    func invalidate(repoRoot: String) {
+        lock.lock(); defer { lock.unlock() }
+        let old = Date.distantPast
+        for k in pulls.keys where k.hasPrefix(repoRoot + "@") { pulls[k] = (pulls[k]!.0, old) }
+        if let r = releases[repoRoot] { releases[repoRoot] = (r.0, old) }
+    }
+
     /// Forgets all cache ages so the next refresh calls hit GitHub again.
     func invalidate() {
         lock.lock(); defer { lock.unlock() }

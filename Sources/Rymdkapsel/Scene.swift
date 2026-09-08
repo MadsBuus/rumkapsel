@@ -317,7 +317,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
         view.onDoubleClick = { [weak self] node in let n = node?.name; self?.enqueue { self?.open(named: n) } }
         view.onClick = { [weak self] node in
-            guard let n = node?.name, n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
+            guard let n = node?.name else { return }
+            if n.hasPrefix("minion:") { self?.enqueue { self?.poke(minionId: String(n.dropFirst(7))) } }
+            guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
         view.onZoom = { [weak self] f in self?.enqueue { guard let self else { return }; self.userZoom = min(6, max(0.4, self.userZoom * f)); self.userZoomChanged = true } }
@@ -1610,6 +1612,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom
             rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         }
+    }
+
+    /// Clicking a minion re-asks GitHub about its repo: its branch's PR, commits and releases.
+    private func poke(minionId: String) {
+        guard let m = minions[minionId], let station = fleet.stations[m.station] else { return }
+        let room = station.rooms[m.home.key]
+        let root = room?.repoRoot ?? repoRoots.first { $0.value.repo == m.home.repo }?.key
+        guard let root else { return }
+        github.invalidate(repoRoot: root)
+        for r in station.rooms.values where r.repoRoot == root {
+            if let b = r.branch { github.refresh(branch: b, repoRoot: root) }
+            if let w = r.worktree { github.refreshCommits(worktree: w) }
+        }
+        github.refreshReleases(repoRoot: root)
+        logEvent("asking github about \(m.home.repo)…")
+        // A little hop so the click feels acknowledged.
+        m.node.runAction(.sequence([.moveBy(x: 0, y: 0.25, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.25, z: 0, duration: 0.12)]))
     }
 
     /// Re-asks GitHub about every office, branch and release right now.
