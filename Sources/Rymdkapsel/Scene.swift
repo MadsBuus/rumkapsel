@@ -639,7 +639,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if pending {
                         addTile(station: station, cell: c, owner: room.key, color: grey, name: "room:" + key)
                     }
-                    let color = progress == 0 ? grey : (i < tiled ? full : subfloor)
+                    let color = progress == 0 ? full.darker(0.32) : (i < tiled ? full : subfloor)
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     tiles.append(t)
