@@ -267,17 +267,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var rockets: [String: SCNNode] = [:]
     private var repoRoots: [String: (repo: String, station: String)] = [:]
     // Crew replay: teammates' last day, looped.
-    private struct CrewEvent { let at: Date; let kind: String; let login: String; let roomKey: String; let text: String }
+    private struct CrewEvent { let at: Date; let kind: String; let login: String; let roomKey: String; let text: String; let n: Int }
+    private struct CrewRoomInfo { var repo: String; var branch: String; var prNumber: Int?; var title: String?; var author: String; var url: String?; var state: String; var last: Date }
     private var crewEvents: [CrewEvent] = []
     private var crewCursor = 0
     private var replayStart = Date()
+    private var replayWindow: TimeInterval = 1
     private var replayTime = 0.0             // seconds since replayStart
     private var crewBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
-    private var crewPRInfo: [String: CrewPR] = [:]
+    private var crewRoomInfo: [String: CrewRoomInfo] = [:]
     private var crewSignature = ""
     private let replayLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    private var hangarAnchors: [String: SCNNode] = [:]
+    private var shipsInFlight: [String: Int] = [:]
     static let crewWindow: TimeInterval = 24 * 3600
-    static let replayLength = 240.0          // seconds of wall clock for one day
+    static let replayLength = 240.0          // seconds of wall clock for one replay
     private var beams: [String: SCNNode] = [:]
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
@@ -556,11 +560,24 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for c in station.padCells {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
             }
-            let pc = station.padCenter
-            let ring = SCNNode(geometry: SCNTube(innerRadius: 0.55, outerRadius: 0.62, height: 0.01))
-            ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
-            ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
-            staticRoot.addChildNode(ring)
+            if station.hasPad {
+                let pc = station.padCenter
+                let ring = SCNNode(geometry: SCNTube(innerRadius: 0.55, outerRadius: 0.62, height: 0.01))
+                ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
+                ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
+                staticRoot.addChildNode(ring)
+            }
+            if station.hasHangar {
+                let hc = station.hangarCenter
+                let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
+                anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
+                for slot in station.hangarSlots {
+                    let mark = SCNNode(geometry: SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01))
+                    mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
+                    mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
+                    staticRoot.addChildNode(mark)
+                }
+            }
             for c in station.corridorCells where (c.x + c.y * 3) % 4 == 0 {
                 let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
                 d.geometry!.firstMaterial = flat(Palette.void)
@@ -612,6 +629,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
+        let bridge = fleet.bridgeCells
+        if let first = bridge.first, let last = bridge.last {
+            let plane = SCNPlane(width: last.x - first.x + 1, height: 2)
+            plane.firstMaterial = flat(Palette.corridor)
+            let n = SCNNode(geometry: plane)
+            n.eulerAngles.x = -.pi / 2
+            n.position = v3((first.x + last.x) / 2, 0, 0.5)
+            n.name = "bridge"
+            staticRoot.addChildNode(n)
+        }
         rebuildLabels()
         rebuildMarkers()
 
@@ -648,14 +675,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let b = station.bounds
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
-            let padLabel = floorText("launch pad", color: NSColor(rgb: (0.55, 0.58, 0.68)), size: 0.38, maxWidth: 5, lines: 1)
-            let pc = station.padCenter
-            add(padLabel.node, yaw: 0, center: SIMD2(ox + pc.x - 0.9 + padLabel.width / 2, oz + pc.y + 1.55 + padLabel.height / 2))
-            let hangarLabel = floorText("hangar", color: NSColor(Colors.hangar).lighter(0.25), size: 0.38, maxWidth: 4, lines: 1)
-            let hc = station.hangarCenter
-            add(hangarLabel.node, yaw: 0, center: SIMD2(ox + hc.x - 0.9 + hangarLabel.width / 2, oz + hc.y + 1.55 + hangarLabel.height / 2))
+            if station.hasPad {
+                let padLabel = floorText("launch pad", color: NSColor(rgb: (0.55, 0.58, 0.68)), size: 0.38, maxWidth: 5, lines: 1)
+                let pc = station.padCenter
+                add(padLabel.node, yaw: 0, center: SIMD2(ox + pc.x - 0.9 + padLabel.width / 2, oz + pc.y + 1.55 + padLabel.height / 2))
+            }
+            if station.hasHangar {
+                let hangarLabel = floorText("hangar", color: NSColor(Colors.hangar).lighter(0.25), size: 0.38, maxWidth: 4, lines: 1)
+                let hc = station.hangarCenter
+                add(hangarLabel.node, yaw: 0, center: SIMD2(ox + hc.x - 0.9 + hangarLabel.width / 2, oz + hc.y + 2.05 + hangarLabel.height / 2))
+            }
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.padCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
@@ -1066,9 +1097,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
         if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
-        if let pr = crewPRInfo[roomKey(station, room)] {
-            parts.append("by \(pr.author) · #\(pr.number) \(pr.state.lowercased()) · \(pr.commits.count) commits · \(pr.reviews.count) reviews")
+        if let info = crewRoomInfo[roomKey(station, room)] {
+            var line = "by \(info.author) · ⎇ \(info.branch)"
+            if let n = info.prNumber { line += " · PR #\(n) \(info.state.lowercased())" }
+            if let t = info.title { line += " · " + t }
+            parts.append(line)
         }
+        if room.key == "kind:bots" { parts.append("dependabot and friends") }
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
             if let pr = github.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
@@ -1090,7 +1125,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         replayLabel.position = CGPoint(x: 14, y: hud.size.height - 90)
         if !crewEvents.isEmpty {
             let f = DateFormatter(); f.dateFormat = "HH:mm"
-            replayLabel.text = "crew replay · " + f.string(from: replayStart.addingTimeInterval(replayTime))
+            replayLabel.text = "crew · replaying " + f.string(from: replayStart.addingTimeInterval(replayTime))
         } else { replayLabel.text = "" }
         if clock - hudClock > 0.5 { hudClock = clock; layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep) }
 
@@ -1154,7 +1189,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let name = raw.hasPrefix("box:") ? "room:" + raw.dropFirst(4) : raw
         let parts = name.dropFirst(5).split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return }
-        if let pr = crewPRInfo[roomKey(station, room)], let u = URL(string: pr.url) {
+        if let info = crewRoomInfo[roomKey(station, room)], let u = info.url.flatMap(URL.init(string:)) {
             DispatchQueue.main.async { NSWorkspace.shared.open(u) }
             return
         }
@@ -1222,64 +1257,88 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         m.path = station.path(from: m.cell, to: cell)
     }
 
-    /// A tiny ship flies in, lands in the hangar and leaves a box of the repo colour; the minion fetches it.
+    /// A hexagonal crate in the repo colour: the order for a new office.
+    private func crate(color: NSColor) -> SCNNode {
+        let geo = SCNCylinder(radius: 0.26, height: 0.18)
+        geo.radialSegmentCount = 6
+        let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
+        geo.materials = [side, top, top]
+        let n = SCNNode(geometry: geo)
+        n.eulerAngles.y = .pi / 6
+        return n
+    }
+
+    /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away.
+    /// Everything is parented to the hangar anchor, so a station shifting underneath does not misalign it.
     private func startDelivery(_ m: Minion, roomKey: String) {
-        guard let station = fleet.stations[m.station], let room = station.rooms[roomKey] else { return }
+        guard let station = fleet.stations[m.station], station.hasHangar, let room = station.rooms[roomKey],
+              let anchor = hangarAnchors[m.station] else { return }
         let key = "\(station.name)|\(roomKey)"
-        let hc = station.hangarCenter
-        let pad = SIMD3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
-        let s = 0.3
-        let box = SCNNode(geometry: SCNBox(width: s, height: s, length: s, chamferRadius: 0))
-        box.geometry!.firstMaterial = lit(NSColor(room.color))
-        box.position = v3(pad.x, s / 2, pad.z)
+        let slotIndex = (shipsInFlight[m.station] ?? 0) % station.hangarSlots.count
+        shipsInFlight[m.station, default: 0] += 1
+        let slotLocal = station.hangarSlots[slotIndex] - station.hangarCenter
+        let slot = SIMD3(slotLocal.x, 0, slotLocal.y)
+
+        let box = crate(color: NSColor(room.color))
+        box.position = v3(slot.x, 0.09, slot.z)
         box.opacity = 0
         box.name = "room:" + key
-        propRoot.addChildNode(box)
+        anchor.addChildNode(box)
         boxes[key] = box
 
         let ship = SCNNode()
-        let hull = SCNNode(geometry: SCNBox(width: 0.55, height: 0.12, length: 0.32, chamferRadius: 0.02))
+        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
         hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
         ship.addChildNode(hull)
-        let cockpit = SCNNode(geometry: SCNBox(width: 0.16, height: 0.08, length: 0.16, chamferRadius: 0.01))
+        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
         cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
-        cockpit.position = v3(0.12, 0.09, 0)
+        cockpit.position = v3(0.16, 0.11, 0)
         ship.addChildNode(cockpit)
         for side in [-1.0, 1.0] {
-            let wing = SCNNode(geometry: SCNBox(width: 0.22, height: 0.04, length: 0.28, chamferRadius: 0))
+            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
             wing.geometry!.firstMaterial = lit(NSColor(room.color))
-            wing.position = v3(-0.12, 0, side * 0.28)
+            wing.position = v3(-0.14, 0, side * 0.34)
             ship.addChildNode(wing)
         }
-        let start = pad + SIMD3(2.0, 7.0, 14.0)
-        let hover = pad + SIMD3(0, 0.9, 0)
-        let exit = pad + SIMD3(-14.0, 7.0, 4.0)
+        for side in [-1.0, 1.0] {
+            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
+            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
+            skid.position = v3(0, -0.14, side * 0.16)
+            ship.addChildNode(skid)
+        }
+        let start = slot + SIMD3(3.0, 9.0, 12.0)
+        let high = slot + SIMD3(0, 5.0, 0)
+        let down = slot + SIMD3(0, 0.55, 0)
+        let exit = slot + SIMD3(-12.0, 8.0, 5.0)
         ship.position = v3(start.x, start.y, start.z)
-        ship.look(at: v3(hover.x, hover.y, hover.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
-        propRoot.addChildNode(ship)
-        let land = SCNAction.move(to: v3(hover.x, hover.y, hover.z), duration: 2.2)
-        land.timingMode = .easeInEaseOut
-        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 2.0)
-        leave.timingMode = .easeIn
+        ship.look(at: v3(high.x, high.y, high.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
+        anchor.addChildNode(ship)
+        let approach = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0); approach.timingMode = .easeOut
+        let descend = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5); descend.timingMode = .easeInEaseOut
+        let rise = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5); rise.timingMode = .easeIn
+        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0); leave.timingMode = .easeIn
         ship.runAction(.sequence([
-            land,
-            .wait(duration: 0.3),
+            approach,
+            .run { n in n.look(at: v3(down.x, down.y, down.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, -1, 0)); n.eulerAngles = SCNVector3(0, Double.pi / 4, 0) },
+            descend,
+            .wait(duration: 0.8),
             .run { _ in
                 box.opacity = 1
-                box.position = v3(pad.x, 0.9, pad.z)
-                let drop = SCNAction.move(to: v3(pad.x, s / 2, pad.z), duration: 0.35)
-                drop.timingMode = .easeIn
+                box.position = v3(slot.x, 0.42, slot.z)
+                let drop = SCNAction.move(to: v3(slot.x, 0.09, slot.z), duration: 0.5); drop.timingMode = .easeIn
                 box.runAction(drop)
             },
-            .wait(duration: 0.6),
+            .wait(duration: 1.2),
+            rise,
             .run { n in n.look(at: v3(exit.x, exit.y, exit.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0)) },
             leave,
+            .run { [weak self] _ in self?.enqueue { self?.shipsInFlight[m.station, default: 1] -= 1 } },
             .removeFromParentNode(),
         ]))
-        logEvent("ship inbound: \(room.name)")
+        logEvent("shuttle inbound: \(room.name)")
         m.errand = .fetch(room: roomKey)
         m.place = .hangar
-        walk(m, to: station.hangarCells.randomElement()!)
+        walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
     }
 
     /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
@@ -1456,7 +1515,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshCrew(repoRoot: root, within: StationController.crewWindow) }
+            if info.station == "work" { github.refreshFeed(repoRoot: root) }
         }
         for change in github.takeStateChanges() {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
@@ -1507,7 +1566,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.toolCount = s.toolCount
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
-            if let key = newRooms[s.id], m.errand == nil, !m.isSubagent {
+            if let key = newRooms[s.id], m.errand == nil, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
                 startDelivery(m, roomKey: key)
             } else if m.errand == nil {
                 let place = Place.forActivity(m.activity, home: home.key, isSubagent: m.isSubagent)
@@ -1534,9 +1593,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if firstRun { restoreView() }
             for m in minions.values where m.errand == nil { send(m, to: m.place) }
             for m in minions.values {
-                if case .fetch(let r) = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
-                    let hc = station.hangarCenter
-                    boxes["\(m.station)|\(r)"]?.position = v3(station.offset.x + hc.x, 0.15, station.offset.y + hc.y)
+                if case .fetch = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
                     walk(m, to: c)
                 } else if case .carry(let r) = m.errand, let station = fleet.stations[m.station], let door = station.doorCell(of: r) {
                     walk(m, to: door)
@@ -1547,60 +1604,111 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: crew replay
 
-    /// Turns teammates' pull requests into offices on the crew station and a timeline to replay.
+    private static let trunkBranches: Set<String> = ["develop", "staging", "main", "master", "production"]
+
+    /// Turns the repositories' activity feeds into offices on the crew station and a timeline to replay.
     private func rebuildCrew() {
-        var prs: [(repo: String, pr: CrewPR)] = []
+        let me = github.myLogin() ?? ""
+        var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" {
-            for pr in github.crewPRs(repoRoot: root) ?? [] { prs.append((info.repo, pr)) }
+            for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
-        let signature = prs.map { "\($0.repo)#\($0.pr.number):\($0.pr.state):\($0.pr.commits.count):\($0.pr.reviews.count)" }.sorted().joined(separator: ",")
+        let signature = "\(feed.count):" + (feed.map { "\($0.e.at.timeIntervalSince1970)" }.max() ?? "")
         guard signature != crewSignature else { return }
         crewSignature = signature
-        guard !prs.isEmpty else { return }
+        guard !feed.isEmpty else { return }
 
         let station = fleet.station("crew")
+        let cutoff = Date().addingTimeInterval(-StationController.crewWindow)
+        // Rooms: one per teammate branch with activity; bots share one bay.
+        var info: [String: CrewRoomInfo] = [:]
+        for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > cutoff {
+            guard !e.isBot, let branch = e.branch, !StationController.trunkBranches.contains(branch) else { continue }
+            let key = "crew:\(repo)/\(branch)"
+            var r = info[key] ?? CrewRoomInfo(repo: repo, branch: branch, prNumber: nil, title: nil, author: e.actor, url: nil, state: "NONE", last: e.at)
+            if let n = e.prNumber { r.prNumber = n }
+            if let t = e.title { r.title = t }
+            if let u = e.url { r.url = u }
+            switch e.kind {
+            case "pr_open": r.state = "OPEN"
+            case "pr_merge": r.state = "MERGED"
+            case "pr_close": r.state = "CLOSED"
+            default: break
+            }
+            r.last = e.at
+            info[key] = r
+        }
+        // Merged, closed or deleted branches are gone: only live work gets an office.
+        for (repo, e) in feed where e.kind == "branch_delete" && e.at > cutoff {
+            if let b = e.branch { info["crew:\(repo)/\(b)"] = nil }
+        }
+        info = info.filter { $0.value.state != "MERGED" && $0.value.state != "CLOSED" }
+        // Cap per repo by latest activity, so a busy day does not explode the station.
+        var keep: Set<String> = []
+        for repo in Set(info.values.map(\.repo)) {
+            let sorted = info.filter { $0.value.repo == repo }.sorted { $0.value.last > $1.value.last }
+            for (k, _) in sorted.prefix(8) { keep.insert(k) }
+        }
+        info = info.filter { keep.contains($0.key) }
+
         var changed = false
-        let live = Set(prs.map { "crew:\($0.repo)#\($0.pr.number)" })
-        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && !live.contains(room.key) {
+        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && info[room.key] == nil {
             station.removeRoom(key: room.key); changed = true
         }
-        crewPRInfo = [:]
-        for (repo, pr) in prs {
-            let key = "crew:\(repo)#\(pr.number)"
-            let issue = pr.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
-            let words = pr.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? pr.title
-            let name = pr.author + " · " + issue + String(words.prefix(22))
-            if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: Date()) { changed = true }
-            crewPRInfo["crew|\(key)"] = pr
+        crewRoomInfo = [:]
+        for (key, r) in info {
+            let issue = r.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
+            let words = r.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? r.branch
+            let name = r.author + " · " + issue + String(words.prefix(22))
+            if station.ensureRoom(key: key, name: name, repo: r.repo, color: fleet.color(forRepo: r.repo), lastActive: r.last) { changed = true }
+            crewRoomInfo["crew|" + key] = r
+        }
+        if feed.contains(where: { $0.e.isBot }) {
+            if station.ensureRoom(key: "kind:bots", name: "bots", repo: nil, color: RGB(r: 0.36, g: 0.40, b: 0.50), lastActive: .distantFuture, shape: Station.rect(2, 2)) { changed = true }
         }
 
-        // Timeline over the last day.
-        replayStart = Date().addingTimeInterval(-StationController.crewWindow)
+        // Timeline over what the feed covers, up to a day.
+        let times = feed.map(\.e.at).filter { $0 > cutoff }
+        replayStart = max(cutoff, times.min() ?? cutoff)
+        replayWindow = max(60, Date().timeIntervalSince(replayStart))
         var events: [CrewEvent] = []
-        for (repo, pr) in prs {
-            let key = "crew:\(repo)#\(pr.number)"
-            if pr.createdAt > replayStart { events.append(CrewEvent(at: pr.createdAt, kind: "open", login: pr.author, roomKey: key, text: "\(pr.author) opened #\(pr.number)")) }
-            for (t, who) in pr.commits where t > replayStart { events.append(CrewEvent(at: t, kind: "commit", login: who, roomKey: key, text: "")) }
-            for (t, who, state) in pr.reviews where t > replayStart {
-                let verb = state == "APPROVED" ? "approved" : state == "CHANGES_REQUESTED" ? "requested changes on" : "reviewed"
-                events.append(CrewEvent(at: t, kind: "review", login: who, roomKey: key, text: "\(who) \(verb) #\(pr.number)"))
+        for (repo, e) in feed where e.at > replayStart {
+            let roomKey: String
+            if e.isBot { roomKey = "kind:bots" }
+            else if let b = e.branch, !StationController.trunkBranches.contains(b), info["crew:\(repo)/\(b)"] != nil { roomKey = "crew:\(repo)/\(b)" }
+            else if e.kind == "issue_open" { roomKey = info.first { $0.value.author == e.actor }?.key ?? "kind:quarters" }
+            else if e.kind == "pr_merge" || e.kind == "pr_open", let b = e.branch, !StationController.trunkBranches.contains(b) { roomKey = "gone" }
+            else { continue }
+            let who = e.actor
+            let n = e.prNumber.map { "#\($0)" } ?? ""
+            switch e.kind {
+            case "push": events.append(CrewEvent(at: e.at, kind: "commit", login: who, roomKey: roomKey, text: "", n: Int(e.detail) ?? 1))
+            case "pr_open": events.append(CrewEvent(at: e.at, kind: "open", login: who, roomKey: roomKey, text: "\(who) opened \(n)", n: 0))
+            case "pr_merge": events.append(CrewEvent(at: e.at, kind: "merge", login: who, roomKey: roomKey, text: "\(who) merged \(n)", n: 0))
+            case "pr_close": events.append(CrewEvent(at: e.at, kind: "close", login: who, roomKey: roomKey, text: "\(who) closed \(n)", n: 0))
+            case "review":
+                let verb = e.detail == "approved" ? "approved" : e.detail == "changes_requested" ? "requested changes on" : "reviewed"
+                events.append(CrewEvent(at: e.at, kind: "review", login: who, roomKey: roomKey, text: "\(who) \(verb) \(n)", n: 0))
+            case "comment": events.append(CrewEvent(at: e.at, kind: "comment", login: who, roomKey: roomKey, text: "", n: 0))
+            case "branch_create": events.append(CrewEvent(at: e.at, kind: "create", login: who, roomKey: roomKey, text: "\(who) started \(e.branch ?? "a branch")", n: 0))
+            case "branch_delete": events.append(CrewEvent(at: e.at, kind: "delete", login: who, roomKey: roomKey, text: "\(who) archived \(e.branch ?? "a branch")", n: 0))
+            case "issue_open": events.append(CrewEvent(at: e.at, kind: "issue", login: who, roomKey: roomKey, text: "\(who) filed \(n) \(e.title ?? "")", n: 0))
+            default: break
             }
-            if let m = pr.mergedAt, m > replayStart { events.append(CrewEvent(at: m, kind: "merge", login: pr.author, roomKey: key, text: "\(pr.author) merged #\(pr.number)")) }
         }
         crewEvents = events.sorted { $0.at < $1.at }
         crewCursor = 0
         replayTime = 0
-        // Boxes start from what was already there before the window.
-        for (repo, pr) in prs {
-            let key = "crew|crew:\(repo)#\(pr.number)"
-            let before = pr.commits.filter { $0.0 <= replayStart }.count
-            crewBoxes[key] = (before, pr.state == "MERGED" && (pr.mergedAt ?? .distantFuture) <= replayStart ? "MERGED" : (pr.createdAt <= replayStart ? "OPEN" : "NONE"), NSColor(fleet.color(forRepo: repo)))
-        }
+        crewBoxes = [:]
+        for (key, r) in info { crewBoxes["crew|" + key] = (1, r.state == "MERGED" ? "NONE" : "NONE", NSColor(fleet.color(forRepo: r.repo))) }
+        crewBoxes["crew|kind:bots"] = (1, "NONE", NSColor(rgb: (0.55, 0.6, 0.7)))
 
-        // One grey minion per teammate.
-        let logins = Set(prs.map(\.pr.author) + prs.flatMap { $0.pr.commits.map(\.1) } + prs.flatMap { $0.pr.reviews.map(\.1) })
+        // One grey minion per teammate, plus one small bot.
+        var logins = Set(feed.filter { !$0.e.isBot && $0.e.at > replayStart }.map(\.e.actor))
+        logins.formUnion(info.values.map(\.author))
         for login in logins where minions["crew:" + login] == nil {
-            let home = Home(key: prs.first { $0.pr.author == login }.map { "crew:\($0.repo)#\($0.pr.number)" } ?? "kind:quarters", name: login, repo: prs.first { $0.pr.author == login }?.repo ?? "crew", issue: nil)
+            let homeKey = info.first { $0.value.author == login }?.key ?? "kind:quarters"
+            let home = Home(key: homeKey, name: login, repo: info[homeKey]?.repo ?? "crew", issue: nil)
             let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
             let m = Minion(id: "crew:" + login, station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: false, start: start, crew: true)
             m.title = login
@@ -1609,53 +1717,82 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             minions[m.id] = m
             send(m, to: .quarters)
         }
-        for m in minions.values where m.isCrew && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
+        if feed.contains(where: { $0.e.isBot }), minions["crew:bots"] == nil {
+            let home = Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil)
+            let m = Minion(id: "crew:bots", station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
+            m.title = "dependabot"
+            m.activity = .sleeping
+            minionRoot.addChildNode(m.node)
+            minions[m.id] = m
+            send(m, to: .room("kind:bots"))
+        }
+        for m in minions.values where m.isCrew && m.id != "crew:bots" && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
         if changed { rebuildStatic(); for m in minions.values where m.errand == nil { send(m, to: m.place) } } else { rebuildMarkers() }
     }
 
     /// Advances the replay clock and acts out the events as they come due.
     private func tickCrew(dt: Double) {
         guard !crewEvents.isEmpty else { return }
-        let speed = StationController.crewWindow / StationController.replayLength
+        let speed = replayWindow / StationController.replayLength
         replayTime += dt * speed
-        if replayTime > StationController.crewWindow {
+        if replayTime > replayWindow + 20 * speed {
             replayTime = 0; crewCursor = 0
-            for (repo, pr) in crewPRInfo.values.map({ ($0.branch, $0) }) { _ = repo; _ = pr }
-            for (key, info) in crewPRInfo {
-                let before = info.commits.filter { $0.0 <= replayStart }.count
-                crewBoxes[key] = (before, info.createdAt <= replayStart ? "OPEN" : "NONE", crewBoxes[key]?.color ?? Palette.minion)
-            }
+            for key in crewBoxes.keys { crewBoxes[key]?.count = 1; crewBoxes[key]?.state = "NONE" }
             rebuildMarkers()
         }
         let now = replayStart.addingTimeInterval(replayTime)
         var markersDirty = false
+        let hour = replayWindow / 24
         while crewCursor < crewEvents.count, crewEvents[crewCursor].at <= now {
             let e = crewEvents[crewCursor]; crewCursor += 1
             let key = "crew|" + e.roomKey
-            let m = minions["crew:" + e.login]
+            let isBots = e.roomKey == "kind:bots"
+            let gone = e.roomKey == "gone"
+            let m = minions[isBots ? "crew:bots" : "crew:" + e.login]
+            func go(_ activity: Activity, _ place: Place, _ hold: Double) {
+                guard let m else { return }
+                if gone, case .room = place { m.activity = activity; m.busy = true; m.busyUntil = replayTime + hold; send(m, to: .core); return }
+                m.activity = activity; m.busy = true; m.busyUntil = replayTime + hold
+                if m.place != place || m.path.isEmpty { send(m, to: place) }
+            }
             switch e.kind {
+            case "commit":
+                crewBoxes[key]?.count += e.n; markersDirty = true
+                go(.coding("x"), .room(e.roomKey), hour * 0.6)
             case "open":
                 crewBoxes[key]?.state = "OPEN"; markersDirty = true
-                logEvent(e.text)
-                if let m { m.activity = .shipping; m.busy = true; m.busyUntil = replayTime + 1800; send(m, to: .hangar) }
-            case "commit":
-                crewBoxes[key]?.count += 1; markersDirty = true
-                if let m { m.activity = .coding("x"); m.busy = true; m.busyUntil = replayTime + 2400; if m.place != .room(e.roomKey) { send(m, to: .room(e.roomKey)) } }
-            case "review":
-                logEvent(e.text)
-                if let m { m.activity = .exploring; m.busy = true; m.busyUntil = replayTime + 1500; send(m, to: .room(e.roomKey)) }
+                if !isBots { logEvent(e.text) }
+                go(.shipping, .room(e.roomKey), hour * 0.4)
             case "merge":
                 crewBoxes[key]?.state = "MERGED"; markersDirty = true
-                logEvent(e.text)
-                if let m { m.activity = .shipping; m.busy = true; m.busyUntil = replayTime + 1800; send(m, to: .hangar) }
-                ringBell(seed: e.roomKey.hashValue)
+                if !isBots { logEvent(e.text); ringBell(seed: e.roomKey.hashValue) }
+                go(.shipping, .core, hour * 0.4)
+            case "close":
+                crewBoxes[key]?.state = "CLOSED"; markersDirty = true
+                if !isBots { logEvent(e.text) }
+            case "review":
+                if !isBots { logEvent(e.text) }
+                go(.exploring, .room(e.roomKey), hour * 0.4)
+            case "comment":
+                go(.writing, .room(e.roomKey), hour * 0.3)
+            case "create":
+                if !isBots { logEvent(e.text) }
+                go(.planning, .room(e.roomKey), hour * 0.3)
+            case "delete":
+                if !isBots { logEvent(e.text) }
+                crewBoxes[key]?.count = 1; markersDirty = true
+            case "issue":
+                if !isBots { logEvent(e.text) }
+                if let m { addPyramid(for: m) }
+                go(.writing, .room(e.roomKey), hour * 0.3)
             default: break
             }
         }
         if markersDirty { rebuildMarkers() }
         for m in minions.values where m.isCrew && m.busy && replayTime > m.busyUntil {
             m.busy = false; m.activity = .sleeping
-            send(m, to: .quarters)
+            clearPyramids(m)
+            send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
         }
     }
 
@@ -1781,11 +1918,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 switch m.errand {
                 case .fetch(let r):
                     let key = "\(m.station)|\(r)"
-                    if let box = boxes[key], box.opacity < 1 { continue }   // ship has not landed yet
+                    if let box = boxes[key], box.opacity < 1 { continue }   // shuttle has not set it down yet
                     if let box = boxes[key] {
                         box.removeAllActions()
                         box.removeFromParentNode()
-                        box.position = v3(0, m.headHeight + 0.18, 0)
+                        box.position = v3(0, m.headHeight + 0.14, 0)
                         m.node.addChildNode(box)
                         m.carried = box
                     }
@@ -1958,7 +2095,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshCrew(repoRoot: root, within: StationController.crewWindow) }
+            if info.station == "work" { github.refreshFeed(repoRoot: root) }
         }
             logEvent("asking github…")
         }

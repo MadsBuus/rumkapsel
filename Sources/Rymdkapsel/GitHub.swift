@@ -32,91 +32,26 @@ struct ReleasePR: Equatable {
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
 }
 
-struct CrewPR: Equatable {
-    let number: Int
-    let title: String
-    let author: String
-    let branch: String
-    let state: String
-    let createdAt: Date
-    let mergedAt: Date?
-    let url: String
-    let commits: [(Date, String)]
-    let reviews: [(Date, String, String)]
-
-    static func == (a: CrewPR, b: CrewPR) -> Bool {
-        a.number == b.number && a.state == b.state && a.commits.count == b.commits.count && a.reviews.count == b.reviews.count
-    }
+/// One entry from a repository's activity feed.
+struct FeedEvent: Equatable {
+    let at: Date
+    let actor: String
+    let isBot: Bool
+    let kind: String        // push, pr_open, pr_merge, pr_close, review, comment, branch_create, branch_delete, issue_open, release
+    let branch: String?
+    let prNumber: Int?
+    let title: String?
+    let url: String?
+    let detail: String      // review state, commit count, etc.
 }
 
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
-    private var crew: [String: ([CrewPR], Date)] = [:]
-    private var me: String?
-
-    func crewPRs(repoRoot: String) -> [CrewPR]? {
-        lock.lock(); defer { lock.unlock() }
-        return crew[repoRoot]?.0
-    }
-
-    /// Teammates' pull requests touched in the last day, with their commits and reviews. Every 10 minutes.
-    func refreshCrew(repoRoot: String, within: TimeInterval) {
-        lock.lock()
-        if let (_, at) = crew[repoRoot], Date().timeIntervalSince(at) < 600 { lock.unlock(); return }
-        if inFlight.contains("w:" + repoRoot) { lock.unlock(); return }
-        inFlight.insert("w:" + repoRoot)
-        lock.unlock()
-        queue.async { [self] in
-            if me == nil, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
-               let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
-                lock.lock(); me = login; lock.unlock()
-            }
-            let iso = ISO8601DateFormatter()
-            let since = Date().addingTimeInterval(-within)
-            var found: [CrewPR] = []
-            if let out = run(["gh", "pr", "list", "--state", "all", "--limit", "40",
-                              "--json", "number,title,author,headRefName,state,createdAt,mergedAt,updatedAt,url"], cwd: repoRoot),
-               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                for o in arr {
-                    let authorObj = o["author"] as? [String: Any]
-                    let author = authorObj?["login"] as? String ?? "?"
-                    let isBot = (authorObj?["is_bot"] as? Bool ?? false) || author.lowercased().contains("dependabot") || author.contains("[bot]")
-                    let head = o["headRefName"] as? String ?? ""
-                    guard author != me, !isBot, !["develop", "staging", "main", "master"].contains(head),
-                          let updated = (o["updatedAt"] as? String).flatMap(iso.date(from:)), updated > since,
-                          let number = o["number"] as? Int else { continue }
-                    var commits: [(Date, String)] = [], reviews: [(Date, String, String)] = []
-                    if let v = run(["gh", "pr", "view", "\(number)", "--json", "commits,reviews"], cwd: repoRoot),
-                       let d = try? JSONSerialization.jsonObject(with: v) as? [String: Any] {
-                        for c in d["commits"] as? [[String: Any]] ?? [] {
-                            guard let t = (c["authoredDate"] as? String).flatMap(iso.date(from:)) else { continue }
-                            let who = (c["authors"] as? [[String: Any]])?.first?["login"] as? String ?? author
-                            commits.append((t, who.isEmpty ? author : who))
-                        }
-                        for r in d["reviews"] as? [[String: Any]] ?? [] {
-                            guard let t = (r["submittedAt"] as? String).flatMap(iso.date(from:)) else { continue }
-                            reviews.append((t, (r["author"] as? [String: Any])?["login"] as? String ?? "?", r["state"] as? String ?? ""))
-                        }
-                    }
-                    found.append(CrewPR(number: number, title: o["title"] as? String ?? "", author: author, branch: head,
-                                        state: o["state"] as? String ?? "", createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? updated,
-                                        mergedAt: (o["mergedAt"] as? String).flatMap(iso.date(from:)), url: o["url"] as? String ?? "",
-                                        commits: commits, reviews: reviews))
-                    if found.count >= 10 { break }
-                }
-            }
-            lock.lock()
-            let changed = crew[repoRoot]?.0 != found
-            crew[repoRoot] = (found, Date())
-            inFlight.remove("w:" + repoRoot)
-            lock.unlock()
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
-        }
-    }
-
     private var releases: [String: ([ReleasePR], Date)] = [:]
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []
+    private var feeds: [String: ([FeedEvent], Date)] = [:]
+    private var me: String?
 
     /// Open release pull requests for a repository, or nil if not fetched yet.
     func openReleases(repoRoot: String) -> [ReleasePR]? {
@@ -134,6 +69,92 @@ final class GitHubResolver {
     func takeStateChanges() -> [(branch: String, pr: PullRequest)] {
         lock.lock(); defer { lock.unlock() }
         let out = stateChanges; stateChanges = []; return out
+    }
+
+    func myLogin() -> String? { lock.lock(); defer { lock.unlock() }; return me }
+    func feed(repoRoot: String) -> [FeedEvent]? {
+        lock.lock(); defer { lock.unlock() }
+        return feeds[repoRoot]?.0
+    }
+
+    /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Every two minutes.
+    func refreshFeed(repoRoot: String) {
+        lock.lock()
+        if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < 120 { lock.unlock(); return }
+        if inFlight.contains("f:" + repoRoot) { lock.unlock(); return }
+        inFlight.insert("f:" + repoRoot)
+        lock.unlock()
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove("f:" + repoRoot); lock.unlock() }
+            if me == nil, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
+               let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
+                lock.lock(); me = login; lock.unlock()
+            }
+            var owner = nameWithOwner(repoRoot: repoRoot)
+            if owner == nil, let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
+               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let n = obj["nameWithOwner"] as? String {
+                lock.lock(); owners[repoRoot] = n; lock.unlock()
+                owner = n
+            }
+            guard let owner else { return }
+            let iso = ISO8601DateFormatter()
+            var events: [FeedEvent] = []
+            for page in 1...2 {
+                guard let out = run(["gh", "api", "repos/\(owner)/events?per_page=100&page=\(page)"], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { break }
+                for e in arr {
+                    guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
+                    let actorObj = e["actor"] as? [String: Any]
+                    let actor = actorObj?["login"] as? String ?? "?"
+                    let isBot = actor.lowercased().contains("dependabot") || actor.contains("[bot]") || actor.lowercased().hasSuffix("-bot") || actor.lowercased().contains("webhook")
+                    let payload = e["payload"] as? [String: Any] ?? [:]
+                    let pr = payload["pull_request"] as? [String: Any]
+                    let prNumber = pr?["number"] as? Int
+                    let prTitle = pr?["title"] as? String
+                    let prURL = pr?["html_url"] as? String
+                    let prBranch = (pr?["head"] as? [String: Any])?["ref"] as? String
+                    func add(_ kind: String, branch: String?, detail: String = "") {
+                        events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: kind, branch: branch, prNumber: prNumber,
+                                                title: prTitle, url: prURL, detail: detail))
+                    }
+                    switch e["type"] as? String ?? "" {
+                    case "PushEvent":
+                        let ref = (payload["ref"] as? String ?? "").replacingOccurrences(of: "refs/heads/", with: "")
+                        let n = (payload["commits"] as? [[String: Any]])?.count ?? (payload["size"] as? Int ?? 1)
+                        add("push", branch: ref, detail: "\(max(1, n))")
+                    case "PullRequestEvent":
+                        let action = payload["action"] as? String ?? ""
+                        let merged = (pr?["merged"] as? Bool ?? false) || action == "merged"
+                        if action == "opened" || action == "reopened" { add("pr_open", branch: prBranch) }
+                        else if action == "closed" || action == "merged" { add(merged ? "pr_merge" : "pr_close", branch: prBranch) }
+                    case "PullRequestReviewEvent":
+                        add("review", branch: prBranch, detail: ((payload["review"] as? [String: Any])?["state"] as? String ?? "").lowercased())
+                    case "PullRequestReviewCommentEvent":
+                        add("comment", branch: prBranch)
+                    case "IssueCommentEvent":
+                        if let issue = payload["issue"] as? [String: Any], issue["pull_request"] != nil { add("comment", branch: nil) }
+                    case "CreateEvent":
+                        if payload["ref_type"] as? String == "branch" { add("branch_create", branch: payload["ref"] as? String) }
+                    case "DeleteEvent":
+                        if payload["ref_type"] as? String == "branch" { add("branch_delete", branch: payload["ref"] as? String) }
+                    case "IssuesEvent":
+                        if payload["action"] as? String == "opened", let issue = payload["issue"] as? [String: Any] {
+                            events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: "issue_open", branch: nil, prNumber: issue["number"] as? Int,
+                                                    title: issue["title"] as? String, url: issue["html_url"] as? String, detail: ""))
+                        }
+                    case "ReleaseEvent":
+                        add("release", branch: nil, detail: ((payload["release"] as? [String: Any])?["tag_name"] as? String) ?? "")
+                    default: break
+                    }
+                }
+                if arr.count < 100 { break }
+            }
+            lock.lock()
+            let changed = feeds[repoRoot]?.0 != events
+            feeds[repoRoot] = (events, Date())
+            lock.unlock()
+            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        }
     }
 
     /// Forgets cache ages for one repository so its next refresh hits GitHub again.

@@ -93,6 +93,8 @@ final class Room {
 /// One station: a corridor cross with tetromino rooms snapped against it.
 final class Station {
     let name: String
+    var hasHangar = true
+    var hasPad = true
     private(set) var rooms: [String: Room] = [:]
     private(set) var spineHalfLength = 2
     private var occupied: [Cell: String] = [:]
@@ -106,14 +108,18 @@ final class Station {
         return [Cell(x: 0, y: y - 1), Cell(x: 1, y: y - 1), Cell(x: 0, y: y), Cell(x: 1, y: y)]
     }
     var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
-    /// The hangar is the 2x2 pad at the outer end of the south corridor arm.
+    /// The hangar is the 2x3 bay at the outer end of the south corridor arm.
     var hangarCells: [Cell] {
+        guard hasHangar else { return [] }
         let y = spineHalfLength + 1
-        return [Cell(x: 0, y: y), Cell(x: 1, y: y), Cell(x: 0, y: y + 1), Cell(x: 1, y: y + 1)]
+        return (0..<3).flatMap { d in [Cell(x: 0, y: y + d), Cell(x: 1, y: y + d)] }
     }
-    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 1.5) }
+    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 2.0) }
+    /// Landing slots along the bay, in local coordinates.
+    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(0.5, Double(spineHalfLength) + 1.0 + Double($0)) } }
     /// The launch pad is the 2x2 at the outer end of the west corridor arm.
     var padCells: [Cell] {
+        guard hasPad else { return [] }
         let x = -spineHalfLength - 1
         return [Cell(x: x, y: 0), Cell(x: x, y: 1), Cell(x: x - 1, y: 0), Cell(x: x - 1, y: 1)]
     }
@@ -125,7 +131,7 @@ final class Station {
         return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0) }
     }
 
-    private static func rect(_ w: Int, _ h: Int) -> [Cell] {
+    static func rect(_ w: Int, _ h: Int) -> [Cell] {
         (0..<w).flatMap { x in (0..<h).map { y in Cell(x: x, y: y) } }
     }
     /// Symmetric bars, blocks and T shapes, like the real station.
@@ -346,7 +352,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v11.json")
+        return dir.appendingPathComponent("fleet-v12.json")
     }
 
     static func stationName(for cwd: String) -> String {
@@ -363,6 +369,7 @@ final class Fleet {
     func station(_ name: String) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
+        if name == "crew" { s.hasHangar = false; s.hasPad = false }
         s.ensureFixedRoom(.quarters)
         stations[name] = s
         return s
@@ -370,15 +377,27 @@ final class Fleet {
 
     var ordered: [Station] { Fleet.order.compactMap { stations[$0] } }
 
-    /// Lays stations out side by side.
+    /// Lays stations out side by side with their corridors on one line, so work and crew can be bridged.
     func arrange() {
         var x = 0.0
         for (i, s) in ordered.enumerated() {
             let b = s.bounds
-            if i > 0 { x += 3 }
-            s.offset = SIMD2(x - Double(b.min.x), -Double(b.min.y + b.max.y) / 2)
+            if i > 0 { x += (s.name == "crew" || ordered[i - 1].name == "crew") ? 3 : 6 }
+            s.offset = SIMD2(x - Double(b.min.x), 0)
             x += Double(b.max.x - b.min.x + 1)
         }
+    }
+
+    /// Corridor tiles bridging the work station's east arm to the crew station's west arm.
+    var bridgeCells: [SIMD2<Double>] {
+        guard let work = stations["work"], let crew = stations["crew"] else { return [] }
+        let from = work.offset.x + Double(work.spineHalfLength) + 1
+        let to = crew.offset.x - Double(crew.spineHalfLength) - 1
+        guard to >= from else { return [] }
+        var out: [SIMD2<Double>] = []
+        var x = from
+        while x <= to { out.append(SIMD2(x, 0)); out.append(SIMD2(x, 1)); x += 1 }
+        return out
     }
 
     var worldBounds: (min: SIMD2<Double>, max: SIMD2<Double>) {
@@ -405,6 +424,7 @@ final class Fleet {
         repoColors = saved.repoColors
         for (name, s) in saved.stations {
             let station = Station(name: name)
+            if name == "crew" { station.hasHangar = false; station.hasPad = false }
             station.restore(s)
             station.ensureFixedRoom(.quarters)
             stations[name] = station
