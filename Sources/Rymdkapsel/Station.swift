@@ -217,8 +217,8 @@ final class Station {
     private func canStep(from a: Cell, to b: Cell) -> Bool {
         let ra = room(at: a)?.key, rb = room(at: b)?.key
         if ra == rb { return true }
-        if let ra, rb == nil { return doorCell(of: ra) == a && isCorridor(b) }
-        if let rb, ra == nil { return doorCell(of: rb) == b && isCorridor(a) }
+        if let ra, rb == nil { return doorCell(of: ra) == a && doorOutside(of: ra) == b }
+        if let rb, ra == nil { return doorCell(of: rb) == b && doorOutside(of: rb) == a }
         return false
     }
 

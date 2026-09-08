@@ -167,6 +167,7 @@ final class Minion {
     private let bodyHeight: Double
     private let bodyDepth: Double
     var facing = 0.0
+    var smoothFacing = 0.0
     var bed: Int?
     var pos: SIMD2<Double>
     var path: [Cell] = []
@@ -1542,12 +1543,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.node.position = v3(station.offset.x + m.pos.x, jump, station.offset.y + m.pos.y)
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
-            m.node.eulerAngles.z = working ? sin(clock * 5 + m.bobPhase) * 0.07 : 0
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
-            var delta = wantFacing - Double(m.node.eulerAngles.y)
+            var delta = wantFacing - m.smoothFacing
             delta = atan2(sin(delta), cos(delta))
-            m.node.eulerAngles.y += delta * min(1, dt * 12)
+            m.smoothFacing += delta * min(1, dt * 12)
+
+            // One little routine per activity, so you can tell at a glance what a minion is up to.
+            var tilt = 0.0, roll = 0.0, spin = 0.0
+            let t = clock + m.bobPhase
+            if working {
+                switch m.activity {
+                case .coding: tilt = sin(t * 14) * 0.06                       // typing: quick nods
+                case .exploring: spin = sin(t * 1.2) * 0.7                    // reading code: scanning left and right
+                case .writing: tilt = sin(t * 3) * 0.1                        // writing: slow nods
+                case .thinking: roll = sin(t * 2) * 0.12                      // thinking: swaying
+                case .planning: tilt = -0.12 + sin(t * 2) * 0.05              // planning: looking up
+                case .reading: tilt = -0.18                                   // reading your message: head back
+                case .testing: spin = t * 3                                   // testing: pacing in circles
+                case .running: tilt = sin(t * 22) * 0.04; roll = cos(t * 19) * 0.04   // running things: jittery
+                case .shipping: roll = sin(t * 9) * 0.16                      // shipping: excited wiggle
+                case .skill: spin = t * 2                                     // using a skill: a slow spin
+                case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
+                default: roll = sin(t * 5) * 0.07
+                }
+            }
+            m.node.eulerAngles = SCNVector3(tilt, m.smoothFacing + spin, roll)
         }
 
         updateBeams()
