@@ -154,6 +154,7 @@ final class Minion {
     var place: Place = .core
     var errand: Errand?
     var carried: SCNNode?
+    var fetchSpot: SIMD2<Double>?
     var pyramids: [SCNNode] = []
     var pyramidCell: Cell?
     var toolCount: Int
@@ -1291,21 +1292,25 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             skid.position = v3(0, -0.14, side * 0.16)
             ship.addChildNode(skid)
         }
-        let start = slot + SIMD3(3.0, 9.0, 12.0)
+        let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
+        let start = slot + corners.randomElement()!
         let high = slot + SIMD3(0, 5.0, 0)
         let down = slot + SIMD3(0, 0.55, 0)
-        let exit = slot + SIMD3(-12.0, 8.0, 5.0)
+        let exit = slot + corners.randomElement()! * SIMD3(1, 0.9, 1) + SIMD3(0, 0, 0)
+        let restYaw = Double.random(in: 0..<(2 * .pi))
+        let drift = Double.random(in: -0.6...0.6)
         ship.position = v3(start.x, start.y, start.z)
         ship.look(at: v3(high.x, high.y, high.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
         anchor.addChildNode(ship)
         let approach = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0); approach.timingMode = .easeOut
         let descend = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5); descend.timingMode = .easeInEaseOut
+        let settleYaw = SCNAction.rotateTo(x: 0, y: restYaw + drift, z: 0, duration: 4.5, usesShortestUnitArc: true); settleYaw.timingMode = .easeInEaseOut
         let rise = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5); rise.timingMode = .easeIn
         let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0); leave.timingMode = .easeIn
         ship.runAction(.sequence([
             approach,
-            .run { n in n.look(at: v3(down.x, down.y, down.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, -1, 0)); n.eulerAngles = SCNVector3(0, Double.pi / 4, 0) },
-            descend,
+            .run { n in n.eulerAngles = SCNVector3(0, restYaw, 0) },
+            .group([descend, settleYaw]),
             .wait(duration: 0.8),
             .run { _ in
                 box.opacity = 1
@@ -1323,6 +1328,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         logEvent("shuttle inbound: \(room.name)")
         m.errand = .fetch(room: roomKey)
         m.place = .hangar
+        m.fetchSpot = station.hangarSlots[slotIndex] + SIMD2(-0.3, 0)
         walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
     }
 
@@ -1832,11 +1838,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .fetch(let r):
                     let key = "\(m.station)|\(r)"
                     if let box = boxes[key], box.opacity < 1 { continue }   // shuttle has not set it down yet
+                    if let spot = m.fetchSpot {
+                        let d = spot - m.pos
+                        if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
+                        m.fetchSpot = nil
+                    }
                     if let box = boxes[key] {
                         box.removeAllActions()
+                        let world = box.worldPosition
                         box.removeFromParentNode()
-                        box.position = v3(0, m.headHeight + 0.14, 0)
                         m.node.addChildNode(box)
+                        box.position = m.node.convertPosition(world, from: nil)
+                        let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.5); lift.timingMode = .easeOut
+                        box.runAction(lift)
                         m.carried = box
                     }
                     m.errand = .carry(room: r)
