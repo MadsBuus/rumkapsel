@@ -123,7 +123,10 @@ final class TranscriptScanner {
                           let line = text.split(separator: "\n").first(where: { $0.hasPrefix("gitdir:") }) {
                     let target = line.dropFirst(7).trimmingCharacters(in: .whitespaces)
                     if let r = target.range(of: "/.git/worktrees/") {
-                        name = URL(fileURLWithPath: String(target[..<r.lowerBound])).lastPathComponent
+                        // A worktree: the repository is the main checkout it was created from.
+                        let main = String(target[..<r.lowerBound])
+                        name = URL(fileURLWithPath: main).lastPathComponent
+                        root = main
                     } else {
                         name = dir.lastPathComponent
                     }

@@ -1249,7 +1249,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     newRooms[s.id] = home.key
                 }
             }
-            if let root = s.repoRoot { repoRoots[root] = (s.repo, stationName); github.refreshReleases(repoRoot: root) }
+            if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
+                repoRoots[root] = (s.repo, stationName)
+            }
             if let room = station.rooms[home.key] {
                 if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot; room.worktree = s.cwd }
                 if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
@@ -1278,7 +1280,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
                 for repo in repos {
                     let root = home.appendingPathComponent("dev/\(repo)").path
-                    if FileManager.default.fileExists(atPath: root + "/.git") {
+                    if FileManager.default.fileExists(atPath: root + "/.git"), !repoRoots.values.contains(where: { $0.repo == repo }) {
                         repoRoots[root] = (repo, "work")
                         _ = fleet.color(forRepo: repo)
                     }

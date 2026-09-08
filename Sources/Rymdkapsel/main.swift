@@ -47,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeFirstResponder(controller.view)
         NSApp.activate(ignoringOtherApps: true)
 
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.controller.refreshGitHub()
+        }
         let musicOn = UserDefaults.standard.object(forKey: "music") as? Bool ?? false
         controller.drone.isEnabled = musicOn && snapshotPath == nil
         musicItem.state = musicOn ? .on : .off
