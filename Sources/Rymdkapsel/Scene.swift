@@ -293,7 +293,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let demo: Bool
     private var demoClock = 0.0
 
-    static let activeWindow: TimeInterval = 45 * 60
+    static let activeWindow: TimeInterval = 12 * 3600   // a minion sleeps as long as its office stands
     static let busyWindow: TimeInterval = 90
     static let replyWindow: TimeInterval = 20
     static let sleepWindow: TimeInterval = 5 * 60
@@ -1154,8 +1154,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
         if place == .quarters, m.bed == nil {
-            let used = Set(minions.values.filter { $0.station == m.station }.compactMap(\.bed))
-            m.bed = station.beds.indices.first { !used.contains($0) }
+            let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
+            m.bed = station.beds.indices.first { !used.contains($0) }   // nil means a spot on the floor
         }
         let cells = station.cells(of: place)
         let target: Cell
