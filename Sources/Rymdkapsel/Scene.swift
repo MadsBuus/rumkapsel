@@ -145,6 +145,7 @@ final class Minion {
     var errand: Errand?
     var carried: SCNNode?
     var pyramids: [SCNNode] = []
+    var pyramidCell: Cell?
     var toolCount: Int
     var title: String?
     var branch: String?
@@ -268,6 +269,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var debris: [(SCNNode, SIMD2<Double>)] = []
     private var lastPing = 0.0
     private var timer: Timer?
+    private var watcher: DirectoryWatcher?
     var viewSize = CGSize(width: 640, height: 440)
     private var didLoadLayout = false
     let demo: Bool
@@ -277,6 +279,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     static let busyWindow: TimeInterval = 90
     static let replyWindow: TimeInterval = 20
     static let sleepWindow: TimeInterval = 5 * 60
+    static let subagentWindow: TimeInterval = 3 * 60
     static let roomsWindow: TimeInterval = 12 * 3600
 
     init(frame: NSRect, demo: Bool) {
@@ -334,7 +337,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             seedDemo()
         } else {
             rescan()
-            timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.rescan() }
+            let projects = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects").path
+            watcher = DirectoryWatcher(path: projects) { [weak self] in self?.rescan() }
+            timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.rescan() }
         }
     }
 
@@ -537,7 +542,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         floorLabels = []
         func add(_ node: SCNNode, yaw: Double, center: SIMD2<Double>) {
             node.eulerAngles.y = yaw
-            node.position = v3(center.x, 0.01, center.y)
+            let y = node.position.y > 0 ? Double(node.position.y) : 0.01
+            node.position = v3(center.x, y, center.y)
+            node.renderingOrder = 10
             labelRoot.addChildNode(node)
             floorLabels.append((node, yaw))
         }
@@ -547,69 +554,66 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let b = station.bounds
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
-            let taken: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil || station.isSpineLine(c)
+            let occupied: (Cell) -> Bool = { c in
+                station.coreCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
+            }
+            var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
+            func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
+                for x in Int((lo.x + 0.5).rounded(.down))...Int((hi.x - 0.5).rounded(.up)) {
+                    for y in Int((lo.y + 0.5).rounded(.down))...Int((hi.y - 0.5).rounded(.up)) where occupied(Cell(x: x, y: y)) {
+                        return true
+                    }
+                }
+                return placed.contains { !(hi.x <= $0.min.x || lo.x >= $0.max.x || hi.y <= $0.min.y || lo.y >= $0.max.y) }
             }
             enum Side { case south, north, east, west }
-            for room in station.rooms.values {
+            for room in station.rooms.values.sorted(by: { $0.key < $1.key }) {
                 let text = StationController.displayName(room)
                 let size = room.key.hasPrefix("kind:") ? 0.38 : 0.46
                 let minX = room.cells.map(\.x).min()!, maxX = room.cells.map(\.x).max()!
                 let minY = room.cells.map(\.y).min()!, maxY = room.cells.map(\.y).max()!
                 let width = Double(maxX - minX + 1), depth = Double(maxY - minY + 1)
                 let charW = 0.5 * size
+                let key = roomKey(station, room)
+                var node: SCNNode?
 
-                var best: (side: Side, free: Int, along: Double)?
                 for side in [Side.south, .north, .east, .west] {
                     let along = (side == .south || side == .north) ? width + 1.5 : depth + 1.5
-                    let lines = max(1, min(2, Int((Double(text.count) * charW / along).rounded(.up))))
-                    let span = Int(along.rounded(.up))
-                    var free = 0
-                    for step in 1...lines {
-                        var ok = true
-                        for i in 0...span {
-                            let c: Cell
-                            switch side {
-                            case .south: c = Cell(x: minX + i, y: maxY + step)
-                            case .north: c = Cell(x: minX + i, y: minY - step)
-                            case .east: c = Cell(x: maxX + step, y: maxY - i)
-                            case .west: c = Cell(x: minX - step, y: maxY - i)
-                            }
-                            if taken(c) { ok = false; break }
-                        }
-                        if ok { free += 1 } else { break }
-                    }
-                    if best == nil || free > best!.free { best = (side, free, along) }
-                    if free >= lines { break }
-                }
-                guard let (side, free, along) = best else { continue }
-                let key = roomKey(station, room)
-                let node: SCNNode
-                if free == 0 {
-                    // Boxed in: cut the name into the tile itself.
-                    let label = floorText(text, color: Palette.void, size: size * 0.85, maxWidth: max(width, depth) - 0.2,
-                                          lines: max(1, min(2, Int((Double(text.count) * charW * 0.85 / (max(width, depth) - 0.2)).rounded(.up)))))
-                    let horizontal = width >= depth
-                    let anchor = room.cells.min { ($0.y, $0.x) < ($1.y, $1.x) }!
-                    let center = SIMD2(ox + Double(anchor.x) - 0.4 + (horizontal ? label.width / 2 : label.height / 2),
-                                       oz + Double(anchor.y) - 0.4 + (horizontal ? label.height / 2 : label.width / 2))
-                    node = label.node
-                    add(node, yaw: horizontal ? 0 : .pi / 2, center: center)
-                } else {
                     let lines = max(1, min(2, Int((Double(text.count) * charW / along).rounded(.up))))
                     let label = floorText(text, color: NSColor(room.color).lighter(0.12), size: size, maxWidth: along, lines: lines)
                     let (w, h) = (label.width, label.height)
                     let center: SIMD2<Double>
                     let yaw: Double
+                    let half: SIMD2<Double>
                     switch side {
-                    case .south: yaw = 0; center = SIMD2(ox + Double(minX) - 0.45 + w / 2, oz + Double(maxY) + 0.62 + h / 2)
-                    case .north: yaw = 0; center = SIMD2(ox + Double(minX) - 0.45 + w / 2, oz + Double(minY) - 0.62 - h / 2)
-                    case .east: yaw = .pi / 2; center = SIMD2(ox + Double(maxX) + 0.62 + h / 2, oz + Double(maxY) + 0.45 - w / 2)
-                    case .west: yaw = .pi / 2; center = SIMD2(ox + Double(minX) - 0.62 - h / 2, oz + Double(maxY) + 0.45 - w / 2)
+                    case .south: yaw = 0; center = SIMD2(Double(minX) - 0.45 + w / 2, Double(maxY) + 0.62 + h / 2); half = SIMD2(w / 2, h / 2)
+                    case .north: yaw = 0; center = SIMD2(Double(minX) - 0.45 + w / 2, Double(minY) - 0.62 - h / 2); half = SIMD2(w / 2, h / 2)
+                    case .east: yaw = .pi / 2; center = SIMD2(Double(maxX) + 0.62 + h / 2, Double(maxY) + 0.45 - w / 2); half = SIMD2(h / 2, w / 2)
+                    case .west: yaw = .pi / 2; center = SIMD2(Double(minX) - 0.62 - h / 2, Double(maxY) + 0.45 - w / 2); half = SIMD2(h / 2, w / 2)
                     }
+                    let lo = center - half, hi = center + half
+                    if collides(lo, hi) { continue }
+                    placed.append((lo, hi))
+                    add(label.node, yaw: yaw, center: center + SIMD2(ox, oz))
                     node = label.node
-                    add(node, yaw: yaw, center: center)
+                    break
                 }
+                if node == nil {
+                    // Boxed in: cut the name into the tile itself.
+                    let horizontal = width >= depth
+                    let along = (horizontal ? width : depth) - 0.3
+                    let lines = max(1, min(2, Int((Double(text.count) * charW * 0.85 / along).rounded(.up))))
+                    let label = floorText(text, color: .black, size: size * 0.85, maxWidth: along, lines: lines)
+                    let maxYRow = room.cells.map(\.y).max()!
+                    let anchor = room.cells.filter { $0.y == maxYRow }.min { $0.x < $1.x }!
+                    let center = horizontal
+                        ? SIMD2(ox + Double(anchor.x) - 0.35 + label.width / 2, oz + Double(anchor.y) + 0.35 - label.height / 2)
+                        : SIMD2(ox + Double(anchor.x) - 0.35 + label.height / 2, oz + Double(anchor.y) + 0.35 - label.width / 2)
+                    label.node.position.y = 0.02
+                    add(label.node, yaw: horizontal ? 0 : .pi / 2, center: center)
+                    node = label.node
+                }
+                guard let node else { continue }
                 node.name = "room:" + key
                 if undelivered.contains(key) { node.opacity = 0 }
                 roomLabels[key] = node
@@ -926,12 +930,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         n.runAction(.scale(to: 1, duration: 0.25))
         propRoot.addChildNode(n)
         m.pyramids.append(n)
+        m.pyramidCell = cell
         if m.errand == nil { m.place = .room(key); walk(m, to: cell) }
     }
 
     private func clearPyramids(_ m: Minion) {
         for p in m.pyramids { p.runAction(.sequence([.fadeOut(duration: 0.8), .removeFromParentNode()])) }
         m.pyramids = []
+        m.pyramidCell = nil
     }
 
     private func ringBell(seed: Int) {
@@ -942,8 +948,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: scanning
 
+    private var scanQueued = false
     private func rescan() {
+        pendingLock.lock()
+        if scanQueued { pendingLock.unlock(); return }
+        scanQueued = true
+        pendingLock.unlock()
         scanQueue.async { [scanner] in
+            self.pendingLock.lock(); self.scanQueued = false; self.pendingLock.unlock()
             let result = scanner.scan(roomsWithin: StationController.roomsWindow)
             self.enqueue { self.apply(result) }
         }
@@ -991,7 +1003,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
 
         var seen = Set<String>()
-        for s in result.sessions where now.timeIntervalSince(s.lastModified) < StationController.activeWindow {
+        for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow) {
             seen.insert(s.id)
             let stationName = Fleet.stationName(for: s.cwd)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
@@ -1044,7 +1056,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.state = .leaving
             if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
             clearPyramids(m)
-            send(m, to: .quarters)
+            if m.isSubagent { m.path = [] } else { send(m, to: .quarters) }
         }
         // Offices that appeared without a minion to deliver them just show up.
         let pending = Set(minions.values.compactMap { m in carriedRoom(of: m) ?? newRooms[m.id].map { "\(m.station)|\($0)" } })
@@ -1195,7 +1207,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .arriving:
                     m.state = .settled
                 case .settled:
-                    if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters {
+                    if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
+                        if m.cell != pc { walk(m, to: pc) }
+                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
                         m.nextWanderAt = clock + (restless ? Double.random(in: 0.6...1.6) : m.busy ? Double.random(in: 1.2...3) : Double.random(in: 8...20))
@@ -1240,30 +1254,43 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 
-    /// Pale beams from researching minions into the monolith, like the game's research screen.
+    /// Lightning from the monolith into each researching minion: a jagged bolt redrawn every frame.
     private func updateBeams() {
         var live = Set<String>()
-        for m in minions.values where m.place == .core && m.path.isEmpty && m.state == .settled && m.opacity > 0.5 {
+        for m in minions.values where m.place == .core && m.path.isEmpty && m.state == .settled && m.opacity > 0.5 && m.activity != .sleeping {
             guard let station = fleet.stations[m.station] else { continue }
             live.insert(m.id)
             let mp = station.monolithPosition
-            let from = SIMD3(station.offset.x + m.pos.x, m.headHeight * 0.8, station.offset.y + m.pos.y)
-            let to = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
-            let d = to - from
-            let len = (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot()
-            let beam = beams[m.id] ?? {
-                let n = SCNNode(geometry: SCNBox(width: 0.035, height: 0.035, length: 1, chamferRadius: 0))
-                n.geometry!.firstMaterial = flat(NSColor(rgb: (0.6, 0.8, 1.0)))
-                n.opacity = 0.85
-                beamRoot.addChildNode(n)
-                beams[m.id] = n
-                return n
+            let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
+            let to = SIMD3(station.offset.x + m.pos.x, m.headHeight * 0.8, station.offset.y + m.pos.y)
+            let bolt = beams[m.id] ?? {
+                let group = SCNNode()
+                for _ in 0..<5 {
+                    let n = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 1, chamferRadius: 0))
+                    n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
+                    group.addChildNode(n)
+                }
+                beamRoot.addChildNode(group)
+                beams[m.id] = group
+                return group
             }()
-            let mid = (from + to) / 2
-            beam.position = v3(mid.x, mid.y, mid.z)
-            beam.scale = SCNVector3(1, 1, len)
-            beam.look(at: v3(to.x, to.y, to.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, 1))
-            beam.opacity = 0.6 + 0.3 * sin(clock * 5 + m.bobPhase)
+            var points = [from]
+            for k in 1..<5 {
+                let t = Double(k) / 5
+                let jitter = 0.14
+                points.append(from + (to - from) * t + SIMD3(Double.random(in: -jitter...jitter), Double.random(in: -jitter...jitter), Double.random(in: -jitter...jitter)))
+            }
+            points.append(to)
+            for (i, seg) in bolt.childNodes.enumerated() {
+                let a = points[i], b = points[i + 1]
+                let d = b - a
+                let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
+                let mid = (a + b) / 2
+                seg.position = v3(mid.x, mid.y, mid.z)
+                seg.scale = SCNVector3(1, 1, len)
+                seg.look(at: v3(b.x, b.y, b.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, 1))
+            }
+            bolt.opacity = Double.random(in: 0.35...1.0)
         }
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }

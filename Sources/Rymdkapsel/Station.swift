@@ -108,22 +108,17 @@ final class Station {
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
         guard let q = rooms["kind:quarters"] else { return [] }
-        var out: [(SIMD2<Double>, Cell)] = []
-        for c in q.cells.prefix(3) {
-            out.append((SIMD2(Double(c.x) - 0.22, Double(c.y)), c))
-            out.append((SIMD2(Double(c.x) + 0.22, Double(c.y)), c))
-        }
-        return out
+        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(6).map { (SIMD2(Double($0.x), Double($0.y)), $0) }
     }
 
     private static func rect(_ w: Int, _ h: Int) -> [Cell] {
         (0..<w).flatMap { x in (0..<h).map { y in Cell(x: x, y: y) } }
     }
-    /// Broad bars and two-wide L shapes, like the real station.
+    /// Symmetric bars, blocks and T shapes, like the real station.
     private static let baseShapes: [[Cell]] = [
-        rect(2, 4), rect(2, 5), rect(3, 3), rect(2, 3), rect(3, 4),
-        rect(2, 5) + [Cell(x: 2, y: 0), Cell(x: 3, y: 0), Cell(x: 2, y: 1), Cell(x: 3, y: 1)],
-        rect(2, 4) + [Cell(x: 2, y: 2), Cell(x: 3, y: 2), Cell(x: 2, y: 3), Cell(x: 3, y: 3)],
+        rect(2, 4), rect(2, 5), rect(3, 3), rect(2, 3), rect(3, 4), rect(2, 6),
+        rect(4, 2) + [Cell(x: 1, y: 2), Cell(x: 2, y: 2), Cell(x: 1, y: 3), Cell(x: 2, y: 3)],
+        rect(3, 2) + [Cell(x: 1, y: 2), Cell(x: 1, y: 3)],
     ]
 
     init(name: String) {
@@ -172,12 +167,12 @@ final class Station {
 
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
-    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date) -> Bool {
+    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = placeShape(Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count])
+        let cells = placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count])
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         walkableCache = nil
@@ -189,7 +184,8 @@ final class Station {
         guard case .room(let key) = place, key.hasPrefix("kind:") else { return false }
         let name = String(key.dropFirst(5))
         let color = name == "hangar" ? Colors.hangar : Colors.quarters
-        return ensureRoom(key: key, name: name, repo: nil, color: color, lastActive: .distantFuture)
+        let shape = name == "hangar" ? Station.rect(2, 2) : Station.rect(2, 3)
+        return ensureRoom(key: key, name: name, repo: nil, color: color, lastActive: .distantFuture, shape: shape)
     }
 
     /// The room cell that touches the corridor, where a carried box gets set down.
@@ -309,7 +305,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v5.json")
+        return dir.appendingPathComponent("fleet-v7.json")
     }
 
     static func stationName(for cwd: String) -> String {
