@@ -352,7 +352,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v12.json")
+        return dir.appendingPathComponent("fleet-v13.json")
     }
 
     static func stationName(for cwd: String) -> String {
@@ -369,7 +369,7 @@ final class Fleet {
     func station(_ name: String) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
-        if name == "crew" { s.hasHangar = false; s.hasPad = false }
+        if name == "crew" { s.hasPad = false }
         s.ensureFixedRoom(.quarters)
         stations[name] = s
         return s
@@ -424,7 +424,7 @@ final class Fleet {
         repoColors = saved.repoColors
         for (name, s) in saved.stations {
             let station = Station(name: name)
-            if name == "crew" { station.hasHangar = false; station.hasPad = false }
+            if name == "crew" { station.hasPad = false }
             station.restore(s)
             station.ensureFixedRoom(.quarters)
             stations[name] = station

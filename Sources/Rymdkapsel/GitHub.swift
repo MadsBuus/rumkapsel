@@ -45,8 +45,55 @@ struct FeedEvent: Equatable {
     let detail: String      // review state, commit count, etc.
 }
 
+struct OpenPR: Equatable {
+    let number: Int
+    let title: String
+    let author: String
+    let isBot: Bool
+    let branch: String
+    let url: String
+    let createdAt: Date
+}
+
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    private var openPRs: [String: ([OpenPR], Date)] = [:]
+
+    func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
+        lock.lock(); defer { lock.unlock() }
+        return openPRs[repoRoot]?.0
+    }
+
+    /// Everyone's open pull requests, every five minutes.
+    func refreshOpenPRs(repoRoot: String) {
+        lock.lock()
+        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
+        if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
+        inFlight.insert("o:" + repoRoot)
+        lock.unlock()
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove("o:" + repoRoot); lock.unlock() }
+            let iso = ISO8601DateFormatter()
+            var found: [OpenPR] = []
+            if let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt"], cwd: repoRoot),
+               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                for o in arr {
+                    let a = o["author"] as? [String: Any]
+                    let login = a?["login"] as? String ?? "?"
+                    let isBot = (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]")
+                    found.append(OpenPR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", author: login, isBot: isBot,
+                                        branch: o["headRefName"] as? String ?? "", url: o["url"] as? String ?? "",
+                                        createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? Date()))
+                }
+            }
+            lock.lock()
+            let changed = openPRs[repoRoot]?.0 != found
+            openPRs[repoRoot] = (found, Date())
+            lock.unlock()
+            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        }
+    }
+
     private var releases: [String: ([ReleasePR], Date)] = [:]
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []

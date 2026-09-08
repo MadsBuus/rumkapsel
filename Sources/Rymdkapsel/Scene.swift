@@ -267,21 +267,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var rockets: [String: SCNNode] = [:]
     private var repoRoots: [String: (repo: String, station: String)] = [:]
     // Crew replay: teammates' last day, looped.
-    private struct CrewEvent { let at: Date; let kind: String; let login: String; let roomKey: String; let text: String; let n: Int }
     private struct CrewRoomInfo { var repo: String; var branch: String; var prNumber: Int?; var title: String?; var author: String; var url: String?; var state: String; var last: Date }
-    private var crewEvents: [CrewEvent] = []
-    private var crewCursor = 0
-    private var replayStart = Date()
-    private var replayWindow: TimeInterval = 1
-    private var replayTime = 0.0             // seconds since replayStart
     private var crewBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
     private var crewRoomInfo: [String: CrewRoomInfo] = [:]
-    private var crewSignature = ""
-    private let replayLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    private var crewSeen: Set<String> = []
+    private var crewLoaded = false
+    private var crewBusyUntil: [String: Date] = [:]
     private var hangarAnchors: [String: SCNNode] = [:]
     private var shipsInFlight: [String: Int] = [:]
-    static let crewWindow: TimeInterval = 24 * 3600
-    static let replayLength = 240.0          // seconds of wall clock for one replay
+    static let crewRecent: TimeInterval = 30 * 60
     private var beams: [String: SCNNode] = [:]
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
@@ -1004,11 +998,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         infoBackground.anchorPoint = CGPoint(x: 0, y: 0)
         hud.addChild(infoBackground)
         hud.addChild(infoLabel)
-        replayLabel.fontSize = 11
-        replayLabel.fontColor = Palette.dim
-        replayLabel.horizontalAlignmentMode = .left
-        replayLabel.verticalAlignmentMode = .bottom
-        hud.addChild(replayLabel)
         statusLabel.fontSize = 10
         statusLabel.fontColor = Palette.dim
         statusLabel.horizontalAlignmentMode = .right
@@ -1122,11 +1111,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let asleep = active.filter { $0.activity == .sleeping }.count
         statusLabel.text = ""
         infoLabel.position = CGPoint(x: 14, y: 12)
-        replayLabel.position = CGPoint(x: 14, y: hud.size.height - 90)
-        if !crewEvents.isEmpty {
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
-            replayLabel.text = "crew · replaying " + f.string(from: replayStart.addingTimeInterval(replayTime))
-        } else { replayLabel.text = "" }
+
         if clock - hudClock > 0.5 { hudClock = clock; layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep) }
 
         var y = hud.size.height - 70
@@ -1515,7 +1500,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshFeed(repoRoot: root) }
+            if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }
         for change in github.takeStateChanges() {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
@@ -1602,113 +1587,60 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    // MARK: crew replay
+    // MARK: crew
 
     private static let trunkBranches: Set<String> = ["develop", "staging", "main", "master", "production"]
 
-    /// Turns the repositories' activity feeds into offices on the crew station and a timeline to replay.
+    /// Crew station: an office per open teammate pull request, boxes per push, and minions that
+    /// react only to what just happened in the repositories' activity feeds.
     private func rebuildCrew() {
         let me = github.myLogin() ?? ""
+        let now = Date()
+        let station = fleet.station("crew")
+        var changed = false
+        var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" {
+            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !StationController.trunkBranches.contains(pr.branch) { open.append((info.repo, pr)) }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
-        let signature = "\(feed.count):" + (feed.map { "\($0.e.at.timeIntervalSince1970)" }.max() ?? "")
-        guard signature != crewSignature else { return }
-        crewSignature = signature
-        guard !feed.isEmpty else { return }
+        guard !open.isEmpty || !feed.isEmpty else { return }
 
-        let station = fleet.station("crew")
-        let cutoff = Date().addingTimeInterval(-StationController.crewWindow)
-        // Rooms: one per teammate branch with activity; bots share one bay.
-        var info: [String: CrewRoomInfo] = [:]
-        for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > cutoff {
-            guard !e.isBot, let branch = e.branch, !StationController.trunkBranches.contains(branch) else { continue }
-            let key = "crew:\(repo)/\(branch)"
-            var r = info[key] ?? CrewRoomInfo(repo: repo, branch: branch, prNumber: nil, title: nil, author: e.actor, url: nil, state: "NONE", last: e.at)
-            if let n = e.prNumber { r.prNumber = n }
-            if let t = e.title { r.title = t }
-            if let u = e.url { r.url = u }
-            switch e.kind {
-            case "pr_open": r.state = "OPEN"
-            case "pr_merge": r.state = "MERGED"
-            case "pr_close": r.state = "CLOSED"
-            default: break
+        // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
+        let liveKeys = Set(open.filter { !$0.pr.isBot }.map { "crew:\($0.repo)/\($0.pr.branch)" })
+        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && !liveKeys.contains(room.key) {
+            let author = crewRoomInfo["crew|" + room.key]?.author ?? ""
+            archive(station: station, room: room, announce: crewLoaded)
+            if crewLoaded, let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(240); send(m, to: .core) }
+            crewRoomInfo["crew|" + room.key] = nil
+            changed = true
+        }
+        var pendingDeliveries: [(login: String, key: String)] = []
+        for (repo, pr) in open where !pr.isBot {
+            let key = "crew:\(repo)/\(pr.branch)"
+            let issue = pr.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
+            let words = pr.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? pr.branch
+            let name = pr.author + " · " + issue + String(words.prefix(22))
+            if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
+                changed = true
+                if crewLoaded { undelivered.insert("crew|" + key); pendingDeliveries.append((pr.author, key)); logEvent("\(pr.author) opened #\(pr.number) \(pr.title.prefix(40))") }
             }
-            r.last = e.at
-            info[key] = r
+            crewRoomInfo["crew|" + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
+            let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
+            crewBoxes["crew|" + key] = (1 + pushes, "OPEN", NSColor(fleet.color(forRepo: repo)))
         }
-        // Merged, closed or deleted branches are gone: only live work gets an office.
-        for (repo, e) in feed where e.kind == "branch_delete" && e.at > cutoff {
-            if let b = e.branch { info["crew:\(repo)/\(b)"] = nil }
-        }
-        info = info.filter { $0.value.state != "MERGED" && $0.value.state != "CLOSED" }
-        // Cap per repo by latest activity, so a busy day does not explode the station.
-        var keep: Set<String> = []
-        for repo in Set(info.values.map(\.repo)) {
-            let sorted = info.filter { $0.value.repo == repo }.sorted { $0.value.last > $1.value.last }
-            for (k, _) in sorted.prefix(8) { keep.insert(k) }
-        }
-        info = info.filter { keep.contains($0.key) }
-
-        var changed = false
-        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && info[room.key] == nil {
-            station.removeRoom(key: room.key); changed = true
-        }
-        crewRoomInfo = [:]
-        for (key, r) in info {
-            let issue = r.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
-            let words = r.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? r.branch
-            let name = r.author + " · " + issue + String(words.prefix(22))
-            if station.ensureRoom(key: key, name: name, repo: r.repo, color: fleet.color(forRepo: r.repo), lastActive: r.last) { changed = true }
-            crewRoomInfo["crew|" + key] = r
-        }
-        if feed.contains(where: { $0.e.isBot }) {
+        let botCount = open.filter(\.pr.isBot).count
+        if botCount > 0 {
             if station.ensureRoom(key: "kind:bots", name: "bots", repo: nil, color: RGB(r: 0.36, g: 0.40, b: 0.50), lastActive: .distantFuture, shape: Station.rect(2, 2)) { changed = true }
+            crewBoxes["crew|kind:bots"] = (botCount, "NONE", NSColor(rgb: (0.55, 0.6, 0.7)))
         }
 
-        // Timeline over what the feed covers, up to a day.
-        let times = feed.map(\.e.at).filter { $0 > cutoff }
-        replayStart = max(cutoff, times.min() ?? cutoff)
-        replayWindow = max(60, Date().timeIntervalSince(replayStart))
-        var events: [CrewEvent] = []
-        for (repo, e) in feed where e.at > replayStart {
-            let roomKey: String
-            if e.isBot { roomKey = "kind:bots" }
-            else if let b = e.branch, !StationController.trunkBranches.contains(b), info["crew:\(repo)/\(b)"] != nil { roomKey = "crew:\(repo)/\(b)" }
-            else if e.kind == "issue_open" { roomKey = info.first { $0.value.author == e.actor }?.key ?? "kind:quarters" }
-            else if e.kind == "pr_merge" || e.kind == "pr_open", let b = e.branch, !StationController.trunkBranches.contains(b) { roomKey = "gone" }
-            else { continue }
-            let who = e.actor
-            let n = e.prNumber.map { "#\($0)" } ?? ""
-            switch e.kind {
-            case "push": events.append(CrewEvent(at: e.at, kind: "commit", login: who, roomKey: roomKey, text: "", n: Int(e.detail) ?? 1))
-            case "pr_open": events.append(CrewEvent(at: e.at, kind: "open", login: who, roomKey: roomKey, text: "\(who) opened \(n)", n: 0))
-            case "pr_merge": events.append(CrewEvent(at: e.at, kind: "merge", login: who, roomKey: roomKey, text: "\(who) merged \(n)", n: 0))
-            case "pr_close": events.append(CrewEvent(at: e.at, kind: "close", login: who, roomKey: roomKey, text: "\(who) closed \(n)", n: 0))
-            case "review":
-                let verb = e.detail == "approved" ? "approved" : e.detail == "changes_requested" ? "requested changes on" : "reviewed"
-                events.append(CrewEvent(at: e.at, kind: "review", login: who, roomKey: roomKey, text: "\(who) \(verb) \(n)", n: 0))
-            case "comment": events.append(CrewEvent(at: e.at, kind: "comment", login: who, roomKey: roomKey, text: "", n: 0))
-            case "branch_create": events.append(CrewEvent(at: e.at, kind: "create", login: who, roomKey: roomKey, text: "\(who) started \(e.branch ?? "a branch")", n: 0))
-            case "branch_delete": events.append(CrewEvent(at: e.at, kind: "delete", login: who, roomKey: roomKey, text: "\(who) archived \(e.branch ?? "a branch")", n: 0))
-            case "issue_open": events.append(CrewEvent(at: e.at, kind: "issue", login: who, roomKey: roomKey, text: "\(who) filed \(n) \(e.title ?? "")", n: 0))
-            default: break
-            }
-        }
-        crewEvents = events.sorted { $0.at < $1.at }
-        crewCursor = 0
-        replayTime = 0
-        crewBoxes = [:]
-        for (key, r) in info { crewBoxes["crew|" + key] = (1, r.state == "MERGED" ? "NONE" : "NONE", NSColor(fleet.color(forRepo: r.repo))) }
-        crewBoxes["crew|kind:bots"] = (1, "NONE", NSColor(rgb: (0.55, 0.6, 0.7)))
-
-        // One grey minion per teammate, plus one small bot.
-        var logins = Set(feed.filter { !$0.e.isBot && $0.e.at > replayStart }.map(\.e.actor))
-        logins.formUnion(info.values.map(\.author))
+        // One grey minion per teammate with an open PR or recent activity.
+        var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
+        logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
         for login in logins where minions["crew:" + login] == nil {
-            let homeKey = info.first { $0.value.author == login }?.key ?? "kind:quarters"
-            let home = Home(key: homeKey, name: login, repo: info[homeKey]?.repo ?? "crew", issue: nil)
+            let homeKey = open.first { $0.pr.author == login }.map { "crew:\($0.repo)/\($0.pr.branch)" } ?? "kind:quarters"
+            let home = Home(key: homeKey, name: login, repo: open.first { $0.pr.author == login }?.repo ?? "crew", issue: nil)
             let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
             let m = Minion(id: "crew:" + login, station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: false, start: start, crew: true)
             m.title = login
@@ -1717,79 +1649,60 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             minions[m.id] = m
             send(m, to: .quarters)
         }
-        if feed.contains(where: { $0.e.isBot }), minions["crew:bots"] == nil {
-            let home = Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil)
-            let m = Minion(id: "crew:bots", station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
-            m.title = "dependabot"
-            m.activity = .sleeping
-            minionRoot.addChildNode(m.node)
-            minions[m.id] = m
+        for m in minions.values where m.isCrew && m.id != "crew:bots" && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
+        if botCount > 0, minions["crew:bots"] == nil {
+            let m = Minion(id: "crew:bots", station: "crew", home: Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil), cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
+            m.title = "dependabot"; m.activity = .sleeping
+            minionRoot.addChildNode(m.node); minions[m.id] = m
             send(m, to: .room("kind:bots"))
         }
-        for m in minions.values where m.isCrew && m.id != "crew:bots" && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
         if changed { rebuildStatic(); for m in minions.values where m.errand == nil { send(m, to: m.place) } } else { rebuildMarkers() }
-    }
-
-    /// Advances the replay clock and acts out the events as they come due.
-    private func tickCrew(dt: Double) {
-        guard !crewEvents.isEmpty else { return }
-        let speed = replayWindow / StationController.replayLength
-        replayTime += dt * speed
-        if replayTime > replayWindow + 20 * speed {
-            replayTime = 0; crewCursor = 0
-            for key in crewBoxes.keys { crewBoxes[key]?.count = 1; crewBoxes[key]?.state = "NONE" }
-            rebuildMarkers()
+        for d in pendingDeliveries {
+            if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal("crew|" + d.key) }
         }
-        let now = replayStart.addingTimeInterval(replayTime)
-        var markersDirty = false
-        let hour = replayWindow / 24
-        while crewCursor < crewEvents.count, crewEvents[crewCursor].at <= now {
-            let e = crewEvents[crewCursor]; crewCursor += 1
-            let key = "crew|" + e.roomKey
-            let isBots = e.roomKey == "kind:bots"
-            let gone = e.roomKey == "gone"
-            let m = minions[isBots ? "crew:bots" : "crew:" + e.login]
-            func go(_ activity: Activity, _ place: Place, _ hold: Double) {
-                guard let m else { return }
-                if gone, case .room = place { m.activity = activity; m.busy = true; m.busyUntil = replayTime + hold; send(m, to: .core); return }
-                m.activity = activity; m.busy = true; m.busyUntil = replayTime + hold
-                if m.place != place || m.path.isEmpty { send(m, to: place) }
-            }
+
+        // What just happened: only fresh events move minions and make the log.
+        for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where !e.isBot {
+            let id = "\(repo)|\(e.at.timeIntervalSince1970)|\(e.actor)|\(e.kind)|\(e.branch ?? "")"
+            guard !crewSeen.contains(id) else { continue }
+            crewSeen.insert(id)
+            let fresh = now.timeIntervalSince(e.at) < StationController.crewRecent
+            guard fresh else { continue }
+            let roomKey = e.branch.map { "crew:\(repo)/\($0)" } ?? ""
+            let hasRoom = station.rooms[roomKey] != nil
+            guard let m = minions["crew:" + e.actor], m.errand == nil else { continue }
+            let n = e.prNumber.map { "#\($0)" } ?? (e.branch ?? "")
             switch e.kind {
-            case "commit":
-                crewBoxes[key]?.count += e.n; markersDirty = true
-                go(.coding("x"), .room(e.roomKey), hour * 0.6)
-            case "open":
-                crewBoxes[key]?.state = "OPEN"; markersDirty = true
-                if !isBots { logEvent(e.text) }
-                go(.shipping, .room(e.roomKey), hour * 0.4)
-            case "merge":
-                crewBoxes[key]?.state = "MERGED"; markersDirty = true
-                if !isBots { logEvent(e.text); ringBell(seed: e.roomKey.hashValue) }
-                go(.shipping, .core, hour * 0.4)
-            case "close":
-                crewBoxes[key]?.state = "CLOSED"; markersDirty = true
-                if !isBots { logEvent(e.text) }
-            case "review":
-                if !isBots { logEvent(e.text) }
-                go(.exploring, .room(e.roomKey), hour * 0.4)
-            case "comment":
-                go(.writing, .room(e.roomKey), hour * 0.3)
-            case "create":
-                if !isBots { logEvent(e.text) }
-                go(.planning, .room(e.roomKey), hour * 0.3)
-            case "delete":
-                if !isBots { logEvent(e.text) }
-                crewBoxes[key]?.count = 1; markersDirty = true
-            case "issue":
-                if !isBots { logEvent(e.text) }
-                if let m { addPyramid(for: m) }
-                go(.writing, .room(e.roomKey), hour * 0.3)
+            case "push" where hasRoom:
+                m.activity = .coding("x"); m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(20 * 60)
+                if m.place != .room(roomKey) { send(m, to: .room(roomKey)) }
+                if crewLoaded { logEvent("\(e.actor) pushed to \(n)") }
+            case "review" where hasRoom:
+                m.activity = .exploring; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(10 * 60)
+                send(m, to: .room(roomKey))
+                let verb = e.detail == "approved" ? "approved" : e.detail == "changes_requested" ? "requested changes on" : "reviewed"
+                logEvent("\(e.actor) \(verb) \(n)")
+            case "comment" where hasRoom:
+                m.activity = .writing; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(8 * 60)
+                send(m, to: .room(roomKey))
+            case "branch_create":
+                m.activity = .planning; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(10 * 60)
+                send(m, to: .core)
+                logEvent("\(e.actor) started \(e.branch ?? "a branch")")
+            case "issue_open":
+                logEvent("\(e.actor) filed \(n) \(e.title?.prefix(40) ?? "")")
+                addPyramid(for: m)
             default: break
             }
         }
-        if markersDirty { rebuildMarkers() }
-        for m in minions.values where m.isCrew && m.busy && replayTime > m.busyUntil {
+        crewLoaded = true
+    }
+
+    /// Crew minions rest once their last activity is old.
+    private func tickCrewRest() {
+        let now = Date()
+        for m in minions.values where m.isCrew && m.busy {
+            if let until = crewBusyUntil[m.id], now < until { continue }
             m.busy = false; m.activity = .sleeping
             clearPyramids(m)
             send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
@@ -1878,7 +1791,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         lastTick = now
         clock += dt
         if demo { tickDemo(dt: dt) }
-        tickCrew(dt: dt)
+        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest() }
         if hud.size != viewSize { hud.size = viewSize }
 
         let k = 1 - exp(-dt * 2)
@@ -2095,7 +2008,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshFeed(repoRoot: root) }
+            if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }
             logEvent("asking github…")
         }
