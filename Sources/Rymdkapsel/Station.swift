@@ -104,6 +104,12 @@ final class Station {
         return [Cell(x: 0, y: y - 1), Cell(x: 1, y: y - 1), Cell(x: 0, y: y), Cell(x: 1, y: y)]
     }
     var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
+    /// The hangar is the 2x2 pad at the outer end of the south corridor arm.
+    var hangarCells: [Cell] {
+        let y = spineHalfLength + 1
+        return [Cell(x: 0, y: y), Cell(x: 1, y: y), Cell(x: 0, y: y + 1), Cell(x: 1, y: y + 1)]
+    }
+    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 1.5) }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
@@ -132,7 +138,7 @@ final class Station {
             out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
             out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
         }
-        return out.filter { !coreCells.contains($0) }
+        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) }
     }
 
     /// The corridor axes are never built on, however far they extend.
@@ -150,6 +156,7 @@ final class Station {
     private var walkable: Set<Cell> {
         if let w = walkableCache { return w }
         var w = Set(coreCells)
+        w.formUnion(hangarCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -161,6 +168,7 @@ final class Station {
     func cells(of place: Place) -> [Cell] {
         switch place {
         case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
+        case .room("kind:hangar"): return hangarCells
         case .room(let key): return rooms[key]?.cells ?? []
         }
     }
@@ -181,11 +189,8 @@ final class Station {
 
     @discardableResult
     func ensureFixedRoom(_ place: Place) -> Bool {
-        guard case .room(let key) = place, key.hasPrefix("kind:") else { return false }
-        let name = String(key.dropFirst(5))
-        let color = name == "hangar" ? Colors.hangar : Colors.quarters
-        let shape = name == "hangar" ? Station.rect(2, 2) : Station.rect(2, 3)
-        return ensureRoom(key: key, name: name, repo: nil, color: color, lastActive: .distantFuture, shape: shape)
+        guard case .room(let key) = place, key == "kind:quarters" else { return false }
+        return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 3))
     }
 
     /// The room cell that touches the corridor, where a carried box gets set down.
@@ -213,7 +218,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell]) -> [Cell] {
@@ -285,7 +290,7 @@ final class Station {
 
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
-        for (key, r) in s.rooms {
+        for (key, r) in s.rooms where key != "kind:hangar" {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             rooms[key] = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
             for c in r.cells { occupied[c] = key }
@@ -305,7 +310,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v7.json")
+        return dir.appendingPathComponent("fleet-v8.json")
     }
 
     static func stationName(for cwd: String) -> String {
@@ -323,7 +328,6 @@ final class Fleet {
         if let s = stations[name] { return s }
         let s = Station(name: name)
         s.ensureFixedRoom(.quarters)
-        s.ensureFixedRoom(.hangar)
         stations[name] = s
         return s
     }
@@ -367,7 +371,6 @@ final class Fleet {
             let station = Station(name: name)
             station.restore(s)
             station.ensureFixedRoom(.quarters)
-            station.ensureFixedRoom(.hangar)
             stations[name] = station
         }
     }

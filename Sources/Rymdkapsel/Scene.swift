@@ -408,6 +408,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func owner(_ station: Station, _ c: Cell) -> String? {
+        if station.hangarCells.contains(c) { return "kind:hangar" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
     }
@@ -474,6 +475,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for c in station.corridorCells + station.coreCells {
                 addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
             }
+            for c in station.hangarCells {
+                addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+            }
             for c in station.corridorCells where (c.x + c.y * 3) % 4 == 0 {
                 let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
                 d.geometry!.firstMaterial = flat(Palette.void)
@@ -529,7 +533,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private static func displayName(_ room: Room) -> String {
         switch room.key {
-        case "kind:hangar": return "hangar"
         case "kind:quarters": return "sleeping"
         default: return room.name
         }
@@ -554,8 +557,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let b = station.bounds
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
+            let hangarLabel = floorText("hangar", color: NSColor(Colors.hangar).lighter(0.25), size: 0.38, maxWidth: 4, lines: 1)
+            let hc = station.hangarCenter
+            add(hangarLabel.node, yaw: 0, center: SIMD2(ox + hc.x - 0.9 + hangarLabel.width / 2, oz + hc.y + 1.55 + hangarLabel.height / 2))
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
@@ -806,6 +812,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if m.isSubagent { parts.append("subagent") }
                 infoLabel.text = parts.joined(separator: "   ")
             }
+        } else if h.hasPrefix("hangar:") {
+            infoLabel.text = "hangar · new offices arrive here by ship"
         } else if h.hasPrefix("station:") {
             infoLabel.text = String(h.dropFirst(8)) + " · the monolith: web research and subagents"
         } else {
@@ -881,22 +889,64 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         m.path = station.path(from: m.cell, to: cell)
     }
 
-    /// Drops a box of the repo colour into the hangar and sends the minion to fetch it.
+    /// A tiny ship flies in, lands in the hangar and leaves a box of the repo colour; the minion fetches it.
     private func startDelivery(_ m: Minion, roomKey: String) {
-        guard let station = fleet.stations[m.station], let room = station.rooms[roomKey],
-              let hangarCell = station.cells(of: .hangar).randomElement() else { return }
+        guard let station = fleet.stations[m.station], let room = station.rooms[roomKey] else { return }
         let key = "\(station.name)|\(roomKey)"
+        let hc = station.hangarCenter
+        let pad = SIMD3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
         let s = 0.3
         let box = SCNNode(geometry: SCNBox(width: s, height: s, length: s, chamferRadius: 0))
         box.geometry!.firstMaterial = lit(NSColor(room.color))
-        box.position = v3(station.offset.x + Double(hangarCell.x), 4, station.offset.y + Double(hangarCell.y))
+        box.position = v3(pad.x, s / 2, pad.z)
+        box.opacity = 0
         box.name = "room:" + key
         propRoot.addChildNode(box)
-        box.runAction(.move(to: v3(station.offset.x + Double(hangarCell.x), s / 2, station.offset.y + Double(hangarCell.y)), duration: 0.7))
         boxes[key] = box
+
+        let ship = SCNNode()
+        let hull = SCNNode(geometry: SCNBox(width: 0.55, height: 0.12, length: 0.32, chamferRadius: 0.02))
+        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
+        ship.addChildNode(hull)
+        let cockpit = SCNNode(geometry: SCNBox(width: 0.16, height: 0.08, length: 0.16, chamferRadius: 0.01))
+        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
+        cockpit.position = v3(0.12, 0.09, 0)
+        ship.addChildNode(cockpit)
+        for side in [-1.0, 1.0] {
+            let wing = SCNNode(geometry: SCNBox(width: 0.22, height: 0.04, length: 0.28, chamferRadius: 0))
+            wing.geometry!.firstMaterial = lit(NSColor(room.color))
+            wing.position = v3(-0.12, 0, side * 0.28)
+            ship.addChildNode(wing)
+        }
+        let start = pad + SIMD3(2.0, 7.0, 14.0)
+        let hover = pad + SIMD3(0, 0.9, 0)
+        let exit = pad + SIMD3(-14.0, 7.0, 4.0)
+        ship.position = v3(start.x, start.y, start.z)
+        ship.look(at: v3(hover.x, hover.y, hover.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
+        propRoot.addChildNode(ship)
+        let land = SCNAction.move(to: v3(hover.x, hover.y, hover.z), duration: 2.2)
+        land.timingMode = .easeInEaseOut
+        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 2.0)
+        leave.timingMode = .easeIn
+        ship.runAction(.sequence([
+            land,
+            .wait(duration: 0.3),
+            .run { _ in
+                box.opacity = 1
+                box.position = v3(pad.x, 0.9, pad.z)
+                let drop = SCNAction.move(to: v3(pad.x, s / 2, pad.z), duration: 0.35)
+                drop.timingMode = .easeIn
+                box.runAction(drop)
+            },
+            .wait(duration: 0.6),
+            .run { n in n.look(at: v3(exit.x, exit.y, exit.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0)) },
+            leave,
+            .removeFromParentNode(),
+        ]))
+        logEvent("ship inbound: \(room.name)")
         m.errand = .fetch(room: roomKey)
         m.place = .hangar
-        walk(m, to: hangarCell)
+        walk(m, to: station.hangarCells.randomElement()!)
     }
 
     private func reveal(_ key: String) {
@@ -1069,8 +1119,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if firstRun { restoreView() }
             for m in minions.values where m.errand == nil { send(m, to: m.place) }
             for m in minions.values {
-                if case .fetch(let r) = m.errand, let station = fleet.stations[m.station], let c = station.cells(of: .hangar).randomElement() {
-                    boxes["\(m.station)|\(r)"]?.position = v3(station.offset.x + Double(c.x), 0.15, station.offset.y + Double(c.y))
+                if case .fetch(let r) = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
+                    let hc = station.hangarCenter
+                    boxes["\(m.station)|\(r)"]?.position = v3(station.offset.x + hc.x, 0.15, station.offset.y + hc.y)
                     walk(m, to: c)
                 } else if case .carry(let r) = m.errand, let station = fleet.stations[m.station], let door = station.doorCell(of: r) {
                     walk(m, to: door)
@@ -1183,6 +1234,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 switch m.errand {
                 case .fetch(let r):
                     let key = "\(m.station)|\(r)"
+                    if let box = boxes[key], box.opacity < 1 { continue }   // ship has not landed yet
                     if let box = boxes[key] {
                         box.removeAllActions()
                         box.removeFromParentNode()
