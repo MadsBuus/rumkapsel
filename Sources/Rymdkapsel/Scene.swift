@@ -514,7 +514,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
     private func localState(_ room: Room) -> (local: Bool, commits: Int) {
         guard room.key.hasPrefix("task:"), let w = room.worktree else { return (false, 0) }
-        let pushed = github.branchPushed(worktree: w) ?? true
+        var pushed = github.branchPushed(worktree: w) ?? true
+        if let b = room.branch, let r = room.repoRoot, github.pull(branch: b, repoRoot: r) != nil { pushed = true }
         return (!pushed, github.commitsAhead(worktree: w) ?? 0)
     }
 
@@ -627,7 +628,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if room.key.hasPrefix("proj:") { progress = 0 }
                 else if local.local { progress = local.commits == 0 ? 0.35 : min(0.9, 0.35 + Double(local.commits) * 0.12) }
                 else { progress = 1 }
-                let grey = NSColor(rgb: (0.27, 0.28, 0.33))
+                let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
+                let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
@@ -640,7 +642,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if pending {
                         addTile(station: station, cell: c, owner: room.key, color: grey, name: "room:" + key)
                     }
-                    let t = addTile(station: station, cell: c, owner: room.key, color: i < tiled ? full : grey, name: "room:" + key)
+                    let color = progress == 0 ? grey : (i < tiled ? full : subfloor)
+                    let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     tiles.append(t)
                 }
