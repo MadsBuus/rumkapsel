@@ -574,8 +574,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in station.rooms.values {
                 let key = roomKey(station, room)
                 var tiles: [SCNNode] = []
+                let sketch = room.key.hasPrefix("proj:")   // a session with no branch yet: an unbuilt slot
+                let tileColor = sketch ? NSColor(rgb: (0.27, 0.28, 0.33)) : NSColor(room.color)
+                if sketch {
+                    let o = outline(station: station, room: room)
+                    o.name = "room:" + key
+                    staticRoot.addChildNode(o)
+                }
                 for c in room.cells {
-                    let t = addTile(station: station, cell: c, owner: room.key, color: NSColor(room.color), name: "room:" + key)
+                    let t = addTile(station: station, cell: c, owner: room.key, color: tileColor, name: "room:" + key)
                     if undelivered.contains(key) { t.opacity = 0 }
                     tiles.append(t)
                 }
@@ -1029,6 +1036,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
+        if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
             if let pr = github.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
@@ -1315,7 +1323,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let m = minions[s.id], m.home.key != home.key, station.rooms[home.key] == nil, station.rooms[m.home.key] != nil,
                !minions.values.contains(where: { $0.id != s.id && $0.home.key == m.home.key && $0.station == stationName }) {
                 let oldKey = "\(stationName)|\(m.home.key)", newKey = "\(stationName)|\(home.key)"
+                let promoted = m.home.key.hasPrefix("proj:") && home.key.hasPrefix("task:")
                 station.renameRoom(from: m.home.key, to: home.key, name: home.name)
+                if promoted, !firstRun, m.errand == nil {
+                    undelivered.insert(newKey)
+                    newRooms[s.id] = home.key
+                    logEvent("\(home.name): branch created, office ordered")
+                }
                 if undelivered.remove(oldKey) != nil { undelivered.insert(newKey) }
                 if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
                 if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
