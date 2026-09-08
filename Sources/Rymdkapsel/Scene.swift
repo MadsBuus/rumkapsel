@@ -407,6 +407,31 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             debrisRoot.addChildNode(n)
             debris.append((n, SIMD2(Double.random(in: -0.12...0.12), Double.random(in: -0.12...0.12))))
         }
+        // A far, still star field: one point-cloud geometry, faint and small.
+        var stars: [SCNVector3] = []
+        var starColors: [SCNVector4] = []
+        for _ in 0..<700 {
+            stars.append(v3(Double.random(in: -90...90), -12, Double.random(in: -90...90)))
+            let b = Double.random(in: 0.25...0.7)
+            starColors.append(SCNVector4(0.8 * b, 0.85 * b, 1.0 * b, 1))
+        }
+        let starSource = SCNGeometrySource(vertices: stars)
+        let colorData = Data(bytes: starColors, count: starColors.count * MemoryLayout<SCNVector4>.stride)
+        let colorSource = SCNGeometrySource(data: colorData, semantic: .color, vectorCount: starColors.count, usesFloatComponents: true,
+                                            componentsPerVector: 4, bytesPerComponent: MemoryLayout<CGFloat>.size, dataOffset: 0, dataStride: MemoryLayout<SCNVector4>.stride)
+        let indices = (0..<stars.count).map { Int32($0) }
+        let element = SCNGeometryElement(indices: indices, primitiveType: .point)
+        element.pointSize = 1.2
+        element.minimumPointScreenSpaceRadius = 0.6
+        element.maximumPointScreenSpaceRadius = 1.6
+        let starGeometry = SCNGeometry(sources: [starSource, colorSource], elements: [element])
+        let starMaterial = SCNMaterial()
+        starMaterial.lightingModel = .constant
+        starMaterial.diffuse.contents = NSColor.white
+        starMaterial.blendMode = .add
+        starGeometry.firstMaterial = starMaterial
+        debrisRoot.addChildNode(SCNNode(geometry: starGeometry))
+
         for _ in 0..<4 {
             let cluster = SCNNode()
             let count = Int.random(in: 12...20)
@@ -799,6 +824,57 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return n
     }
 
+    /// A red-and-white tape barrier with a gantry ladder: the release is up but not cleared to fly.
+    private func holdDecoration(around center: SIMD3<Double>, tall: Bool) -> SCNNode {
+        let n = SCNNode()
+        let red = flat(NSColor(rgb: (0.9, 0.2, 0.2))), white = flat(NSColor(rgb: (0.95, 0.95, 0.95)))
+        let radius = 0.72, postH = 0.32
+        for k in 0..<4 {
+            let a = Double(k) * .pi / 2 + .pi / 4
+            let post = SCNNode(geometry: SCNBox(width: 0.05, height: postH, length: 0.05, chamferRadius: 0))
+            post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
+            post.position = v3(center.x + cos(a) * radius, postH / 2, center.z + sin(a) * radius)
+            n.addChildNode(post)
+            // Tape between this post and the next, striped in short segments.
+            let b = a + .pi / 2
+            let p0 = SIMD2(center.x + cos(a) * radius, center.z + sin(a) * radius)
+            let p1 = SIMD2(center.x + cos(b) * radius, center.z + sin(b) * radius)
+            let segs = 6
+            for i in 0..<segs {
+                let t0 = Double(i) / Double(segs), t1 = Double(i + 1) / Double(segs)
+                let m0 = p0 + (p1 - p0) * t0, m1 = p0 + (p1 - p0) * t1
+                let mid = (m0 + m1) / 2
+                let d = m1 - m0
+                let len = (d.x * d.x + d.y * d.y).squareRoot()
+                let seg = SCNNode(geometry: SCNBox(width: len, height: 0.06, length: 0.012, chamferRadius: 0))
+                seg.geometry!.firstMaterial = i % 2 == 0 ? red : white
+                seg.position = v3(mid.x, postH * 0.8, mid.y)
+                seg.eulerAngles.y = -atan2(d.y, d.x)
+                n.addChildNode(seg)
+            }
+        }
+        // Gantry: a tower with rungs beside the rocket.
+        let h = tall ? 1.7 : 1.1
+        let tower = SCNNode()
+        for dz in [-0.08, 0.08] {
+            let rail = SCNNode(geometry: SCNBox(width: 0.04, height: h, length: 0.04, chamferRadius: 0))
+            rail.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.55, 0.2)))
+            rail.position = v3(0, h / 2, dz)
+            tower.addChildNode(rail)
+        }
+        var y = 0.15
+        while y < h {
+            let rung = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 0.2, chamferRadius: 0))
+            rung.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.55, 0.2)))
+            rung.position = v3(0, y, 0)
+            tower.addChildNode(rung)
+            y += 0.18
+        }
+        tower.position = v3(center.x + 0.32, 0, center.z + 0.02)
+        n.addChildNode(tower)
+        return n
+    }
+
     /// Flame on, a slow climb that carries the rocket out of the frame, then gone.
     private func liftOff(_ node: SCNNode) {
         node.childNode(withName: "flame", recursively: false)?.opacity = 1
@@ -813,12 +889,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot] else { continue }
             let key = "\(info.station)|\(launch.pr.number)"
-            let node = rockets.removeValue(forKey: key) ?? {
+            let node = rockets.removeValue(forKey: key) ?? rockets.removeValue(forKey: key + "|hold") ?? {
                 let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: launch.pr.isProduction)
                 if let st = fleet.stations[info.station] { n.position = v3(st.offset.x + st.padCenter.x, 0, st.offset.y + st.padCenter.y) }
                 rocketRoot.addChildNode(n)
                 return n
             }()
+            node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
             liftOff(node)
             logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
             ringBell(seed: launch.pr.number)
@@ -828,19 +905,25 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
             let hasProduction = open.contains(where: \.isProduction)
             for pr in open where pr.isProduction || !hasProduction {
-                let key = "\(info.station)|\(pr.number)"
+                let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")"
                 live.insert(key)
                 if rockets[key] != nil { continue }
                 let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction)
+                if pr.untested {
+                    let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: pr.isProduction)
+                    deco.name = "hold"
+                    n.addChildNode(deco)
+                }
                 let slot = rockets.values.filter { $0.parent != nil }.count % 4
                 let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(0.45, 0.45), SIMD2(0.45, -0.45), SIMD2(-0.45, 0.45)]
                 let pc = station.padCenter + offsets[slot]
                 n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
-                n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)"
-                for c in n.childNodes { c.name = n.name }
+                let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"
+                n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
+                n.enumerateChildNodes { c, _ in if c.name != "flame" { c.name = n.name } }
                 rocketRoot.addChildNode(n)
                 rockets[key] = n
-                logEvent("\(info.repo): release to \(pr.base) on the pad")
+                logEvent("\(info.repo): release to \(pr.base) on the pad" + (pr.untested ? " (untested)" : ""))
             }
         }
         for (key, n) in rockets where !live.contains(key) && !n.hasActions { n.removeFromParentNode(); rockets[key] = nil }
@@ -1413,6 +1496,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let pc = st.padCenter + (i == 0 ? SIMD2(0.45, -0.45) : SIMD2(0, 0))
                 n.position = v3(st.offset.x + pc.x, 0, st.offset.y + pc.y)
                 n.name = "rocket:https://github.com|demo release"
+                if tall { let d = holdDecoration(around: SIMD3(0, 0, 0), tall: true); d.name = "hold"; n.addChildNode(d) }
                 rocketRoot.addChildNode(n)
                 rockets["work|\(i)"] = n
             }
@@ -1565,6 +1649,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .shipping: roll = sin(t * 9) * 0.16                      // shipping: excited wiggle
                 case .skill: spin = t * 2                                     // using a skill: a slow spin
                 case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
+                case .qa: tilt = -0.25 + sin(t * 1.5) * 0.1; spin = sin(t * 0.8) * 0.4   // QA: looking the rocket up and down
                 default: roll = sin(t * 5) * 0.07
                 }
             }

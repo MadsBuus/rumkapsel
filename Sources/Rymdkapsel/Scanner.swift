@@ -3,7 +3,7 @@ import Foundation
 /// What a session is doing right now, as far as its transcript tells us.
 enum Activity: Equatable {
     case researching, exploring, coding(String), testing, running, shipping, skill(String), planning, delegating
-    case writing, thinking, reading, waiting, sleeping
+    case writing, thinking, reading, waiting, sleeping, qa
 
     var label: String {
         switch self {
@@ -21,6 +21,7 @@ enum Activity: Equatable {
         case .reading: return "reading"
         case .waiting: return "waiting for you"
         case .sleeping: return "sleeping"
+        case .qa: return "QA testing"
         }
     }
 }
@@ -57,6 +58,7 @@ final class TranscriptScanner {
         var title: String?
         var toolCount = 0
         var activity: Activity = .waiting
+        var currentSkill: String?
         var area: String?
         var markers: [StationEvent: String] = [:]
     }
@@ -208,7 +210,9 @@ final class TranscriptScanner {
                             p.activity = act
                             if let ev { p.markers[ev] = uuid }
                         case "Skill":
-                            p.activity = .skill(input["skill"] as? String ?? "?")
+                            let name = input["skill"] as? String ?? "?"
+                            p.currentSkill = name
+                            p.activity = .skill(name)
                             p.markers[.skill] = uuid
                         case "Agent", "Workflow":
                             p.activity = .delegating
@@ -223,10 +227,11 @@ final class TranscriptScanner {
                     }
                 }
             case "user":
-                if obj["toolUseResult"] == nil { p.activity = .reading; p.markers[.prompt] = uuid }
+                if obj["toolUseResult"] == nil { p.activity = .reading; p.markers[.prompt] = uuid; p.currentSkill = nil }
             default: break
             }
         }
+        if p.currentSkill == "test-pr", p.activity != .reading { p.activity = .qa }
         return p
     }
 }

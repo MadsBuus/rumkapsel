@@ -31,10 +31,12 @@ enum Place: Hashable {
 
     static let quarters = Place.room("kind:quarters")
     static let hangar = Place.room("kind:hangar")
+    static let pad = Place.room("kind:pad")
 
     static func forActivity(_ a: Activity, home: String, isSubagent: Bool) -> Place {
         if isSubagent || a == .researching { return .core }
         if a == .sleeping { return .quarters }
+        if a == .qa { return .pad }
         return .room(home)
     }
 }
@@ -176,6 +178,7 @@ final class Station {
         switch place {
         case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
         case .room("kind:hangar"): return hangarCells
+        case .room("kind:pad"): return padCells + [Cell(x: -spineHalfLength, y: 0), Cell(x: -spineHalfLength, y: 1)]
         case .room(let key): return rooms[key]?.cells ?? []
         }
     }
