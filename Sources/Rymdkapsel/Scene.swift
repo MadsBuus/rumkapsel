@@ -343,6 +343,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "2": focus(on: "private")
             case "3": focus(on: nil)
             case "r": resetView()
+            case "g": refreshGitHub()
             default: return false
             }
             return true
@@ -1542,6 +1543,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         enqueue { [self] in
             userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom
             rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
+        }
+    }
+
+    /// Re-asks GitHub about every office, branch and release right now.
+    func refreshGitHub() {
+        enqueue { [self] in
+            github.invalidate()
+            for station in fleet.stations.values {
+                for room in station.rooms.values {
+                    if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
+                    if let w = room.worktree { github.refreshCommits(worktree: w) }
+                }
+            }
+            for root in repoRoots.keys { github.refreshReleases(repoRoot: root) }
+            logEvent("asking github…")
         }
     }
 

@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
         floatItem.state = .on
         app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
+        app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
         for (title, key) in [("Focus Work", "1"), ("Focus Private", "2"), ("Focus Both", "3")] {
             let item = app.addItem(withTitle: title, action: #selector(focusStation(_:)), keyEquivalent: key)
             item.keyEquivalentModifierMask = []
@@ -100,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func resetView() { controller.resetView() }
+    @objc func refreshGitHub() { controller.refreshGitHub() }
 
     @objc func focusStation(_ sender: NSMenuItem) {
         switch sender.keyEquivalent {
