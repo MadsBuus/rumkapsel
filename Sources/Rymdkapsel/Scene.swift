@@ -662,18 +662,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                 let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
                 let count = min(16, 1 + ahead)
-                // The room's own tint, with the pull request state mixed in.
+                // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
-                let color: NSColor
+                let status: NSColor?
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
-                case (nil, _, _): color = base
-                case ("MERGED", _, _): color = base.mixed(with: NSColor(rgb: (0.6, 0.4, 0.9)), 0.65)
-                case ("CLOSED", _, _): color = base.mixed(with: NSColor(rgb: (0.3, 0.3, 0.35)), 0.7)
-                case (_, "APPROVED", _): color = base.mixed(with: NSColor(rgb: (0.45, 0.95, 0.5)), 0.7)
-                case (_, "CHANGES_REQUESTED", _): color = base.mixed(with: NSColor(rgb: (0.95, 0.3, 0.3)), 0.7)
-                case (_, _, true): color = base.mixed(with: NSColor(rgb: (0.65, 0.65, 0.7)), 0.6)
-                default: color = base.mixed(with: NSColor(rgb: (0.4, 0.8, 0.45)), 0.55)
+                case (nil, _, _): status = nil
+                case ("MERGED", _, _): status = NSColor(rgb: (0.6, 0.4, 0.9))
+                case ("CLOSED", _, _): status = NSColor(rgb: (0.35, 0.35, 0.4))
+                case (_, "APPROVED", _): status = NSColor(rgb: (0.45, 0.95, 0.5))
+                case (_, "CHANGES_REQUESTED", _): status = NSColor(rgb: (0.95, 0.3, 0.3))
+                case (_, _, true): status = NSColor(rgb: (0.6, 0.62, 0.68))
+                default: status = NSColor(rgb: (0.4, 0.82, 0.45))
                 }
+                let color = status.map { $0.mixed(with: base, 0.15) } ?? base
                 let floorShadow = NSColor(room.color).darker(0.16)
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
