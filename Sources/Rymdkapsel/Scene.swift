@@ -521,6 +521,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
+        for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
         rebuildLabels()
         rebuildMarkers()
 
@@ -950,9 +951,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func reveal(_ key: String) {
-        guard undelivered.remove(key) != nil else { return }
         boxes.removeValue(forKey: key)?.removeFromParentNode()
         if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
+        guard undelivered.remove(key) != nil else { return }
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0.6
         roomTiles[key]?.forEach { $0.opacity = 1 }
@@ -1046,7 +1047,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 if liveRooms[station.name]?.contains(room.key) != true || now.timeIntervalSince(room.lastActive) > StationController.roomsWindow {
                     station.removeRoom(key: room.key); changed = true
-                    undelivered.remove("\(station.name)|\(room.key)")
+                    let k = "\(station.name)|\(room.key)"
+                    undelivered.remove(k)
+                    outlines.removeValue(forKey: k)?.removeFromParentNode()
+                    boxes.removeValue(forKey: k)?.removeFromParentNode()
                     if !firstRun { logEvent("archived: \(room.name)") }
                 }
             }
@@ -1113,6 +1117,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for key in undelivered where !pending.contains(key) {
             changed = true
             undelivered.remove(key)
+            outlines.removeValue(forKey: key)?.removeFromParentNode()
+            boxes.removeValue(forKey: key)?.removeFromParentNode()
         }
         if changed {
             rebuildStatic()
