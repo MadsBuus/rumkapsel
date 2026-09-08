@@ -75,9 +75,11 @@ final class GitHubResolver {
             defer { lock.lock(); inFlight.remove("o:" + repoRoot); lock.unlock() }
             let iso = ISO8601DateFormatter()
             var found: [OpenPR] = []
-            if let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt"], cwd: repoRoot),
+            if let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                let stale = Date().addingTimeInterval(-14 * 24 * 3600)
                 for o in arr {
+                    if let u = (o["updatedAt"] as? String).flatMap(iso.date(from:)), u < stale { continue }
                     let a = o["author"] as? [String: Any]
                     let login = a?["login"] as? String ?? "?"
                     let isBot = (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]")
