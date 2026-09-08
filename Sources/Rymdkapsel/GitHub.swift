@@ -20,8 +20,72 @@ struct PullRequest: Equatable {
     }
 }
 
+struct ReleasePR: Equatable {
+    let number: Int
+    let title: String
+    let base: String     // staging or production
+    let head: String
+    let state: String
+    let url: String
+    var isProduction: Bool { base == "production" || base == "main" || base == "master" }
+}
+
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    private var releases: [String: ([ReleasePR], Date)] = [:]
+    private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
+    private var stateChanges: [(branch: String, pr: PullRequest)] = []
+
+    /// Open release pull requests for a repository, or nil if not fetched yet.
+    func openReleases(repoRoot: String) -> [ReleasePR]? {
+        lock.lock(); defer { lock.unlock() }
+        return releases[repoRoot]?.0.filter { $0.state == "OPEN" }
+    }
+
+    /// Release pull requests that merged since the last poll, each returned once.
+    func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
+        lock.lock(); defer { lock.unlock() }
+        let out = pendingLaunches; pendingLaunches = []; return out
+    }
+
+    /// Task pull requests whose state changed since the last poll, each returned once.
+    func takeStateChanges() -> [(branch: String, pr: PullRequest)] {
+        lock.lock(); defer { lock.unlock() }
+        let out = stateChanges; stateChanges = []; return out
+    }
+
+    func refreshReleases(repoRoot: String) {
+        lock.lock()
+        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
+        if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
+        inFlight.insert("r:" + repoRoot)
+        lock.unlock()
+        queue.async { [self] in
+            var found: [ReleasePR] = []
+            for base in ["staging", "production"] {
+                guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
+                                     "--json", "number,title,baseRefName,headRefName,state,url"], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
+                for o in arr {
+                    let head = o["headRefName"] as? String ?? ""
+                    guard ["develop", "staging", "main", "master"].contains(head) else { continue }
+                    found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
+                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? ""))
+                }
+            }
+            lock.lock()
+            let previous = releases[repoRoot]?.0 ?? []
+            for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
+                pendingLaunches.append((repoRoot, pr))
+            }
+            let changed = previous != found
+            releases[repoRoot] = (found, Date())
+            inFlight.remove("r:" + repoRoot)
+            lock.unlock()
+            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        }
+    }
+
     private let queue = DispatchQueue(label: "rymdkapsel.github", qos: .utility)
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
@@ -79,7 +143,7 @@ final class GitHubResolver {
     func refresh(branch: String, repoRoot: String) {
         let key = repoRoot + "@" + branch
         lock.lock()
-        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < 120 { lock.unlock(); return }
+        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
         if inFlight.contains(key) { lock.unlock(); return }
         inFlight.insert(key)
         lock.unlock()
@@ -92,16 +156,22 @@ final class GitHubResolver {
                 lock.lock(); owners[repoRoot] = n; lock.unlock()
             }
             var pr: PullRequest?
-            if let out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1",
-                              "--json", "number,title,state,reviewDecision,isDraft,url"], cwd: repoRoot),
-               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]],
-               let o = arr.first {
-                pr = PullRequest(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "",
-                                 state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
-                                 isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
+            func parse(_ o: [String: Any]) -> PullRequest {
+                PullRequest(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "",
+                            state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
+                            isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
+            }
+            let fields = "number,title,state,reviewDecision,isDraft,url"
+            if let out = run(["gh", "pr", "view", branch, "--json", fields], cwd: repoRoot),
+               let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
+                pr = parse(o)
+            } else if let out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", fields], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
+                pr = parse(o)
             }
             lock.lock()
             let changed = pulls[key]?.0 != pr
+            if changed, let pr, pulls[key] != nil { stateChanges.append((branch, pr)) }
             pulls[key] = (pr, Date())
             inFlight.remove(key)
             lock.unlock()

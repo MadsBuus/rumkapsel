@@ -110,6 +110,12 @@ final class Station {
         return [Cell(x: 0, y: y), Cell(x: 1, y: y), Cell(x: 0, y: y + 1), Cell(x: 1, y: y + 1)]
     }
     var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 1.5) }
+    /// The launch pad is the 2x2 at the outer end of the west corridor arm.
+    var padCells: [Cell] {
+        let x = -spineHalfLength - 1
+        return [Cell(x: x, y: 0), Cell(x: x, y: 1), Cell(x: x - 1, y: 0), Cell(x: x - 1, y: 1)]
+    }
+    var padCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 0.5) }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
@@ -138,7 +144,7 @@ final class Station {
             out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
             out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
         }
-        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) }
+        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) }
     }
 
     /// The corridor axes are never built on, however far they extend.
@@ -157,6 +163,7 @@ final class Station {
         if let w = walkableCache { return w }
         var w = Set(coreCells)
         w.formUnion(hangarCells)
+        w.formUnion(padCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -244,7 +251,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell]) -> [Cell] {
@@ -336,7 +343,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v8.json")
+        return dir.appendingPathComponent("fleet-v9.json")
     }
 
     static func stationName(for cwd: String) -> String {

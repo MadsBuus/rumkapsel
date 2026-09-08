@@ -259,6 +259,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var boxes: [String: SCNNode] = [:]
     private var outlines: [String: SCNNode] = [:]
     private let beamRoot = SCNNode()
+    private let rocketRoot = SCNNode()
+    private var rockets: [String: SCNNode] = [:]
+    private var repoRoots: [String: (repo: String, station: String)] = [:]
     private var beams: [String: SCNNode] = [:]
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKShapeNode()
@@ -313,7 +316,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
         view.onDoubleClick = { [weak self] node in let n = node?.name; self?.enqueue { self?.open(named: n) } }
         view.onClick = { [weak self] node in
-            guard let n = node?.name, n.hasPrefix("box:") else { return }
+            guard let n = node?.name, n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
         view.onZoom = { [weak self] f in self?.enqueue { guard let self else { return }; self.userZoom = min(6, max(0.4, self.userZoom * f)); self.userZoomChanged = true } }
@@ -332,7 +335,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 self.userPan -= (right * dx - forward * dy) * unitsPerPixel
             }
         }
-        github.onUpdate = { [weak self] in self?.enqueue { self?.rebuildMarkers() } }
+        github.onUpdate = { [weak self] in self?.enqueue { self?.rebuildMarkers(); self?.rebuildRockets() } }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
@@ -360,7 +363,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func buildScene() {
         scene.background.contents = Palette.void
-        for n in [staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot] { scene.rootNode.addChildNode(n) }
+        for n in [staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot] { scene.rootNode.addChildNode(n) }
 
         let camera = SCNCamera()
         camera.usesOrthographicProjection = true
@@ -422,6 +425,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if station.hangarCells.contains(c) { return "kind:hangar" }
+        if station.padCells.contains(c) { return "kind:pad" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
     }
@@ -503,6 +507,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for c in station.hangarCells {
                 addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
             }
+            for c in station.padCells {
+                addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
+            }
+            let pc = station.padCenter
+            let ring = SCNNode(geometry: SCNTube(innerRadius: 0.55, outerRadius: 0.62, height: 0.01))
+            ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
+            ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
+            staticRoot.addChildNode(ring)
             for c in station.corridorCells where (c.x + c.y * 3) % 4 == 0 {
                 let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
                 d.geometry!.firstMaterial = flat(Palette.void)
@@ -583,6 +595,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let b = station.bounds
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
+            let padLabel = floorText("launch pad", color: NSColor(rgb: (0.55, 0.58, 0.68)), size: 0.38, maxWidth: 5, lines: 1)
+            let pc = station.padCenter
+            add(padLabel.node, yaw: 0, center: SIMD2(ox + pc.x - 0.9 + padLabel.width / 2, oz + pc.y + 1.55 + padLabel.height / 2))
             let hangarLabel = floorText("hangar", color: NSColor(Colors.hangar).lighter(0.25), size: 0.38, maxWidth: 4, lines: 1)
             let hc = station.hangarCenter
             add(hangarLabel.node, yaw: 0, center: SIMD2(ox + hc.x - 0.9 + hangarLabel.width / 2, oz + hc.y + 1.55 + hangarLabel.height / 2))
@@ -712,6 +727,76 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
+    }
+
+    private func rocket(color: NSColor, tall: Bool) -> SCNNode {
+        let n = SCNNode()
+        let h = tall ? 1.3 : 0.8, r = tall ? 0.16 : 0.12
+        let body = SCNNode(geometry: SCNCylinder(radius: r, height: h))
+        body.geometry!.firstMaterial = lit(NSColor(rgb: (0.9, 0.9, 0.93)))
+        body.position = v3(0, h / 2 + 0.1, 0)
+        n.addChildNode(body)
+        let nose = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: r, height: r * 2.2))
+        nose.geometry!.firstMaterial = lit(color)
+        nose.position = v3(0, h + 0.1 + r * 1.1, 0)
+        n.addChildNode(nose)
+        for k in 0..<3 {
+            let fin = SCNNode(geometry: SCNBox(width: 0.04, height: r * 2, length: r * 1.4, chamferRadius: 0))
+            fin.geometry!.firstMaterial = lit(color)
+            fin.position = v3(0, r + 0.1, 0)
+            let pivot = SCNNode()
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
+            fin.position = v3(0, r + 0.1, r + r * 0.6)
+            pivot.addChildNode(fin)
+            n.addChildNode(pivot)
+        }
+        let flame = SCNNode(geometry: SCNCone(topRadius: r * 0.7, bottomRadius: 0, height: 0.3))
+        flame.geometry!.firstMaterial = flat(Palette.pyramid)
+        flame.position = v3(0, -0.05, 0)
+        flame.name = "flame"
+        flame.opacity = 0
+        n.addChildNode(flame)
+        return n
+    }
+
+    /// Rockets on the pad for open release pull requests; a merged one lifts off.
+    private func rebuildRockets() {
+        for launch in github.takeLaunches() {
+            guard let info = repoRoots[launch.repoRoot] else { continue }
+            let key = "\(info.station)|\(launch.pr.number)"
+            let node = rockets.removeValue(forKey: key) ?? {
+                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: launch.pr.isProduction)
+                if let st = fleet.stations[info.station] { n.position = v3(st.offset.x + st.padCenter.x, 0, st.offset.y + st.padCenter.y) }
+                rocketRoot.addChildNode(n)
+                return n
+            }()
+            node.childNode(withName: "flame", recursively: false)?.opacity = 1
+            let up = SCNAction.moveBy(x: 0, y: 14, z: 0, duration: 3.0)
+            up.timingMode = .easeIn
+            node.runAction(.sequence([.wait(duration: 0.6), .group([up, .sequence([.wait(duration: 2), .fadeOut(duration: 1)])]), .removeFromParentNode()]))
+            logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
+            ringBell(seed: launch.pr.number)
+        }
+        var live = Set<String>()
+        for (root, info) in repoRoots {
+            guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
+            for pr in open {
+                let key = "\(info.station)|\(pr.number)"
+                live.insert(key)
+                if rockets[key] != nil { continue }
+                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction)
+                let slot = rockets.values.filter { $0.parent != nil }.count % 4
+                let offsets: [SIMD2<Double>] = [SIMD2(-0.35, -0.35), SIMD2(0.35, 0.35), SIMD2(0.35, -0.35), SIMD2(-0.35, 0.35)]
+                let pc = station.padCenter + offsets[slot]
+                n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
+                n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)"
+                for c in n.childNodes { c.name = n.name }
+                rocketRoot.addChildNode(n)
+                rockets[key] = n
+                logEvent("\(info.repo): release to \(pr.base) on the pad")
+            }
+        }
+        for (key, n) in rockets where !live.contains(key) && !n.hasActions { n.removeFromParentNode(); rockets[key] = nil }
     }
 
     // MARK: hud
@@ -863,6 +948,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if m.isSubagent { parts.append("subagent") }
                 infoLabel.text = parts.joined(separator: "   ")
             }
+        } else if h.hasPrefix("rocket:") {
+            infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+        } else if h.hasPrefix("pad:") {
+            infoLabel.text = "launch pad · release pull requests wait here; merging launches"
         } else if h.hasPrefix("hangar:") {
             infoLabel.text = "hangar · new offices arrive here by ship"
         } else if h.hasPrefix("station:") {
@@ -873,6 +962,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func open(named raw: String?) {
+        if let raw, raw.hasPrefix("rocket:"), let u = URL(string: String(raw.dropFirst(7).split(separator: "|", maxSplits: 1).first ?? "")) {
+            DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+            return
+        }
         guard let raw, raw.hasPrefix("room:") || raw.hasPrefix("box:") else { return }
         let name = raw.hasPrefix("box:") ? "room:" + raw.dropFirst(4) : raw
         let parts = name.dropFirst(5).split(separator: "|", maxSplits: 1).map(String.init)
@@ -1101,6 +1194,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     newRooms[s.id] = home.key
                 }
             }
+            if let root = s.repoRoot { repoRoots[root] = (s.repo, stationName); github.refreshReleases(repoRoot: root) }
             if let room = station.rooms[home.key] {
                 if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot; room.worktree = s.cwd }
                 if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
@@ -1121,6 +1215,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
 
+        for change in github.takeStateChanges() {
+            let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
+            logEvent("\(who): \(change.pr.summary)")
+            ringBell(seed: change.pr.number)
+        }
         var seen = Set<String>()
         for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow) {
             seen.insert(s.id)
@@ -1234,6 +1333,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rebuildStatic()
         for m in minions.values { send(m, to: m.place) }
         logEvent("#450 opened a pull request")
+        if let st = fleet.stations["work"] {
+            for (i, tall) in [false, true].enumerated() {
+                let n = rocket(color: NSColor(fleet.color(forRepo: i == 0 ? "api-node-nest" : "tattoodo-web")), tall: tall)
+                let pc = st.padCenter + (i == 0 ? SIMD2(-0.35, -0.35) : SIMD2(0.35, 0.35))
+                n.position = v3(st.offset.x + pc.x, 0, st.offset.y + pc.y)
+                n.name = "rocket:https://github.com|demo release"
+                rocketRoot.addChildNode(n)
+                rockets["work|\(i)"] = n
+            }
+        }
     }
 
     private func tickDemo(dt: Double) {
@@ -1244,6 +1353,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 m.toolCount += 1
                 if m.toolCount % 2 == 0 { addPyramid(for: m) } else { clearPyramids(m) }
                 ringBell(seed: m.id.hashValue)
+            }
+            if clock > 12, let r = rockets["work|1"], !r.hasActions, r.parent != nil {
+                r.childNode(withName: "flame", recursively: false)?.opacity = 1
+                let up = SCNAction.moveBy(x: 0, y: 14, z: 0, duration: 3.0); up.timingMode = .easeIn
+                r.runAction(.sequence([.group([up, .sequence([.wait(duration: 2), .fadeOut(duration: 1)])]), .removeFromParentNode()]))
+                logEvent("tattoodo-web launched to production: release 2.14")
             }
             if clock > 6, !minions.keys.contains("demo-new") {
                 let home = FileManager.default.homeDirectoryForCurrentUser.path

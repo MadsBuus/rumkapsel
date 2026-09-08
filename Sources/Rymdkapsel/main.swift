@@ -56,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if num("--yaw") != nil || num("--pitch") != nil || num("--zoom") != nil {
             controller.setView(yawDegrees: num("--yaw") ?? 0, pitchDegrees: num("--pitch") ?? -30, zoom: num("--zoom") ?? 1)
         }
+        if let i = args.firstIndex(of: "--focus"), args.count > i + 1 {
+            let name = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in controller.focus(on: name) }
+        }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
             DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4)) { [self] in
