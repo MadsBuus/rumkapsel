@@ -7,6 +7,16 @@ extension NSColor {
         self.init(calibratedRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: alpha)
     }
     convenience init(_ c: RGB) { self.init(rgb: c.tuple) }
+    func mixed(with other: NSColor, _ t: CGFloat) -> NSColor {
+        let a = usingColorSpace(.deviceRGB)!, b = other.usingColorSpace(.deviceRGB)!
+        return NSColor(calibratedRed: a.redComponent + (b.redComponent - a.redComponent) * t,
+                       green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
+                       blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t, alpha: 1)
+    }
+    func darker(_ f: CGFloat) -> NSColor {
+        let c = usingColorSpace(.deviceRGB)!
+        return NSColor(calibratedRed: max(0, c.redComponent - f), green: max(0, c.greenComponent - f), blue: max(0, c.blueComponent - f), alpha: 1)
+    }
     func lighter(_ f: CGFloat) -> NSColor {
         let c = usingColorSpace(.deviceRGB)!
         return NSColor(calibratedRed: min(1, c.redComponent + f), green: min(1, c.greenComponent + f), blue: min(1, c.blueComponent + f), alpha: 1)
@@ -652,16 +662,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                 let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
                 let count = min(16, 1 + ahead)
+                // The room's own tint, with the pull request state mixed in.
+                let base = NSColor(room.color).lighter(0.12)
                 let color: NSColor
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
-                case (nil, _, _): color = NSColor(rgb: (0.55, 0.55, 0.58))
-                case ("MERGED", _, _): color = NSColor(rgb: (0.6, 0.4, 0.9))
-                case ("CLOSED", _, _): color = NSColor(rgb: (0.35, 0.35, 0.4))
-                case (_, "APPROVED", _): color = NSColor(rgb: (0.5, 0.95, 0.55))
-                case (_, "CHANGES_REQUESTED", _): color = NSColor(rgb: (0.9, 0.3, 0.3))
-                case (_, _, true): color = NSColor(rgb: (0.6, 0.65, 0.7))
-                default: color = NSColor(rgb: (0.38, 0.78, 0.45))
+                case (nil, _, _): color = base
+                case ("MERGED", _, _): color = base.mixed(with: NSColor(rgb: (0.6, 0.4, 0.9)), 0.65)
+                case ("CLOSED", _, _): color = base.mixed(with: NSColor(rgb: (0.3, 0.3, 0.35)), 0.7)
+                case (_, "APPROVED", _): color = base.mixed(with: NSColor(rgb: (0.45, 0.95, 0.5)), 0.7)
+                case (_, "CHANGES_REQUESTED", _): color = base.mixed(with: NSColor(rgb: (0.95, 0.3, 0.3)), 0.7)
+                case (_, _, true): color = base.mixed(with: NSColor(rgb: (0.65, 0.65, 0.7)), 0.6)
+                default: color = base.mixed(with: NSColor(rgb: (0.4, 0.8, 0.45)), 0.55)
                 }
+                let floorShadow = NSColor(room.color).darker(0.16)
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
@@ -669,14 +682,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 for i in 0..<count {
                     let size = 0.16 + 0.15 * rnd()
-                    let shade = CGFloat(rnd() * 0.16 - 0.06)
-                    let n = SCNNode(geometry: SCNBox(width: size, height: size, length: size, chamferRadius: size * 0.08))
-                    let m = SCNMaterial()
-                    m.diffuse.contents = color.lighter(shade)
-                    m.lightingModel = .blinn
-                    m.specular.contents = NSColor(white: 0.35, alpha: 1)
-                    m.shininess = 0.4
-                    n.geometry!.firstMaterial = m
+                    let shade = CGFloat(rnd() * 0.1 - 0.04)
+                    let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
+                    let tint = color.lighter(shade)
+                    // Flat game-style shading: light top, mid and dark sides, no lights involved.
+                    let top = flat(tint.lighter(0.14)), mid = flat(tint), dark = flat(tint.darker(0.13))
+                    box.materials = [mid, dark, mid, dark, top, top]
+                    let n = SCNNode(geometry: box)
+                    let shadow = SCNNode(geometry: SCNPlane(width: size * 1.25, height: size * 1.25))
+                    shadow.geometry!.firstMaterial = flat(floorShadow)
+                    shadow.eulerAngles.x = -.pi / 2
+                    shadow.position = v3(size * 0.08, -size / 2 + 0.004, size * 0.08)
+                    shadow.name = "box:" + key
+                    n.addChildNode(shadow)
                     let pos: SIMD3<Double>
                     if i >= 8, let base = placedBoxes[i - 8] as (pos: SIMD3<Double>, size: Double)? {
                         pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
