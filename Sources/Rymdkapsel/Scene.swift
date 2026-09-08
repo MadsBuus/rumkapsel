@@ -1738,7 +1738,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             default: break
             }
         }
-        crewLoaded = true
+        // Only count as loaded once every work repo has answered, so existing PRs never look new.
+        if repoRoots.filter({ $0.value.station == "work" }).allSatisfy({ github.teamOpenPRs(repoRoot: $0.key) != nil }) { crewLoaded = true }
     }
 
     /// Crew minions rest once their last activity is old.
