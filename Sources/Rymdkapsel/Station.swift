@@ -193,10 +193,36 @@ final class Station {
         return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 3))
     }
 
-    /// The room cell that touches the corridor, where a carried box gets set down.
+    /// The room cell that touches the corridor: the doorway, and where a carried box gets set down.
     func doorCell(of key: String) -> Cell? {
         guard let r = rooms[key] else { return nil }
-        return r.cells.first { $0.neighbours.contains(where: isCorridor) } ?? r.cells.first
+        let candidates = r.cells.filter { $0.neighbours.contains(where: isCorridor) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        return candidates.first ?? r.cells.first
+    }
+
+    /// The corridor cell just outside a room's doorway.
+    func doorOutside(of key: String) -> Cell? {
+        guard let d = doorCell(of: key) else { return nil }
+        return d.neighbours.first(where: isCorridor)
+    }
+
+    /// Walking between a room and the hallway is only allowed through the doorway.
+    private func canStep(from a: Cell, to b: Cell) -> Bool {
+        let ra = room(at: a)?.key, rb = room(at: b)?.key
+        if ra == rb { return true }
+        if let ra, rb == nil { return doorCell(of: ra) == a && isCorridor(b) }
+        if let rb, ra == nil { return doorCell(of: rb) == b && isCorridor(a) }
+        return false
+    }
+
+    /// Renames a room in place, keeping its floor.
+    func renameRoom(from old: String, to new: String, name: String) {
+        guard let r = rooms[old], rooms[new] == nil else { return }
+        let nr = Room(key: new, name: name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
+        nr.branch = r.branch; nr.repoRoot = r.repoRoot; nr.worktree = r.worktree
+        rooms[old] = nil
+        rooms[new] = nr
+        for c in nr.cells { occupied[c] = new }
     }
 
     func removeRoom(key: String) {
@@ -256,7 +282,7 @@ final class Station {
         while head < queue.count {
             let c = queue[head]; head += 1
             if c == to { break }
-            for n in c.neighbours where walkable.contains(n) && prev[n] == nil {
+            for n in c.neighbours where walkable.contains(n) && prev[n] == nil && canStep(from: c, to: n) {
                 prev[n] = c
                 queue.append(n)
             }

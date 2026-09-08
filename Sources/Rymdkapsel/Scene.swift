@@ -161,6 +161,7 @@ final class Minion {
     var pos: SIMD2<Double>
     var path: [Cell] = []
     var nextWanderAt = 0.0
+    var waitingSince = 0.0
     let bobPhase = Double.random(in: 0..<6.28)
     var opacity = 0.0
 
@@ -512,6 +513,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if undelivered.contains(key) { t.opacity = 0 }
                     tiles.append(t)
                 }
+                if let d = station.doorCell(of: room.key), let o = station.doorOutside(of: room.key) {
+                    let dx = Double(o.x - d.x), dz = Double(o.y - d.y)
+                    let door = SCNNode(geometry: SCNPlane(width: dx == 0 ? 0.42 : 0.2, height: dx == 0 ? 0.2 : 0.42))
+                    door.geometry!.firstMaterial = flat(NSColor(room.color))
+                    door.eulerAngles.x = -.pi / 2
+                    door.position = v3(station.offset.x + Double(d.x) + dx * 0.5, 0.003, station.offset.y + Double(d.y) + dz * 0.5)
+                    door.name = "room:" + key
+                    if undelivered.contains(key) { door.opacity = 0 }
+                    staticRoot.addChildNode(door)
+                    tiles.append(door)
+                }
                 roomTiles[key] = tiles
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
                 if undelivered.contains(key) {
@@ -636,7 +648,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let key = roomKey(station, room)
                 let pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                 let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
-                let count = min(12, 1 + ahead)
+                let count = min(16, 1 + ahead)
                 let color: NSColor
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
                 case (nil, _, _): color = NSColor(rgb: (0.55, 0.55, 0.58))
@@ -647,15 +659,31 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case (_, _, true): color = NSColor(rgb: (0.6, 0.65, 0.7))
                 default: color = NSColor(rgb: (0.38, 0.78, 0.45))
                 }
-                let s = 0.26
-                let slots: [SIMD2<Double>] = [SIMD2(-0.24, -0.24), SIMD2(0.24, -0.24), SIMD2(-0.24, 0.24), SIMD2(0.24, 0.24)]
+                // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
+                var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
+                func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 let cells = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+                var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 for i in 0..<count {
-                    let cell = cells[(i / 4) % cells.count]
-                    let o = slots[i % 4]
-                    let n = SCNNode(geometry: SCNBox(width: s, height: s, length: s, chamferRadius: 0))
-                    n.geometry!.firstMaterial = lit(color)
-                    n.position = v3(station.offset.x + Double(cell.x) + o.x, s / 2, station.offset.y + Double(cell.y) + o.y)
+                    let size = 0.16 + 0.15 * rnd()
+                    let shade = CGFloat(rnd() * 0.16 - 0.06)
+                    let n = SCNNode(geometry: SCNBox(width: size, height: size, length: size, chamferRadius: size * 0.08))
+                    let m = SCNMaterial()
+                    m.diffuse.contents = color.lighter(shade)
+                    m.lightingModel = .blinn
+                    m.specular.contents = NSColor(white: 0.35, alpha: 1)
+                    m.shininess = 0.4
+                    n.geometry!.firstMaterial = m
+                    let pos: SIMD3<Double>
+                    if i >= 8, let base = placedBoxes[i - 8] as (pos: SIMD3<Double>, size: Double)? {
+                        pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
+                    } else {
+                        let cell = cells[(i / 3) % cells.count]
+                        pos = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.7, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.7)
+                    }
+                    placedBoxes.append((pos, size))
+                    n.position = v3(pos.x, pos.y, pos.z)
+                    n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
                     if undelivered.contains(key) { n.opacity = 0 }
                     markerRoot.addChildNode(n)
@@ -1029,6 +1057,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let stationName = Fleet.stationName(for: s.cwd)
             let station = fleet.station(stationName)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+            if let m = minions[s.id], m.home.key != home.key, station.rooms[home.key] == nil, station.rooms[m.home.key] != nil,
+               !minions.values.contains(where: { $0.id != s.id && $0.home.key == m.home.key && $0.station == stationName }) {
+                let oldKey = "\(stationName)|\(m.home.key)", newKey = "\(stationName)|\(home.key)"
+                station.renameRoom(from: m.home.key, to: home.key, name: home.name)
+                if undelivered.remove(oldKey) != nil { undelivered.insert(newKey) }
+                if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
+                if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
+                switch m.errand {
+                case .fetch: m.errand = .fetch(room: home.key)
+                case .carry: m.errand = .carry(room: home.key)
+                case nil: break
+                }
+                if m.place == .room(m.home.key) { m.place = .room(home.key) }
+                changed = true
+            }
             if station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
                 if !firstRun {
@@ -1076,6 +1119,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             } else {
                 m.activity = s.activity
             }
+            if m.activity == .waiting, m.waitingSince == 0 { m.waitingSince = clock }
+            if m.activity != .waiting { m.waitingSince = 0 }
             m.title = s.title
             m.branch = s.branch
             m.cwd = s.cwd
@@ -1227,8 +1272,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
-            let restless = m.activity == .waiting && m.errand == nil
-            let speed = m.busy ? 2.4 : (restless ? 1.1 : 1.4)
+            let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
+            let jumping = m.activity == .waiting && waitingAge < 60 && m.errand == nil
+            let pacing = m.activity == .waiting && waitingAge >= 60 && m.errand == nil
+            let speed = m.busy ? 2.4 : (pacing ? 0.8 : 1.4)
             if let next = m.path.first {
                 let target = SIMD2(Double(next.x), Double(next.y))
                 let d = target - m.pos
@@ -1267,10 +1314,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .settled:
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
                         if m.cell != pc { walk(m, to: pc) }
-                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters {
+                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
-                        m.nextWanderAt = clock + (restless ? Double.random(in: 0.6...1.6) : m.busy ? Double.random(in: 1.2...3) : Double.random(in: 8...20))
+                        m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
                     }
                 case .leaving:
                     m.opacity -= dt * 1.5
@@ -1283,12 +1330,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             let resting = m.path.isEmpty && m.state == .settled
             m.setSleeping(resting && m.activity == .sleeping)
-            let bob = m.busy && m.path.isEmpty && !m.isSubagent ? abs(sin(clock * 9 + m.bobPhase)) * 0.06 : 0
-            m.node.position = v3(station.offset.x + m.pos.x, bob, station.offset.y + m.pos.y)
+            let jump = jumping && resting ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0
+            m.node.position = v3(station.offset.x + m.pos.x, jump, station.offset.y + m.pos.y)
             m.node.opacity = m.opacity
-            let fidget = restless && resting ? sin(clock * 6 + m.bobPhase) * 0.35 : 0
+            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
+            m.node.eulerAngles.z = working ? sin(clock * 5 + m.bobPhase) * 0.07 : 0
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
-            let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing) + fidget
+            let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
             var delta = wantFacing - Double(m.node.eulerAngles.y)
             delta = atan2(sin(delta), cos(delta))
             m.node.eulerAngles.y += delta * min(1, dt * 12)
