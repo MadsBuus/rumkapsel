@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatItem.state = .on
         app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
         app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
-        for (title, key) in [("Focus Work", "1"), ("Focus Private", "2"), ("Focus Both", "3")] {
+        for (title, key) in [("Focus Work", "1"), ("Focus Private", "2"), ("Focus All", "3"), ("Focus Crew", "4")] {
             let item = app.addItem(withTitle: title, action: #selector(focusStation(_:)), keyEquivalent: key)
             item.keyEquivalentModifierMask = []
         }
@@ -110,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch sender.keyEquivalent {
         case "1": controller.focus(on: "work")
         case "2": controller.focus(on: "private")
+        case "4": controller.focus(on: "crew")
         default: controller.focus(on: nil)
         }
     }

@@ -340,13 +340,13 @@ final class Fleet {
     private(set) var stations: [String: Station] = [:]
     private(set) var repoColors: [String: Int] = [:]
 
-    static let order = ["work", "private"]
+    static let order = ["work", "crew", "private"]
 
     private static var saveURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v10.json")
+        return dir.appendingPathComponent("fleet-v11.json")
     }
 
     static func stationName(for cwd: String) -> String {

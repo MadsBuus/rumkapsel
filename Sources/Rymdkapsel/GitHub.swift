@@ -32,8 +32,88 @@ struct ReleasePR: Equatable {
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
 }
 
+struct CrewPR: Equatable {
+    let number: Int
+    let title: String
+    let author: String
+    let branch: String
+    let state: String
+    let createdAt: Date
+    let mergedAt: Date?
+    let url: String
+    let commits: [(Date, String)]
+    let reviews: [(Date, String, String)]
+
+    static func == (a: CrewPR, b: CrewPR) -> Bool {
+        a.number == b.number && a.state == b.state && a.commits.count == b.commits.count && a.reviews.count == b.reviews.count
+    }
+}
+
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    private var crew: [String: ([CrewPR], Date)] = [:]
+    private var me: String?
+
+    func crewPRs(repoRoot: String) -> [CrewPR]? {
+        lock.lock(); defer { lock.unlock() }
+        return crew[repoRoot]?.0
+    }
+
+    /// Teammates' pull requests touched in the last day, with their commits and reviews. Every 10 minutes.
+    func refreshCrew(repoRoot: String, within: TimeInterval) {
+        lock.lock()
+        if let (_, at) = crew[repoRoot], Date().timeIntervalSince(at) < 600 { lock.unlock(); return }
+        if inFlight.contains("w:" + repoRoot) { lock.unlock(); return }
+        inFlight.insert("w:" + repoRoot)
+        lock.unlock()
+        queue.async { [self] in
+            if me == nil, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
+               let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
+                lock.lock(); me = login; lock.unlock()
+            }
+            let iso = ISO8601DateFormatter()
+            let since = Date().addingTimeInterval(-within)
+            var found: [CrewPR] = []
+            if let out = run(["gh", "pr", "list", "--state", "all", "--limit", "40",
+                              "--json", "number,title,author,headRefName,state,createdAt,mergedAt,updatedAt,url"], cwd: repoRoot),
+               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                for o in arr {
+                    let authorObj = o["author"] as? [String: Any]
+                    let author = authorObj?["login"] as? String ?? "?"
+                    let isBot = (authorObj?["is_bot"] as? Bool ?? false) || author.lowercased().contains("dependabot") || author.contains("[bot]")
+                    let head = o["headRefName"] as? String ?? ""
+                    guard author != me, !isBot, !["develop", "staging", "main", "master"].contains(head),
+                          let updated = (o["updatedAt"] as? String).flatMap(iso.date(from:)), updated > since,
+                          let number = o["number"] as? Int else { continue }
+                    var commits: [(Date, String)] = [], reviews: [(Date, String, String)] = []
+                    if let v = run(["gh", "pr", "view", "\(number)", "--json", "commits,reviews"], cwd: repoRoot),
+                       let d = try? JSONSerialization.jsonObject(with: v) as? [String: Any] {
+                        for c in d["commits"] as? [[String: Any]] ?? [] {
+                            guard let t = (c["authoredDate"] as? String).flatMap(iso.date(from:)) else { continue }
+                            let who = (c["authors"] as? [[String: Any]])?.first?["login"] as? String ?? author
+                            commits.append((t, who.isEmpty ? author : who))
+                        }
+                        for r in d["reviews"] as? [[String: Any]] ?? [] {
+                            guard let t = (r["submittedAt"] as? String).flatMap(iso.date(from:)) else { continue }
+                            reviews.append((t, (r["author"] as? [String: Any])?["login"] as? String ?? "?", r["state"] as? String ?? ""))
+                        }
+                    }
+                    found.append(CrewPR(number: number, title: o["title"] as? String ?? "", author: author, branch: head,
+                                        state: o["state"] as? String ?? "", createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? updated,
+                                        mergedAt: (o["mergedAt"] as? String).flatMap(iso.date(from:)), url: o["url"] as? String ?? "",
+                                        commits: commits, reviews: reviews))
+                    if found.count >= 10 { break }
+                }
+            }
+            lock.lock()
+            let changed = crew[repoRoot]?.0 != found
+            crew[repoRoot] = (found, Date())
+            inFlight.remove("w:" + repoRoot)
+            lock.unlock()
+            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        }
+    }
+
     private var releases: [String: ([ReleasePR], Date)] = [:]
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []

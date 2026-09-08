@@ -168,6 +168,8 @@ final class Minion {
     private let bodyDepth: Double
     var facing = 0.0
     var smoothFacing = 0.0
+    var isCrew = false
+    var busyUntil = 0.0        // replay seconds, for crew minions
     var bed: Int?
     var pos: SIMD2<Double>
     var path: [Cell] = []
@@ -176,15 +178,16 @@ final class Minion {
     let bobPhase = Double.random(in: 0..<6.28)
     var opacity = 0.0
 
-    init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell) {
+    init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         self.id = id; self.station = station; self.home = home; self.cwd = cwd; self.toolCount = toolCount; self.isSubagent = isSubagent
+        self.isCrew = crew
         pos = SIMD2(Double(start.x), Double(start.y))
 
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
         let d = isSubagent ? 0.08 : 0.11
         let body = SCNNode(geometry: SCNBox(width: w, height: h, length: d, chamferRadius: 0.01))
-        body.geometry!.firstMaterial = lit(Palette.minion)
+        body.geometry!.firstMaterial = lit(crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : Palette.minion)
         body.position = v3(0, h / 2, 0)
         let visor = SCNNode(geometry: SCNBox(width: w * 0.5, height: h * 0.1, length: 0.012, chamferRadius: 0))
         visor.geometry!.firstMaterial = flat(Palette.core)
@@ -263,6 +266,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private let rocketRoot = SCNNode()
     private var rockets: [String: SCNNode] = [:]
     private var repoRoots: [String: (repo: String, station: String)] = [:]
+    // Crew replay: teammates' last day, looped.
+    private struct CrewEvent { let at: Date; let kind: String; let login: String; let roomKey: String; let text: String }
+    private var crewEvents: [CrewEvent] = []
+    private var crewCursor = 0
+    private var replayStart = Date()
+    private var replayTime = 0.0             // seconds since replayStart
+    private var crewBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
+    private var crewPRInfo: [String: CrewPR] = [:]
+    private var crewSignature = ""
+    private let replayLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    static let crewWindow: TimeInterval = 24 * 3600
+    static let replayLength = 240.0          // seconds of wall clock for one day
     private var beams: [String: SCNNode] = [:]
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
@@ -339,13 +354,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 self.userPan -= (right * dx - forward * dy) * unitsPerPixel
             }
         }
-        github.onUpdate = { [weak self] in self?.enqueue { self?.rebuildMarkers(); self?.rebuildRockets() } }
+        github.onUpdate = { [weak self] in self?.enqueue { self?.rebuildMarkers(); self?.rebuildRockets(); self?.rebuildCrew() } }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
             case "1": focus(on: "work")
             case "2": focus(on: "private")
             case "3": focus(on: nil)
+            case "4": focus(on: "crew")
             case "r": resetView()
             case "g": refreshGitHub()
             default: return false
@@ -575,7 +591,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let key = roomKey(station, room)
                 var tiles: [SCNNode] = []
                 let sketch = room.key.hasPrefix("proj:")   // a session with no branch yet: an unbuilt slot
-                let tileColor = sketch ? NSColor(rgb: (0.27, 0.28, 0.33)) : NSColor(room.color)
+                let tileColor = sketch ? NSColor(rgb: (0.27, 0.28, 0.33)) : (room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color))
                 if sketch {
                     let o = outline(station: station, room: room)
                     o.name = "room:" + key
@@ -709,11 +725,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func rebuildMarkers() {
         markerRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values {
-            for room in station.rooms.values where room.branch != nil {
+            for room in station.rooms.values where room.branch != nil || room.key.hasPrefix("crew:") {
                 let key = roomKey(station, room)
-                let pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
-                let count = min(16, 1 + ahead)
+                var count: Int
+                var pr: PullRequest?
+                if room.key.hasPrefix("crew:") {
+                    guard let cb = crewBoxes[key] else { continue }
+                    count = min(16, max(1, cb.count))
+                    pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
+                } else {
+                    pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
+                    let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
+                    count = min(16, 1 + ahead)
+                }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
                 let status: NSColor?
@@ -949,6 +973,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         infoBackground.anchorPoint = CGPoint(x: 0, y: 0)
         hud.addChild(infoBackground)
         hud.addChild(infoLabel)
+        replayLabel.fontSize = 11
+        replayLabel.fontColor = Palette.dim
+        replayLabel.horizontalAlignmentMode = .left
+        replayLabel.verticalAlignmentMode = .bottom
+        hud.addChild(replayLabel)
         statusLabel.fontSize = 10
         statusLabel.fontColor = Palette.dim
         statusLabel.horizontalAlignmentMode = .right
@@ -1037,6 +1066,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
         if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
+        if let pr = crewPRInfo[roomKey(station, room)] {
+            parts.append("by \(pr.author) · #\(pr.number) \(pr.state.lowercased()) · \(pr.commits.count) commits · \(pr.reviews.count) reviews")
+        }
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
             if let pr = github.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
@@ -1055,6 +1087,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let asleep = active.filter { $0.activity == .sleeping }.count
         statusLabel.text = ""
         infoLabel.position = CGPoint(x: 14, y: 12)
+        replayLabel.position = CGPoint(x: 14, y: hud.size.height - 90)
+        if !crewEvents.isEmpty {
+            let f = DateFormatter(); f.dateFormat = "HH:mm"
+            replayLabel.text = "crew replay · " + f.string(from: replayStart.addingTimeInterval(replayTime))
+        } else { replayLabel.text = "" }
         if clock - hudClock > 0.5 { hudClock = clock; layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep) }
 
         var y = hud.size.height - 70
@@ -1116,8 +1153,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard let raw, raw.hasPrefix("room:") || raw.hasPrefix("box:") else { return }
         let name = raw.hasPrefix("box:") ? "room:" + raw.dropFirst(4) : raw
         let parts = name.dropFirst(5).split(separator: "|", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]],
-              let branch = room.branch, let root = room.repoRoot else { return }
+        guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return }
+        if let pr = crewPRInfo[roomKey(station, room)], let u = URL(string: pr.url) {
+            DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+            return
+        }
+        guard let branch = room.branch, let root = room.repoRoot else { return }
         var url: URL?
         if let pr = github.pull(branch: branch, repoRoot: root), let u = URL(string: pr.url) {
             url = u
@@ -1241,6 +1282,37 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         walk(m, to: station.hangarCells.randomElement()!)
     }
 
+    /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
+    /// detaches, sinks and fades. The model drops the room at once; only the visuals linger.
+    private func archive(station: Station, room: Room, announce: Bool) {
+        let key = roomKey(station, room)
+        undelivered.remove(key)
+        outlines.removeValue(forKey: key)?.removeFromParentNode()
+        boxes.removeValue(forKey: key)?.removeFromParentNode()
+        if announce {
+            let ghost = SCNNode()
+            for t in roomTiles[key] ?? [] { t.removeFromParentNode(); ghost.addChildNode(t) }
+            if let l = roomLabels[key] { l.removeFromParentNode(); ghost.addChildNode(l); roomLabels[key] = nil }
+            for b in markerRoot.childNodes where b.name == "box:" + key {
+                b.runAction(.sequence([.scale(to: 0.01, duration: 0.5), .removeFromParentNode()]))
+            }
+            propRoot.addChildNode(ghost)
+            let sink = SCNAction.moveBy(x: 0, y: -4, z: 0, duration: 2.2)
+            sink.timingMode = .easeIn
+            ghost.runAction(.sequence([.wait(duration: 0.6), .group([sink, .sequence([.wait(duration: 0.8), .fadeOut(duration: 1.4)])]), .removeFromParentNode()]))
+            if let hall = station.doorOutside(of: room.key) {
+                for m in minions.values where m.station == station.name && m.place == .room(room.key) {
+                    m.path = station.path(from: m.cell, to: hall)
+                    m.place = .core   // parked in the hallway until the next scan sends it on
+                    m.nextWanderAt = clock + 4
+                }
+            }
+            logEvent("archived: \(room.name)")
+        }
+        roomTiles[key] = nil
+        station.removeRoom(key: room.key)
+    }
+
     private func reveal(_ key: String) {
         boxes.removeValue(forKey: key)?.removeFromParentNode()
         if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
@@ -1359,14 +1431,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             liveRooms[stationName, default: []].insert(home.key)
         }
         for station in fleet.stations.values {
-            for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
+            for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
                 if liveRooms[station.name]?.contains(room.key) != true || now.timeIntervalSince(room.lastActive) > StationController.roomsWindow {
-                    station.removeRoom(key: room.key); changed = true
-                    let k = "\(station.name)|\(room.key)"
-                    undelivered.remove(k)
-                    outlines.removeValue(forKey: k)?.removeFromParentNode()
-                    boxes.removeValue(forKey: k)?.removeFromParentNode()
-                    if !firstRun { logEvent("archived: \(room.name)") }
+                    archive(station: station, room: room, announce: !firstRun)
+                    changed = true
                 }
             }
         }
@@ -1386,7 +1454,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
-        for root in repoRoots.keys { github.refreshReleases(repoRoot: root) }
+        for (root, info) in repoRoots {
+            github.refreshReleases(repoRoot: root)
+            if info.station == "work" { github.refreshCrew(repoRoot: root, within: StationController.crewWindow) }
+        }
         for change in github.takeStateChanges() {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
             logEvent("\(who): \(change.pr.summary)")
@@ -1444,7 +1515,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.state == .leaving { m.state = .arriving; send(m, to: m.place) }
         }
-        for m in minions.values where !seen.contains(m.id) && m.state != .leaving {
+        for m in minions.values where !seen.contains(m.id) && m.state != .leaving && !m.isCrew {
             m.state = .leaving
             if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
             clearPyramids(m)
@@ -1471,6 +1542,120 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     walk(m, to: door)
                 }
             }
+        }
+    }
+
+    // MARK: crew replay
+
+    /// Turns teammates' pull requests into offices on the crew station and a timeline to replay.
+    private func rebuildCrew() {
+        var prs: [(repo: String, pr: CrewPR)] = []
+        for (root, info) in repoRoots where info.station == "work" {
+            for pr in github.crewPRs(repoRoot: root) ?? [] { prs.append((info.repo, pr)) }
+        }
+        let signature = prs.map { "\($0.repo)#\($0.pr.number):\($0.pr.state):\($0.pr.commits.count):\($0.pr.reviews.count)" }.sorted().joined(separator: ",")
+        guard signature != crewSignature else { return }
+        crewSignature = signature
+        guard !prs.isEmpty else { return }
+
+        let station = fleet.station("crew")
+        var changed = false
+        let live = Set(prs.map { "crew:\($0.repo)#\($0.pr.number)" })
+        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && !live.contains(room.key) {
+            station.removeRoom(key: room.key); changed = true
+        }
+        crewPRInfo = [:]
+        for (repo, pr) in prs {
+            let key = "crew:\(repo)#\(pr.number)"
+            let issue = pr.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
+            let words = pr.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? pr.title
+            let name = pr.author + " · " + issue + String(words.prefix(22))
+            if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: Date()) { changed = true }
+            crewPRInfo["crew|\(key)"] = pr
+        }
+
+        // Timeline over the last day.
+        replayStart = Date().addingTimeInterval(-StationController.crewWindow)
+        var events: [CrewEvent] = []
+        for (repo, pr) in prs {
+            let key = "crew:\(repo)#\(pr.number)"
+            if pr.createdAt > replayStart { events.append(CrewEvent(at: pr.createdAt, kind: "open", login: pr.author, roomKey: key, text: "\(pr.author) opened #\(pr.number)")) }
+            for (t, who) in pr.commits where t > replayStart { events.append(CrewEvent(at: t, kind: "commit", login: who, roomKey: key, text: "")) }
+            for (t, who, state) in pr.reviews where t > replayStart {
+                let verb = state == "APPROVED" ? "approved" : state == "CHANGES_REQUESTED" ? "requested changes on" : "reviewed"
+                events.append(CrewEvent(at: t, kind: "review", login: who, roomKey: key, text: "\(who) \(verb) #\(pr.number)"))
+            }
+            if let m = pr.mergedAt, m > replayStart { events.append(CrewEvent(at: m, kind: "merge", login: pr.author, roomKey: key, text: "\(pr.author) merged #\(pr.number)")) }
+        }
+        crewEvents = events.sorted { $0.at < $1.at }
+        crewCursor = 0
+        replayTime = 0
+        // Boxes start from what was already there before the window.
+        for (repo, pr) in prs {
+            let key = "crew|crew:\(repo)#\(pr.number)"
+            let before = pr.commits.filter { $0.0 <= replayStart }.count
+            crewBoxes[key] = (before, pr.state == "MERGED" && (pr.mergedAt ?? .distantFuture) <= replayStart ? "MERGED" : (pr.createdAt <= replayStart ? "OPEN" : "NONE"), NSColor(fleet.color(forRepo: repo)))
+        }
+
+        // One grey minion per teammate.
+        let logins = Set(prs.map(\.pr.author) + prs.flatMap { $0.pr.commits.map(\.1) } + prs.flatMap { $0.pr.reviews.map(\.1) })
+        for login in logins where minions["crew:" + login] == nil {
+            let home = Home(key: prs.first { $0.pr.author == login }.map { "crew:\($0.repo)#\($0.pr.number)" } ?? "kind:quarters", name: login, repo: prs.first { $0.pr.author == login }?.repo ?? "crew", issue: nil)
+            let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
+            let m = Minion(id: "crew:" + login, station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: false, start: start, crew: true)
+            m.title = login
+            m.activity = .sleeping
+            minionRoot.addChildNode(m.node)
+            minions[m.id] = m
+            send(m, to: .quarters)
+        }
+        for m in minions.values where m.isCrew && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
+        if changed { rebuildStatic(); for m in minions.values where m.errand == nil { send(m, to: m.place) } } else { rebuildMarkers() }
+    }
+
+    /// Advances the replay clock and acts out the events as they come due.
+    private func tickCrew(dt: Double) {
+        guard !crewEvents.isEmpty else { return }
+        let speed = StationController.crewWindow / StationController.replayLength
+        replayTime += dt * speed
+        if replayTime > StationController.crewWindow {
+            replayTime = 0; crewCursor = 0
+            for (repo, pr) in crewPRInfo.values.map({ ($0.branch, $0) }) { _ = repo; _ = pr }
+            for (key, info) in crewPRInfo {
+                let before = info.commits.filter { $0.0 <= replayStart }.count
+                crewBoxes[key] = (before, info.createdAt <= replayStart ? "OPEN" : "NONE", crewBoxes[key]?.color ?? Palette.minion)
+            }
+            rebuildMarkers()
+        }
+        let now = replayStart.addingTimeInterval(replayTime)
+        var markersDirty = false
+        while crewCursor < crewEvents.count, crewEvents[crewCursor].at <= now {
+            let e = crewEvents[crewCursor]; crewCursor += 1
+            let key = "crew|" + e.roomKey
+            let m = minions["crew:" + e.login]
+            switch e.kind {
+            case "open":
+                crewBoxes[key]?.state = "OPEN"; markersDirty = true
+                logEvent(e.text)
+                if let m { m.activity = .shipping; m.busy = true; m.busyUntil = replayTime + 1800; send(m, to: .hangar) }
+            case "commit":
+                crewBoxes[key]?.count += 1; markersDirty = true
+                if let m { m.activity = .coding("x"); m.busy = true; m.busyUntil = replayTime + 2400; if m.place != .room(e.roomKey) { send(m, to: .room(e.roomKey)) } }
+            case "review":
+                logEvent(e.text)
+                if let m { m.activity = .exploring; m.busy = true; m.busyUntil = replayTime + 1500; send(m, to: .room(e.roomKey)) }
+            case "merge":
+                crewBoxes[key]?.state = "MERGED"; markersDirty = true
+                logEvent(e.text)
+                if let m { m.activity = .shipping; m.busy = true; m.busyUntil = replayTime + 1800; send(m, to: .hangar) }
+                ringBell(seed: e.roomKey.hashValue)
+            default: break
+            }
+        }
+        if markersDirty { rebuildMarkers() }
+        for m in minions.values where m.isCrew && m.busy && replayTime > m.busyUntil {
+            m.busy = false; m.activity = .sleeping
+            send(m, to: .quarters)
         }
     }
 
@@ -1556,6 +1741,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         lastTick = now
         clock += dt
         if demo { tickDemo(dt: dt) }
+        tickCrew(dt: dt)
         if hud.size != viewSize { hud.size = viewSize }
 
         let k = 1 - exp(-dt * 2)
@@ -1770,7 +1956,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if let w = room.worktree { github.refreshCommits(worktree: w) }
                 }
             }
-            for root in repoRoots.keys { github.refreshReleases(repoRoot: root) }
+            for (root, info) in repoRoots {
+            github.refreshReleases(repoRoot: root)
+            if info.station == "work" { github.refreshCrew(repoRoot: root, within: StationController.crewWindow) }
+        }
             logEvent("asking github…")
         }
     }
