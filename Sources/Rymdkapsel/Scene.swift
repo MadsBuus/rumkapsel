@@ -623,11 +623,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 var tiles: [SCNNode] = []
                 // Construction progress: no branch = empty grey floor; a local branch starts the tiling,
                 // commits add more, and pushing finishes it.
-                let local = localState(room)
-                let progress: Double
-                if room.key.hasPrefix("proj:") { progress = 0 }
-                else if local.local { progress = local.commits == 0 ? 0.35 : min(0.9, 0.35 + Double(local.commits) * 0.12) }
-                else { progress = 1 }
+                // Dark while it's just a conversation; lit as soon as a branch exists.
+                let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
@@ -790,10 +787,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
                 } else {
                     let local = localState(room)
-                    if local.local && local.commits == 0 { continue }        // a research session: nothing to show yet
+                    if local.commits == 0 { continue }                        // no commits, no boxes
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                    count = min(16, local.local ? local.commits : 1 + local.commits)
-                    if local.local { boxOpacity = 0.55 }
+                    count = min(16, local.commits)
                 }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
