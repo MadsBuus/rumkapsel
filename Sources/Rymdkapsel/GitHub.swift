@@ -95,7 +95,7 @@ final class GitHubResolver {
         }
     }
 
-    private let queue = DispatchQueue(label: "rymdkapsel.github", qos: .utility)
+    private let queue = DispatchQueue(label: "rymdkapsel.github", qos: .utility, attributes: .concurrent)
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
     private var owners: [String: String] = [:]

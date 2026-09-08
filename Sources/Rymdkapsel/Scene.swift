@@ -264,11 +264,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var repoRoots: [String: (repo: String, station: String)] = [:]
     private var beams: [String: SCNNode] = [:]
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
-    private let infoBackground = SKShapeNode()
+    private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
     private let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
     private var legendNodes: [SKNode] = []
     private var jobNodes: [SKNode] = []
     private var hudClock = 0.0
+    private var legendSignature = ""
     private var eventLabels: [(SKLabelNode, Double)] = []
     private var hovered: String?
     private var lastTick = 0.0
@@ -732,28 +733,63 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func rocket(color: NSColor, tall: Bool) -> SCNNode {
         let n = SCNNode()
-        let h = tall ? 1.3 : 0.8, r = tall ? 0.16 : 0.12
-        let body = SCNNode(geometry: SCNCylinder(radius: r, height: h))
-        body.geometry!.firstMaterial = lit(NSColor(rgb: (0.9, 0.9, 0.93)))
-        body.position = v3(0, h / 2 + 0.1, 0)
-        n.addChildNode(body)
-        let nose = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: r, height: r * 2.2))
+        let h = tall ? 1.5 : 0.9, r = tall ? 0.17 : 0.12
+        let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
+        let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        // Body, a slightly wider lower stage, and a nose cone in the repo colour.
+        let lower = SCNNode(geometry: SCNCylinder(radius: r, height: h * 0.45))
+        lower.geometry!.firstMaterial = white
+        lower.position = v3(0, 0.12 + h * 0.225, 0)
+        n.addChildNode(lower)
+        let band = SCNNode(geometry: SCNCylinder(radius: r * 1.02, height: h * 0.08))
+        band.geometry!.firstMaterial = lit(color)
+        band.position = v3(0, 0.12 + h * 0.45, 0)
+        n.addChildNode(band)
+        let upper = SCNNode(geometry: SCNCylinder(radius: r * 0.9, height: h * 0.4))
+        upper.geometry!.firstMaterial = white
+        upper.position = v3(0, 0.12 + h * 0.49 + h * 0.2, 0)
+        n.addChildNode(upper)
+        let nose = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: r * 0.9, height: r * 2.6))
         nose.geometry!.firstMaterial = lit(color)
-        nose.position = v3(0, h + 0.1 + r * 1.1, 0)
+        nose.position = v3(0, 0.12 + h * 0.89 + r * 1.3, 0)
         n.addChildNode(nose)
+        // Portholes on the upper stage.
         for k in 0..<3 {
-            let fin = SCNNode(geometry: SCNBox(width: 0.04, height: r * 2, length: r * 1.4, chamferRadius: 0))
-            fin.geometry!.firstMaterial = lit(color)
-            fin.position = v3(0, r + 0.1, 0)
+            let port = SCNNode(geometry: SCNSphere(radius: r * 0.18))
+            port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
+            let a = Double(k) * 2 * .pi / 3
+            port.position = v3(sin(a) * r * 0.86, 0.12 + h * 0.75, cos(a) * r * 0.86)
+            n.addChildNode(port)
+        }
+        // Four swept fins and an engine nozzle.
+        for k in 0..<4 {
             let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
-            fin.position = v3(0, r + 0.1, r + r * 0.6)
+            pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
+            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: r * 2.4, length: r * 1.5, chamferRadius: 0))
+            fin.geometry!.firstMaterial = lit(color)
+            fin.position = v3(0, 0.12 + r * 1.0, r + r * 0.55)
+            fin.eulerAngles.x = 0.35
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
         }
-        let flame = SCNNode(geometry: SCNCone(topRadius: r * 0.7, bottomRadius: 0, height: 0.3))
+        let nozzle = SCNNode(geometry: SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14))
+        nozzle.geometry!.firstMaterial = dark
+        nozzle.position = v3(0, 0.05, 0)
+        n.addChildNode(nozzle)
+        // Landing legs so it stands on the pad.
+        for k in 0..<3 {
+            let pivot = SCNNode()
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
+            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.22, length: 0.03, chamferRadius: 0))
+            leg.geometry!.firstMaterial = dark
+            leg.position = v3(0, 0.1, r * 1.1)
+            leg.eulerAngles.x = 0.5
+            pivot.addChildNode(leg)
+            n.addChildNode(pivot)
+        }
+        let flame = SCNNode(geometry: SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
-        flame.position = v3(0, -0.05, 0)
+        flame.position = v3(0, -0.2, 0)
         flame.name = "flame"
         flame.opacity = 0
         n.addChildNode(flame)
@@ -794,7 +830,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if rockets[key] != nil { continue }
                 let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction)
                 let slot = rockets.values.filter { $0.parent != nil }.count % 4
-                let offsets: [SIMD2<Double>] = [SIMD2(-0.35, -0.35), SIMD2(0.35, 0.35), SIMD2(0.35, -0.35), SIMD2(-0.35, 0.35)]
+                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(0.45, 0.45), SIMD2(0.45, -0.45), SIMD2(-0.45, 0.45)]
                 let pc = station.padCenter + offsets[slot]
                 n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
                 n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)"
@@ -817,9 +853,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         infoLabel.fontColor = Palette.text
         infoLabel.horizontalAlignmentMode = .left
         infoLabel.verticalAlignmentMode = .bottom
-        infoBackground.fillColor = Palette.void.withAlphaComponent(0.85)
-        infoBackground.strokeColor = Palette.dim.withAlphaComponent(0.5)
-        infoBackground.lineWidth = 1
+        infoBackground.anchorPoint = CGPoint(x: 0, y: 0)
         hud.addChild(infoBackground)
         hud.addChild(infoLabel)
         statusLabel.fontSize = 10
@@ -831,10 +865,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Top: repos in their colours with counts. Bottom: jobs with one tiny minion per worker, like the game.
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
+        let withOffices = Set(fleet.stations.values.flatMap { $0.rooms.values.compactMap(\.repo) })
+        let withRockets = Set(repoRoots.filter { github.openReleases(repoRoot: $0.key)?.isEmpty == false }.map(\.value.repo))
+        let repos = fleet.repoColors.keys.filter { withOffices.contains($0) || withRockets.contains($0) }
+            .sorted { fleet.repoColors[$0]! < fleet.repoColors[$1]! }
+        guard !repos.isEmpty else { return }
+        var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|"
+        for repo in repos {
+            let offices = fleet.stations.values.flatMap { $0.rooms.values }.filter { $0.repo == repo }.count
+            let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
+            signature += "\(repo):\(workers):\(offices);"
+        }
+        guard signature != legendSignature else { return }
+        legendSignature = signature
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
-        let repos = fleet.repoColors.keys.sorted { fleet.repoColors[$0]! < fleet.repoColors[$1]! }
-        guard !repos.isEmpty else { return }
         let slot = hud.size.width / CGFloat(repos.count)
         for (i, repo) in repos.enumerated() {
             let x = slot * (CGFloat(i) + 0.5)
@@ -867,8 +912,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let icons = min(count, 8)
             let iconsWidth = CGFloat(icons) * 8
             for k in 0..<icons {
-                let r = SKShapeNode(rectOf: CGSize(width: 4, height: 9))
-                r.fillColor = Palette.minion; r.strokeColor = .clear
+                let r = SKSpriteNode(color: Palette.minion, size: CGSize(width: 4, height: 9))
                 r.position = CGPoint(x: x - iconsWidth + CGFloat(k) * 8 + 4, y: 14)
                 hud.addChild(r); jobNodes.append(r)
             }
@@ -934,7 +978,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             infoBackground.isHidden = !hasText
             if hasText {
                 let f = infoLabel.frame.insetBy(dx: -8, dy: -5)
-                infoBackground.path = CGPath(roundedRect: f, cornerWidth: 4, cornerHeight: 4, transform: nil)
+                infoBackground.position = f.origin
+                infoBackground.size = f.size
             }
         }
         guard let hRaw = hovered else { infoLabel.text = ""; return }
@@ -1223,6 +1268,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
 
+        // Every Conductor repo with a checkout under ~/dev counts as a work repo for releases,
+        // even with no session today, so a release on the pad never depends on someone working.
+        if firstRun {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let workspaces = home.appendingPathComponent("conductor/workspaces")
+            if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
+                for repo in repos {
+                    let root = home.appendingPathComponent("dev/\(repo)").path
+                    if FileManager.default.fileExists(atPath: root + "/.git") {
+                        repoRoots[root] = (repo, "work")
+                        _ = fleet.color(forRepo: repo)
+                    }
+                }
+            }
+        }
+        for root in repoRoots.keys { github.refreshReleases(repoRoot: root) }
         for change in github.takeStateChanges() {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
             logEvent("\(who): \(change.pr.summary)")
@@ -1344,7 +1405,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if let st = fleet.stations["work"] {
             for (i, tall) in [false, true].enumerated() {
                 let n = rocket(color: NSColor(fleet.color(forRepo: i == 0 ? "api-node-nest" : "tattoodo-web")), tall: tall)
-                let pc = st.padCenter + (i == 0 ? SIMD2(-0.35, -0.35) : SIMD2(0.35, 0.35))
+                let pc = st.padCenter + (i == 0 ? SIMD2(0.45, -0.45) : SIMD2(0, 0))
                 n.position = v3(st.offset.x + pc.x, 0, st.offset.y + pc.y)
                 n.name = "rocket:https://github.com|demo release"
                 rocketRoot.addChildNode(n)
