@@ -259,6 +259,7 @@ final class GitHubResolver {
     private let queue = DispatchQueue(label: "rymdkapsel.github", qos: .utility, attributes: .concurrent)
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
+    private var pushed: [String: Bool] = [:]
     private var owners: [String: String] = [:]
     private var inFlight = Set<String>()
     private let lock = NSLock()
@@ -275,6 +276,12 @@ final class GitHubResolver {
         return commits[worktree]?.0
     }
 
+    /// Whether the worktree's branch exists on origin, or nil if unknown yet.
+    func branchPushed(worktree: String) -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return pushed[worktree]
+    }
+
     func refreshCommits(worktree: String) {
         lock.lock()
         if let (_, at) = commits[worktree], Date().timeIntervalSince(at) < 60 { lock.unlock(); return }
@@ -282,13 +289,15 @@ final class GitHubResolver {
         inFlight.insert("c:" + worktree)
         lock.unlock()
         queue.async { [self] in
-            var base = "origin/main"
-            if let out = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd: worktree),
-               let name = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-                base = name
-            } else if run(["git", "rev-parse", "--verify", "origin/main"], cwd: worktree) == nil,
-                      run(["git", "rev-parse", "--verify", "origin/master"], cwd: worktree) != nil {
-                base = "origin/master"
+            // Work branches off develop where it exists; otherwise main, master, or the remote default.
+            var base = "origin/HEAD"
+            for candidate in ["origin/develop", "origin/main", "origin/master"] where run(["git", "rev-parse", "--verify", "--quiet", candidate], cwd: worktree) != nil {
+                base = candidate; break
+            }
+            var isPushed = false
+            if let out = run(["git", "branch", "--show-current"], cwd: worktree),
+               let branch = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
+                isPushed = run(["git", "rev-parse", "--verify", "--quiet", "origin/" + branch], cwd: worktree) != nil
             }
             var n = 0
             if let out = run(["git", "rev-list", "--count", "\(base)..HEAD"], cwd: worktree),
@@ -296,8 +305,9 @@ final class GitHubResolver {
                 n = v
             }
             lock.lock()
-            let changed = commits[worktree]?.0 != n
+            let changed = commits[worktree]?.0 != n || pushed[worktree] != isPushed
             commits[worktree] = (n, Date())
+            pushed[worktree] = isPushed
             inFlight.remove("c:" + worktree)
             lock.unlock()
             if changed { DispatchQueue.main.async { self.onUpdate?() } }

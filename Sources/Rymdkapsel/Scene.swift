@@ -155,6 +155,7 @@ final class Minion {
     var errand: Errand?
     var carried: SCNNode?
     var fetchSpot: SIMD2<Double>?
+    var commitDrop = false
     var pyramids: [SCNNode] = []
     var pyramidCell: Cell?
     var toolCount: Int
@@ -270,6 +271,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     // Crew replay: teammates' last day, looped.
     private struct CrewRoomInfo { var repo: String; var branch: String; var prNumber: Int?; var title: String?; var author: String; var url: String?; var state: String; var last: Date }
     private var crewBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
+    private var lastBoxCount: [String: Int] = [:]
+    private var localSignature = ""
     private var crewRoomInfo: [String: CrewRoomInfo] = [:]
     private var crewSeen: Set<String> = []
     private var crewLoaded = false
@@ -353,7 +356,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 self.userPan -= (right * dx - forward * dy) * unitsPerPixel
             }
         }
-        github.onUpdate = { [weak self] in self?.enqueue { self?.rebuildMarkers(); self?.rebuildRockets(); self?.rebuildCrew() } }
+        github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
@@ -500,6 +503,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
+    /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
+    private func onGitHubUpdate() {
+        let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in let l = localState(r); return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0)" } }.sorted().joined()
+        if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
+        rebuildRockets()
+        rebuildCrew()
+    }
+
+    /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
+    private func localState(_ room: Room) -> (local: Bool, commits: Int) {
+        guard room.key.hasPrefix("task:"), let w = room.worktree else { return (false, 0) }
+        let pushed = github.branchPushed(worktree: w) ?? true
+        return (!pushed, github.commitsAhead(worktree: w) ?? 0)
+    }
+
     /// Dashed outline around a room's footprint, the game's look for a room under construction.
     private func outline(station: Station, room: Room) -> SCNNode {
         let group = SCNNode()
@@ -602,9 +620,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in station.rooms.values {
                 let key = roomKey(station, room)
                 var tiles: [SCNNode] = []
-                let sketch = room.key.hasPrefix("proj:")   // a session with no branch yet: an unbuilt slot
+                let local = localState(room)
+                let sketch = room.key.hasPrefix("proj:") || (local.local && local.commits == 0)   // nothing shared yet: an unbuilt slot
                 let tileColor = sketch ? NSColor(rgb: (0.27, 0.28, 0.33)) : (room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color))
-                if sketch {
+                if sketch || local.local {
                     let o = outline(station: station, room: room)
                     o.name = "room:" + key
                     staticRoot.addChildNode(o)
@@ -755,14 +774,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let key = roomKey(station, room)
                 var count: Int
                 var pr: PullRequest?
+                var boxOpacity = 1.0
                 if room.key.hasPrefix("crew:") {
                     guard let cb = crewBoxes[key] else { continue }
                     count = min(16, max(1, cb.count))
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
                 } else {
+                    let local = localState(room)
+                    if local.local && local.commits == 0 { continue }        // a research session: nothing to show yet
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                    let ahead = room.worktree.flatMap { github.commitsAhead(worktree: $0) } ?? 0
-                    count = min(16, 1 + ahead)
+                    count = min(16, local.local ? local.commits : 1 + local.commits)
+                    if local.local { boxOpacity = 0.55 }
                 }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
@@ -809,9 +831,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     n.position = v3(pos.x, pos.y, pos.z)
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
-                    if undelivered.contains(key) { n.opacity = 0 }
+                    n.opacity = undelivered.contains(key) ? 0 : boxOpacity
                     markerRoot.addChildNode(n)
                 }
+                // More commits than last time while the owner is in: it carries the new box in.
+                if let last = lastBoxCount[key], count > last, !room.key.hasPrefix("crew:"),
+                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && $0.errand == nil && $0.carried == nil }) {
+                    let carry = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
+                    carry.geometry!.firstMaterial = lit(color)
+                    carry.position = v3(0, m.headHeight + 0.14, 0)
+                    m.node.addChildNode(carry)
+                    m.carried = carry
+                    m.commitDrop = true
+                    if let dest = room.cells.filter({ $0 != m.cell }).randomElement() { walk(m, to: dest) }
+                }
+                lastBoxCount[key] = count
             }
         }
     }
@@ -1087,6 +1121,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
         if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
+        let local = localState(room)
+        if local.local { parts.append(local.commits == 0 ? "local branch, nothing committed · a research session" : "local branch, \(local.commits) commits not pushed") }
         if let info = crewRoomInfo[roomKey(station, room)] {
             var line = "by \(info.author) · ⎇ \(info.branch)"
             if let n = info.prNumber { line += " · PR #\(n) \(info.state.lowercased())" }
@@ -1180,6 +1216,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             return
         }
         guard let branch = room.branch, let root = room.repoRoot else { return }
+        if localState(room).local { logEvent("\(room.name): not on github yet"); return }
         var url: URL?
         if let pr = github.pull(branch: branch, repoRoot: root), let u = URL(string: pr.url) {
             url = u
@@ -1834,6 +1871,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos += d / dist * step }
                 m.facing = atan2(d.x, d.y)
             } else {
+                if m.commitDrop, let c = m.carried {
+                    m.commitDrop = false
+                    m.carried = nil
+                    let world = c.worldPosition
+                    c.removeFromParentNode()
+                    c.position = world
+                    propRoot.addChildNode(c)
+                    let down = SCNAction.move(to: v3(world.x, 0.12, world.z), duration: 0.35); down.timingMode = .easeIn
+                    c.runAction(.sequence([down, .wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))
+                }
                 switch m.errand {
                 case .fetch(let r):
                     let key = "\(m.station)|\(r)"
