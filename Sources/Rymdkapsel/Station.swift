@@ -122,7 +122,7 @@ final class Station {
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
         guard let q = rooms["kind:quarters"] else { return [] }
-        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(6).map { (SIMD2(Double($0.x), Double($0.y)), $0) }
+        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0) }
     }
 
     private static func rect(_ w: Int, _ h: Int) -> [Cell] {
@@ -200,7 +200,7 @@ final class Station {
     @discardableResult
     func ensureFixedRoom(_ place: Place) -> Bool {
         guard case .room(let key) = place, key == "kind:quarters" else { return false }
-        return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 3))
+        return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4))
     }
 
     /// The room cell that touches the corridor: the doorway, and where a carried box gets set down.
@@ -346,7 +346,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rymdkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v9.json")
+        return dir.appendingPathComponent("fleet-v10.json")
     }
 
     static func stationName(for cwd: String) -> String {

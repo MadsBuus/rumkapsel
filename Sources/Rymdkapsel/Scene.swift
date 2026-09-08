@@ -1160,6 +1160,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let cells = station.cells(of: place)
         let target: Cell
         if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
+        else if place == .quarters, let hall = station.doorOutside(of: "kind:quarters") { target = hall }   // no bed left: the hallway
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
@@ -1618,8 +1619,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
-            if m.path.isEmpty, let b = m.bed, b < station.beds.count, m.place == .quarters {
-                m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
+            if m.path.isEmpty, m.place == .quarters {
+                if let b = m.bed, b < station.beds.count {
+                    m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
+                } else if let hall = station.doorOutside(of: "kind:quarters") {
+                    let k = Double(abs(m.id.hashValue) % 5) - 2
+                    let spot = SIMD2(Double(hall.x), Double(hall.y)) + SIMD2(k * 0.18, k * 0.1)
+                    m.pos += (spot - m.pos) * min(1, dt * 4)
+                }
             }
             let resting = m.path.isEmpty && m.state == .settled
             m.setSleeping(resting && m.activity == .sleeping)
