@@ -182,9 +182,10 @@ final class Minion {
     var hammerUp = false
     var lying = false
     var wakeUntil = 0.0
-    enum Tool { case goggles, clipboard, wrench, hammer }
+    enum Tool { case goggles, tablet, scanner, hammer }
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
+
     var promptCount = 0
     var queuedCones: [SCNNode] = []
     var toolSeed: Int { abs(id.hashValue) % 4 }
@@ -244,7 +245,8 @@ final class Minion {
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
     var headHeight: Double { bodyHeight }
 
-    /// Hold a tool in front of the body: goggles, clipboard, wrench or hammer. Nil puts it away.
+    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
+    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t
@@ -256,50 +258,58 @@ final class Minion {
         let w = 0.22, h = bodyHeight, d = bodyDepth
         switch t {
         case .goggles:
-            let band = SCNNode(geometry: SCNBox(width: w * 0.9, height: h * 0.14, length: 0.03, chamferRadius: 0.005))
+            let band = SCNNode(geometry: SCNBox(width: w * 0.9, height: h * 0.12, length: 0.025, chamferRadius: 0))
             band.geometry!.firstMaterial = dark
-            band.position = v3(0, h * 0.34, d / 2 + 0.02)
+            band.position = v3(0, h * 0.34, d / 2 + 0.015)
             for side in [-1.0, 1.0] {
-                let lens = SCNNode(geometry: SCNCylinder(radius: 0.04, height: 0.02))
+                let lens = SCNNode(geometry: SCNBox(width: 0.07, height: 0.05, length: 0.015, chamferRadius: 0))
                 lens.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.85, 0.75)))
-                lens.eulerAngles.x = .pi / 2
-                lens.position = v3(side * 0.055, 0, 0.02)
+                lens.position = v3(side * 0.05, 0, 0.02)
                 band.addChildNode(lens)
             }
             n.addChildNode(band)
-        case .clipboard:
-            let board = SCNNode(geometry: SCNBox(width: 0.16, height: 0.2, length: 0.015, chamferRadius: 0.005))
-            board.geometry!.firstMaterial = lit(NSColor(rgb: (0.96, 0.95, 0.9)))
-            board.position = v3(0.02, h * 0.12, d / 2 + 0.05)
-            board.eulerAngles.x = -0.35
-            let clip = SCNNode(geometry: SCNBox(width: 0.07, height: 0.025, length: 0.025, chamferRadius: 0))
-            clip.geometry!.firstMaterial = dark
-            clip.position = v3(0, 0.1, 0)
-            board.addChildNode(clip)
-            n.addChildNode(board)
-        case .wrench:
-            let shaft = SCNNode(geometry: SCNBox(width: 0.035, height: 0.2, length: 0.03, chamferRadius: 0))
-            shaft.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-            shaft.position = v3(0.06, h * 0.12, d / 2 + 0.05)
-            shaft.eulerAngles.z = -0.5
-            let head = SCNNode(geometry: SCNBox(width: 0.09, height: 0.05, length: 0.03, chamferRadius: 0))
-            head.geometry!.firstMaterial = shaft.geometry!.firstMaterial
-            head.position = v3(0, 0.11, 0)
-            shaft.addChildNode(head)
-            n.addChildNode(shaft)
+        case .tablet:
+            // A dark slab held nearly flat in front, screen glowing, top edge toward the chest.
+            let slab = SCNNode(geometry: SCNBox(width: 0.18, height: 0.012, length: 0.13, chamferRadius: 0))
+            slab.geometry!.firstMaterial = dark
+            slab.position = v3(0, h * 0.28, d / 2 + 0.09)
+            slab.eulerAngles.x = 0.35
+            let screen = SCNNode(geometry: SCNBox(width: 0.15, height: 0.004, length: 0.1, chamferRadius: 0))
+            screen.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.85, 1.0)))
+            screen.position = v3(0, 0.008, 0)
+            slab.addChildNode(screen)
+            n.addChildNode(slab)
+        case .scanner:
+            // A handheld scanner pointing forward with a bright tip.
+            let grip = SCNNode(geometry: SCNBox(width: 0.05, height: 0.05, length: 0.2, chamferRadius: 0))
+            grip.geometry!.firstMaterial = dark
+            grip.position = v3(0.06, h * 0.3, d / 2 + 0.11)
+            let tip = SCNNode(geometry: SCNBox(width: 0.06, height: 0.06, length: 0.03, chamferRadius: 0))
+            tip.geometry!.firstMaterial = flat(NSColor(rgb: (0.4, 1.0, 0.8)))
+            tip.position = v3(0, 0, 0.11)
+            tip.name = "tip"
+            grip.addChildNode(tip)
+            n.addChildNode(grip)
         case .hammer:
-            let handle = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
+            // Handle pointing forward, head at the far end: tilting the body brings it down on the work.
+            let handle = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 0.26, chamferRadius: 0))
             handle.geometry!.firstMaterial = lit(NSColor(rgb: (0.6, 0.45, 0.3)))
-            handle.position = v3(0.07, h * 0.16, d / 2 + 0.05)
-            let head = SCNNode(geometry: SCNBox(width: 0.1, height: 0.06, length: 0.06, chamferRadius: 0))
+            handle.position = v3(0.07, h * 0.42, d / 2 + 0.14)
+            handle.eulerAngles.x = 0.35
+            let head = SCNNode(geometry: SCNBox(width: 0.08, height: 0.1, length: 0.06, chamferRadius: 0))
             head.geometry!.firstMaterial = dark
-            head.position = v3(0, 0.12, 0)
+            head.position = v3(0, -0.02, 0.13)
             handle.addChildNode(head)
             n.addChildNode(handle)
         }
         n.name = node.name
         body.addChildNode(n)
         toolNode = n
+    }
+
+    /// Blink the scanner tip, if held.
+    func blinkScanner(_ on: Bool) {
+        toolNode?.childNodes.first?.childNode(withName: "tip", recursively: false)?.opacity = on ? 1 : 0.25
     }
 
     /// Tip over onto the back in the dorm, or stand back up.
@@ -2602,7 +2612,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // Working the cone: welding, hammering, pushing and pulling, or bent over it.
                 let tool = (m.toolSeed + Int(clock / 7)) % 4
                 let cone = m.pyramids.last
-                m.setTool([Minion.Tool.goggles, .hammer, .wrench, nil][tool])
+                m.setTool([Minion.Tool.goggles, .hammer, .scanner, nil][tool])
                 switch tool {
                 case 0:
                     tilt = 0.32
@@ -2646,8 +2656,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if working && !atCone {
                 switch m.activity {
-                case .coding, .testing, .running: m.setTool(.wrench)
-                case .exploring, .reading, .writing, .qa, .planning: m.setTool(.clipboard)
+                case .testing, .running: m.setTool(.scanner); m.blinkScanner(Int(clock * 6) % 2 == 0)
+                case .coding, .exploring, .reading, .writing, .qa, .planning, .skill: m.setTool(.tablet)
                 default: m.setTool(nil)
                 }
                 switch m.activity {
@@ -2657,10 +2667,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .thinking: tilt = -0.18; roll = sin(t * 1.4) * 0.14      // thinking: head back, slow sway
                 case .planning: tilt = -0.12 + sin(t * 2) * 0.05              // planning: looking up
                 case .reading: tilt = -0.18                                   // reading your message: head back
-                case .testing: spin = t * 3                                   // testing: pacing in circles
+                case .testing: spin = sin(t * 1.6) * 0.6; tilt = 0.1         // testing: sweeping the scanner across
                 case .running: tilt = sin(t * 22) * 0.04; roll = cos(t * 19) * 0.04   // running things: jittery
                 case .shipping: roll = sin(t * 9) * 0.16                      // shipping: excited wiggle
-                case .skill: spin = t * 2                                     // using a skill: a slow spin
+                case .skill: tilt = 0.15; roll = sin(t * 3) * 0.05           // using a skill: heads-down on the tablet
                 case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
                 case .qa:
                     // QA on the test deck: peering down at the staged boxes, a green tick popping up now and then.

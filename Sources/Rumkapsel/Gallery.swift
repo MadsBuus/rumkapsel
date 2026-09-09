@@ -93,10 +93,10 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         case .thinking: return (0, sin(t * 2) * 0.12, 0)
         case .planning: return (-0.12 + sin(t * 2) * 0.05, 0, 0)
         case .reading: return (-0.18, 0, 0)
-        case .testing: return (0, 0, t * 3)
+        case .testing: return (0.1, 0, sin(t * 1.6) * 0.6)
         case .running: return (sin(t * 22) * 0.04, cos(t * 19) * 0.04, 0)
         case .shipping: return (0, sin(t * 9) * 0.16, 0)
-        case .skill: return (0, 0, t * 2)
+        case .skill: return (0.15, sin(t * 3) * 0.05, 0)
         case .delegating: return (0, 0, sin(t * 4) * 0.3)
         case .qa: return (0.28 + sin(t * 1.2) * 0.08, 0, sin(t * 0.6) * 0.5)
         default: return (0, sin(t * 5) * 0.07, 0)
@@ -135,8 +135,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let p = tile(i, act == .waiting ? "waiting (jump)" : act.label); i += 1
             let m = minion(at: p)
             switch act {
-            case .coding, .testing: m.setTool(.wrench)
-            case .exploring, .writing, .qa: m.setTool(.clipboard)
+            case .testing: m.setTool(.scanner)
+            case .coding, .exploring, .writing, .qa: m.setTool(.tablet)
             default: break
             }
             updaters.append { [weak self] c, _ in
@@ -154,7 +154,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let cn = Props.pyramid(color: pink.lighter(0.22), size: 0.32, floor: pink); cn.position = v3(p.x + 0.2, 0, p.y)
             scene.rootNode.addChildNode(cn)
             let m = minion(at: SIMD2(p.x - 0.2, p.y)); m.node.eulerAngles.y = .pi / 2
-            m.setTool([Minion.Tool.goggles, .hammer, .wrench, nil][k])
+            m.setTool([Minion.Tool.goggles, .hammer, .scanner, nil][k])
             var light: SCNNode?
             if k == 0 {
                 let l = SCNNode(); l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
