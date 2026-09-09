@@ -1068,7 +1068,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 var i = 0
                 for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
                     let c = NSColor(fleet.color(forRepo: repo))
-                    for _ in 0..<min(n, 12) {
+                    for _ in 0..<min(n, 24) {
                         let size = 0.38
                         let pkg = package(color: c.lighter(0.1), band: purple, size: size)
                         let cell = sorted[(i / 2) % sorted.count]
@@ -1254,7 +1254,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     n.addChildNode(deco)
                 }
                 let slot = rockets.values.filter { $0.parent != nil }.count % 4
-                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(0.45, 0.45), SIMD2(0.45, -0.45), SIMD2(-0.45, 0.45)]
+                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.0, 0), SIMD2(-1.0, 0), SIMD2(0, 0.55)]
                 let pc = station.padCenter + offsets[slot]
                 n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
                 let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"

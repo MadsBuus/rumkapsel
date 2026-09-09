@@ -119,27 +119,28 @@ final class Station {
     /// Landing slots along the bay, in local coordinates.
     var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(0.5, Double(spineHalfLength) + 1.0 + Double($0)) } }
     /// The launch pad is the 2x2 at the outer end of the west corridor arm.
+    /// The launch pad is a 3x2 apron at the outer end of the west corridor arm.
     var padCells: [Cell] {
         guard hasPad else { return [] }
         let x = -spineHalfLength - 1
-        return [Cell(x: x, y: 0), Cell(x: x, y: 1), Cell(x: x - 1, y: 0), Cell(x: x - 1, y: 1)]
+        return (0..<3).flatMap { d in [Cell(x: x - d, y: 0), Cell(x: x - d, y: 1)] }
     }
-    var padCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 0.5) }
-    /// The storage bay: a 2x2 next to the launch pad where merged work is kept until a release.
+    var padCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.0, 0.5) }
+    /// The storage bay: a 3x3 yard south of the launch pad where merged work waits for a release.
     var storageCells: [Cell] {
         guard hasPad else { return [] }
         let x = -spineHalfLength - 1
-        return [Cell(x: x, y: 2), Cell(x: x, y: 3), Cell(x: x - 1, y: 2), Cell(x: x - 1, y: 3)]
+        return (0..<3).flatMap { d in (2...4).map { y in Cell(x: x - d, y: y) } }
     }
-    var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 2.5) }
+    var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.0, 3.0) }
     var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
     var storedBoxes: Int { stored.values.reduce(0, +) }
     var staged: [String: Int] = [:]          // boxes on the test deck, per repo
-    /// The test deck: a 2x2 on the north side of the launch pad where staged work waits for production.
+    /// The test deck: a 3x3 yard north of the launch pad where staged work waits for production.
     var deckCells: [Cell] {
         guard hasPad else { return [] }
         let x = -spineHalfLength - 1
-        return [Cell(x: x, y: -1), Cell(x: x, y: -2), Cell(x: x - 1, y: -1), Cell(x: x - 1, y: -2)]
+        return (0..<3).flatMap { d in (-3...(-1)).map { y in Cell(x: x - d, y: y) } }
     }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
@@ -382,7 +383,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v15.json")
+        return dir.appendingPathComponent("fleet-v16.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
