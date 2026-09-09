@@ -739,14 +739,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
-                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.3)
+                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.26)
                 padLabel.node.position.y = 0.012
-                add(padLabel.node, yaw: 0, center: station.padCenter + SIMD2(ox, oz + 0.78))
+                let pc = station.padCells
+                let corner = SIMD2(Double(pc.map(\.x).max()!) + 0.42 - padLabel.width / 2, Double(pc.map(\.y).max()!) + 0.42 - padLabel.height / 2)
+                add(padLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             if station.hasHangar {
-                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.34)
+                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.28)
                 hangarLabel.node.position.y = 0.012
-                add(hangarLabel.node, yaw: 0, center: station.hangarCenter + SIMD2(ox, oz))
+                let hc = station.hangarCells
+                let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
+                add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             let occupied: (Cell) -> Bool = { c in
                 station.coreCells.contains(c) || station.hangarCells.contains(c) || station.padCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
@@ -765,12 +769,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let text = StationController.displayName(room)
                 if room.key.hasPrefix("kind:") {
                     // Fixed rooms: a short word cut into the middle of the floor.
-                    let cx = Double(room.cells.map(\.x).reduce(0, +)) / Double(room.cells.count)
-                    let cy = Double(room.cells.map(\.y).reduce(0, +)) / Double(room.cells.count)
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
-                    let label = floorSign(text, color: accent, size: 0.34)
+                    let label = floorSign(text, color: accent, size: 0.28)
                     label.node.position.y = 0.012
-                    add(label.node, yaw: 0, center: SIMD2(ox + cx, oz + cy))
+                    // Tucked into the far corner of the floor, clear of beds and rings.
+                    let maxY = room.cells.map(\.y).max()!
+                    let maxX = room.cells.filter { $0.y == maxY }.map(\.x).max()!
+                    let corner = SIMD2(Double(maxX) + 0.42 - label.width / 2, Double(maxY) + 0.42 - label.height / 2)
+                    add(label.node, yaw: 0, center: corner + SIMD2(ox, oz))
                     label.node.name = "room:" + roomKey(station, room)
                     roomLabels[roomKey(station, room)] = label.node
                     continue
