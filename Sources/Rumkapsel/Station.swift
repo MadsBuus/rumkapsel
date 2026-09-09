@@ -119,15 +119,16 @@ final class Station {
     var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 2.0) }
     /// Landing slots along the bay, in local coordinates.
     var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(0.5, Double(spineHalfLength) + 1.0 + Double($0)) } }
-    /// The launch pad is the 2x2 at the outer end of the west corridor arm.
-    /// The yard runs outward along the west arm: storage, then staging, then the launch pad at the far end.
-    /// Each block is 4x4, spanning rows -1...2 so it sits centred on the two-wide corridor.
+    /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
+    /// the test deck at the end of the west arm, and the launch pad to the north-west.
+    private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
-        let x0 = -spineHalfLength - 1 - index * 4
-        return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y) } }
+        let x0 = -spineHalfLength - 1
+        let r = yardRow(index)
+        return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
     }
-    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5 - Double(index * 4), 0.5) }
+    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, 0.5 + Double(yardRow(index))) }
     var storageCells: [Cell] { yardBlock(0) }
     var storageCenter: SIMD2<Double> { yardCenter(0) }
     var deckCells: [Cell] { yardBlock(1) }
@@ -205,7 +206,7 @@ final class Station {
         switch place {
         case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
         case .room("kind:hangar"): return hangarCells
-        case .room("kind:pad"): return padCells + [Cell(x: -spineHalfLength, y: 0), Cell(x: -spineHalfLength, y: 1)]
+        case .room("kind:pad"): return padCells
         case .room("kind:storage"): return storageCells
         case .room("kind:deck"): return deckCells.isEmpty ? padCells : deckCells
         case .room(let key): return rooms[key]?.cells ?? []
@@ -389,7 +390,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v17.json")
+        return dir.appendingPathComponent("fleet-v18.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
@@ -418,14 +419,23 @@ final class Fleet {
 
     var ordered: [Station] { Fleet.order.compactMap { stations[$0] } }
 
-    /// Lays stations out side by side with their corridors on one line, so work and crew can be bridged.
+    /// Work and crew share a row with their corridors on one line (so they can be bridged);
+    /// private sits below work, keeping the whole fleet squarish rather than a long strip.
     func arrange() {
         var x = 0.0
-        for (i, s) in ordered.enumerated() {
+        var rowMaxY = 0.0
+        for s in ordered where s.name != "private" {
             let b = s.bounds
-            if i > 0 { x += (s.name == "crew" || ordered[i - 1].name == "crew") ? 3 : 6 }
+            if x > 0 { x += 3 }
             s.offset = SIMD2(x - Double(b.min.x), 0)
             x += Double(b.max.x - b.min.x + 1)
+            rowMaxY = max(rowMaxY, Double(b.max.y))
+        }
+        if let p = stations["private"] {
+            let b = p.bounds
+            let anchor = stations["work"] ?? ordered.first
+            let ax = anchor.map { $0.offset.x + Double($0.bounds.min.x) } ?? 0
+            p.offset = SIMD2(ax - Double(b.min.x) + 4, rowMaxY + 6 - Double(b.min.y))
         }
     }
 

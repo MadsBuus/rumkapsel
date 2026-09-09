@@ -101,7 +101,7 @@ final class StationView: SCNView {
     var onHover: ((SCNNode?) -> Void)?
     var onDoubleClick: ((SCNNode?) -> Void)?
     var onZoom: ((Double) -> Void)?
-    var onRotate: ((Double) -> Void)?
+    var onRotate: ((Double, NSPoint) -> Void)?
     var onPan: ((Double, Double) -> Void)?
     var onTilt: ((Double) -> Void)?
     var onKey: ((String) -> Bool)?
@@ -119,7 +119,7 @@ final class StationView: SCNView {
     override var acceptsFirstResponder: Bool { true }
 
     override func magnify(with event: NSEvent) { onZoom?(1 + event.magnification) }
-    override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180) }
+    override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180, convert(event.locationInWindow, from: nil)) }
     override func scrollWheel(with event: NSEvent) {
         if event.modifierFlags.contains(.option) { onZoom?(1 - Double(event.scrollingDeltaY) * 0.01) }
         else { onTilt?(Double(event.scrollingDeltaY)) }
@@ -436,10 +436,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var hovered: String?
     private var lastTick = 0.0
     private var clock = 0.0
-    private var targetSpan = 12.0
+    private var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     private var targetFocus = SIMD2<Double>(0, 0)
     private var userZoom = 1.0
     private var userZoomChanged = false
+    private var userDriving = 0.0          // seconds left of snappy camera response after a gesture
     private var userYaw = 0.0
     private var userPitch = -Double.pi / 6
     private var userPan = SIMD2<Double>(0, 0)
@@ -489,7 +490,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             self?.enqueue { self?.open(named: n) }
         }
         view.onZoom = { [weak self] f in self?.enqueue { guard let self else { return }; self.userZoom = min(6, max(0.4, self.userZoom * f)); self.userZoomChanged = true } }
-        view.onRotate = { [weak self] r in self?.enqueue { self?.userYaw -= r } }
+        view.onRotate = { [weak self] r, point in
+            // Pivot on the ground point under the cursor: rotate the camera focus around it.
+            let ground = self?.groundPoint(at: point)
+            self?.enqueue {
+                guard let self else { return }
+                let before = self.userYaw
+                self.userYaw -= r
+                self.userDriving = 0.5
+                if let g = ground {
+                    let focus = self.targetFocus + self.userPan
+                    let d = focus - g
+                    let a = self.userYaw - before
+                    let rotated = SIMD2(d.x * cos(a) - d.y * sin(a), d.x * sin(a) + d.y * cos(a))
+                    self.userPan = g + rotated - self.targetFocus
+                }
+            }
+        }
         view.onTilt = { [weak self] dy in
             self?.enqueue { guard let self else { return }; self.userPitch = min(-0.15, max(-Double.pi / 2 + 0.05, self.userPitch - dy * 0.004)) }
         }
@@ -497,6 +514,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             self?.enqueue {
                 guard let self else { return }
                 self.focused = nil
+                self.userDriving = 0.5
                 let yaw = Double.pi / 4 + self.userYaw
                 let unitsPerPixel = 2 * self.cameraNode.camera!.orthographicScale / Double(max(1, self.viewSize.height))
                 let right = SIMD2(cos(yaw), -sin(yaw))
@@ -913,9 +931,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rebuildLabels()
         rebuildMarkers()
 
-        let b = fleet.worldBounds
-        targetFocus = (b.min + b.max) / 2
-        targetSpan = (b.max.x - b.min.x) + (b.max.y - b.min.y) + 3
+        (targetFocus, targetHalf) = frame(for: Array(fleet.stations.values))
         if let f = focused { focusNow(on: f) }
         fleet.save()
     }
@@ -2124,7 +2140,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if changed {
             rebuildStatic()
-            if firstRun { restoreView() }
+            if firstRun, !viewPinned { restoreView() }
             for m in minions.values where m.errand == nil { send(m, to: m.place) }
             for m in minions.values {
                 if case .fetch = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
@@ -2684,12 +2700,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         let k = 1 - exp(-dt * 2)
         let focus = targetFocus + userPan
-        rig.position.x += (focus.x - Double(rig.position.x)) * k
-        rig.position.z += (focus.y - Double(rig.position.z)) * k
+        let kp = userDriving > 0 ? 1 - exp(-dt * 25) : k
+        if userDriving > 0 { userDriving -= dt }
+        rig.position.x += (focus.x - Double(rig.position.x)) * kp
+        rig.position.z += (focus.y - Double(rig.position.z)) * kp
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (Double.pi / 4 + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        let wantScale = fitScale(span: targetSpan) / userZoom
+        let wantScale = fitScale(half: targetHalf) / userZoom
         let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
         cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
         userZoomChanged = false
@@ -2808,7 +2826,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     }
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
                         if m.cell != pc { walk(m, to: pc) }
-                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !jumping {
+                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
@@ -3001,9 +3019,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }
 
+    private var viewPinned = false   // set from the command line: never overridden by the remembered view
     func setView(yawDegrees: Double, pitchDegrees: Double, zoom: Double) {
+        viewPinned = true
         enqueue { [self] in
-            userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom
+            userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom; userPan = .zero
             rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         }
     }
@@ -3069,10 +3089,42 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         enqueue { [self] in userZoom = 1; userYaw = 0; userPitch = -.pi / 6; userPan = .zero; focused = nil }
     }
 
+    /// The point on the floor plane under a view location, in world x/z.
+    private func groundPoint(at p: NSPoint) -> SIMD2<Double>? {
+        let near = view.unprojectPoint(SCNVector3(p.x, p.y, 0))
+        let far = view.unprojectPoint(SCNVector3(p.x, p.y, 1))
+        let dy = Double(far.y - near.y)
+        guard abs(dy) > 1e-6 else { return nil }
+        let t = -Double(near.y) / dy
+        return SIMD2(Double(near.x) + Double(far.x - near.x) * t, Double(near.z) + Double(far.z - near.z) * t)
+    }
+
     /// Orthographic half-height that fits a footprint of the given span at the current aspect.
-    private func fitScale(span: Double) -> Double {
+    /// Where the default isometric camera should look to centre these stations, and the half-extent
+    /// they cover on screen (in ground units across, and along the view before the tilt foreshortens it).
+    /// Each station's own footprint is projected, so an L-shaped fleet isn't framed by its empty corner.
+    private func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
+        let yaw = Double.pi / 4
+        var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
+        for st in stations {
+            let b = st.bounds
+            for (x, z) in [(Double(b.min.x), Double(b.min.y)), (Double(b.max.x) + 1, Double(b.min.y)),
+                           (Double(b.min.x), Double(b.max.y) + 1), (Double(b.max.x) + 1, Double(b.max.y) + 1)] {
+                let wx = x + st.offset.x, wz = z + st.offset.y
+                let u = wx * cos(yaw) - wz * sin(yaw), v = wx * sin(yaw) + wz * cos(yaw)
+                lo = pointwiseMin(lo, SIMD2(u, v)); hi = pointwiseMax(hi, SIMD2(u, v))
+            }
+        }
+        guard lo.x.isFinite else { return (SIMD2(0, 0), SIMD2(6, 6)) }
+        let c = (lo + hi) / 2
+        return (SIMD2(c.x * cos(yaw) + c.y * sin(yaw), -c.x * sin(yaw) + c.y * cos(yaw)), (hi - lo) / 2)
+    }
+
+    /// Orthographic half-height that fits a projected half-extent at the default tilt.
+    private func fitScale(half: SIMD2<Double>) -> Double {
         let aspect = max(0.6, Double(viewSize.width / max(1, viewSize.height)))
-        return max(span / (4 * 2.0.squareRoot()) + 3.0, span / (2 * 2.0.squareRoot()) / aspect + 1.2)
+        let pitch = -Double.pi / 6
+        return max(half.y * abs(sin(pitch)) + 3.0, (half.x + 1.5) / aspect)
     }
 
     /// Pans and zooms onto one station, or back to the whole fleet.
@@ -3085,11 +3137,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard let name = stationName, let station = fleet.stations[name] else {
             userPan = .zero; userZoom = 1; userZoomChanged = true; return
         }
-        let b = station.bounds
-        let center = SIMD2(Double(b.min.x + b.max.x) / 2, Double(b.min.y + b.max.y) / 2) + station.offset
+        let (center, half) = frame(for: [station])
         userPan = center - targetFocus
-        let span = Double(b.max.x - b.min.x) + Double(b.max.y - b.min.y) + 3
-        userZoom = min(6, max(0.4, fitScale(span: targetSpan) / fitScale(span: span)))
+        userZoom = min(6, max(0.4, fitScale(half: targetHalf) / fitScale(half: half)))
         userZoomChanged = true
     }
 
@@ -3103,6 +3153,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func restoreView() {
         let d = UserDefaults.standard
         guard d.object(forKey: "view.zoom") != nil else { return }
+        if d.integer(forKey: "view.layout") != 18 {   // the fleet was laid out differently: forget the old pan
+            d.set(18, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
+        }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         let f = d.string(forKey: "view.focus") ?? ""
@@ -3110,8 +3163,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             focusNow(on: f)
         } else {
             userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
+            // A remembered pan from an older layout can point at empty space: drop it if it left the fleet.
+            let b = fleet.worldBounds
+            let p = targetFocus + userPan
+            if p.x < b.min.x - 4 || p.x > b.max.x + 4 || p.y < b.min.y - 4 || p.y > b.max.y + 4 { userPan = .zero }
         }
-        cameraNode.camera!.orthographicScale = fitScale(span: targetSpan) / userZoom
+        cameraNode.camera!.orthographicScale = fitScale(half: targetHalf) / userZoom
         rig.position.x = targetFocus.x + userPan.x; rig.position.z = targetFocus.y + userPan.y
     }
 
