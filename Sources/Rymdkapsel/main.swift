@@ -2,15 +2,16 @@ import AppKit
 import Sparkle
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var window: NSWindow!
     var controller: StationController!
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
-    let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    var updater: SPUStandardUpdaterController!
+    static let feedbackRepo = "MadsBuus/rymdkapsel-releases"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        FileHandle.standardError.write("launched\n".data(using: .utf8)!)
+        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         let args = CommandLine.arguments
         let demo = args.contains("--demo")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
@@ -81,9 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About rymdkapsel", action: #selector(about), keyEquivalent: "")
-        let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
         app.addItem(check)
+        app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
+        app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
         musicItem = app.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
         floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
@@ -109,6 +112,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func resetView() { controller.resetView() }
+
+    private func openIssue(kind: String, label: String) {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        var c = URLComponents(string: "https://github.com/\(AppDelegate.feedbackRepo)/issues/new")!
+        c.queryItems = [
+            URLQueryItem(name: "labels", value: label),
+            URLQueryItem(name: "title", value: "\(kind): "),
+            URLQueryItem(name: "body", value: "\n\n---\nrymdkapsel \(version) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
+        ]
+        if let url = c.url { NSWorkspace.shared.open(url) }
+    }
+
+    @objc func requestFeature() { openIssue(kind: "Feature", label: "enhancement") }
+    @objc func reportBug() { openIssue(kind: "Bug", label: "bug") }
+
+    // MARK: Sparkle
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        controller.announce("update available: rymdkapsel \(item.displayVersionString) · press U")
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        controller.announce("you are on the latest version")
+    }
     @objc func refreshGitHub() { controller.refreshGitHub() }
 
     @objc func focusStation(_ sender: NSMenuItem) {

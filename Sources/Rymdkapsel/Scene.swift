@@ -2154,6 +2154,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         m.node.runAction(.sequence([.moveBy(x: 0, y: 0.25, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.25, z: 0, duration: 0.12)]))
     }
 
+    /// A line in the station log from outside the scene, such as an update notice.
+    func announce(_ text: String) {
+        enqueue { [self] in logEvent(text); ringBell(seed: text.hashValue) }
+    }
+
     /// Re-asks GitHub about every office, branch and release right now.
     func refreshGitHub() {
         enqueue { [self] in
