@@ -19,8 +19,9 @@ enum Colors {
     /// Colours handed out to repositories, in order of first sighting.
     static let repos: [RGB] = [
         RGB(r: 0.83, g: 0.35, b: 0.55), RGB(r: 0.25, g: 0.65, b: 0.60), RGB(r: 0.94, g: 0.65, b: 0.10),
-        RGB(r: 0.35, g: 0.78, b: 0.85), RGB(r: 0.94, g: 0.49, b: 0.13), RGB(r: 0.80, g: 0.78, b: 0.25),
-        RGB(r: 0.45, g: 0.60, b: 0.95), RGB(r: 0.75, g: 0.55, b: 0.35),
+        RGB(r: 0.35, g: 0.78, b: 0.85), RGB(r: 0.94, g: 0.49, b: 0.13), RGB(r: 0.60, g: 0.62, b: 0.95),
+        RGB(r: 0.80, g: 0.78, b: 0.25), RGB(r: 0.75, g: 0.55, b: 0.35), RGB(r: 0.45, g: 0.60, b: 0.95),
+        RGB(r: 0.78, g: 0.42, b: 0.32), RGB(r: 0.30, g: 0.45, b: 0.80), RGB(r: 0.92, g: 0.80, b: 0.55),
     ]
 }
 

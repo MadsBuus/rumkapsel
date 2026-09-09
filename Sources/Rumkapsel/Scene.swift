@@ -1328,10 +1328,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             .sorted { fleet.repoColors[$0]! < fleet.repoColors[$1]! }
         guard !repos.isEmpty else { return }
         var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|"
+        let rootOf = Dictionary(repoRoots.map { ($0.value.repo, $0.key) }, uniquingKeysWith: { a, _ in a })
         for repo in repos {
             let offices = fleet.stations.values.flatMap { $0.rooms.values }.filter { $0.repo == repo }.count
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
-            signature += "\(repo):\(workers):\(offices);"
+            let loading = rootOf[repo].map { github.isBusy(repoRoot: $0) } ?? false
+            signature += "\(repo):\(workers):\(offices):\(loading);"
         }
         guard signature != legendSignature else { return }
         legendSignature = signature
@@ -1358,6 +1360,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             counts.position = CGPoint(x: x, y: hud.size.height - 52)
             hud.addChild(name); hud.addChild(counts)
             legendNodes.append(name); legendNodes.append(counts)
+            // A small spinner beside the title while this repository is being refreshed from GitHub.
+            if rootOf[repo].map({ github.isBusy(repoRoot: $0) }) == true {
+                let spinner = SKSpriteNode(color: name.fontColor ?? Palette.dim, size: CGSize(width: 7, height: 7))
+                spinner.position = CGPoint(x: x + name.frame.width / 2 + 12, y: hud.size.height - 41)
+                spinner.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 1.1)))
+                spinner.alpha = 0.85
+                hud.addChild(spinner); legendNodes.append(spinner)
+            }
         }
         let jobs: [(String, Int, NSColor)] = [
             ("working", busy, NSColor(rgb: (0.35, 0.78, 0.85))),

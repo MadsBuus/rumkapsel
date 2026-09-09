@@ -141,6 +141,12 @@ final class GitHubResolver {
     }
 
     func myLogin() -> String? { lock.lock(); defer { lock.unlock() }; return me }
+
+    /// True while any GitHub or git call for the repository is running.
+    func isBusy(repoRoot: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix(repoRoot + "@") || $0.hasPrefix("c:" + repoRoot) }
+    }
     func feed(repoRoot: String) -> [FeedEvent]? {
         lock.lock(); defer { lock.unlock() }
         return feeds[repoRoot]?.0
