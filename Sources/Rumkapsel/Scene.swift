@@ -180,6 +180,8 @@ final class Minion {
     var commitDrop = false
     var weldLight: SCNNode?
     var hammerUp = false
+    var promptCount = 0
+    var queuedCones: [SCNNode] = []
     var toolSeed: Int { abs(id.hashValue) % 4 }
     var pyramids: [SCNNode] = []
     var pyramidCell: Cell?
@@ -1402,6 +1404,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let start = s.isSubagent ? (st?.coreCenter ?? Cell(x: 0, y: 0)) : (st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0))
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         m.markers = s.eventMarkers
+        m.promptCount = s.promptCount
         minionRoot.addChildNode(m.node)
         minions[s.id] = m
         return m
@@ -1411,6 +1414,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if let key = carriedRoom(of: m) { reveal(key) }
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
+        m.queuedCones.forEach { $0.removeFromParentNode() }
         m.weldLight?.removeFromParentNode()
         m.node.removeFromParentNode()
         minions[m.id] = nil
@@ -1583,13 +1587,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    private func addPyramid(for m: Minion) {
+    private func addPyramid(for m: Minion, queued: Bool = false) {
         guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false) else { return }
         let cells = station.cells(of: .room(key)).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let boxed = lastBoxCount["\(m.station)|\(key)"].map { ($0 + 2) / 3 } ?? 0
         guard let cell = (cells.count > boxed ? Array(cells.dropFirst(boxed)) : cells).randomElement() else { return }
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
-        if m.pyramids.count >= 3, let old = m.pyramids.first {
+        if !queued, m.pyramids.count >= 5, let old = m.pyramids.first {
             old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))
             m.pyramids.removeFirst()
         }
@@ -1603,6 +1607,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rise.timingMode = .easeOut
         n.runAction(rise)
         propRoot.addChildNode(n)
+        if queued {
+            n.opacity = 0.35
+            m.queuedCones.append(n)
+            return
+        }
         m.pyramids.append(n)
         m.pyramidCell = cell
         if m.errand == nil { m.place = .room(key); walk(m, to: cell) }
@@ -1772,7 +1781,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     case .pushed: logEvent("\(who) pushed")
                     case .committed: logEvent("\(who) committed")
                     case .skill: if case .skill(let name) = s.activity { logEvent("\(who) used /\(name)") }
-                    case .prompt: if !m.isSubagent { addPyramid(for: m) }
+                    case .prompt:
+                        if !m.isSubagent {
+                            // One cone per message that arrived since last time; a queued cone lights up when picked up.
+                            let newPrompts = max(1, s.promptCount - m.promptCount)
+                            for _ in 0..<min(newPrompts, 5) {
+                                if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
+                                addPyramid(for: m)
+                            }
+                        }
                     case .tool: continue
                     }
                     ringBell(seed: s.id.hashValue &+ event.rawValue.hashValue)
@@ -1780,6 +1797,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             m.markers = s.eventMarkers
             m.toolCount = s.toolCount
+            m.promptCount = s.promptCount
+            if !m.isSubagent {
+                while m.queuedCones.count < min(5, s.queuedCount) { addPyramid(for: m, queued: true) }
+                while m.queuedCones.count > s.queuedCount, let q = m.queuedCones.popLast() { q.removeFromParentNode() }
+            }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
             if let key = newRooms[s.id], m.errand == nil, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
@@ -2069,7 +2091,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let h = Home.from(repo: a.0, branch: a.3, cwd: a.1)
             station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
             let s = SessionInfo(id: "demo-\(i)", cwd: a.1, repo: a.0, repoRoot: nil, owner: nil, lastModified: Date(), activity: a.2, area: nil,
-                                title: nil, branch: a.3, toolCount: 0, isSubagent: i == 2, cwdExists: true, eventMarkers: [:])
+                                title: nil, branch: a.3, toolCount: 0, isSubagent: i == 2, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
             let m = spawnMinion(s, station: stationName, home: h)
             m.busy = a.2 != .waiting && a.2 != .sleeping
             m.activity = a.2
@@ -2134,7 +2156,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 rebuildStatic()
                 for mm in minions.values where mm.errand == nil { send(mm, to: mm.place) }
                 let s = SessionInfo(id: "demo-new", cwd: cwd, repo: "tattoodo-web", repoRoot: nil, owner: nil, lastModified: Date(), activity: .coding("app"), area: nil,
-                                    title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, eventMarkers: [:])
+                                    title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
                 let m = spawnMinion(s, station: "work", home: h)
                 m.busy = true; m.activity = .coding("app")
                 startDelivery(m, roomKey: h.key)

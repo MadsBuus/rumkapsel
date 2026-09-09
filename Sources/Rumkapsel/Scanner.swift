@@ -42,6 +42,8 @@ struct SessionInfo {
     let toolCount: Int
     let isSubagent: Bool
     let cwdExists: Bool
+    let promptCount: Int       // your messages seen in the tail
+    let queuedCount: Int       // messages still waiting in the queue
     /// Marker of the newest record for each event kind, so the scene can detect fresh ones.
     let eventMarkers: [StationEvent: String]
 }
@@ -58,6 +60,8 @@ final class TranscriptScanner {
         var branch: String?
         var title: String?
         var toolCount = 0
+        var promptCount = 0
+        var queued = 0
         var activity: Activity = .waiting
         var currentSkill: String?
         var area: String?
@@ -100,7 +104,7 @@ final class TranscriptScanner {
                 result.sessions.append(SessionInfo(
                     id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, owner: repo.root.flatMap(remoteOwner(for:)), lastModified: mtime, activity: parsed.activity, area: parsed.area,
                     title: parsed.title, branch: parsed.branch, toolCount: parsed.toolCount, isSubagent: isSub,
-                    cwdExists: fm.fileExists(atPath: cwd), eventMarkers: parsed.markers))
+                    cwdExists: fm.fileExists(atPath: cwd), promptCount: parsed.promptCount, queuedCount: max(0, parsed.queued), eventMarkers: parsed.markers))
             }
         }
         return result
@@ -245,7 +249,13 @@ final class TranscriptScanner {
                     }
                 }
             case "user":
-                if obj["toolUseResult"] == nil { p.activity = .reading; p.markers[.prompt] = uuid; p.currentSkill = nil }
+                if obj["toolUseResult"] == nil { p.activity = .reading; p.markers[.prompt] = uuid; p.currentSkill = nil; p.promptCount += 1 }
+            case "queue-operation":
+                switch obj["operation"] as? String {
+                case "enqueue": p.queued += 1
+                case "dequeue": p.queued -= 1
+                default: break
+                }
             default: break
             }
         }
