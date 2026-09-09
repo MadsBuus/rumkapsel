@@ -4,7 +4,6 @@ A tiny macOS desk toy, a homage to [rymdkapsel](https://rymdkapsel.com) by Grape
 are minions on a space station. Repos are colours, Conductor worktrees are offices, the monolith is where
 web research and subagents happen, commits pile up as boxes, and pull requests colour them.
 
-Not affiliated with Grapefrukt. Just a love letter.
 
 ## Build
 
@@ -31,3 +30,10 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 ## Flags
 
 `--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits.
+
+## A homage
+
+This exists because of [rymdkapsel](https://rymdkapsel.com), Martin Jonasson's (Grapefrukt) small, perfect space station game.
+The tetromino rooms, the brown corridors, the tiny white minions, the monolith, the drone: all of that is his idea, and we borrowed the look
+with love and no permission. If you have not played it, go play it. It is on every platform and it is a few dollars well spent.
+Rumkapsel is a desk toy, not a game, and it is not affiliated with Grapefrukt in any way.
