@@ -1958,7 +1958,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.toolCount = s.toolCount
             m.promptCount = s.promptCount
             if !m.isSubagent {
-                while m.queuedCones.count < min(5, s.queuedCount) { addPyramid(for: m, queued: true) }
+                // Bounded: the cone can fail to place (no room yet), which must never spin the render thread.
+                let want = min(5, s.queuedCount)
+                var attempts = 0
+                while m.queuedCones.count < want && attempts < 5 {
+                    let before = m.queuedCones.count
+                    addPyramid(for: m, queued: true)
+                    attempts += 1
+                    if m.queuedCones.count == before { break }
+                }
                 while m.queuedCones.count > s.queuedCount, let q = m.queuedCones.popLast() { q.removeFromParentNode() }
             }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
