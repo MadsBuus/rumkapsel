@@ -30,6 +30,7 @@ final class Drone: @unchecked Sendable {
     private var pendingWorkload: [Int: Int]?
     private struct Sweep { var t: Double; var up: Bool }
     private var sweeps: [Sweep] = []
+    private var thuds: [Double] = []      // ages of soft thuds in flight
     private static let repoDegrees = [0, 7, 4, 11, 2, 9, 14, 16]   // semitones above the drone root per repo colour
 
     // Voicings in MIDI note numbers. D minor colour throughout, never resolving too hard.
@@ -98,6 +99,11 @@ final class Drone: @unchecked Sendable {
         lock.lock(); pendingWorkload = load; lock.unlock()
     }
 
+    /// A soft low thud: a box set down, a hammer blow.
+    func thud() {
+        lock.lock(); if thuds.count < 6 { thuds.append(0) }; lock.unlock()
+    }
+
     /// A slow glide: up for a launch, down for a shuttle coming in.
     func sweep(up: Bool) {
         lock.lock(); if sweeps.count < 4 { sweeps.append(Sweep(t: 0, up: up)) }; lock.unlock()
@@ -131,6 +137,8 @@ final class Drone: @unchecked Sendable {
         if let load = pendingWorkload { applyWorkload(load); pendingWorkload = nil }
         var localSweeps = sweeps
         sweeps.removeAll()
+        var localThuds = thuds
+        thuds.removeAll()
         lock.unlock()
         let layerRamp = 1.0 - exp(-dt / 4.0)
 
@@ -194,6 +202,12 @@ final class Drone: @unchecked Sendable {
                 localSweeps[k].t = t + dt
             }
 
+            for k in localThuds.indices {
+                let t = localThuds[k]
+                s += sin(t * 72 * 2 * .pi) * exp(-t * 22) * 0.12 + sin(t * 140 * 2 * .pi) * exp(-t * 40) * 0.04
+                localThuds[k] = t + dt
+            }
+
             filterState += (s - filterState) * cutoff
             master += (masterTarget - master) * masterRamp
             buf[i] = Float(filterState * master)
@@ -201,9 +215,11 @@ final class Drone: @unchecked Sendable {
 
         localBells.removeAll { $0.t > 6 }
         localSweeps.removeAll { $0.t > 6 }
+        localThuds.removeAll { $0 > 0.6 }
         lock.lock()
         bells = localBells + bells
         sweeps = localSweeps + sweeps
+        thuds = localThuds + thuds
         lock.unlock()
     }
 }

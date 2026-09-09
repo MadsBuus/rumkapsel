@@ -178,6 +178,9 @@ final class Minion {
     var carried: SCNNode?
     var fetchSpot: SIMD2<Double>?
     var commitDrop = false
+    var weldLight: SCNNode?
+    var hammerUp = false
+    var toolSeed: Int { abs(id.hashValue) % 4 }
     var pyramids: [SCNNode] = []
     var pyramidCell: Cell?
     var toolCount: Int
@@ -552,10 +555,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
     private func onGitHubUpdate() {
-        let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in let l = localState(r); return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0)" } }.sorted().joined()
+        let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in
+            let l = localState(r)
+            let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
+            return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0):\(checks)"
+        } }.sorted().joined()
         if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
         rebuildRockets()
         rebuildCrew()
+    }
+
+    private func checksFailing(_ room: Room) -> Bool {
+        guard let b = room.branch, let r = room.repoRoot, let pr = github.pull(branch: b, repoRoot: r) else { return false }
+        return pr.state == "OPEN" && pr.checks == "failure"
+    }
+
+    private func isDusty(_ room: Room) -> Bool {
+        !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") && Date().timeIntervalSince(room.lastActive) > 7 * 24 * 3600
     }
 
     /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
@@ -685,6 +701,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
                 let powered = room.key.hasPrefix("kind:") || room.key.hasPrefix("crew:") || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
                 roomPower[key] = powered
+                let failing = checksFailing(room)
+                let dusty = isDusty(room)
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
@@ -704,6 +722,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     tiles.append(t)
+                    if failing || dusty {
+                        let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
+                        overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
+                        overlay.eulerAngles.x = -.pi / 2
+                        overlay.position = v3(t.position.x, 0.004, t.position.z)
+                        overlay.name = "room:" + key
+                        if failing {
+                            overlay.opacity = 0.15
+                            overlay.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.5, duration: 0.7), .fadeOpacity(to: 0.12, duration: 0.9)])))
+                        } else {
+                            overlay.opacity = 0.28
+                        }
+                        staticRoot.addChildNode(overlay)
+                    }
                 }
                 roomTiles[key] = tiles
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
@@ -888,7 +920,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case (_, _, true): status = NSColor(rgb: (0.6, 0.62, 0.68))
                 default: status = NSColor(rgb: (0.4, 0.82, 0.45))
                 }
-                let color = status.map { $0.mixed(with: base, 0.15) } ?? base
+                var color = status.map { $0.mixed(with: base, 0.15) } ?? base
+                let failing = !room.key.hasPrefix("crew:") && checksFailing(room)
+                if !room.key.hasPrefix("crew:") && isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
@@ -922,6 +956,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
                     n.opacity = undelivered.contains(key) ? 0 : boxOpacity
+                    if failing {
+                        let shell = SCNNode(geometry: SCNBox(width: size * 1.25, height: size * 1.25, length: size * 1.25, chamferRadius: 0))
+                        shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
+                        shell.opacity = 0.2
+                        shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
+                        shell.name = "box:" + key
+                        n.addChildNode(shell)
+                    }
                     markerRoot.addChildNode(n)
                 }
                 // More commits than last time while the owner is in: it carries the new box in.
@@ -1360,6 +1402,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if let key = carriedRoom(of: m) { reveal(key) }
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
+        m.weldLight?.removeFromParentNode()
         m.node.removeFromParentNode()
         minions[m.id] = nil
     }
@@ -2150,7 +2193,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     c.position = world
                     propRoot.addChildNode(c)
                     let down = SCNAction.move(to: v3(world.x, 0.12, world.z), duration: 0.35); down.timingMode = .easeIn
-                    c.runAction(.sequence([down, .wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))
+                    c.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }, .wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))
                 }
                 switch m.errand {
                 case .fetch(let r):
@@ -2202,7 +2245,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     h.box.position = world
                     propRoot.addChildNode(h.box)
                     let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.35); down.timingMode = .easeIn
-                    h.box.runAction(.sequence([down, .run { _ in }]))
+                    h.box.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }]))
                     let done = h.onDone
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.enqueue { done() } }
                     m.carried = nil
@@ -2251,9 +2294,47 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.smoothFacing += delta * min(1, dt * 12)
 
             // One little routine per activity, so you can tell at a glance what a minion is up to.
-            var tilt = 0.0, roll = 0.0, spin = 0.0
+            var tilt = 0.0, roll = 0.0, spin = 0.0, lean = 0.0
             let t = clock + m.bobPhase
-            if working {
+            let atCone = working && !m.pyramids.isEmpty && m.pyramidCell == m.cell
+            if atCone {
+                // Working the cone: welding, hammering, pushing and pulling, or bent over it.
+                let tool = (m.toolSeed + Int(clock / 7)) % 4
+                let cone = m.pyramids.last
+                switch tool {
+                case 0:
+                    tilt = 0.5
+                    if m.weldLight == nil {
+                        let l = SCNNode()
+                        l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
+                        let spark = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))
+                        spark.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.8)))
+                        spark.constraints = [SCNBillboardConstraint()]
+                        l.addChildNode(spark)
+                        propRoot.addChildNode(l)
+                        m.weldLight = l
+                    }
+                    if let l = m.weldLight, let cone {
+                        l.position = v3(cone.position.x, 0.25, cone.position.z)
+                        let on = Double.random(in: 0...1) < 0.55
+                        l.light?.intensity = on ? Double.random(in: 300...1200) : 0
+                        l.opacity = on ? 1 : 0
+                    }
+                case 1:
+                    let swing = sin(t * 7)
+                    tilt = max(0, swing) * 0.6
+                    if swing > 0.95 && !m.hammerUp { m.hammerUp = true; drone.thud(); cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)])) }
+                    if swing < 0 { m.hammerUp = false }
+                case 2:
+                    lean = sin(t * 2.5) * 0.12
+                    tilt = 0.15 + sin(t * 2.5) * 0.1
+                    cone?.position.x = (cone?.position.x ?? 0) + CGFloat(cos(t * 2.5) * 0.002)
+                default:
+                    tilt = 0.35 + sin(t * 1.5) * 0.08
+                }
+            }
+            if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if working && !atCone {
                 switch m.activity {
                 case .coding: tilt = sin(t * 14) * 0.06                       // typing: quick nods
                 case .exploring: spin = sin(t * 1.2) * 0.7                    // reading code: scanning left and right
@@ -2271,6 +2352,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             m.node.eulerAngles = SCNVector3(tilt, m.smoothFacing + spin, roll)
+            if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
         }
 
         updateBeams()

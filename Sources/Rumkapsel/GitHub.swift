@@ -7,6 +7,7 @@ struct PullRequest: Equatable {
     let reviewDecision: String // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or empty
     let isDraft: Bool
     let url: String
+    var checks: String = ""    // failure, pending, success or empty
 
     var summary: String {
         var s = "PR #\(number) " + (isDraft ? "draft" : state.lowercased())
@@ -14,6 +15,12 @@ struct PullRequest: Equatable {
         case "APPROVED": s += " · approved"
         case "CHANGES_REQUESTED": s += " · changes requested"
         case "REVIEW_REQUIRED": s += " · awaiting review"
+        default: break
+        }
+        switch checks {
+        case "failure": s += " · checks failing"
+        case "pending": s += " · checks running"
+        case "success": s += " · checks green"
         default: break
         }
         return s
@@ -341,11 +348,21 @@ final class GitHubResolver {
             }
             var pr: PullRequest?
             func parse(_ o: [String: Any]) -> PullRequest {
-                PullRequest(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "",
-                            state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
-                            isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
+                var checks = ""
+                if let rollup = o["statusCheckRollup"] as? [[String: Any]], !rollup.isEmpty {
+                    let conclusions = rollup.map { ($0["conclusion"] as? String ?? "").uppercased() }
+                    let statuses = rollup.map { ($0["status"] as? String ?? $0["state"] as? String ?? "").uppercased() }
+                    if conclusions.contains(where: { ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR"].contains($0) }) || statuses.contains("FAILURE") || statuses.contains("ERROR") { checks = "failure" }
+                    else if statuses.contains(where: { ["IN_PROGRESS", "QUEUED", "PENDING", "WAITING"].contains($0) }) || conclusions.contains("") { checks = "pending" }
+                    else { checks = "success" }
+                }
+                var pr = PullRequest(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "",
+                                     state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
+                                     isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
+                pr.checks = checks
+                return pr
             }
-            let fields = "number,title,state,reviewDecision,isDraft,url"
+            let fields = "number,title,state,reviewDecision,isDraft,url,statusCheckRollup"
             if let out = run(["gh", "pr", "view", branch, "--json", fields], cwd: repoRoot),
                let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
                 pr = parse(o)
