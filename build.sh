@@ -2,8 +2,8 @@
 # Builds rumkapsel.app into ./build. Add "run" to launch it afterwards.
 set -e
 cd "$(dirname "$0")"
-swift build -c release 2>&1 | grep -E 'error|Compiling|Build' || true
-BIN=.build/release/Rumkapsel
+swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
+BIN=.build/apple/Products/Release/Rumkapsel
 [ -x "$BIN" ] || { echo "build failed"; exit 1; }
 APP=build/rumkapsel.app
 rm -rf "$APP"
@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>rumkapsel</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
-  <key>CFBundleVersion</key><string>202609091005</string>
+  <key>CFBundleShortVersionString</key><string>0.1.1</string>
+  <key>CFBundleVersion</key><string>202609091023</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>SUFeedURL</key><string>https://raw.githubusercontent.com/MadsBuus/rumkapsel-releases/main/appcast.xml</string>
