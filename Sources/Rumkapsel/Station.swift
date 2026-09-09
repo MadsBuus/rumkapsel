@@ -355,8 +355,24 @@ final class Fleet {
         return dir.appendingPathComponent("fleet-v13.json")
     }
 
-    static func stationName(for cwd: String) -> String {
-        cwd.contains("/conductor/") ? "work" : "private"
+    /// GitHub owners whose repositories count as work, from an editable config file.
+    static let workOwners: Set<String> = {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("config.json")
+        if let data = try? Data(contentsOf: url), let cfg = try? JSONDecoder().decode([String: [String]].self, from: data), let owners = cfg["workOwners"] {
+            return Set(owners.map { $0.lowercased() })
+        }
+        let defaults = ["workOwners": ["Tattoodo"]]
+        if let data = try? JSONSerialization.data(withJSONObject: defaults, options: [.prettyPrinted]) { try? data.write(to: url) }
+        return ["tattoodo"]
+    }()
+
+    /// Conductor workspaces and any repository owned by a work organisation are work; the rest is private.
+    static func stationName(for cwd: String, owner: String? = nil) -> String {
+        if cwd.contains("/conductor/") { return "work" }
+        if let owner, workOwners.contains(owner) { return "work" }
+        return "private"
     }
 
     func color(forRepo repo: String) -> RGB {

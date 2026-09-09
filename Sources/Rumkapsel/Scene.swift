@@ -1544,8 +1544,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // Every session touched today keeps its office alive; archived worktrees lose theirs.
         var liveRooms: [String: Set<String>] = [:]
         var newRooms: [String: String] = [:]   // session id -> room key
-        for s in result.sessions where s.cwdExists && (s.cwd.contains("/conductor/") || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
-            let stationName = Fleet.stationName(for: s.cwd)
+        for s in result.sessions where s.cwdExists && (Fleet.stationName(for: s.cwd, owner: s.owner) == "work" || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
+            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner)
             let station = fleet.station(stationName)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
             if let m = minions[s.id], m.home.key != home.key, station.rooms[home.key] == nil, station.rooms[m.home.key] != nil,
@@ -1589,7 +1589,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
-                let isWorkspace = room.worktree?.contains("/conductor/") == true
+                let isWorkspace = station.name == "work" && room.worktree.map { FileManager.default.fileExists(atPath: $0) } == true
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
                 let stale = now.timeIntervalSince(room.lastActive) > StationController.roomsWindow
                 let expired = stale && (!isWorkspace || merged)
@@ -1629,9 +1629,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var latestPerCwd: [String: Date] = [:]
         for s in result.sessions where !s.isSubagent { latestPerCwd[s.cwd] = max(latestPerCwd[s.cwd] ?? .distantPast, s.lastModified) }
         for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
-            || (!s.isSubagent && s.cwdExists && s.cwd.contains("/conductor/") && latestPerCwd[s.cwd] == s.lastModified) {
+            || (!s.isSubagent && s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner) == "work" && latestPerCwd[s.cwd] == s.lastModified) {
             seen.insert(s.id)
-            let stationName = Fleet.stationName(for: s.cwd)
+            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
             let isNew = minions[s.id] == nil
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
@@ -1862,7 +1862,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let station = fleet.station(stationName)
             let h = Home.from(repo: a.0, branch: a.3, cwd: a.1)
             station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
-            let s = SessionInfo(id: "demo-\(i)", cwd: a.1, repo: a.0, repoRoot: nil, lastModified: Date(), activity: a.2, area: nil,
+            let s = SessionInfo(id: "demo-\(i)", cwd: a.1, repo: a.0, repoRoot: nil, owner: nil, lastModified: Date(), activity: a.2, area: nil,
                                 title: nil, branch: a.3, toolCount: 0, isSubagent: i == 2, cwdExists: true, eventMarkers: [:])
             let m = spawnMinion(s, station: stationName, home: h)
             m.busy = a.2 != .waiting && a.2 != .sleeping
@@ -1908,7 +1908,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 undelivered.insert("work|\(h.key)")
                 rebuildStatic()
                 for mm in minions.values where mm.errand == nil { send(mm, to: mm.place) }
-                let s = SessionInfo(id: "demo-new", cwd: cwd, repo: "tattoodo-web", repoRoot: nil, lastModified: Date(), activity: .coding("app"), area: nil,
+                let s = SessionInfo(id: "demo-new", cwd: cwd, repo: "tattoodo-web", repoRoot: nil, owner: nil, lastModified: Date(), activity: .coding("app"), area: nil,
                                     title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, eventMarkers: [:])
                 let m = spawnMinion(s, station: "work", home: h)
                 m.busy = true; m.activity = .coding("app")

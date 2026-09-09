@@ -33,6 +33,7 @@ struct SessionInfo {
     let cwd: String
     let repo: String
     let repoRoot: String?
+    let owner: String?          // GitHub owner of the origin remote, lowercased
     let lastModified: Date
     let activity: Activity
     let area: String?
@@ -67,6 +68,7 @@ final class TranscriptScanner {
         .appendingPathComponent(".claude/projects")
     private var cache: [String: (mtime: Date, parsed: Parsed)] = [:]
     private var repoCache: [String: (name: String, root: String?)] = [:]
+    private var ownerCache: [String: String?] = [:]
 
     func scan(roomsWithin: TimeInterval) -> ScanResult {
         var result = ScanResult()
@@ -96,7 +98,7 @@ final class TranscriptScanner {
                 let repo = repoInfo(for: cwd)
                 let isSub = url.deletingLastPathComponent() != project
                 result.sessions.append(SessionInfo(
-                    id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, lastModified: mtime, activity: parsed.activity, area: parsed.area,
+                    id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, owner: repo.root.flatMap(remoteOwner(for:)), lastModified: mtime, activity: parsed.activity, area: parsed.area,
                     title: parsed.title, branch: parsed.branch, toolCount: parsed.toolCount, isSubagent: isSub,
                     cwdExists: fm.fileExists(atPath: cwd), eventMarkers: parsed.markers))
             }
@@ -139,6 +141,22 @@ final class TranscriptScanner {
         }
         repoCache[cwd] = (name, root)
         return (name, root)
+    }
+
+    /// The GitHub owner in the origin remote of a repository, read from its git config.
+    func remoteOwner(for root: String) -> String? {
+        if let cached = ownerCache[root] { return cached }
+        var owner: String?
+        if let text = try? String(contentsOfFile: root + "/.git/config", encoding: .utf8) {
+            for line in text.split(separator: "\n") where line.contains("url =") && line.contains("github.com") {
+                let url = line.split(separator: "=", maxSplits: 1).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+                let tail = url.replacingOccurrences(of: "git@github.com:", with: "").replacingOccurrences(of: "https://github.com/", with: "")
+                owner = tail.split(separator: "/").first.map { String($0).lowercased() }
+                break
+            }
+        }
+        ownerCache[root] = owner
+        return owner
     }
 
     private static let sourceRoots: Set<String> = ["src", "app", "apps", "lib", "libs", "packages", "modules", "Sources", "Tests", "test", "tests", "spec", "components", "pages", "features"]
