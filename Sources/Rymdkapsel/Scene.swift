@@ -74,6 +74,28 @@ private func floorText(_ text: String, color: NSColor, size: Double, maxWidth: D
     return (outer, w, h)
 }
 
+/// Uppercase, letter-spaced signage cut into a floor, pivoted on its centre.
+private func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, width: Double, height: Double) {
+    let attributed = NSAttributedString(string: text.uppercased(), attributes: [
+        .font: NSFont(name: "HelveticaNeue-Bold", size: 1) ?? NSFont.boldSystemFont(ofSize: 1),
+        .kern: 0.18,
+    ])
+    let t = SCNText(string: attributed, extrusionDepth: 0)
+    t.flatness = 0.02
+    t.firstMaterial = flat(color)
+    t.firstMaterial!.isDoubleSided = true
+    let bb = t.boundingBox
+    let w = Double(bb.max.x - bb.min.x) * size, h = Double(bb.max.y - bb.min.y) * size
+    let inner = SCNNode(geometry: t)
+    inner.scale = SCNVector3(size, size, size)
+    inner.eulerAngles.x = -.pi / 2
+    inner.position = v3(-Double(bb.min.x) * size, 0, Double(bb.min.y) * size)
+    let outer = SCNNode()
+    outer.addChildNode(inner)
+    outer.pivot = SCNMatrix4MakeTranslation(w / 2, 0, -h / 2)
+    return (outer, w, h)
+}
+
 /// SCNView that reports hovers, double-clicks and trackpad gestures.
 final class StationView: SCNView {
     var onHover: ((SCNNode?) -> Void)?
@@ -717,12 +739,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
-                let padLabel = floorText("launch", color: NSColor(rgb: (0.62, 0.66, 0.78)), size: 0.34, maxWidth: 2, lines: 1)
+                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.3)
                 padLabel.node.position.y = 0.012
-                add(padLabel.node, yaw: 0, center: station.padCenter + SIMD2(ox, oz + 0.75))
+                add(padLabel.node, yaw: 0, center: station.padCenter + SIMD2(ox, oz + 0.78))
             }
             if station.hasHangar {
-                let hangarLabel = floorText("bay", color: NSColor(rgb: (0.1, 0.12, 0.18)), size: 0.36, maxWidth: 2, lines: 1)
+                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.34)
                 hangarLabel.node.position.y = 0.012
                 add(hangarLabel.node, yaw: 0, center: station.hangarCenter + SIMD2(ox, oz))
             }
@@ -745,7 +767,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     // Fixed rooms: a short word cut into the middle of the floor.
                     let cx = Double(room.cells.map(\.x).reduce(0, +)) / Double(room.cells.count)
                     let cy = Double(room.cells.map(\.y).reduce(0, +)) / Double(room.cells.count)
-                    let label = floorText(text, color: .black, size: 0.36, maxWidth: 3, lines: 1)
+                    let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
+                    let label = floorSign(text, color: accent, size: 0.34)
                     label.node.position.y = 0.012
                     add(label.node, yaw: 0, center: SIMD2(ox + cx, oz + cy))
                     label.node.name = "room:" + roomKey(station, room)
