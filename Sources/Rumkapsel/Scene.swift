@@ -1017,9 +1017,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    private func rocket(color: NSColor, tall: Bool) -> SCNNode {
+    private func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
-        let h = tall ? 1.5 : 0.9, r = tall ? 0.17 : 0.12
+        // A production rocket grows with what it will carry: small for a couple of boxes, big for a dozen.
+        let grow = tall ? min(1.6, 0.85 + Double(cargo) * 0.06) : 1.0
+        let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         // Body, a slightly wider lower stage, and a nose cone in the repo colour.
@@ -1148,7 +1150,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot] else { continue }
             let key = "\(info.station)|\(launch.pr.number)"
-            let node = rockets.removeValue(forKey: key) ?? rockets.removeValue(forKey: key + "|hold") ?? {
+            let existing = rockets.keys.first { $0.hasPrefix(key + "|") || $0 == key }
+            let node = existing.flatMap { rockets.removeValue(forKey: $0) } ?? {
                 let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: launch.pr.isProduction)
                 if let st = fleet.stations[info.station] { n.position = v3(st.offset.x + st.padCenter.x, 0, st.offset.y + st.padCenter.y) }
                 rocketRoot.addChildNode(n)
@@ -1164,10 +1167,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
             let hasProduction = open.contains(where: \.isProduction)
             for pr in open where pr.isProduction || !hasProduction {
-                let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")"
+                let cargoBucket = (station.stored[info.repo] ?? 0) / 3
+                let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")|c\(cargoBucket)"
                 live.insert(key)
                 if rockets[key] != nil { continue }
-                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction)
+                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: station.stored[info.repo] ?? 0)
                 if pr.untested {
                     let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: pr.isProduction)
                     deco.name = "hold"
@@ -1186,6 +1190,31 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         for (key, n) in rockets where !live.contains(key) && !n.hasActions { n.removeFromParentNode(); rockets[key] = nil }
+        rebuildDueRings()
+    }
+
+    private let ringRoot = SCNNode()
+    /// Cargo waiting with no rocket yet: a faint ring in the repo colour on the pad, a release is due.
+    private func rebuildDueRings() {
+        if ringRoot.parent == nil { propRoot.addChildNode(ringRoot) }
+        ringRoot.childNodes.forEach { $0.removeFromParentNode() }
+        for station in fleet.stations.values where station.hasPad {
+            let waiting = station.stored.filter { $0.value > 0 }.map(\.key).sorted()
+            let withRocket = Set(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> String? in
+                (github.openReleases(repoRoot: root)?.isEmpty == false) ? info.repo : nil
+            })
+            for (i, repo) in waiting.filter({ !withRocket.contains($0) }).enumerated() {
+                let radius = 0.62 + Double(i) * 0.09
+                let ring = SCNNode(geometry: SCNTube(innerRadius: radius, outerRadius: radius + 0.05, height: 0.008))
+                ring.geometry!.firstMaterial = flat(NSColor(fleet.color(forRepo: repo)))
+                ring.opacity = 0.3
+                ring.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.6, duration: 1.6), .fadeOpacity(to: 0.25, duration: 1.6)])))
+                let pc = station.padCenter
+                ring.position = v3(station.offset.x + pc.x, 0.009, station.offset.y + pc.y)
+                ring.name = "pad:" + station.name
+                ringRoot.addChildNode(ring)
+            }
+        }
     }
 
     // MARK: hud
@@ -1365,7 +1394,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
             infoLabel.text = "storage · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
         } else if h.hasPrefix("pad:") {
-            infoLabel.text = "launch pad · release pull requests wait here; merging launches"
+            let name = String(h.dropFirst(4))
+            let due = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.map { "\($0.value) \($0.key)" }.sorted()
+            infoLabel.text = "launch pad · release pull requests wait here; merging launches" + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
         } else if h.hasPrefix("hangar:") {
             infoLabel.text = "hangar · new offices arrive here by ship"
         } else if h.hasPrefix("station:") {
@@ -1875,6 +1906,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 station.stored[repo, default: 0] += 1
                 b.removeFromParentNode()
                 rebuildMarkers()
+                rebuildRockets()
                 fleet.save()
             }
         }
