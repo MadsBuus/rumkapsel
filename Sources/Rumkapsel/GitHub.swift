@@ -257,7 +257,7 @@ final class GitHubResolver {
         }
     }
 
-    private let queue = DispatchQueue(label: "rymdkapsel.github", qos: .utility, attributes: .concurrent)
+    private let queue = DispatchQueue(label: "rumkapsel.github", qos: .utility, attributes: .concurrent)
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]

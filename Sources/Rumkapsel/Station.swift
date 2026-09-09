@@ -350,7 +350,7 @@ final class Fleet {
 
     private static var saveURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Rymdkapsel", isDirectory: true)
+            .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("fleet-v13.json")
     }

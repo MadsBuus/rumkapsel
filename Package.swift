@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "Rymdkapsel",
+    name: "Rumkapsel",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
     ],
     targets: [
         .executableTarget(
-            name: "Rymdkapsel",
+            name: "Rumkapsel",
             dependencies: [.product(name: "Sparkle", package: "Sparkle")],
-            path: "Sources/Rymdkapsel",
+            path: "Sources/Rumkapsel",
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         )
     ],

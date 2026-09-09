@@ -1,6 +1,6 @@
-# rymdkapsel
+# rumkapsel
 
-A tiny macOS desk toy in the spirit of [rymdkapsel](https://rymdkapsel.com): your Claude Code sessions
+A tiny macOS desk toy, a homage to [rymdkapsel](https://rymdkapsel.com) by Grapefrukt: your Claude Code sessions
 are minions on a space station. Repos are colours, Conductor worktrees are offices, the monolith is where
 web research and subagents happen, commits pile up as boxes, and pull requests colour them.
 

@@ -4,7 +4,7 @@ import Foundation
 /// Fires a debounced callback whenever anything under a directory tree changes.
 final class DirectoryWatcher {
     private var stream: FSEventStreamRef?
-    private let queue = DispatchQueue(label: "rymdkapsel.fsevents")
+    private let queue = DispatchQueue(label: "rumkapsel.fsevents")
     private let onChange: () -> Void
     private var pending = false
     private let debounce: TimeInterval

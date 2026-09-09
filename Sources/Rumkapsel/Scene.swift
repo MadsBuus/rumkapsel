@@ -265,7 +265,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let drone = Drone()
     private let scanner = TranscriptScanner()
     private let github = GitHubResolver()
-    private let scanQueue = DispatchQueue(label: "rymdkapsel.scan")
+    private let scanQueue = DispatchQueue(label: "rumkapsel.scan")
 
     private var minions: [String: Minion] = [:]
     private let staticRoot = SCNNode()
@@ -1714,7 +1714,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Display names for GitHub logins, from an editable file in Application Support.
     private static let crewNames: [String: String] = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rymdkapsel", isDirectory: true)
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
         let url = dir.appendingPathComponent("crew.json")
         if let data = try? Data(contentsOf: url), let map = try? JSONDecoder().decode([String: String].self, from: data) { return map }
         let defaults = ["donlion": "Leo", "johanplenge": "Johan", "skogge": "Chris", "MadsBuus": "Mads"]

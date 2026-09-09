@@ -8,7 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
     var updater: SPUStandardUpdaterController!
-    static let feedbackRepo = "MadsBuus/rymdkapsel-releases"
+    static let feedbackRepo = "MadsBuus/rumkapsel-releases"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
-        window.title = "rymdkapsel"
+        window.title = "rumkapsel"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = false
@@ -42,11 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         controller.view.postsFrameChangedNotifications = true
 
-        if !window.setFrameUsingName("RymdkapselMain"), let screen = NSScreen.main {
+        if !window.setFrameUsingName("RumkapselMain"), let screen = NSScreen.main {
             let f = screen.visibleFrame
             window.setFrameOrigin(NSPoint(x: f.maxX - size.width - 24, y: f.minY + 24))
         }
-        window.setFrameAutosaveName("RymdkapselMain")
+        window.setFrameAutosaveName("RumkapselMain")
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(controller.view)
 
@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let app = NSMenu()
-        app.addItem(withTitle: "About rymdkapsel", action: #selector(about), keyEquivalent: "")
+        app.addItem(withTitle: "About rumkapsel", action: #selector(about), keyEquivalent: "")
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
         app.addItem(check)
@@ -106,8 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     @objc func about() {
         let alert = NSAlert()
-        alert.messageText = "rymdkapsel"
-        alert.informativeText = "Each station is a repository. Minions are live Claude sessions: they research at the core, code in the area rooms, test in the reactor, ship from the hangar, cook up skills in the kitchen and rest in quarters while waiting for you.\n\nA love letter to the real rymdkapsel by Grapefrukt."
+        alert.messageText = "rumkapsel"
+        alert.informativeText = "Your Claude sessions and Conductor workspaces as a space station: offices per branch, commits as boxes, pull requests as colours, releases as rockets, and your crew next door.\n\nA homage to rymdkapsel by Grapefrukt."
         alert.runModal()
     }
 
@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         c.queryItems = [
             URLQueryItem(name: "labels", value: label),
             URLQueryItem(name: "title", value: "\(kind): "),
-            URLQueryItem(name: "body", value: "\n\n---\nrymdkapsel \(version) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
+            URLQueryItem(name: "body", value: "\n\n---\nrumkapsel \(version) · macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"),
         ]
         if let url = c.url { NSWorkspace.shared.open(url) }
     }
@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     // MARK: Sparkle
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
-        controller.announce("update available: rymdkapsel \(item.displayVersionString) · press U")
+        controller.announce("update available: rumkapsel \(item.displayVersionString) · press U")
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
