@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
     let settingsModel = SettingsModel()
-    static let feedbackRepo = "MadsBuus/rumkapsel-releases"
+    static let feedbackRepo = "MadsBuus/rumkapsel"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Sparkle needs a real .app bundle; skip it for bare debug binaries, demos and snapshots.

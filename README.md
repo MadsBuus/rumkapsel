@@ -5,6 +5,10 @@ are minions on a space station. Repos are colours, Conductor worktrees are offic
 web research and subagents happen, commits pile up as boxes, and pull requests colour them.
 
 
+## Contributing
+
+Pull requests welcome. Fork, branch, `./build.sh run` to try it, open a PR. Feature requests and bugs go in [issues](https://github.com/MadsBuus/rumkapsel/issues).
+
 ## Build
 
 ```bash

@@ -35,7 +35,7 @@ struct ReleasePR: Equatable {
     let state: String
     let url: String
     let labels: [String]
-    var isProduction: Bool { base == "production" || base == "main" || base == "master" }
+    var isProduction: Bool { base == ConfigStore.shared.current.productionBranch }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
 }
 
@@ -242,13 +242,16 @@ final class GitHubResolver {
         lock.unlock()
         queue.async { [self] in
             var found: [ReleasePR] = []
-            for base in ["staging", "production"] {
+            let cfg = ConfigStore.shared.current
+            let bases = [cfg.stagingBranch, cfg.productionBranch].filter { !$0.isEmpty }
+            let heads: Set<String> = [cfg.trunkBranch, cfg.stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
+            for base in bases {
                 guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
                                      "--json", "number,title,baseRefName,headRefName,state,url,labels"], cwd: repoRoot),
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
                 for o in arr {
                     let head = o["headRefName"] as? String ?? ""
-                    guard ["develop", "staging", "main", "master"].contains(head) else { continue }
+                    guard heads.contains(head) else { continue }
                     let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
                     found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
                                            head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels))
@@ -309,7 +312,8 @@ final class GitHubResolver {
         queue.async { [self] in
             // Work branches off develop where it exists; otherwise main, master, or the remote default.
             var base = "origin/HEAD"
-            for candidate in ["origin/develop", "origin/main", "origin/master"] where run(["git", "rev-parse", "--verify", "--quiet", candidate], cwd: worktree) != nil {
+            let trunk = ConfigStore.shared.current.trunkBranch
+            for candidate in ["origin/" + trunk, "origin/develop", "origin/main", "origin/master"] where run(["git", "rev-parse", "--verify", "--quiet", candidate], cwd: worktree) != nil {
                 base = candidate; break
             }
             var isPushed = false

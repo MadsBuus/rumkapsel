@@ -36,7 +36,7 @@ enum Place: Hashable {
     static func forActivity(_ a: Activity, home: String, isSubagent: Bool) -> Place {
         if isSubagent || a == .researching { return .core }
         if a == .sleeping { return .quarters }
-        if a == .qa { return .pad }
+        if a == .qa { return .room("kind:deck") }
         return .room(home)
     }
 }
@@ -133,6 +133,13 @@ final class Station {
     var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 2.5) }
     var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
     var storedBoxes: Int { stored.values.reduce(0, +) }
+    var staged: [String: Int] = [:]          // boxes on the test deck, per repo
+    /// The test deck: a 2x2 on the north side of the launch pad where staged work waits for production.
+    var deckCells: [Cell] {
+        guard hasPad else { return [] }
+        let x = -spineHalfLength - 1
+        return [Cell(x: x, y: -1), Cell(x: x, y: -2), Cell(x: x - 1, y: -1), Cell(x: x - 1, y: -2)]
+    }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
@@ -161,7 +168,7 @@ final class Station {
             out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
             out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
         }
-        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) }
+        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) && !deckCells.contains($0) }
     }
 
     /// The corridor axes are never built on, however far they extend.
@@ -182,6 +189,7 @@ final class Station {
         w.formUnion(hangarCells)
         w.formUnion(padCells)
         w.formUnion(storageCells)
+        w.formUnion(deckCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -196,6 +204,7 @@ final class Station {
         case .room("kind:hangar"): return hangarCells
         case .room("kind:pad"): return padCells + [Cell(x: -spineHalfLength, y: 0), Cell(x: -spineHalfLength, y: 1)]
         case .room("kind:storage"): return storageCells
+        case .room("kind:deck"): return deckCells.isEmpty ? padCells : deckCells
         case .room(let key): return rooms[key]?.cells ?? []
         }
     }
@@ -271,7 +280,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell]) -> [Cell] {
@@ -334,18 +343,20 @@ final class Station {
         var rooms: [String: SavedRoom]
         var stored: Int?
         var storedByRepo: [String: Int]?
+        var stagedByRepo: [String: Int]?
     }
     struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
 
     var saved: Saved {
         Saved(spine: spineHalfLength, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
-        }, stored: storedBoxes, storedByRepo: stored)
+        }, stored: storedBoxes, storedByRepo: stored, stagedByRepo: staged)
     }
 
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
         stored = s.storedByRepo ?? [:]
+        staged = s.stagedByRepo ?? [:]
         for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)

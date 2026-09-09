@@ -352,6 +352,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let demo: Bool
     private var demoClock = 0.0
     private var demoMerged = false
+    private var demoStaged = false
 
     static let activeWindow: TimeInterval = 12 * 3600   // a minion sleeps as long as its office stands
     static let busyWindow: TimeInterval = 90
@@ -518,6 +519,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if station.hangarCells.contains(c) { return "kind:hangar" }
         if station.storageCells.contains(c) { return "kind:storage" }
+        if station.deckCells.contains(c) && !ConfigStore.shared.current.stagingBranch.isEmpty { return "kind:deck" }
         if station.padCells.contains(c) { return "kind:pad" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
@@ -653,6 +655,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             for c in station.storageCells {
                 addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
+            }
+            if !ConfigStore.shared.current.stagingBranch.isEmpty {
+                for c in station.deckCells {
+                    addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
+                }
             }
             if station.hasPad {
                 let pc = station.padCenter
@@ -795,6 +802,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
+                if !ConfigStore.shared.current.stagingBranch.isEmpty {
+                    let deckLabel = floorSign("staging", color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
+                    deckLabel.node.position.y = 0.012
+                    let dc = station.deckCells
+                    let dcorner = SIMD2(Double(dc.map(\.x).max()!) + 0.42 - deckLabel.width / 2, Double(dc.map(\.y).max()!) + 0.42 - deckLabel.height / 2)
+                    add(deckLabel.node, yaw: 0, center: dcorner + SIMD2(ox, oz))
+                }
                 let storeLabel = floorSign("storage", color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
                 storeLabel.node.position.y = 0.012
                 let sc = station.storageCells
@@ -989,13 +1003,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            // Merged work waiting in storage, in its repo colour, four to a tile.
-            if station.hasPad && station.storedBoxes > 0 {
-                var seed = UInt64(truncatingIfNeeded: station.name.hashValue) | 1
+            // Merged work waiting in storage and staged work on the deck, in repo colours, four to a tile.
+            for (area, piles, cells) in [("storage", station.stored, station.storageCells), ("deck", station.staged, station.deckCells)] where station.hasPad && !cells.isEmpty {
+                var seed = UInt64(truncatingIfNeeded: (station.name + area).hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                let cells = station.storageCells
                 var i = 0
-                for (repo, n) in station.stored.sorted(by: { $0.key < $1.key }) where n > 0 {
+                for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
                     let c = NSColor(fleet.color(forRepo: repo))
                     for _ in 0..<min(n, 16) {
                         let size = [0.18, 0.24, 0.3][min(2, Int(rnd() * 3))]
@@ -1007,7 +1020,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         let o = slot[i % 4]
                         node.position = v3(station.offset.x + Double(cell.x) + o.x, size / 2 + Double(i / 16) * 0.3, station.offset.y + Double(cell.y) + o.y)
                         node.eulerAngles.y = rnd() * 0.8
-                        node.name = "storage:\(station.name)|\(repo)"
+                        node.name = "\(area):\(station.name)|\(repo)"
                         markerRoot.addChildNode(node)
                         i += 1
                         if i >= 32 { break }
@@ -1149,6 +1162,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func rebuildRockets() {
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot] else { continue }
+            if !launch.pr.isProduction {
+                if let st = fleet.stations[info.station] { stageCargo(station: st, repo: info.repo) }
+                ringBell(seed: launch.pr.number)
+                continue
+            }
             let key = "\(info.station)|\(launch.pr.number)"
             let existing = rockets.keys.first { $0.hasPrefix(key + "|") || $0 == key }
             let node = existing.flatMap { rockets.removeValue(forKey: $0) } ?? {
@@ -1166,12 +1184,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for (root, info) in repoRoots {
             guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
             let hasProduction = open.contains(where: \.isProduction)
-            for pr in open where pr.isProduction || !hasProduction {
-                let cargoBucket = (station.stored[info.repo] ?? 0) / 3
+            let stagingIsDeck = !ConfigStore.shared.current.stagingBranch.isEmpty
+            for pr in open where pr.isProduction || (!hasProduction && !stagingIsDeck) {
+                let cargoBucket = ((stagingIsDeck ? station.staged : station.stored)[info.repo] ?? 0) / 3
                 let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")|c\(cargoBucket)"
                 live.insert(key)
                 if rockets[key] != nil { continue }
-                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: station.stored[info.repo] ?? 0)
+                let cargoPile = stagingIsDeck ? station.staged : station.stored
+                let n = rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: cargoPile[info.repo] ?? 0)
                 if pr.untested {
                     let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: pr.isProduction)
                     deco.name = "hold"
@@ -1199,9 +1219,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if ringRoot.parent == nil { propRoot.addChildNode(ringRoot) }
         ringRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values where station.hasPad {
-            let waiting = station.stored.filter { $0.value > 0 }.map(\.key).sorted()
+            let pile = ConfigStore.shared.current.stagingBranch.isEmpty ? station.stored : station.staged
+            let waiting = pile.filter { $0.value > 0 }.map(\.key).sorted()
             let withRocket = Set(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> String? in
-                (github.openReleases(repoRoot: root)?.isEmpty == false) ? info.repo : nil
+                (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) == true) ? info.repo : nil
             })
             for (i, repo) in waiting.filter({ !withRocket.contains($0) }).enumerated() {
                 let radius = 0.62 + Double(i) * 0.09
@@ -1393,9 +1414,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
             infoLabel.text = "storage · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
+        } else if h.hasPrefix("deck:") {
+            let qa = minions.values.filter { $0.activity == .qa && $0.state != .leaving }.map { $0.home.name }
+            if !qa.isEmpty { infoLabel.text = "test deck · QA in progress: " + qa.joined(separator: ", "); return }
+            let name = String(h.dropFirst(5).split(separator: "|").first ?? "")
+            let parts = (fleet.stations[name]?.staged ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
+            infoLabel.text = "test deck · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
         } else if h.hasPrefix("pad:") {
             let name = String(h.dropFirst(4))
-            let due = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.map { "\($0.value) \($0.key)" }.sorted()
+            let due = (ConfigStore.shared.current.stagingBranch.isEmpty ? fleet.stations[name]?.stored : fleet.stations[name]?.staged)?.filter { $0.value > 0 }.map { "\($0.value) \($0.key)" }.sorted() ?? []
             infoLabel.text = "launch pad · release pull requests wait here; merging launches" + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
         } else if h.hasPrefix("hangar:") {
             infoLabel.text = "hangar · new offices arrive here by ship"
@@ -1912,9 +1939,31 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// A release merged: storage is emptied into the rocket before it lifts off.
-    private func loadRocket(station: Station, rocket: SCNNode, repo: String) {
+    /// A staging release merged: the repo's storage boxes are carried to the test deck.
+    private func stageCargo(station: Station, repo: String) {
         let boxes = markerRoot.childNodes.filter { $0.name == "storage:\(station.name)|\(repo)" }
+        guard !boxes.isEmpty else { return }
+        logEvent("\(repo): deployed to staging, moving to the test deck")
+        for (i, b) in boxes.enumerated() {
+            let dest = station.deckCells[i % station.deckCells.count]
+            let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
+            b.name = "haul"
+            addHaul(station: station, box: b, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
+                guard let self else { return }
+                station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
+                station.staged[repo, default: 0] += 1
+                b.removeFromParentNode()
+                rebuildMarkers()
+                rebuildRockets()
+                fleet.save()
+            }
+        }
+    }
+
+    /// A production release merged: the deck (or storage, without a staging branch) is loaded into the rocket.
+    private func loadRocket(station: Station, rocket: SCNNode, repo: String) {
+        let source = ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck"
+        let boxes = markerRoot.childNodes.filter { $0.name == "\(source):\(station.name)|\(repo)" }
         guard !boxes.isEmpty else { liftOff(rocket); return }
         pendingLaunch[station.name + "|" + repo] = (rocket, boxes.count, clock)
         logEvent("\(repo): loading the rocket")
@@ -1925,7 +1974,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             b.name = "haul"
             addHaul(station: station, box: b, from: fromCell, to: padCell, drop: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y)) { [weak self] in
                 guard let self else { return }
-                station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
+                if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) } else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
                 b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
                 let pk = station.name + "|" + repo
                 if var p = pendingLaunch[pk] {
@@ -2179,7 +2228,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 haulMergedBoxes(station: st, room: room)
             }
-            if clock > 26, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work|tattoodo-web"] == nil, let st = fleet.stations["work"] {
+            if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 { demoStaged = true; stageCargo(station: st, repo: "tattoodo-web") }
+            if clock > 30, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work|tattoodo-web"] == nil, let st = fleet.stations["work"] {
                 r.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
                 loadRocket(station: st, rocket: r, repo: "tattoodo-web")
                 logEvent("tattoodo-web launched to production: release 2.14")
@@ -2431,7 +2481,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .shipping: roll = sin(t * 9) * 0.16                      // shipping: excited wiggle
                 case .skill: spin = t * 2                                     // using a skill: a slow spin
                 case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
-                case .qa: tilt = -0.25 + sin(t * 1.5) * 0.1; spin = sin(t * 0.8) * 0.4   // QA: looking the rocket up and down
+                case .qa:
+                    // QA on the test deck: peering down at the staged boxes, a green tick popping up now and then.
+                    tilt = 0.28 + sin(t * 1.2) * 0.08; spin = sin(t * 0.6) * 0.5
+                    if Int(t * 2) % 9 == 0 && Int((t - dt) * 2) % 9 != 0 {
+                        let tick = SCNNode(geometry: SCNSphere(radius: 0.07))
+                        tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
+                        tick.position = v3(m.node.position.x, m.headHeight + 0.2, m.node.position.z)
+                        propRoot.addChildNode(tick)
+                        tick.runAction(.sequence([.group([.moveBy(x: 0, y: 0.5, z: 0, duration: 0.9), .sequence([.wait(duration: 0.5), .fadeOut(duration: 0.4)])]), .removeFromParentNode()]))
+                        drone.ping(seed: m.id.hashValue)
+                    }
                 default: roll = sin(t * 5) * 0.07
                 }
             }

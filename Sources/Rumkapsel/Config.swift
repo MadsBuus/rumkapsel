@@ -13,6 +13,9 @@ struct AppConfig: Codable, Equatable {
     var githubMinutes: Int = 5
     var sleepMinutes: Int = 5
     var showCrew: Bool = true
+    var trunkBranch: String = "develop"        // where feature branches merge
+    var stagingBranch: String = "staging"      // optional: a test deck between trunk and production
+    var productionBranch: String = "production"
 
     static var url: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)

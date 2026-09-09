@@ -25,6 +25,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             stations.tabItem { Label("Stations", systemImage: "building.2") }
+            pipeline.tabItem { Label("Releases", systemImage: "airplane.departure") }
             repositories.tabItem { Label("Repositories", systemImage: "shippingbox") }
             people.tabItem { Label("People", systemImage: "person.2") }
             general.tabItem { Label("General", systemImage: "gear") }
@@ -60,6 +61,20 @@ struct SettingsView: View {
             Divider()
             Toggle("Show the crew station with teammates' pull requests", isOn: $model.config.showCrew)
             Text("Per-repository overrides live under Repositories.").font(.caption).foregroundStyle(.secondary)
+        }
+        .onChange(of: model.config) { _ in model.commit() }
+    }
+
+    private var pipeline: some View {
+        page {
+            Text("How work flows to production").font(.headline)
+            Text("Merged pull requests go to storage. A release into the staging branch moves them to the test deck. A release into the production branch loads the rocket. Leave staging empty if you release straight from trunk.")
+                .font(.caption).foregroundStyle(.secondary)
+            Grid(alignment: .leading, verticalSpacing: 10) {
+                GridRow { Text("Trunk branch"); TextField("develop", text: $model.config.trunkBranch).frame(width: 200) }
+                GridRow { Text("Staging branch"); TextField("optional", text: $model.config.stagingBranch).frame(width: 200) }
+                GridRow { Text("Production branch"); TextField("production", text: $model.config.productionBranch).frame(width: 200) }
+            }
         }
         .onChange(of: model.config) { _ in model.commit() }
     }
