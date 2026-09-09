@@ -288,7 +288,35 @@ final class GitHubResolver {
             // No release pipeline in this repository: nothing waits for a launch here.
             let hasPipeline = !bases.isEmpty && (lastStaging != nil || lastProduction != nil)
             let floor = Date().addingTimeInterval(-30 * 24 * 3600)
-            if hasPipeline, let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
+            // Exact diff between branches when they all exist: pull request numbers named in the commits.
+            func prNumbers(_ range: String) -> [Int]? {
+                guard let out = run(["git", "log", "--format=%s", "--no-merges", "--max-count=300", range], cwd: repoRoot),
+                      let text = String(data: out, encoding: .utf8) else { return nil }
+                var found: [Int] = []
+                for line in text.split(separator: "\n") {
+                    if let m = line.firstMatch(of: #/\(#(\d+)\)\s*$/#), let n = Int(m.1) { found.append(n) }
+                }
+                if let out = run(["git", "log", "--format=%s", "--merges", "--max-count=300", range], cwd: repoRoot), let t = String(data: out, encoding: .utf8) {
+                    for line in t.split(separator: "\n") {
+                        if let m = line.firstMatch(of: #/Merge pull request #(\d+)/#), let n = Int(m.1) { found.append(n) }
+                    }
+                }
+                return Array(Set(found)).sorted(by: >)
+            }
+            var exact = false
+            if hasPipeline, !stagingBranch.isEmpty, !productionBranch.isEmpty {
+                _ = run(["git", "fetch", "-q", "origin", cfg.trunkBranch, stagingBranch, productionBranch], cwd: repoRoot)
+                if let deck = prNumbers("origin/\(productionBranch)..origin/\(stagingBranch)"),
+                   let storage = prNumbers("origin/\(stagingBranch)..origin/\(cfg.trunkBranch)") {
+                    let releaseNumbers = Set(found.map(\.number))
+                    newCargo.deckNumbers = deck.filter { !releaseNumbers.contains($0) }
+                    newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
+                    newCargo.deck = newCargo.deckNumbers.count
+                    newCargo.storage = newCargo.storageNumbers.count
+                    exact = true
+                }
+            }
+            if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }

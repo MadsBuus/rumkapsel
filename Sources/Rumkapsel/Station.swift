@@ -144,10 +144,11 @@ final class Station {
         return (0..<3).flatMap { d in (-3...(-1)).map { y in Cell(x: x - d, y: y) } }
     }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
-    /// Six beds on the quarters floor, as local positions and the cell they belong to.
-    var beds: [(pos: SIMD2<Double>, cell: Cell)] {
+    /// Bunk beds: each dorm tile has a lower and an upper bunk.
+    var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
         guard let q = rooms["kind:quarters"] else { return [] }
-        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0) }
+        let cells = q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8)
+        return cells.map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) } + cells.map { (SIMD2(Double($0.x), Double($0.y)), $0, 1) }
     }
 
     static func rect(_ w: Int, _ h: Int) -> [Cell] {

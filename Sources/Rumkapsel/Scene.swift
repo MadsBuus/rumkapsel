@@ -232,6 +232,13 @@ final class Minion {
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
         node.addChildNode(tiltNode)
+        let shadow = SCNNode(geometry: SCNPlane(width: w * 1.6, height: d * 3.2))
+        shadow.geometry!.firstMaterial = flat(Palette.void)
+        shadow.opacity = 0.35
+        shadow.eulerAngles.x = -.pi / 2
+        shadow.position = v3(0.03, 0.003, 0.02)
+        shadow.name = "minion:" + id
+        node.addChildNode(shadow)
         self.tilt = tiltNode
         self.body = body
         self.bodyHeight = h
@@ -469,6 +476,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onClick = { [weak self] node in
             guard let n = node?.name else { return }
             if n.hasPrefix("minion:") { self?.enqueue { self?.poke(minionId: String(n.dropFirst(7))) } }
+            if (n.hasPrefix("storage:") || n.hasPrefix("deck:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
@@ -797,12 +805,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             glow.position = v3(station.offset.x + mp.x, 1.75, station.offset.y + mp.y)
             staticRoot.addChildNode(glow)
             for bed in station.beds {
-                let b = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72))
-                b.geometry!.firstMaterial = flat(NSColor(Colors.bed))
-                b.eulerAngles.x = -.pi / 2
-                b.position = v3(station.offset.x + bed.pos.x, 0.005, station.offset.y + bed.pos.y)
-                b.name = "room:\(station.name)|kind:quarters"
-                staticRoot.addChildNode(b)
+                if bed.level == 0 {
+                    let b = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72))
+                    b.geometry!.firstMaterial = flat(NSColor(Colors.bed))
+                    b.eulerAngles.x = -.pi / 2
+                    b.position = v3(station.offset.x + bed.pos.x, 0.005, station.offset.y + bed.pos.y)
+                    b.name = "room:\(station.name)|kind:quarters"
+                    staticRoot.addChildNode(b)
+                } else {
+                    // The upper bunk: a slab on four thin posts.
+                    let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))
+                    slab.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.08))
+                    slab.position = v3(station.offset.x + bed.pos.x, 0.34, station.offset.y + bed.pos.y)
+                    slab.name = "room:\(station.name)|kind:quarters"
+                    for dx in [-0.16, 0.16] { for dz in [-0.35, 0.35] {
+                        let post = SCNNode(geometry: SCNBox(width: 0.025, height: 0.34, length: 0.025, chamferRadius: 0))
+                        post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.22, 0.3)))
+                        post.position = v3(dx, -0.17, dz)
+                        slab.addChildNode(post)
+                    } }
+                    staticRoot.addChildNode(slab)
+                }
             }
 
             for room in station.rooms.values {
@@ -1137,10 +1160,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 let sorted = cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                 var i = 0
+                let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
+                    github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
                 for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
                     let c = NSColor(fleet.color(forRepo: repo))
-                    for _ in 0..<min(n, 24) {
+                    let numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
+                    for k in 0..<min(n, 24) {
                         let size = 0.38
+                        let prNumber = k < numbers.count ? numbers[k] : 0
                         let pkg = Props.package(color: c.lighter(0.1), band: purple, size: size)
                         let cell = sorted[(i / 2) % sorted.count]
                         let level = Double(i / (sorted.count * 2)) * 0.34
@@ -1148,7 +1175,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
                         pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, level, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
                         pkg.eulerAngles.y = neat ? 0 : (rnd() - 0.5) * 0.7
-                        pkg.name = "\(area):\(station.name)|\(repo)"
+                        pkg.name = "\(area):\(station.name)|\(repo)|\(prNumber)"
+                        pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                         markerRoot.addChildNode(pkg)
                         i += 1
                     }
@@ -1450,6 +1478,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         } else if h.hasPrefix("rocket:") {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+        } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
+            let parts = h.split(separator: "|")
+            infoLabel.text = "\(parts[1]) · PR #\(n) · \(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging") · click to open"
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
@@ -1473,6 +1504,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } else {
             infoLabel.text = ""
         }
+    }
+
+    /// A crate in storage or on the deck opens its pull request.
+    private func openCargo(named name: String) {
+        let parts = name.split(separator: "|").map(String.init)
+        guard parts.count == 3, let n = Int(parts[2]), n > 0 else { return }
+        let repo = parts[1]
+        guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root),
+              let url = URL(string: "https://github.com/\(owner)/pull/\(n)") else { return }
+        DispatchQueue.main.async { NSWorkspace.shared.open(url) }
     }
 
     private func open(named raw: String?) {
@@ -1536,14 +1577,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func send(_ m: Minion, to place: Place) {
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
+        var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
-            m.bed = station.beds.indices.first { !used.contains($0) }   // nil means a spot on the floor
+            m.bed = station.beds.indices.first { !used.contains($0) }
+            if m.bed == nil { place = .lounge }   // every bunk taken: doze in the lounge
         }
         let cells = station.cells(of: place)
         let target: Cell
         if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
-        else if place == .quarters, let hall = station.doorOutside(of: "kind:quarters") { target = hall }   // no bed left: the hallway
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
@@ -2569,19 +2611,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
+            var bunkLift = 0.0
             if m.path.isEmpty, m.place == .quarters {
                 if let b = m.bed, b < station.beds.count {
                     m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
-                } else if let hall = station.doorOutside(of: "kind:quarters") {
-                    let k = Double(abs(m.id.hashValue) % 5) - 2
-                    let spot = SIMD2(Double(hall.x), Double(hall.y)) + SIMD2(k * 0.18, k * 0.1)
-                    m.pos += (spot - m.pos) * min(1, dt * 4)
+                    bunkLift = station.beds[b].level == 1 ? 0.36 : 0
                 }
             }
             let resting = m.path.isEmpty && m.state == .settled
             if resting && m.activity == .sleeping && m.place == .quarters { m.setSleeping(true) }
             let jump = jumping && resting && m.place != .lounge ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0
-            m.node.position = v3(station.offset.x + m.pos.x, jump, station.offset.y + m.pos.y)
+            m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
