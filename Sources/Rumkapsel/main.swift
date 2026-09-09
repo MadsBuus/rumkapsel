@@ -11,7 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     static let feedbackRepo = "MadsBuus/rumkapsel-releases"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+        // Sparkle needs a real .app bundle; skip it for bare debug binaries, demos and snapshots.
+        let inBundle = Bundle.main.bundleURL.pathExtension == "app"
+        let headless = CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--demo")
+        updater = SPUStandardUpdaterController(startingUpdater: inBundle && !headless, updaterDelegate: self, userDriverDelegate: nil)
         let args = CommandLine.arguments
         let demo = args.contains("--demo")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
