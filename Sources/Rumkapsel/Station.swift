@@ -289,7 +289,9 @@ final class Station {
 
     private func placeShape(_ shape: [Cell]) -> [Cell] {
         let variants = rotations(of: shape)
-        while true {
+        var rounds = 0
+        while rounds < 40 {   // bounded: a station can never wedge the render thread
+            rounds += 1
             let reach = spineHalfLength + 4
             var anchors: [Cell] = []
             for x in -reach...reach { for y in -reach...reach { anchors.append(Cell(x: x, y: y)) } }
@@ -311,6 +313,9 @@ final class Station {
             spineHalfLength += 2
             walkableCache = nil
         }
+        // Give up gracefully: park the room in a free spot far out along the east arm.
+        let far = Cell(x: spineHalfLength + 2, y: 2)
+        return variants[0].map { $0 + far }
     }
 
     /// Breadth-first path over walkable cells. Returns cells to visit, excluding `from`.

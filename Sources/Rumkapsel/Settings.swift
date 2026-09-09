@@ -81,7 +81,7 @@ struct SettingsView: View {
 
     private var repositories: some View {
         page {
-            Text("Where each repository's sessions go, and whether teammates' work in it shows on the crew station.")
+            Text("Where each repository's sessions go, whether teammates' work in it shows on the crew station, and whether it is shared on the local network. Nothing is shared unless ticked.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
                 TableColumn("Repository") { Text($0.id) }
@@ -103,6 +103,14 @@ struct SettingsView: View {
                     Toggle("", isOn: Binding(
                         get: { model.config.repos[repo]?.crew ?? true },
                         set: { model.config.repos[repo, default: .init()].crew = $0; model.commit() }))
+                    .labelsHidden()
+                }
+                .width(50)
+                TableColumn("Share") { (row: Named) in
+                    let repo = row.id
+                    Toggle("", isOn: Binding(
+                        get: { model.config.repos[repo]?.share ?? false },
+                        set: { model.config.repos[repo, default: .init()].share = $0; model.commit() }))
                     .labelsHidden()
                 }
                 .width(50)
@@ -138,7 +146,7 @@ struct SettingsView: View {
             Toggle("Share my station on the local network", isOn: $model.config.shareOnLAN)
             HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
                 .disabled(!model.config.shareOnLAN).opacity(model.config.shareOnLAN ? 1 : 0.5)
-            Text("Only the picture is shared: rooms, box counts and where minions stand. No paths, branches or transcripts.").font(.caption).foregroundStyle(.secondary)
+            Text("Only repositories ticked under Repositories are shared, and only the picture: rooms, package counts and where minions stand. No paths, branches or transcripts.").font(.caption).foregroundStyle(.secondary)
             Divider()
             Button("Check for Updates…") { onCheckUpdates() }
             Spacer()

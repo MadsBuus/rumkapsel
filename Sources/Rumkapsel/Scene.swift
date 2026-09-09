@@ -2014,20 +2014,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if cfg.shareOnLAN { peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName) } else { peers.stop() }
     }
 
-    /// Our own picture for the others: local stations only, never the crew station.
+    /// Our own picture for the others: only repositories ticked for sharing, never the crew station.
     private func makeSnapshot() -> PeerSnapshot? {
+        let cfg = ConfigStore.shared.current
         var out: [PeerSnapshot.Station] = []
         for station in fleet.stations.values where station.name != "crew" {
-            let rooms = station.rooms.values.filter { !$0.key.hasPrefix("crew:") }.map { r in
+            let sharedRooms = station.rooms.values.filter { r in r.repo.map { cfg.shared(repo: $0) } ?? false }
+            guard !sharedRooms.isEmpty else { continue }
+            let fixed = station.rooms.values.filter { $0.key.hasPrefix("kind:") && $0.key != "kind:bots" }
+            let rooms = (sharedRooms + fixed).map { r in
                 PeerSnapshot.Room(key: r.key, name: r.name, color: r.color, cells: r.cells,
                                   boxes: lastBoxCount[roomKey(station, r)] ?? 0,
                                   dim: r.key.hasPrefix("proj:") || !(roomPower[roomKey(station, r)] ?? true))
             }
-            let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving }.map {
+            let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) }.map {
                 PeerSnapshot.Minion(id: $0.id.hashValue.description, x: $0.pos.x, y: $0.pos.y, asleep: $0.activity == .sleeping, busy: $0.busy)
             }
+            let stored = station.stored.filter { cfg.shared(repo: $0.key) }
+            let staged = station.staged.filter { cfg.shared(repo: $0.key) }
             out.append(PeerSnapshot.Station(name: station.name, spine: station.spineHalfLength, hasPad: station.hasPad, hasHangar: station.hasHangar,
-                                            rooms: rooms, minions: ms, stored: station.stored, staged: station.staged))
+                                            rooms: rooms, minions: ms, stored: stored, staged: staged))
         }
         return PeerSnapshot(name: peers.name, stations: out)
     }

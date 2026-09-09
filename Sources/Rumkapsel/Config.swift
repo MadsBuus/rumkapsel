@@ -5,6 +5,7 @@ struct AppConfig: Codable, Equatable {
     struct RepoOverride: Codable, Equatable {
         var station: String = "auto"   // auto, work, private, hidden
         var crew: Bool = true
+        var share: Bool = false        // visible to other rumkapsels on the local network
     }
     var stationRule: String = "none"          // conductor, owner, none
     var workOwners: [String] = ["Tattoodo"]
@@ -56,6 +57,7 @@ struct AppConfig: Codable, Equatable {
     }
 
     func crewEnabled(repo: String) -> Bool { showCrew && (repos[repo]?.crew ?? true) }
+    func shared(repo: String) -> Bool { shareOnLAN && (repos[repo]?.share ?? false) }
 }
 
 /// Shared, mutable copy used by the scene; the settings window replaces it and notifies.
