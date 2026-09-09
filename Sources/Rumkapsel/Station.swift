@@ -131,7 +131,8 @@ final class Station {
         return [Cell(x: x, y: 2), Cell(x: x, y: 3), Cell(x: x - 1, y: 2), Cell(x: x - 1, y: 3)]
     }
     var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 2.5) }
-    var storedBoxes = 0
+    var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
+    var storedBoxes: Int { stored.values.reduce(0, +) }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
@@ -332,18 +333,19 @@ final class Station {
         var spine: Int
         var rooms: [String: SavedRoom]
         var stored: Int?
+        var storedByRepo: [String: Int]?
     }
     struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
 
     var saved: Saved {
         Saved(spine: spineHalfLength, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
-        }, stored: storedBoxes)
+        }, stored: storedBoxes, storedByRepo: stored)
     }
 
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
-        storedBoxes = s.stored ?? 0
+        stored = s.storedByRepo ?? [:]
         for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)

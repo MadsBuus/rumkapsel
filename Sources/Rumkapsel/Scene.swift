@@ -989,24 +989,29 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            // Merged work waiting in storage, purple, four to a tile.
+            // Merged work waiting in storage, in its repo colour, four to a tile.
             if station.hasPad && station.storedBoxes > 0 {
                 var seed = UInt64(truncatingIfNeeded: station.name.hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                let purple = NSColor(rgb: (0.6, 0.4, 0.9))
                 let cells = station.storageCells
-                for i in 0..<min(16, station.storedBoxes) {
-                    let size = [0.18, 0.24, 0.3][min(2, Int(rnd() * 3))]
-                    let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
-                    box.materials = [flat(purple), flat(purple.darker(0.13)), flat(purple), flat(purple.darker(0.13)), flat(purple.lighter(0.14)), flat(purple)]
-                    let n = SCNNode(geometry: box)
-                    let cell = cells[(i / 4) % cells.count]
-                    let slot: [SIMD2<Double>] = [SIMD2(-0.25, -0.25), SIMD2(0.25, -0.25), SIMD2(-0.25, 0.25), SIMD2(0.25, 0.25)]
-                    let o = slot[i % 4]
-                    n.position = v3(station.offset.x + Double(cell.x) + o.x, size / 2 + Double(i / 16) * 0.3, station.offset.y + Double(cell.y) + o.y)
-                    n.eulerAngles.y = rnd() * 0.8
-                    n.name = "storage:" + station.name
-                    markerRoot.addChildNode(n)
+                var i = 0
+                for (repo, n) in station.stored.sorted(by: { $0.key < $1.key }) where n > 0 {
+                    let c = NSColor(fleet.color(forRepo: repo))
+                    for _ in 0..<min(n, 16) {
+                        let size = [0.18, 0.24, 0.3][min(2, Int(rnd() * 3))]
+                        let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
+                        box.materials = [flat(c), flat(c.darker(0.13)), flat(c), flat(c.darker(0.13)), flat(c.lighter(0.14)), flat(c)]
+                        let node = SCNNode(geometry: box)
+                        let cell = cells[(i / 4) % cells.count]
+                        let slot: [SIMD2<Double>] = [SIMD2(-0.25, -0.25), SIMD2(0.25, -0.25), SIMD2(-0.25, 0.25), SIMD2(0.25, 0.25)]
+                        let o = slot[i % 4]
+                        node.position = v3(station.offset.x + Double(cell.x) + o.x, size / 2 + Double(i / 16) * 0.3, station.offset.y + Double(cell.y) + o.y)
+                        node.eulerAngles.y = rnd() * 0.8
+                        node.name = "storage:\(station.name)|\(repo)"
+                        markerRoot.addChildNode(node)
+                        i += 1
+                        if i >= 32 { break }
+                    }
                 }
             }
         }
@@ -1150,7 +1155,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 return n
             }()
             node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-            if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node) } else { liftOff(node) }
+            if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node, repo: info.repo) } else { liftOff(node) }
             logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
             ringBell(seed: launch.pr.number)
         }
@@ -1356,8 +1361,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } else if h.hasPrefix("rocket:") {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("storage:") {
-            let n = fleet.stations[String(h.dropFirst(8))]?.storedBoxes ?? 0
-            infoLabel.text = "storage · \(n) merged boxes waiting for a release"
+            let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
+            let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
+            infoLabel.text = "storage · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
         } else if h.hasPrefix("pad:") {
             infoLabel.text = "launch pad · release pull requests wait here; merging launches"
         } else if h.hasPrefix("hangar:") {
@@ -1856,13 +1862,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         haulingRooms.insert(key)
         hauledAt[key] = Date()
         logEvent("\(room.name): merged, moving to storage")
+        let repo = room.repo ?? "work"
+        let c = NSColor(room.color)
         for (i, b) in boxes.enumerated() {
+            (b.geometry as? SCNBox)?.materials = [flat(c), flat(c.darker(0.13)), flat(c), flat(c.darker(0.13)), flat(c.lighter(0.14)), flat(c)]
+            b.childNodes.forEach { $0.removeFromParentNode() }
             let dest = station.storageCells[i % station.storageCells.count]
             let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
             b.name = "haul"
             addHaul(station: station, box: b, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
                 guard let self else { return }
-                station.storedBoxes += 1
+                station.stored[repo, default: 0] += 1
                 b.removeFromParentNode()
                 rebuildMarkers()
                 fleet.save()
@@ -1871,11 +1881,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     /// A release merged: storage is emptied into the rocket before it lifts off.
-    private func loadRocket(station: Station, rocket: SCNNode) {
-        let boxes = markerRoot.childNodes.filter { $0.name == "storage:" + station.name }
+    private func loadRocket(station: Station, rocket: SCNNode, repo: String) {
+        let boxes = markerRoot.childNodes.filter { $0.name == "storage:\(station.name)|\(repo)" }
         guard !boxes.isEmpty else { liftOff(rocket); return }
-        pendingLaunch[station.name] = (rocket, boxes.count, clock)
-        logEvent("\(station.name): loading the rocket")
+        pendingLaunch[station.name + "|" + repo] = (rocket, boxes.count, clock)
+        logEvent("\(repo): loading the rocket")
         let padCell = station.padCells.first ?? Station.rect(1, 1)[0]
         let pc = station.padCenter
         for b in boxes {
@@ -1883,12 +1893,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             b.name = "haul"
             addHaul(station: station, box: b, from: fromCell, to: padCell, drop: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y)) { [weak self] in
                 guard let self else { return }
-                station.storedBoxes = max(0, station.storedBoxes - 1)
+                station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
                 b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
-                if var p = pendingLaunch[station.name] {
+                let pk = station.name + "|" + repo
+                if var p = pendingLaunch[pk] {
                     p.remaining -= 1
-                    pendingLaunch[station.name] = p
-                    if p.remaining <= 0 { pendingLaunch[station.name] = nil; liftOff(p.node); fleet.save() }
+                    pendingLaunch[pk] = p
+                    if p.remaining <= 0 { pendingLaunch[pk] = nil; liftOff(p.node); fleet.save() }
                 }
             }
         }
@@ -2136,9 +2147,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 haulMergedBoxes(station: st, room: room)
             }
-            if clock > 26, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work"] == nil, let st = fleet.stations["work"] {
+            if clock > 26, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work|tattoodo-web"] == nil, let st = fleet.stations["work"] {
                 r.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-                loadRocket(station: st, rocket: r)
+                loadRocket(station: st, rocket: r, repo: "tattoodo-web")
                 logEvent("tattoodo-web launched to production: release 2.14")
                 rockets["work|1"] = nil
             }
