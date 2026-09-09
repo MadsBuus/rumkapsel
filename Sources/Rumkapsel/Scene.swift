@@ -167,7 +167,8 @@ final class Minion {
     enum State { case arriving, settled, leaving }
     enum Errand { case fetch(room: String), carry(room: String), pickup(Int), deliver(Int) }
 
-    let id: String
+    var id: String
+    var freeSince = 0.0        // clock when the worker's session went away; 0 while assigned
     var station: String
     var home: Home
     var state: State = .arriving
@@ -449,7 +450,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var demoMerged = false
     private var demoStaged = false
 
-    static let activeWindow: TimeInterval = 12 * 3600   // a minion sleeps as long as its office stands
+    static let activeWindow: TimeInterval = 60 * 60     // a worker stays with a session for an hour of quiet
     static let busyWindow: TimeInterval = 90
     static let replyWindow: TimeInterval = 20
     static let sleepWindow: TimeInterval = 5 * 60
@@ -1551,7 +1552,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func spawnMinion(_ s: SessionInfo, station: String, home: Home) -> Minion {
         let st = fleet.stations[station]
-        let start = s.isSubagent ? (st?.coreCenter ?? Cell(x: 0, y: 0)) : (st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0))
+        let start = s.isSubagent ? (st?.coreCenter ?? Cell(x: 0, y: 0)) : (st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0))
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         m.markers = s.eventMarkers
         m.promptCount = s.promptCount
@@ -1599,6 +1600,57 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func walk(_ m: Minion, to cell: Cell) {
         guard let station = fleet.stations[m.station] else { return }
         m.path = station.path(from: m.cell, to: cell)
+    }
+
+    /// A new worker arrives by shuttle: it stays invisible until the ship has set down, then steps out.
+    private func arriveByShuttle(_ m: Minion) {
+        guard let station = fleet.stations[m.station], station.hasHangar, let anchor = hangarAnchors[m.station] else { return }
+        let slotIndex = (shipsInFlight[m.station] ?? 0) % station.hangarSlots.count
+        shipsInFlight[m.station, default: 0] += 1
+        let slot = station.hangarSlots[slotIndex]
+        m.pos = slot
+        m.opacity = 0
+        m.node.opacity = 0
+        m.wakeUntil = clock + 8.5   // held until the ship lands
+        let ship = shuttle(color: NSColor(fleet.color(forRepo: m.home.repo)))
+        let local = SIMD3(slot.x - station.hangarCenter.x, 0, slot.y - station.hangarCenter.y)
+        let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
+        let start = local + corners.randomElement()!, high = local + SIMD3(0, 5, 0), down = local + SIMD3(0, 0.55, 0), exit = local + corners.randomElement()!
+        ship.position = v3(start.x, start.y, start.z)
+        anchor.addChildNode(ship)
+        let approach = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0); approach.timingMode = .easeOut
+        let descend = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5); descend.timingMode = .easeInEaseOut
+        let rise = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5); rise.timingMode = .easeIn
+        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0); leave.timingMode = .easeIn
+        ship.runAction(.sequence([approach, descend, .wait(duration: 0.6), .run { [weak self] _ in self?.enqueue { m.opacity = 1; m.wakeUntil = 0 } }, .wait(duration: 1.0), rise, leave,
+                                  .run { [weak self] _ in self?.enqueue { self?.shipsInFlight[m.station, default: 1] -= 1 } }, .removeFromParentNode()]))
+        logEvent("shuttle inbound: a new worker for \(m.home.name)")
+        drone.sweep(up: false)
+    }
+
+    /// The shuttle body, wings in a repo colour.
+    private func shuttle(color: NSColor) -> SCNNode {
+        let ship = SCNNode()
+        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
+        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
+        ship.addChildNode(hull)
+        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
+        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
+        cockpit.position = v3(0.16, 0.11, 0)
+        ship.addChildNode(cockpit)
+        for side in [-1.0, 1.0] {
+            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
+            wing.geometry!.firstMaterial = lit(color)
+            wing.position = v3(-0.14, 0, side * 0.34)
+            ship.addChildNode(wing)
+        }
+        for side in [-1.0, 1.0] {
+            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
+            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
+            skid.position = v3(0, -0.14, side * 0.16)
+            ship.addChildNode(skid)
+        }
+        return ship
     }
 
     /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away.
@@ -1888,17 +1940,42 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         var seen = Set<String>()
-        // Old sessions in a workspace that still exists keep one sleeper per workspace: the latest.
-        var latestPerCwd: [String: Date] = [:]
-        for s in result.sessions where !s.isSubagent { latestPerCwd[s.cwd] = max(latestPerCwd[s.cwd] ?? .distantPast, s.lastModified) }
-        for s in result.sessions where Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
-            && (now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
-            || (!s.isSubagent && s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" && latestPerCwd[s.cwd] == s.lastModified)) {
+        let liveSessions = result.sessions.filter { s in
+            Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
+                && now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
+        }
+        let liveIds = Set(liveSessions.map(\.id))
+        // Workers whose session ended are free for reuse; they rest until someone needs them.
+        for m in minions.values where !m.isCrew && !m.isSubagent && !liveIds.contains(m.id) && m.freeSince == 0 { m.freeSince = clock; m.busy = false; m.activity = .sleeping; clearPyramids(m) }
+        for s in liveSessions {
             seen.insert(s.id)
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
-            let isNew = minions[s.id] == nil
+            var isNew = minions[s.id] == nil
+            var reused = false
+            if isNew && !s.isSubagent {
+                // A free worker on this station takes the new session before the shuttle brings another.
+                if let free = minions.values.filter({ $0.station == stationName && !$0.isCrew && !$0.isSubagent && $0.freeSince > 0 && $0.errand == nil })
+                    .min(by: { $0.freeSince < $1.freeSince }) {
+                    minions[free.id] = nil
+                    free.id = s.id
+                    free.node.name = "minion:" + s.id
+                    free.node.enumerateChildNodes { c, _ in c.name = "minion:" + s.id }
+                    free.freeSince = 0
+                    free.markers = s.eventMarkers
+                    free.promptCount = s.promptCount
+                    free.toolCount = s.toolCount
+                    free.cwd = s.cwd
+                    free.state = .arriving
+                    minions[s.id] = free
+                    isNew = false
+                    reused = true
+                }
+            }
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
+            m.freeSince = 0
+            if isNew && !s.isSubagent && newRooms[s.id] == nil { arriveByShuttle(m) }
+            _ = reused
             if m.station != stationName { despawn(m); continue }
             m.home = home
             let idle = now.timeIntervalSince(s.lastModified)
@@ -1965,11 +2042,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.state == .leaving { m.state = .arriving; send(m, to: m.place) }
         }
-        for m in minions.values where !seen.contains(m.id) && m.state != .leaving && !m.isCrew {
-            m.state = .leaving
-            if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
-            clearPyramids(m)
-            if m.isSubagent { m.path = [] } else { send(m, to: .quarters) }
+        for m in minions.values where !seen.contains(m.id) && m.state != .leaving && m.isSubagent {
+            m.state = .leaving; m.path = []
+        }
+        for station in fleet.stations.values where station.name != "crew" {
+            let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
+                .sorted { $0.freeSince < $1.freeSince }
+            let bunks = station.beds.count
+            for (i, m) in free.enumerated() {
+                let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
+                if i >= bunks || longIdle {
+                    m.state = .leaving
+                    if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
+                    if m.place != .quarters { send(m, to: .quarters) }
+                } else if m.place != .quarters && m.errand == nil {
+                    send(m, to: .quarters)
+                }
+            }
         }
         // Offices that appeared without a minion to deliver them just show up.
         let pending = Set(minions.values.compactMap { m in carriedRoom(of: m) ?? newRooms[m.id].map { "\(m.station)|\($0)" } })
@@ -2522,7 +2611,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
             if m.wakeUntil > 0 {
-                if clock < m.wakeUntil { continue } else { m.wakeUntil = 0 }
+                if clock < m.wakeUntil { m.node.opacity = m.opacity; continue } else { m.wakeUntil = 0 }
             }
             if let next = m.path.first {
                 let target = SIMD2(Double(next.x), Double(next.y))
