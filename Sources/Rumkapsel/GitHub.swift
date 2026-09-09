@@ -258,35 +258,33 @@ final class GitHubResolver {
         queue.async { [self] in
             var found: [ReleasePR] = []
             let cfg = ConfigStore.shared.current
-            let bases = [cfg.stagingBranch, cfg.productionBranch].filter { !$0.isEmpty }
-            let heads: Set<String> = [cfg.trunkBranch, cfg.stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
-            for base in bases {
-                guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
-                                     "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
-                for o in arr {
-                    let head = o["headRefName"] as? String ?? ""
-                    guard heads.contains(head) else { continue }
-                    let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-                    found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
-                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
-                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))))
-                }
+            // Which of the configured branches this repository actually has.
+            var remoteBranches = Set<String>()
+            if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+                for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
-            // Cargo: PRs merged into trunk, split by the last staging and production releases.
+            let stagingBranch = remoteBranches.contains(cfg.stagingBranch) ? cfg.stagingBranch : ""
+            let productionBranch = remoteBranches.contains(cfg.productionBranch) ? cfg.productionBranch : ""
+            let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
+            let heads: Set<String> = [cfg.trunkBranch, stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
+            for base in bases {            // Cargo: PRs merged into trunk, split by the last staging and production releases.
             let iso = ISO8601DateFormatter()
-            let lastStaging = found.filter { $0.base == cfg.stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
-            let lastProduction = found.filter { $0.base == cfg.productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+            let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+            let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
-            if let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
+            // No release pipeline in this repository: nothing waits for a launch here.
+            let hasPipeline = !bases.isEmpty && (lastStaging != nil || lastProduction != nil)
+            let floor = Date().addingTimeInterval(-30 * 24 * 3600)
+            if hasPipeline, let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
                     let a = o["author"] as? [String: Any]
                     let login = a?["login"] as? String ?? ""
                     if (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]") { continue }
+                    if m < floor { continue }
                     if let lp = lastProduction, m <= lp { continue }                 // already shipped
-                    if cfg.stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
+                    if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
                     else { newCargo.deck += 1; newCargo.deckNumbers.append(n) }
                 }
             }
