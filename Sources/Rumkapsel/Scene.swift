@@ -1544,8 +1544,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // Every session touched today keeps its office alive; archived worktrees lose theirs.
         var liveRooms: [String: Set<String>] = [:]
         var newRooms: [String: String] = [:]   // session id -> room key
-        for s in result.sessions where s.cwdExists && (Fleet.stationName(for: s.cwd, owner: s.owner) == "work" || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
-            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner)
+        let cfg = ConfigStore.shared.current
+        for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
+            && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
+            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let station = fleet.station(stationName)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
             if let m = minions[s.id], m.home.key != home.key, station.rooms[home.key] == nil, station.rooms[m.home.key] != nil,
@@ -1615,6 +1617,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
+        github.intervalMinutes = cfg.githubMinutes
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
@@ -1628,10 +1631,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // Old sessions in a workspace that still exists keep one sleeper per workspace: the latest.
         var latestPerCwd: [String: Date] = [:]
         for s in result.sessions where !s.isSubagent { latestPerCwd[s.cwd] = max(latestPerCwd[s.cwd] ?? .distantPast, s.lastModified) }
-        for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
-            || (!s.isSubagent && s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner) == "work" && latestPerCwd[s.cwd] == s.lastModified) {
+        for s in result.sessions where Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
+            && (now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
+            || (!s.isSubagent && s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" && latestPerCwd[s.cwd] == s.lastModified)) {
             seen.insert(s.id)
-            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner)
+            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
             let isNew = minions[s.id] == nil
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
@@ -1639,7 +1643,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.home = home
             let idle = now.timeIntervalSince(s.lastModified)
             m.busy = idle < StationController.busyWindow
-            if idle > StationController.sleepWindow || !s.cwdExists {
+            if idle > Double(cfg.sleepMinutes) * 60 || !s.cwdExists {
                 m.activity = .sleeping
             } else if idle > StationController.replyWindow, s.activity == .writing || s.activity == .waiting {
                 m.activity = .waiting
@@ -1712,27 +1716,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private static let trunkBranches: Set<String> = ["develop", "staging", "main", "master", "production"]
 
-    /// Display names for GitHub logins, from an editable file in Application Support.
-    private static let crewNames: [String: String] = {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
-        let url = dir.appendingPathComponent("crew.json")
-        if let data = try? Data(contentsOf: url), let map = try? JSONDecoder().decode([String: String].self, from: data) { return map }
-        let defaults = ["donlion": "Leo", "johanplenge": "Johan", "skogge": "Chris", "MadsBuus": "Mads"]
-        if let data = try? JSONSerialization.data(withJSONObject: defaults, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: url) }
-        return defaults
-    }()
-    private func crewName(_ login: String) -> String { StationController.crewNames[login] ?? login }
+    private func crewName(_ login: String) -> String { ConfigStore.shared.current.crewNames[login] ?? login }
+    private(set) var seenLogins: Set<String> = []
 
     /// Crew station: an office per open teammate pull request, boxes per push, and minions that
     /// react only to what just happened in the repositories' activity feeds.
     private func rebuildCrew() {
         let me = github.myLogin() ?? ""
         let now = Date()
+        let cfg = ConfigStore.shared.current
+        guard cfg.showCrew else {
+            if fleet.stations["crew"] != nil {
+                for m in minions.values where m.isCrew { despawn(m) }
+                fleet.removeStation(named: "crew"); rebuildStatic()
+            }
+            return
+        }
         let station = fleet.station("crew")
         var changed = false
         var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
-        for (root, info) in repoRoots where info.station == "work" {
+        for (root, info) in repoRoots where info.station == "work" && cfg.crewEnabled(repo: info.repo) {
             for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !StationController.trunkBranches.contains(pr.branch) { open.append((info.repo, pr)) }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
@@ -1770,6 +1774,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // One grey minion per teammate with an open PR or recent activity.
         var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
+        seenLogins.formUnion(feed.filter { !$0.e.isBot }.map(\.e.actor)); seenLogins.formUnion(logins)
         for login in logins where minions["crew:" + login] == nil {
             let homeKey = open.first { $0.pr.author == login }.map { "crew:\($0.repo)/\($0.pr.branch)" } ?? "kind:quarters"
             let home = Home(key: homeKey, name: login, repo: open.first { $0.pr.author == login }?.repo ?? "crew", issue: nil)
@@ -1858,7 +1863,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             ("madplan", "\(home)/dev/madplan", .thinking, "main"),
         ]
         for (i, a) in acts.enumerated() {
-            let stationName = Fleet.stationName(for: a.1)
+            let stationName = a.1.contains("/conductor/") ? "work" : "private"
             let station = fleet.station(stationName)
             let h = Home.from(repo: a.0, branch: a.3, cwd: a.1)
             station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
@@ -2154,6 +2159,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         m.node.runAction(.sequence([.moveBy(x: 0, y: 0.25, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.25, z: 0, duration: 0.12)]))
     }
 
+    /// Settings changed: rebuild the fleet from scratch on the next scan.
+    func applyConfigChange() {
+        enqueue { [self] in
+            for m in Array(minions.values) { despawn(m) }
+            fleet.removeAllStations()
+            repoRoots = [:]
+            crewLoaded = false
+            didLoadLayout = false
+            rebuildStatic()
+            rescan()
+        }
+    }
+
+    var knownRepos: [String] { fleet.repoColors.keys.sorted() }
+
     /// A line in the station log from outside the scene, such as an update notice.
     func announce(_ text: String) {
         enqueue { [self] in logEvent(text); ringBell(seed: text.hashValue) }
@@ -2169,7 +2189,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if let w = room.worktree { github.refreshCommits(worktree: w) }
                 }
             }
-            for (root, info) in repoRoots {
+            github.intervalMinutes = ConfigStore.shared.current.githubMinutes
+        for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }

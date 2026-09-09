@@ -57,6 +57,9 @@ struct OpenPR: Equatable {
 
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    /// Poll interval for pull requests, releases and open PRs; the feed stays at two minutes.
+    var intervalMinutes = 5
+    private var interval: TimeInterval { Double(intervalMinutes) * 60 }
     private var openPRs: [String: ([OpenPR], Date)] = [:]
 
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
@@ -67,7 +70,7 @@ final class GitHubResolver {
     /// Everyone's open pull requests, every five minutes.
     func refreshOpenPRs(repoRoot: String) {
         lock.lock()
-        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
+        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
         lock.unlock()
@@ -226,7 +229,7 @@ final class GitHubResolver {
 
     func refreshReleases(repoRoot: String) {
         lock.lock()
-        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
+        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("r:" + repoRoot)
         lock.unlock()
@@ -324,7 +327,7 @@ final class GitHubResolver {
     func refresh(branch: String, repoRoot: String) {
         let key = repoRoot + "@" + branch
         lock.lock()
-        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < 300 { lock.unlock(); return }
+        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains(key) { lock.unlock(); return }
         inFlight.insert(key)
         lock.unlock()

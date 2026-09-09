@@ -1,5 +1,7 @@
 import AppKit
+import ServiceManagement
 import Sparkle
+import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
@@ -8,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
     var updater: SPUStandardUpdaterController!
+    var settingsWindow: NSWindow?
+    let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel-releases"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
         buildMenu()
+        ConfigStore.shared.onChange = { [weak self] _ in self?.controller.applyConfigChange() }
 
         let size = NSSize(width: 640, height: 440)
         window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
@@ -88,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
         app.addItem(check)
+        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
         app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
@@ -115,6 +121,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     @objc func resetView() { controller.resetView() }
+
+    @objc func openSettings() {
+        settingsModel.config = ConfigStore.shared.current
+        settingsModel.knownRepos = controller.knownRepos
+        settingsModel.knownLogins = Array(Set(controller.seenLogins).union(settingsModel.config.crewNames.keys)).sorted()
+        settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
+        settingsModel.musicOn = controller.drone.isEnabled
+        settingsModel.floatOn = window.level == .floating
+        if settingsWindow == nil {
+            let view = SettingsView(model: settingsModel,
+                                    onMusic: { [weak self] on in self?.setMusic(on) },
+                                    onFloat: { [weak self] on in self?.setFloat(on) },
+                                    onLaunchAtLogin: { on in
+                                        if on { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
+                                    },
+                                    onCheckUpdates: { [weak self] in self?.updater.checkForUpdates(nil) })
+            let w = NSWindow(contentViewController: NSHostingController(rootView: view))
+            w.title = "rumkapsel settings"
+            w.styleMask = [.titled, .closable]
+            w.isReleasedWhenClosed = false
+            w.center()
+            settingsWindow = w
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func setMusic(_ on: Bool) {
+        controller.drone.isEnabled = on
+        musicItem.state = on ? .on : .off
+        UserDefaults.standard.set(on, forKey: "music")
+    }
+
+    private func setFloat(_ on: Bool) {
+        window.level = on ? .floating : .normal
+        floatItem.state = on ? .on : .off
+        UserDefaults.standard.set(on, forKey: "float")
+    }
 
     private func openIssue(kind: String, label: String) {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -150,19 +194,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
     }
 
-    @objc func toggleMusic() {
-        let on = !controller.drone.isEnabled
-        controller.drone.isEnabled = on
-        musicItem.state = on ? .on : .off
-        UserDefaults.standard.set(on, forKey: "music")
-    }
-
-    @objc func toggleFloat() {
-        let on = window.level != .floating
-        window.level = on ? .floating : .normal
-        floatItem.state = on ? .on : .off
-        UserDefaults.standard.set(on, forKey: "float")
-    }
+    @objc func toggleMusic() { setMusic(!controller.drone.isEnabled) }
+    @objc func toggleFloat() { setFloat(window.level != .floating) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }

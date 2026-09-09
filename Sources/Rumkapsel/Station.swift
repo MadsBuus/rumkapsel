@@ -355,32 +355,12 @@ final class Fleet {
         return dir.appendingPathComponent("fleet-v13.json")
     }
 
-    /// How sessions are split into stations, from an editable config file:
-    /// "conductor": Conductor workspaces are work, the rest private (default when ~/conductor exists);
-    /// "owner": repositories owned by `workOwners` are work; "none": one station for everything.
-    static let config: (rule: String, workOwners: Set<String>) = {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("config.json")
-        if let data = try? Data(contentsOf: url), let cfg = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let rule = cfg["stationRule"] as? String ?? "none"
-            let owners = (cfg["workOwners"] as? [String] ?? []).map { $0.lowercased() }
-            return (rule, Set(owners))
-        }
-        let hasConductor = FileManager.default.fileExists(atPath: home.appendingPathComponent("conductor/workspaces").path)
-        let defaults: [String: Any] = ["stationRule": hasConductor ? "conductor" : "none", "workOwners": ["Tattoodo"]]
-        if let data = try? JSONSerialization.data(withJSONObject: defaults, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: url) }
-        return (hasConductor ? "conductor" : "none", ["tattoodo"])
-    }()
-
-    static func stationName(for cwd: String, owner: String? = nil) -> String {
-        switch config.rule {
-        case "conductor": return cwd.contains("/conductor/") ? "work" : "private"
-        case "owner": return (owner.map { config.workOwners.contains($0) } ?? false) || cwd.contains("/conductor/") ? "work" : "private"
-        default: return "work"
-        }
+    static func stationName(for cwd: String, owner: String?, repo: String) -> String {
+        ConfigStore.shared.current.station(cwd: cwd, owner: owner, repo: repo)
     }
+
+    func removeAllStations() { stations = [:] }
+    func removeStation(named name: String) { stations[name] = nil }
 
     func color(forRepo repo: String) -> RGB {
         if let i = repoColors[repo] { return Colors.repos[i % Colors.repos.count] }
