@@ -135,6 +135,11 @@ struct SettingsView: View {
             Stepper("Ask GitHub every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
             Stepper("Minions sleep after \(model.config.sleepMinutes) quiet min", value: $model.config.sleepMinutes, in: 1...60)
             Divider()
+            Toggle("Share my station on the local network", isOn: $model.config.shareOnLAN)
+            HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
+                .disabled(!model.config.shareOnLAN).opacity(model.config.shareOnLAN ? 1 : 0.5)
+            Text("Only the picture is shared: rooms, box counts and where minions stand. No paths, branches or transcripts.").font(.caption).foregroundStyle(.secondary)
+            Divider()
             Button("Check for Updates…") { onCheckUpdates() }
             Spacer()
             Text("Config file: \(AppConfig.url.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)

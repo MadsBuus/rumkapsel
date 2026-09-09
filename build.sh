@@ -28,6 +28,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SUFeedURL</key><string>https://raw.githubusercontent.com/MadsBuus/rumkapsel-releases/main/appcast.xml</string>
   <key>SUPublicEDKey</key><string>YQUtcIJONdnRjC7xjWWsGroOVAj+wmZlLxTOcXpYjlA=</string>
   <key>SUEnableInstallerLauncherService</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>rumkapsel finds other rumkapsel stations on your local network so you can see each other's work.</string>
+  <key>NSBonjourServices</key><array><string>_rumkapsel._tcp</string></array>
 </dict></plist>
 PLIST
 echo "built $APP"

@@ -16,6 +16,8 @@ struct AppConfig: Codable, Equatable {
     var trunkBranch: String = "develop"        // where feature branches merge
     var stagingBranch: String = "staging"      // optional: a test deck between trunk and production
     var productionBranch: String = "production"
+    var shareOnLAN: Bool = false
+    var shareName: String = NSUserName()
 
     static var url: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
