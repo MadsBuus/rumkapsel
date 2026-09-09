@@ -3153,8 +3153,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func restoreView() {
         let d = UserDefaults.standard
         guard d.object(forKey: "view.zoom") != nil else { return }
-        if d.integer(forKey: "view.layout") != 18 {   // the fleet was laid out differently: forget the old pan
-            d.set(18, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
+        if d.integer(forKey: "view.layout") != 19 {   // the fleet was laid out differently: forget the old pan
+            d.set(19, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch

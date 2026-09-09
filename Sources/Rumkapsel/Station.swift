@@ -110,15 +110,15 @@ final class Station {
         return [Cell(x: 0, y: y - 1), Cell(x: 1, y: y - 1), Cell(x: 0, y: y), Cell(x: 1, y: y)]
     }
     var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
-    /// The hangar is the 2x3 bay at the outer end of the south corridor arm.
+    /// The hangar is the 4x2 bay across the outer end of the south corridor arm, wider than it is long.
     var hangarCells: [Cell] {
         guard hasHangar else { return [] }
         let y = spineHalfLength + 1
-        return (0..<3).flatMap { d in [Cell(x: 0, y: y + d), Cell(x: 1, y: y + d)] }
+        return (-1...2).flatMap { x in (0..<2).map { d in Cell(x: x, y: y + d) } }
     }
-    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 2.0) }
-    /// Landing slots along the bay, in local coordinates.
-    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(0.5, Double(spineHalfLength) + 1.0 + Double($0)) } }
+    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 1.5) }
+    /// Landing slots across the bay, in local coordinates.
+    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 1.5) } }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west.
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
@@ -156,9 +156,9 @@ final class Station {
     }
     /// Symmetric bars, blocks and T shapes, like the real station.
     private static let baseShapes: [[Cell]] = [
-        rect(2, 4), rect(2, 5), rect(3, 3), rect(2, 3), rect(3, 4), rect(2, 6),
-        rect(4, 2) + [Cell(x: 1, y: 2), Cell(x: 2, y: 2), Cell(x: 1, y: 3), Cell(x: 2, y: 3)],
+        rect(2, 3), rect(2, 4), rect(3, 3), rect(2, 2), rect(3, 2), rect(2, 5),
         rect(3, 2) + [Cell(x: 1, y: 2), Cell(x: 1, y: 3)],
+        rect(3, 1) + [Cell(x: 1, y: 1), Cell(x: 1, y: 2)],
     ]
 
     init(name: String) {
@@ -390,7 +390,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v18.json")
+        return dir.appendingPathComponent("fleet-v19.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
