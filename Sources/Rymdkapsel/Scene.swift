@@ -77,8 +77,8 @@ private func floorText(_ text: String, color: NSColor, size: Double, maxWidth: D
 /// Uppercase, letter-spaced signage cut into a floor, pivoted on its centre.
 private func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, width: Double, height: Double) {
     let attributed = NSAttributedString(string: text.uppercased(), attributes: [
-        .font: NSFont(name: "HelveticaNeue-Bold", size: 1) ?? NSFont.boldSystemFont(ofSize: 1),
-        .kern: 0.18,
+        .font: NSFont(name: "Futura-CondensedExtraBold", size: 1) ?? NSFont(name: "HelveticaNeue-CondensedBlack", size: 1) ?? NSFont.boldSystemFont(ofSize: 1),
+        .kern: 0,
     ])
     let t = SCNText(string: attributed, extrusionDepth: 0)
     t.flatness = 0.02
@@ -739,14 +739,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
-                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.26)
+                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
                 padLabel.node.position.y = 0.012
                 let pc = station.padCells
                 let corner = SIMD2(Double(pc.map(\.x).max()!) + 0.42 - padLabel.width / 2, Double(pc.map(\.y).max()!) + 0.42 - padLabel.height / 2)
                 add(padLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             if station.hasHangar {
-                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.28)
+                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
                 hangarLabel.node.position.y = 0.012
                 let hc = station.hangarCells
                 let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
@@ -770,7 +770,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if room.key.hasPrefix("kind:") {
                     // Fixed rooms: a short word cut into the middle of the floor.
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
-                    let label = floorSign(text, color: accent, size: 0.28)
+                    let label = floorSign(text, color: accent, size: 0.36)
                     label.node.position.y = 0.012
                     // Tucked into the far corner of the floor, clear of beds and rings.
                     let maxY = room.cells.map(\.y).max()!
