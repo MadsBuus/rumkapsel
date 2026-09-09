@@ -267,7 +267,20 @@ final class GitHubResolver {
             let productionBranch = remoteBranches.contains(cfg.productionBranch) ? cfg.productionBranch : ""
             let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
             let heads: Set<String> = [cfg.trunkBranch, stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
-            for base in bases {            // Cargo: PRs merged into trunk, split by the last staging and production releases.
+            for base in bases {
+                guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
+                                     "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
+                for o in arr {
+                    let head = o["headRefName"] as? String ?? ""
+                    guard heads.contains(head) else { continue }
+                    let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+                    found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
+                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
+                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))))
+                }
+            }
+            // Cargo: PRs merged into trunk, split by the last staging and production releases.
             let iso = ISO8601DateFormatter()
             let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
