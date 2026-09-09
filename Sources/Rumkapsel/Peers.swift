@@ -20,6 +20,8 @@ final class PeerHub {
     private let queue = DispatchQueue(label: "rumkapsel.peers")
     private var timer: DispatchSourceTimer?
     private(set) var name = ""
+    var isRunning: Bool { listener != nil }
+    var peerCount: Int { queue.sync { outgoing.count } }
     var snapshotProvider: (() -> PeerSnapshot?)?
     var onSnapshot: ((PeerSnapshot) -> Void)?
 

@@ -334,6 +334,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
     private let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    private let shareDot = SKSpriteNode(color: NSColor(rgb: (0.35, 0.85, 0.5)), size: CGSize(width: 7, height: 7))
+    private let shareLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private var legendNodes: [SKNode] = []
     private var jobNodes: [SKNode] = []
     private var hudClock = 0.0
@@ -1263,6 +1265,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         infoBackground.anchorPoint = CGPoint(x: 0, y: 0)
         hud.addChild(infoBackground)
         hud.addChild(infoLabel)
+        shareLabel.fontSize = 10
+        shareLabel.fontColor = Palette.dim
+        shareLabel.horizontalAlignmentMode = .right
+        shareLabel.verticalAlignmentMode = .top
+        hud.addChild(shareDot)
+        hud.addChild(shareLabel)
         statusLabel.fontSize = 10
         statusLabel.fontColor = Palette.dim
         statusLabel.horizontalAlignmentMode = .right
@@ -1380,7 +1388,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         statusLabel.text = ""
         infoLabel.position = CGPoint(x: 14, y: 12)
 
-        if clock - hudClock > 0.5 { hudClock = clock; layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep) }
+        if clock - hudClock > 0.5 {
+            hudClock = clock
+            layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
+            // Sharing indicator: green dot when broadcasting, with how many stations are in range.
+            let sharing = peers.isRunning
+            shareDot.isHidden = !sharing
+            shareLabel.isHidden = !sharing
+            if sharing {
+                let n = peerSnapshots.count
+                shareLabel.text = "sharing as \(peers.name)" + (n > 0 ? " · \(n) station\(n == 1 ? "" : "s") in range" : "")
+                shareLabel.position = CGPoint(x: hud.size.width - 14, y: hud.size.height - 14)
+                shareDot.position = CGPoint(x: hud.size.width - 14 - shareLabel.frame.width - 10, y: hud.size.height - 19)
+                shareDot.alpha = 0.7 + 0.3 * sin(clock * 2)
+            }
+        }
 
         var y = hud.size.height - 70
         eventLabels.removeAll { l, t in
