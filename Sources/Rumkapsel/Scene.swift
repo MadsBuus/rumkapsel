@@ -990,12 +990,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.padCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.padCells.contains(c) || station.storageCells.contains(c)
+                    || station.deckCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
-                for x in Int((lo.x + 0.5).rounded(.down))...Int((hi.x - 0.5).rounded(.up)) {
-                    for y in Int((lo.y + 0.5).rounded(.down))...Int((hi.y - 0.5).rounded(.up)) where occupied(Cell(x: x, y: y)) {
+                // Tiles are centred on integer coordinates: any tile the text touches counts.
+                let x0 = Int((lo.x + 0.4).rounded(.down)), x1 = max(x0, Int((hi.x - 0.4).rounded(.down)))
+                let y0 = Int((lo.y + 0.4).rounded(.down)), y1 = max(y0, Int((hi.y - 0.4).rounded(.down)))
+                for x in x0...x1 {
+                    for y in y0...y1 where occupied(Cell(x: x, y: y)) {
                         return true
                     }
                 }
@@ -1049,11 +1053,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     break
                 }
                 if node == nil {
-                    // Boxed in: cut the name into the tile itself.
+                    // Boxed in: cut the name into the tile itself, shrunk until it fits the floor.
                     let horizontal = width >= depth
                     let along = (horizontal ? width : depth) - 0.3
-                    let lines = max(1, min(2, Int((Double(text.count) * charW * 0.85 / along).rounded(.up))))
-                    let label = floorText(text, color: .black, size: size * 0.85, maxWidth: along, lines: lines)
+                    let across = (horizontal ? depth : width) - 0.3
+                    var size = size * 0.85
+                    var lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
+                    let fitWidth = 3 * along / (Double(text.count) * 0.5)          // three lines at most
+                    let fitDepth = across / (Double(lines) * 1.15)                 // stacked lines must fit too
+                    size = max(0.16, min(size, fitWidth, fitDepth))
+                    lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
+                    let label = floorText(text, color: NSColor(room.color).darker(0.28), size: size, maxWidth: along, lines: lines)
                     let maxYRow = room.cells.map(\.y).max()!
                     let anchor = room.cells.filter { $0.y == maxYRow }.min { $0.x < $1.x }!
                     let center = horizontal
@@ -2025,7 +2035,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
             m.freeSince = 0
-            if isNew && !s.isSubagent && newRooms[s.id] == nil { arriveByShuttle(m) }
+            if isNew && !s.isSubagent && newRooms[s.id] == nil && !firstRun { arriveByShuttle(m) }
             _ = reused
             if m.station != stationName { despawn(m); continue }
             m.home = home
@@ -3023,7 +3033,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func setView(yawDegrees: Double, pitchDegrees: Double, zoom: Double) {
         viewPinned = true
         enqueue { [self] in
-            userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom; userPan = .zero
+            userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom
             rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         }
     }
@@ -3153,8 +3163,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func restoreView() {
         let d = UserDefaults.standard
         guard d.object(forKey: "view.zoom") != nil else { return }
-        if d.integer(forKey: "view.layout") != 19 {   // the fleet was laid out differently: forget the old pan
-            d.set(19, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
+        if d.integer(forKey: "view.layout") != 20 {   // the fleet was laid out differently: forget the old pan
+            d.set(20, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch

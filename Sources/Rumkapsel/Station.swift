@@ -309,6 +309,7 @@ final class Station {
                     let cells = v.map { $0 + anchor }
                     guard cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
                     guard cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) else { continue }
+                    guard flatTowardsCorridor(cells) else { continue }
                     return cells
                 }
             }
@@ -318,6 +319,28 @@ final class Station {
         // Give up gracefully: park the room in a free spot far out along the east arm.
         let far = Cell(x: spineHalfLength + 2, y: 2)
         return variants[0].map { $0 + far }
+    }
+
+    /// A room shows a straight wall to the hallway: a T with its notch against the corridor
+    /// would leave a dark closet between the room, the hallway and its neighbours.
+    private func flatTowardsCorridor(_ cells: [Cell]) -> Bool {
+        let set = Set(cells)
+        let minX = cells.map(\.x).min()!, maxX = cells.map(\.x).max()!
+        let minY = cells.map(\.y).min()!, maxY = cells.map(\.y).max()!
+        for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
+            guard cells.contains(where: { isCorridor(Cell(x: $0.x + dx, y: $0.y + dy)) }) else { continue }
+            // The whole edge line facing that direction must be part of the room.
+            let edge: [Cell]
+            if dx == 0 {
+                let y = dy > 0 ? maxY : minY
+                edge = (minX...maxX).map { Cell(x: $0, y: y) }
+            } else {
+                let x = dx > 0 ? maxX : minX
+                edge = (minY...maxY).map { Cell(x: x, y: $0) }
+            }
+            if !edge.allSatisfy({ set.contains($0) }) { return false }
+        }
+        return true
     }
 
     /// Breadth-first path over walkable cells. Returns cells to visit, excluding `from`.
@@ -390,7 +413,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v19.json")
+        return dir.appendingPathComponent("fleet-v20.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
