@@ -1727,7 +1727,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func addPyramid(for m: Minion, queued: Bool = false) {
-        guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false) else { return }
+        guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false),
+              !key.hasPrefix("kind:") else { return }   // prompts only land in an office
         let cells = station.cells(of: .room(key)).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let boxed = lastBoxCount["\(m.station)|\(key)"].map { ($0 + 2) / 3 } ?? 0
         guard let cell = (cells.count > boxed ? Array(cells.dropFirst(boxed)) : cells).randomElement() else { return }
