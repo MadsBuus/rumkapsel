@@ -4,11 +4,15 @@ import PackageDescription
 let package = Package(
     name: "Rymdkapsel",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .executableTarget(
             name: "Rymdkapsel",
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Rymdkapsel",
-            swiftSettings: [.unsafeFlags(["-Onone"], .when(configuration: .debug))]
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         )
     ],
     swiftLanguageVersions: [.v5]

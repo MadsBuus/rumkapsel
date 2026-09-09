@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -6,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var controller: StationController!
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
+    let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         FileHandle.standardError.write("launched\n".data(using: .utf8)!)
@@ -79,6 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About rymdkapsel", action: #selector(about), keyEquivalent: "")
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        check.target = updater
+        app.addItem(check)
         app.addItem(.separator())
         musicItem = app.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
         floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
