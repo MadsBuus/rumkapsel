@@ -315,7 +315,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     static let replyWindow: TimeInterval = 20
     static let sleepWindow: TimeInterval = 5 * 60
     static let subagentWindow: TimeInterval = 3 * 60
-    static let roomsWindow: TimeInterval = 12 * 3600
+    static let roomsWindow: TimeInterval = 12 * 3600       // for sessions outside Conductor
+    static let scanWindow: TimeInterval = 14 * 24 * 3600   // how far back transcripts are read
 
     init(frame: NSRect, demo: Bool) {
         self.demo = demo
@@ -1462,7 +1463,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         pendingLock.unlock()
         scanQueue.async { [scanner] in
             self.pendingLock.lock(); self.scanQueued = false; self.pendingLock.unlock()
-            let result = scanner.scan(roomsWithin: StationController.roomsWindow)
+            let result = scanner.scan(roomsWithin: StationController.scanWindow)
             self.enqueue { self.apply(result) }
         }
     }
@@ -1480,7 +1481,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // Every session touched today keeps its office alive; archived worktrees lose theirs.
         var liveRooms: [String: Set<String>] = [:]
         var newRooms: [String: String] = [:]   // session id -> room key
-        for s in result.sessions where s.cwdExists {
+        for s in result.sessions where s.cwdExists && (s.cwd.contains("/conductor/") || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
             let stationName = Fleet.stationName(for: s.cwd)
             let station = fleet.station(stationName)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
@@ -1516,7 +1517,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 repoRoots[root] = (s.repo, stationName)
             }
             if let room = station.rooms[home.key] {
-                if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot; room.worktree = s.cwd }
+                room.worktree = s.cwd
+                if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
                 if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
                 if let w = room.worktree { github.refreshCommits(worktree: w) }
             }
@@ -1524,7 +1526,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
-                if liveRooms[station.name]?.contains(room.key) != true || now.timeIntervalSince(room.lastActive) > StationController.roomsWindow {
+                let isWorkspace = room.worktree?.contains("/conductor/") == true
+                let expired = !isWorkspace && now.timeIntervalSince(room.lastActive) > StationController.roomsWindow
+                if liveRooms[station.name]?.contains(room.key) != true || expired {
                     archive(station: station, room: room, announce: !firstRun)
                     changed = true
                 }
@@ -1556,7 +1560,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             ringBell(seed: change.pr.number)
         }
         var seen = Set<String>()
-        for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow) {
+        // Old sessions in a workspace that still exists keep one sleeper per workspace: the latest.
+        var latestPerCwd: [String: Date] = [:]
+        for s in result.sessions where !s.isSubagent { latestPerCwd[s.cwd] = max(latestPerCwd[s.cwd] ?? .distantPast, s.lastModified) }
+        for s in result.sessions where now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
+            || (!s.isSubagent && s.cwdExists && s.cwd.contains("/conductor/") && latestPerCwd[s.cwd] == s.lastModified) {
             seen.insert(s.id)
             let stationName = Fleet.stationName(for: s.cwd)
             let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
