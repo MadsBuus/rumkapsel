@@ -26,7 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.backgroundColor = Palette.void
         window.minSize = NSSize(width: 320, height: 240)
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.level = .floating
+        let floatOn = UserDefaults.standard.bool(forKey: "float")
+        window.level = floatOn ? .floating : .normal
         window.isReleasedWhenClosed = false
 
         controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo)
@@ -45,7 +46,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setFrameAutosaveName("RymdkapselMain")
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(controller.view)
-        NSApp.activate(ignoringOtherApps: true)
 
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.controller.refreshGitHub()
@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.addItem(.separator())
         musicItem = app.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
         floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
-        floatItem.state = .on
+        floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
         app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
         app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
         for (title, key) in [("Focus Work", "1"), ("Focus Private", "2"), ("Focus All", "3"), ("Focus Crew", "4")] {
@@ -126,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let on = window.level != .floating
         window.level = on ? .floating : .normal
         floatItem.state = on ? .on : .off
+        UserDefaults.standard.set(on, forKey: "float")
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

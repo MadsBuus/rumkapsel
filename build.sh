@@ -27,5 +27,5 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 echo "built $APP"
-[ "$1" = "run" ] && open "$APP"
+[ "$1" = "run" ] && open -g "$APP"
 exit 0
