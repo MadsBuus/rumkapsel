@@ -169,6 +169,9 @@ final class Minion {
 
     var id: String
     var freeSince = 0.0        // clock when the worker's session went away; 0 while assigned
+    var couch: Int?
+    var isTester = false
+    var nextImpatience = 0.0
     var station: String
     var home: Home
     var state: State = .arriving
@@ -394,6 +397,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var crewLoaded = false
     private var crewBusyUntil: [String: Date] = [:]
     private var hangarAnchors: [String: SCNNode] = [:]
+    private var lastBusy: [String: Double] = [:]
+    private var loadedRockets: [String: Int] = [:]          // rocket key -> crates loaded, waiting for ignition
     private var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
     private var knownSpine: [String: Int] = [:]
     // Peers on the local network: their snapshots, the stations built from them, and their minions.
@@ -412,6 +417,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var hauls: [Haul] = []
     private var nextHaulId = 1
     private var pendingLaunch: [String: (node: SCNNode, remaining: Int, since: Double)] = [:]
+    private var pendingIgnition: [String: Bool] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     private var shipsInFlight: [String: Int] = [:]
@@ -766,7 +772,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if station.hasPad {
                 let pc = station.padCenter
-                let ring = SCNNode(geometry: SCNTube(innerRadius: 0.55, outerRadius: 0.62, height: 0.01))
+                let ring = SCNNode(geometry: SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01))
                 ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
                 ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
                 staticRoot.addChildNode(ring)
@@ -779,6 +785,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 table.position = v3(station.offset.x + cx, 0.14, station.offset.y + cy)
                 table.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(table)
+                for (k, c) in station.couches.enumerated() {
+                    let along = k < 4   // couches on the side walls run along z, the far wall along x
+                    let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: 0.18, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
+                    couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.45, 0.4)))
+                    couch.position = v3(station.offset.x + c.x, 0.09, station.offset.y + c.y)
+                    couch.name = "room:" + roomKey(station, lounge)
+                    let back = SCNNode(geometry: SCNBox(width: along ? 0.08 : 0.8, height: 0.22, length: along ? 0.8 : 0.08, chamferRadius: 0.02))
+                    back.geometry!.firstMaterial = couch.geometry!.firstMaterial
+                    back.position = v3(along ? (c.x < cx ? -0.11 : 0.11) : 0, 0.16, along ? 0 : 0.11)
+                    couch.addChildNode(back)
+                    staticRoot.addChildNode(couch)
+                }
             }
             if station.hasHangar {
                 let hc = station.hangarCenter
@@ -1169,7 +1187,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
                     let c = NSColor(fleet.color(forRepo: repo))
                     let numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
-                    for k in 0..<min(n, 24) {
+                    for k in 0..<min(n, 48) {
                         let size = 0.38
                         let prNumber = k < numbers.count ? numbers[k] : 0
                         let pkg = Props.package(color: c.lighter(0.1), band: purple, size: size)
@@ -1217,7 +1235,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 return n
             }()
             node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-            if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node, repo: info.repo) } else { liftOff(node) }
+            let pk = info.station + "|" + info.repo
+            if loadedRockets[pk] != nil { loadedRockets[pk] = nil; liftOff(node) }
+            else if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node, repo: info.repo) } else { liftOff(node) }
             logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
             ringBell(seed: launch.pr.number)
         }
@@ -1227,23 +1247,28 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let hasProduction = open.contains(where: \.isProduction)
             let stagingIsDeck = !ConfigStore.shared.current.stagingBranch.isEmpty
             for pr in open where pr.isProduction || (!hasProduction && !stagingIsDeck) {
-                let cargoBucket = ((stagingIsDeck ? station.staged : station.stored)[info.repo] ?? 0) / 3
+                let cargoBucket = max((stagingIsDeck ? station.staged : station.stored)[info.repo] ?? 0, loadedRockets[info.station + "|" + info.repo] ?? 0) / 3
                 let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")|c\(cargoBucket)"
                 live.insert(key)
                 if rockets[key] != nil { continue }
                 let cargoPile = stagingIsDeck ? station.staged : station.stored
-                let n = Props.rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: cargoPile[info.repo] ?? 0)
+                let n = Props.rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: max(cargoPile[info.repo] ?? 0, loadedRockets[info.station + "|" + info.repo] ?? 0))
                 if pr.untested {
                     let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: pr.isProduction)
                     deco.name = "hold"
                     n.addChildNode(deco)
                 }
                 let slot = rockets.values.filter { $0.parent != nil }.count % 4
-                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.0, 0), SIMD2(-1.0, 0), SIMD2(0, 0.55)]
+                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
                 let pc = station.padCenter + offsets[slot]
                 n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
                 let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"
                 n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
+                let pk = info.station + "|" + info.repo
+                if pr.isProduction, !pr.untested {
+                    if loadedRockets[pk] != nil { addSteam(to: n) }
+                    else if pendingLaunch[pk] == nil { DispatchQueue.main.async { [weak self] in self?.enqueue { self?.loadRocket(station: station, rocket: n, repo: info.repo, thenLaunch: false) } } }
+                }
                 n.enumerateChildNodes { c, _ in if c.name != "flame" { c.name = n.name } }
                 rocketRoot.addChildNode(n)
                 rockets[key] = n
@@ -1266,7 +1291,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) == true) ? info.repo : nil
             })
             for (i, repo) in waiting.filter({ !withRocket.contains($0) }).enumerated() {
-                let radius = 0.62 + Double(i) * 0.09
+                let radius = 1.62 + Double(i) * 0.12
                 let ring = SCNNode(geometry: SCNTube(innerRadius: radius, outerRadius: radius + 0.05, height: 0.008))
                 ring.geometry!.firstMaterial = flat(NSColor(fleet.color(forRepo: repo)))
                 ring.opacity = 0.3
@@ -1585,11 +1610,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if place == .quarters, m.bed == nil {
             let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
             m.bed = station.beds.indices.first { !used.contains($0) }
-            if m.bed == nil { place = .lounge }   // every bunk taken: doze in the lounge
+            if m.bed == nil { place = .lounge }   // every bed taken: the lounge
+        }
+        if place != .lounge { m.couch = nil }
+        if place == .lounge, m.couch == nil {
+            let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.couch))
+            m.couch = station.couches.indices.first { !used.contains($0) }
         }
         let cells = station.cells(of: place)
         let target: Cell
         if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
+        else if place == .lounge, let c = m.couch, c < station.couches.count, let lounge = station.rooms["kind:lounge"] {
+            let spot = station.couches[c]
+            target = lounge.cells.min { a, b in hypot(Double(a.x) - spot.x, Double(a.y) - spot.y) < hypot(Double(b.x) - spot.x, Double(b.y) - spot.y) } ?? lounge.cells[0]
+        }
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
@@ -1962,6 +1996,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     free.node.name = "minion:" + s.id
                     free.node.enumerateChildNodes { c, _ in c.name = "minion:" + s.id }
                     free.freeSince = 0
+                    free.isTester = false
                     free.markers = s.eventMarkers
                     free.promptCount = s.promptCount
                     free.toolCount = s.toolCount
@@ -2046,19 +2081,38 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.state = .leaving; m.path = []
         }
         for station in fleet.stations.values where station.name != "crew" {
-            let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
-                .sorted { $0.freeSince < $1.freeSince }
-            let bunks = station.beds.count
-            for (i, m) in free.enumerated() {
-                let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
-                if i >= bunks || longIdle {
-                    m.state = .leaving
-                    if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
-                    if m.place != .quarters { send(m, to: .quarters) }
-                } else if m.place != .quarters && m.errand == nil {
-                    send(m, to: .quarters)
+            // A standing crew of two, always present, so the station is never empty.
+            let workers = minions.values.filter { $0.station == station.name && !$0.isSubagent && !$0.isCrew && $0.state != .leaving }
+            if workers.count < 2, !station.rooms.isEmpty {
+                for k in workers.count..<2 {
+                    let home = Home(key: "kind:lounge", name: "standby", repo: station.rooms.values.first { $0.repo != nil }?.repo ?? "crew", issue: nil)
+                    let start = station.cells(of: .lounge).randomElement() ?? station.coreCenter
+                    let m = Minion(id: "standby:\(station.name):\(k):\(Int(clock))", station: station.name, home: home, cwd: "", toolCount: 0, isSubagent: false, start: start)
+                    m.freeSince = clock - 1
+                    m.activity = .waiting
+                    minionRoot.addChildNode(m.node)
+                    minions[m.id] = m
+                    send(m, to: .lounge)
                 }
             }
+            let busyRecently = minions.values.contains { $0.station == station.name && $0.busy && !$0.isCrew } || (lastBusy[station.name].map { clock - $0 < 3600 } ?? false)
+            if minions.values.contains(where: { $0.station == station.name && $0.busy && !$0.isCrew }) { lastBusy[station.name] = clock }
+            let hour = Calendar.current.component(.hour, from: now)
+            let night = !busyRecently || hour >= 22 || hour < 7
+            let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
+                .sorted { $0.freeSince < $1.freeSince }
+            for (i, m) in free.enumerated() where !m.isTester {
+                let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
+                let restPlace: Place = night ? .quarters : .lounge
+                if longIdle || (i >= station.beds.count + station.couches.count) {
+                    m.state = .leaving
+                    if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
+                } else if m.errand == nil && m.place != restPlace && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
+                    m.activity = night ? .sleeping : .waiting
+                    send(m, to: restPlace)
+                }
+            }
+            assignTester(station: station, free: free)
         }
         // Offices that appeared without a minion to deliver them just show up.
         let pending = Set(minions.values.compactMap { m in carriedRoom(of: m) ?? newRooms[m.id].map { "\(m.station)|\($0)" } })
@@ -2253,13 +2307,33 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// A production release merged: the deck (or storage, without a staging branch) is loaded into the rocket.
-    private func loadRocket(station: Station, rocket: SCNNode, repo: String) {
+    /// Steam venting from a loaded rocket waiting for ignition.
+    private func addSteam(to rocket: SCNNode) {
+        guard rocket.childNode(withName: "steam", recursively: false) == nil else { return }
+        let emitter = SCNNode(); emitter.name = "steam"
+        rocket.addChildNode(emitter)
+        let puff = SCNAction.run { [weak self] _ in
+            guard let self else { return }
+            enqueue {
+                let p = SCNNode(geometry: SCNSphere(radius: 0.08))
+                p.geometry!.firstMaterial = flat(NSColor(rgb: (0.85, 0.88, 0.95)))
+                p.opacity = 0.7
+                p.position = v3(Double.random(in: -0.25...0.25), 0.05, Double.random(in: -0.25...0.25))
+                emitter.addChildNode(p)
+                p.runAction(.sequence([.group([.moveBy(x: CGFloat(Double.random(in: -0.4...0.4)), y: 0.5, z: CGFloat(Double.random(in: -0.4...0.4)), duration: 1.6), .scale(to: 2.2, duration: 1.6), .fadeOut(duration: 1.6)]), .removeFromParentNode()]))
+            }
+        }
+        emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
+    }
+
+    /// Cleared to launch: the deck (or storage, without a staging branch) is loaded into the rocket, which then steams until ignition.
+    private func loadRocket(station: Station, rocket: SCNNode, repo: String, thenLaunch: Bool = true) {
         let source = ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck"
-        let boxes = markerRoot.childNodes.filter { $0.name == "\(source):\(station.name)|\(repo)" }
-        guard !boxes.isEmpty else { liftOff(rocket); return }
+        let boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(source):\(station.name)|\(repo)|") }
+        guard !boxes.isEmpty else { if thenLaunch { liftOff(rocket) } else { addSteam(to: rocket) }; return }
         pendingLaunch[station.name + "|" + repo] = (rocket, boxes.count, clock)
-        logEvent("\(repo): loading the rocket")
+        pendingIgnition[station.name + "|" + repo] = thenLaunch
+        logEvent("\(repo): cleared, loading the rocket")
         let padCell = station.padCells.first ?? Station.rect(1, 1)[0]
         let pc = station.padCenter
         for b in boxes {
@@ -2273,7 +2347,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if var p = pendingLaunch[pk] {
                     p.remaining -= 1
                     pendingLaunch[pk] = p
-                    if p.remaining <= 0 { pendingLaunch[pk] = nil; liftOff(p.node); fleet.save() }
+                    if p.remaining <= 0 {
+                        pendingLaunch[pk] = nil
+                        if pendingIgnition[pk] ?? true { liftOff(p.node) } else { loadedRockets[pk] = boxes.count; addSteam(to: p.node); logEvent("\(repo): loaded and steaming, waiting for the release to merge") }
+                        pendingIgnition[pk] = nil
+                        fleet.save()
+                    }
                 }
             }
         }
@@ -2293,7 +2372,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
             pendingLaunch[name] = nil
-            liftOff(p.node)
+            if pendingIgnition[name] ?? true { liftOff(p.node) } else { loadedRockets[name] = p.remaining; addSteam(to: p.node) }
+            pendingIgnition[name] = nil
         }
     }
 
@@ -2441,6 +2521,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         // Only count as loaded once every work repo has answered, so existing PRs never look new.
         if repoRoots.filter({ $0.value.station == "work" }).allSatisfy({ github.teamOpenPRs(repoRoot: $0.key) != nil }) { crewLoaded = true }
+    }
+
+    /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
+    private func assignTester(station: Station, free: [Minion]) {
+        let cargoOnDeck = station.staged.values.reduce(0, +) > 0
+        let cleared = loadedRockets.keys.contains { $0.hasPrefix(station.name + "|") }
+        let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
+        let current = minions.values.first { $0.station == station.name && $0.isTester }
+        if wanted, current == nil, let m = free.first(where: { $0.errand == nil }) {
+            m.isTester = true
+            m.activity = .qa
+            m.busy = true
+            send(m, to: .room("kind:deck"))
+            logEvent("staging ready for QA · \(m.home.name) walks the rows")
+        } else if !wanted, let m = current {
+            m.isTester = false
+            m.busy = false
+            m.activity = .waiting
+            m.setTool(nil)
+            send(m, to: .lounge)
+        }
     }
 
     /// Crew minions rest once their last activity is old.
@@ -2695,6 +2796,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .arriving:
                     m.state = .settled
                 case .settled:
+                    if m.isTester, clock >= m.nextWanderAt {
+                        let choices = station.deckCells.filter { $0 != m.cell }
+                        if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
+                        m.nextWanderAt = clock + Double.random(in: 1.5...3.5)
+                        m.setTool(.scanner)
+                        if clock >= m.nextImpatience {
+                            m.nextImpatience = clock + Double.random(in: 5...9)
+                            m.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
+                        }
+                    }
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
                         if m.cell != pc { walk(m, to: pc) }
                     } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !jumping {
@@ -2709,6 +2820,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
             var bunkLift = 0.0
+            if m.path.isEmpty, m.place == .lounge, let c = m.couch, c < station.couches.count {
+                m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
+            }
             if m.path.isEmpty, m.place == .quarters {
                 if let b = m.bed, b < station.beds.count {
                     m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
@@ -2788,7 +2902,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
                 let toTable = SIMD2(cx, cy) - m.pos
                 m.smoothFacing = atan2(toTable.x, toTable.y)
-                tilt = sin(t * 2.2) * 0.06
+                tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05   // sat back on a couch, or standing at the table
                 roll = sin(t * 1.3) * 0.04
             }
             if working && !atCone {

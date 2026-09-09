@@ -120,35 +120,34 @@ final class Station {
     /// Landing slots along the bay, in local coordinates.
     var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(0.5, Double(spineHalfLength) + 1.0 + Double($0)) } }
     /// The launch pad is the 2x2 at the outer end of the west corridor arm.
-    /// The launch pad is a 3x2 apron at the outer end of the west corridor arm.
-    var padCells: [Cell] {
+    /// The yard runs outward along the west arm: storage, then staging, then the launch pad at the far end.
+    /// Each block is 4x4, spanning rows -1...2 so it sits centred on the two-wide corridor.
+    private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
-        let x = -spineHalfLength - 1
-        return (0..<3).flatMap { d in [Cell(x: x - d, y: 0), Cell(x: x - d, y: 1)] }
+        let x0 = -spineHalfLength - 1 - index * 4
+        return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y) } }
     }
-    var padCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.0, 0.5) }
-    /// The storage bay: a 3x3 yard south of the launch pad where merged work waits for a release.
-    var storageCells: [Cell] {
-        guard hasPad else { return [] }
-        let x = -spineHalfLength - 1
-        return (0..<3).flatMap { d in (2...4).map { y in Cell(x: x - d, y: y) } }
-    }
-    var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.0, 3.0) }
+    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5 - Double(index * 4), 0.5) }
+    var storageCells: [Cell] { yardBlock(0) }
+    var storageCenter: SIMD2<Double> { yardCenter(0) }
+    var deckCells: [Cell] { yardBlock(1) }
+    var padCells: [Cell] { yardBlock(2) }
+    var padCenter: SIMD2<Double> { yardCenter(2) }
     var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
     var storedBoxes: Int { stored.values.reduce(0, +) }
     var staged: [String: Int] = [:]          // boxes on the test deck, per repo
-    /// The test deck: a 3x3 yard north of the launch pad where staged work waits for production.
-    var deckCells: [Cell] {
-        guard hasPad else { return [] }
-        let x = -spineHalfLength - 1
-        return (0..<3).flatMap { d in (-3...(-1)).map { y in Cell(x: x - d, y: y) } }
-    }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
-    /// Bunk beds: each dorm tile has a lower and an upper bunk.
+    /// Eight flat beds, one per dorm tile.
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
         guard let q = rooms["kind:quarters"] else { return [] }
-        let cells = q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8)
-        return cells.map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) } + cells.map { (SIMD2(Double($0.x), Double($0.y)), $0, 1) }
+        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
+    }
+    /// Couch spots along the lounge walls where free workers sit.
+    var couches: [SIMD2<Double>] {
+        guard let l = rooms["kind:lounge"] else { return [] }
+        let xs = l.cells.map(\.x), ys = l.cells.map(\.y)
+        let minX = Double(xs.min()!), maxX = Double(xs.max()!), minY = Double(ys.min()!), maxY = Double(ys.max()!)
+        return [SIMD2(minX - 0.3, minY), SIMD2(minX - 0.3, maxY), SIMD2(maxX + 0.3, minY), SIMD2(maxX + 0.3, maxY), SIMD2(minX, maxY + 0.3), SIMD2(maxX, maxY + 0.3)]
     }
 
     static func rect(_ w: Int, _ h: Int) -> [Cell] {
@@ -231,7 +230,7 @@ final class Station {
     func ensureFixedRoom(_ place: Place) -> Bool {
         guard case .room(let key) = place else { return false }
         if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4)) }
-        if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(2, 2)) }
+        if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
         return false
     }
 
@@ -390,7 +389,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v16.json")
+        return dir.appendingPathComponent("fleet-v17.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
