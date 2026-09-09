@@ -134,6 +134,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         for act in [Activity.coding("x"), .exploring, .thinking, .writing, .testing, .shipping, .qa, .waiting] {
             let p = tile(i, act == .waiting ? "waiting (jump)" : act.label); i += 1
             let m = minion(at: p)
+            switch act {
+            case .coding, .testing: m.setTool(.wrench)
+            case .exploring, .writing, .qa: m.setTool(.clipboard)
+            default: break
+            }
             updaters.append { [weak self] c, _ in
                 guard let self else { return }
                 if act == .waiting { m.node.position = v3(p.x, abs(sin(c * 7)) * 0.14, p.y); return }
@@ -146,10 +151,10 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         for (k, name) in ["welding", "hammering", "push / pull", "bent over"].enumerated() {
             let p = tile(i, name); i += 1
             roomFloor(at: p, color: pink)
-            let cone = SCNCone(topRadius: 0, bottomRadius: 0.15, height: 0.3); cone.radialSegmentCount = 6
-            let cn = SCNNode(geometry: cone); cn.geometry!.firstMaterial = lit(pink.lighter(0.22)); cn.position = v3(p.x + 0.2, 0.15, p.y)
+            let cn = Props.pyramid(color: pink.lighter(0.22), size: 0.32, floor: pink); cn.position = v3(p.x + 0.2, 0, p.y)
             scene.rootNode.addChildNode(cn)
             let m = minion(at: SIMD2(p.x - 0.2, p.y)); m.node.eulerAngles.y = .pi / 2
+            m.setTool([Minion.Tool.goggles, .hammer, .wrench, nil][k])
             var light: SCNNode?
             if k == 0 {
                 let l = SCNNode(); l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
@@ -177,9 +182,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let p = tile(i, "cones: live / queued"); i += 1
             roomFloor(at: p, color: teal)
             for (k, a) in [1.0, 0.35].enumerated() {
-                let cone = SCNCone(topRadius: 0, bottomRadius: 0.15, height: 0.3); cone.radialSegmentCount = 6
-                let cn = SCNNode(geometry: cone); cn.geometry!.firstMaterial = lit(teal.lighter(0.22)); cn.opacity = a
-                cn.position = v3(p.x - 0.4 + Double(k) * 0.8, 0.15, p.y); scene.rootNode.addChildNode(cn)
+                let cn = Props.pyramid(color: teal.lighter(0.22), size: 0.32, floor: teal); cn.opacity = a
+                cn.position = v3(p.x - 0.4 + Double(k) * 0.8, 0, p.y); scene.rootNode.addChildNode(cn)
             }
         }
         // 6. boxes
@@ -203,7 +207,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let bands = [NSColor(rgb: (0.4, 0.82, 0.45)), NSColor(rgb: (0.6, 0.4, 0.9)), NSColor(rgb: (0.4, 0.82, 0.45))]
             for (k, band) in bands.enumerated() {
                 let pkg = Props.package(color: pink.lighter(0.1), band: band, size: 0.5)
-                pkg.position = v3(p.x - 0.8 + Double(k) * 0.8, 0.2, p.y)
+                pkg.position = v3(p.x - 0.8 + Double(k) * 0.8, 0, p.y)
                 if k == 2 {
                     let shell = SCNNode(geometry: SCNBox(width: 0.6, height: 0.5, length: 0.6, chamferRadius: 0)); shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2))); shell.opacity = 0.2
                     shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)]))); pkg.addChildNode(shell)

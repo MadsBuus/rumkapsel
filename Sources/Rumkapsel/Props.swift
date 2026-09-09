@@ -3,17 +3,48 @@ import SceneKit
 
 /// The things that populate a station, so the gallery and the scene draw the same props.
 enum Props {
-    /// A strapped package: one pull request's worth of work, in the repo colour with bands in the status colour.
+    /// The soft dark patch under a prop, the game's "foot".
+    static func foot(color: NSColor, size: Double) -> SCNNode {
+        let f = SCNNode(geometry: SCNPlane(width: size, height: size))
+        f.geometry!.firstMaterial = flat(color)
+        f.eulerAngles.x = -.pi / 2
+        f.position = v3(size * 0.06, 0.004, size * 0.06)
+        return f
+    }
+
+    /// A square pyramid with two lit faces and two shaded, like the game's resource pyramids.
+    static func pyramid(color: NSColor, size: Double, floor: NSColor) -> SCNNode {
+        let geo = SCNPyramid(width: size, height: size * 0.9, length: size)
+        geo.materials = [flat(color.darker(0.2)), flat(color.lighter(0.12)), flat(color.darker(0.08)), flat(color.darker(0.2)), flat(color.darker(0.14))]
+        let n = SCNNode()
+        let body = SCNNode(geometry: geo)
+        body.position = v3(0, 0, 0)
+        n.addChildNode(body)
+        n.addChildNode(foot(color: floor.darker(0.16), size: size * 1.15))
+        return n
+    }
+
+    /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     static func package(color: NSColor, band: NSColor, size: Double) -> SCNNode {
         let n = SCNNode()
-        let box = SCNBox(width: size, height: size * 0.8, length: size, chamferRadius: size * 0.04)
+        let h = size * 0.8
+        let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
         box.materials = [flat(color), flat(color.darker(0.13)), flat(color), flat(color.darker(0.13)), flat(color.lighter(0.14)), flat(color)]
-        n.addChildNode(SCNNode(geometry: box))
-        for axis in 0..<2 {
-            let strap = SCNBox(width: axis == 0 ? size * 1.04 : size * 0.18, height: size * 0.84, length: axis == 0 ? size * 0.18 : size * 1.04, chamferRadius: 0)
-            strap.firstMaterial = flat(band)
-            n.addChildNode(SCNNode(geometry: strap))
-        }
+        let body = SCNNode(geometry: box)
+        body.position = v3(0, h / 2, 0)
+        n.addChildNode(body)
+        // Strap groove: a slightly proud ring in a deeper shade, flush like a real crate strap.
+        let strap = SCNBox(width: size * 1.02, height: h * 0.16, length: size * 1.02, chamferRadius: 0)
+        strap.materials = [flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.22)), flat(color.darker(0.3))]
+        let s = SCNNode(geometry: strap)
+        s.position = v3(0, h / 2, 0)
+        n.addChildNode(s)
+        // Status tag on the lid.
+        let tag = SCNNode(geometry: SCNBox(width: size * 0.34, height: 0.012, length: size * 0.24, chamferRadius: 0))
+        tag.geometry!.firstMaterial = flat(band)
+        tag.position = v3(size * 0.22, h + 0.006, -size * 0.22)
+        n.addChildNode(tag)
+        n.addChildNode(foot(color: color.darker(0.28), size: size * 1.3))
         return n
     }
 
@@ -23,8 +54,11 @@ enum Props {
         geo.radialSegmentCount = 6
         let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
         geo.materials = [side, top, top]
-        let n = SCNNode(geometry: geo)
-        n.eulerAngles.y = .pi / 6
+        let n = SCNNode()
+        let body = SCNNode(geometry: geo)
+        body.eulerAngles.y = .pi / 6
+        n.addChildNode(body)
+        n.addChildNode(foot(color: color.darker(0.3), size: 0.7))
         return n
     }
 

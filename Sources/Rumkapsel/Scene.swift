@@ -182,6 +182,9 @@ final class Minion {
     var hammerUp = false
     var lying = false
     var wakeUntil = 0.0
+    enum Tool { case goggles, clipboard, wrench, hammer }
+    private(set) var tool: Tool?
+    private var toolNode: SCNNode?
     var promptCount = 0
     var queuedCones: [SCNNode] = []
     var toolSeed: Int { abs(id.hashValue) % 4 }
@@ -240,6 +243,64 @@ final class Minion {
 
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
     var headHeight: Double { bodyHeight }
+
+    /// Hold a tool in front of the body: goggles, clipboard, wrench or hammer. Nil puts it away.
+    func setTool(_ t: Tool?) {
+        guard t != tool else { return }
+        tool = t
+        toolNode?.removeFromParentNode()
+        toolNode = nil
+        guard let t else { return }
+        let n = SCNNode()
+        let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        let w = 0.22, h = bodyHeight, d = bodyDepth
+        switch t {
+        case .goggles:
+            let band = SCNNode(geometry: SCNBox(width: w * 0.9, height: h * 0.14, length: 0.03, chamferRadius: 0.005))
+            band.geometry!.firstMaterial = dark
+            band.position = v3(0, h * 0.34, d / 2 + 0.02)
+            for side in [-1.0, 1.0] {
+                let lens = SCNNode(geometry: SCNCylinder(radius: 0.04, height: 0.02))
+                lens.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.85, 0.75)))
+                lens.eulerAngles.x = .pi / 2
+                lens.position = v3(side * 0.055, 0, 0.02)
+                band.addChildNode(lens)
+            }
+            n.addChildNode(band)
+        case .clipboard:
+            let board = SCNNode(geometry: SCNBox(width: 0.16, height: 0.2, length: 0.015, chamferRadius: 0.005))
+            board.geometry!.firstMaterial = lit(NSColor(rgb: (0.96, 0.95, 0.9)))
+            board.position = v3(0.02, h * 0.12, d / 2 + 0.05)
+            board.eulerAngles.x = -0.35
+            let clip = SCNNode(geometry: SCNBox(width: 0.07, height: 0.025, length: 0.025, chamferRadius: 0))
+            clip.geometry!.firstMaterial = dark
+            clip.position = v3(0, 0.1, 0)
+            board.addChildNode(clip)
+            n.addChildNode(board)
+        case .wrench:
+            let shaft = SCNNode(geometry: SCNBox(width: 0.035, height: 0.2, length: 0.03, chamferRadius: 0))
+            shaft.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
+            shaft.position = v3(0.06, h * 0.12, d / 2 + 0.05)
+            shaft.eulerAngles.z = -0.5
+            let head = SCNNode(geometry: SCNBox(width: 0.09, height: 0.05, length: 0.03, chamferRadius: 0))
+            head.geometry!.firstMaterial = shaft.geometry!.firstMaterial
+            head.position = v3(0, 0.11, 0)
+            shaft.addChildNode(head)
+            n.addChildNode(shaft)
+        case .hammer:
+            let handle = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
+            handle.geometry!.firstMaterial = lit(NSColor(rgb: (0.6, 0.45, 0.3)))
+            handle.position = v3(0.07, h * 0.16, d / 2 + 0.05)
+            let head = SCNNode(geometry: SCNBox(width: 0.1, height: 0.06, length: 0.06, chamferRadius: 0))
+            head.geometry!.firstMaterial = dark
+            head.position = v3(0, 0.12, 0)
+            handle.addChildNode(head)
+            n.addChildNode(handle)
+        }
+        n.name = node.name
+        body.addChildNode(n)
+        toolNode = n
+    }
 
     /// Tip over onto the back in the dorm, or stand back up.
     func setSleeping(_ asleep: Bool) {
@@ -984,7 +1045,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let cell = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.first!
                     let size = 0.42 + min(0.28, Double(count) * 0.03)
                     let pkg = Props.package(color: NSColor(room.color).lighter(0.1), band: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
-                    pkg.position = v3(station.offset.x + Double(cell.x), size * 0.4, station.offset.y + Double(cell.y))
+                    pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
                     pkg.opacity = undelivered.contains(key) ? 0 : 1
                     if failing {
@@ -1075,7 +1136,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         let level = Double(i / (sorted.count * 2)) * 0.34
                         let side = Double(i % 2) * 0.5 - 0.25
                         let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
-                        pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, size * 0.4 + level, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
+                        pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, level, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
                         pkg.eulerAngles.y = neat ? 0 : (rnd() - 0.5) * 0.7
                         pkg.name = "\(area):\(station.name)|\(repo)"
                         markerRoot.addChildNode(pkg)
@@ -1623,13 +1684,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))
             m.pyramids.removeFirst()
         }
-        let cone = SCNCone(topRadius: 0, bottomRadius: 0.15, height: 0.3)
-        cone.radialSegmentCount = 6
-        let n = SCNNode(geometry: cone)
-        n.geometry!.firstMaterial = lit(tint)
+        let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
+        let n = Props.pyramid(color: tint, size: 0.32, floor: floorColor)
         let ox = Double.random(in: -0.25...0.25), oz = Double.random(in: -0.25...0.25)
-        n.position = v3(station.offset.x + Double(cell.x) + ox, -0.32, station.offset.y + Double(cell.y) + oz)
-        let rise = SCNAction.move(to: v3(station.offset.x + Double(cell.x) + ox, 0.15, station.offset.y + Double(cell.y) + oz), duration: 0.5)
+        n.position = v3(station.offset.x + Double(cell.x) + ox, -0.35, station.offset.y + Double(cell.y) + oz)
+        let rise = SCNAction.move(to: v3(station.offset.x + Double(cell.x) + ox, 0, station.offset.y + Double(cell.y) + oz), duration: 0.5)
         rise.timingMode = .easeOut
         n.runAction(rise)
         propRoot.addChildNode(n)
@@ -2543,6 +2602,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // Working the cone: welding, hammering, pushing and pulling, or bent over it.
                 let tool = (m.toolSeed + Int(clock / 7)) % 4
                 let cone = m.pyramids.last
+                m.setTool([Minion.Tool.goggles, .hammer, .wrench, nil][tool])
                 switch tool {
                 case 0:
                     tilt = 0.32
@@ -2575,6 +2635,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if !working { m.setTool(nil) }
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
@@ -2585,10 +2646,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if working && !atCone {
                 switch m.activity {
+                case .coding, .testing, .running: m.setTool(.wrench)
+                case .exploring, .reading, .writing, .qa, .planning: m.setTool(.clipboard)
+                default: m.setTool(nil)
+                }
+                switch m.activity {
                 case .coding: tilt = sin(t * 14) * 0.06                       // typing: quick nods
-                case .exploring: spin = sin(t * 1.2) * 0.7                    // reading code: scanning left and right
-                case .writing: tilt = sin(t * 3) * 0.1                        // writing: slow nods
-                case .thinking: roll = sin(t * 2) * 0.12                      // thinking: swaying
+                case .exploring: tilt = 0.18; spin = sin(t * 1.2) * 0.7       // reading code: clipboard, scanning left and right
+                case .writing: tilt = 0.2 + sin(t * 3) * 0.06                 // writing: head down over the clipboard, small nods
+                case .thinking: tilt = -0.18; roll = sin(t * 1.4) * 0.14      // thinking: head back, slow sway
                 case .planning: tilt = -0.12 + sin(t * 2) * 0.05              // planning: looking up
                 case .reading: tilt = -0.18                                   // reading your message: head back
                 case .testing: spin = t * 3                                   // testing: pacing in circles
