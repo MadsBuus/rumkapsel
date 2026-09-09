@@ -271,6 +271,7 @@ final class GitHubResolver {
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]
+    private var dirty: [String: Int] = [:]
     private var owners: [String: String] = [:]
     private var inFlight = Set<String>()
     private let lock = NSLock()
@@ -285,6 +286,12 @@ final class GitHubResolver {
     func commitsAhead(worktree: String) -> Int? {
         lock.lock(); defer { lock.unlock() }
         return commits[worktree]?.0
+    }
+
+    /// Changed or new files not yet committed in the worktree.
+    func dirtyFiles(worktree: String) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return dirty[worktree] ?? 0
     }
 
     /// Whether the worktree's branch exists on origin, or nil if unknown yet.
@@ -310,18 +317,23 @@ final class GitHubResolver {
                let branch = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
                 isPushed = run(["git", "rev-parse", "--verify", "--quiet", "origin/" + branch], cwd: worktree) != nil
             }
+            var changed = 0
+            if let out = run(["git", "status", "--porcelain"], cwd: worktree), let text = String(data: out, encoding: .utf8) {
+                changed = text.split(separator: "\n").count
+            }
             var n = 0
             if let out = run(["git", "rev-list", "--count", "\(base)..HEAD"], cwd: worktree),
                let text = String(data: out, encoding: .utf8), let v = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 n = v
             }
             lock.lock()
-            let changed = commits[worktree]?.0 != n || pushed[worktree] != isPushed
+            let changedResult = commits[worktree]?.0 != n || pushed[worktree] != isPushed || dirty[worktree] != changed
             commits[worktree] = (n, Date())
             pushed[worktree] = isPushed
+            dirty[worktree] = changed
             inFlight.remove("c:" + worktree)
             lock.unlock()
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+            if changedResult { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
 

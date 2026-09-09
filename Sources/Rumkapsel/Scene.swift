@@ -191,6 +191,7 @@ final class Minion {
     let isSubagent: Bool
     let node = SCNNode()
     private let body: SCNNode
+    let tilt: SCNNode
     private let bodyHeight: Double
     private let bodyDepth: Double
     var facing = 0.0
@@ -220,7 +221,10 @@ final class Minion {
         visor.geometry!.firstMaterial = flat(Palette.core)
         visor.position = v3(0, h * 0.3, d / 2 + 0.004)
         body.addChildNode(visor)
-        node.addChildNode(body)
+        let tiltNode = SCNNode()
+        tiltNode.addChildNode(body)
+        node.addChildNode(tiltNode)
+        self.tilt = tiltNode
         self.body = body
         self.bodyHeight = h
         self.bodyDepth = d
@@ -896,6 +900,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in station.rooms.values where room.branch != nil || room.key.hasPrefix("crew:") {
                 let key = roomKey(station, room)
                 var count: Int
+                var ghosts = 0                 // uncommitted work: unfinished, translucent boxes
                 var pr: PullRequest?
                 var boxOpacity = 1.0
                 if room.key.hasPrefix("crew:") {
@@ -904,9 +909,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
                 } else {
                     let local = localState(room)
-                    if local.commits == 0 || haulingRooms.contains(key) { continue }   // nothing to show, or on its way to storage
+                    let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
+                    if (local.commits == 0 && dirtyFiles == 0) || haulingRooms.contains(key) { continue }   // nothing to show, or on its way to storage
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                     count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
+                    ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
                 }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
@@ -929,7 +936,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 let cells = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
-                for i in 0..<count {
+                for i in 0..<(count + ghosts) {
+                    let ghost = i >= count
                     let size = [0.18, 0.26, 0.34][min(2, Int(rnd() * 3))]
                     let shade = CGFloat(rnd() * 0.1 - 0.04)
                     let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
@@ -955,8 +963,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     n.position = v3(pos.x, pos.y, pos.z)
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
-                    n.opacity = undelivered.contains(key) ? 0 : boxOpacity
-                    if failing {
+                    n.opacity = undelivered.contains(key) ? 0 : (ghost ? 0.38 : boxOpacity)
+                    if failing && !ghost {
                         let shell = SCNNode(geometry: SCNBox(width: size * 1.25, height: size * 1.25, length: size * 1.25, chamferRadius: 0))
                         shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
                         shell.opacity = 0.2
@@ -977,7 +985,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     m.commitDrop = true
                     if let dest = room.cells.filter({ $0 != m.cell }).randomElement() { walk(m, to: dest) }
                 }
-                lastBoxCount[key] = count
+                lastBoxCount[key] = count + ghosts
             }
             // Merged work waiting in storage, purple, four to a tile.
             if station.hasPad && station.storedBoxes > 0 {
@@ -1287,6 +1295,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             parts.append("⎇ " + branch)
             if let pr = github.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
             if let w = room.worktree, let n = github.commitsAhead(worktree: w) { parts.append("\(n) commits") }
+            if let w = room.worktree, github.dirtyFiles(worktree: w) > 0 { parts.append("\(github.dirtyFiles(worktree: w)) files uncommitted") }
         }
         let here = minions.values.filter { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }
         let workspaces = Set(here.map { URL(fileURLWithPath: $0.cwd).lastPathComponent }).sorted()
@@ -2289,21 +2298,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
-            var delta = wantFacing - m.smoothFacing
-            delta = atan2(sin(delta), cos(delta))
-            m.smoothFacing += delta * min(1, dt * 12)
+            if !(working && !m.pyramids.isEmpty && m.pyramidCell == m.cell) {
+                var delta = wantFacing - m.smoothFacing
+                delta = atan2(sin(delta), cos(delta))
+                m.smoothFacing += delta * min(1, dt * 12)
+            }
 
             // One little routine per activity, so you can tell at a glance what a minion is up to.
             var tilt = 0.0, roll = 0.0, spin = 0.0, lean = 0.0
             let t = clock + m.bobPhase
             let atCone = working && !m.pyramids.isEmpty && m.pyramidCell == m.cell
+            if atCone, let cone = m.pyramids.last {
+                // Stand a step back from the cone and face it.
+                let conePos = SIMD2(Double(cone.position.x) - station.offset.x, Double(cone.position.z) - station.offset.y)
+                let spot = conePos + SIMD2(-0.38, 0.1)
+                let d = spot - m.pos
+                if (d.x * d.x + d.y * d.y).squareRoot() > 0.02 { m.pos += d * min(1, dt * 4) }
+                let toCone = conePos - m.pos
+                m.smoothFacing = atan2(toCone.x, toCone.y)
+            }
             if atCone {
                 // Working the cone: welding, hammering, pushing and pulling, or bent over it.
                 let tool = (m.toolSeed + Int(clock / 7)) % 4
                 let cone = m.pyramids.last
                 switch tool {
                 case 0:
-                    tilt = 0.5
+                    tilt = 0.32
                     if m.weldLight == nil {
                         let l = SCNNode()
                         l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
@@ -2322,15 +2342,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     }
                 case 1:
                     let swing = sin(t * 7)
-                    tilt = max(0, swing) * 0.6
+                    tilt = max(0, swing) * 0.45
                     if swing > 0.95 && !m.hammerUp { m.hammerUp = true; drone.thud(); cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)])) }
                     if swing < 0 { m.hammerUp = false }
                 case 2:
-                    lean = sin(t * 2.5) * 0.12
-                    tilt = 0.15 + sin(t * 2.5) * 0.1
-                    cone?.position.x = (cone?.position.x ?? 0) + CGFloat(cos(t * 2.5) * 0.002)
+                    lean = sin(t * 2.5) * 0.05
+                    tilt = 0.12 + sin(t * 2.5) * 0.08
                 default:
-                    tilt = 0.35 + sin(t * 1.5) * 0.08
+                    tilt = 0.22 + sin(t * 1.5) * 0.05
                 }
             }
             if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
@@ -2351,7 +2370,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
-            m.node.eulerAngles = SCNVector3(tilt, m.smoothFacing + spin, roll)
+            m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
+            m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
         }
 
