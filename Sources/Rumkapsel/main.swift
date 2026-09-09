@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var floatItem: NSMenuItem!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
+    var galleryWindow: NSWindow?
+    var gallery: GalleryController?
     let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel"
 
@@ -77,10 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if let i = args.firstIndex(of: "--share-as"), args.count > i + 1 {
             controller.peers.start(name: args[i + 1])
         }
+        let galleryMode = args.contains("--gallery")
+        if galleryMode { openGallery() }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
             DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4)) { [self] in
-                controller.snapshot(to: path)
+                if galleryMode { gallery?.snapshot(to: path) } else { controller.snapshot(to: path) }
                 FileHandle.standardError.write("snapshot written\n".data(using: .utf8)!)
                 NSApp.terminate(nil)
             }
@@ -97,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         check.target = updater
         app.addItem(check)
         app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
+        g.keyEquivalentModifierMask = [.command, .shift]
         app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
         app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
@@ -124,6 +130,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     @objc func resetView() { controller.resetView() }
+
+    @objc func openGallery() {
+        if galleryWindow == nil {
+            let size = NSSize(width: 900, height: 620)
+            let gc = GalleryController(frame: NSRect(origin: .zero, size: size))
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.title = "rumkapsel gallery"
+            w.contentView = gc.view
+            w.isReleasedWhenClosed = false
+            w.center()
+            gallery = gc
+            galleryWindow = w
+        }
+        galleryWindow?.makeKeyAndOrderFront(nil)
+        galleryWindow?.makeFirstResponder(gallery?.view)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     @objc func openSettings() {
         settingsModel.config = ConfigStore.shared.current
