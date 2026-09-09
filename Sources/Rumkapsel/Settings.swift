@@ -29,32 +29,43 @@ struct SettingsView: View {
             people.tabItem { Label("People", systemImage: "person.2") }
             general.tabItem { Label("General", systemImage: "gear") }
         }
-        .frame(width: 560, height: 420)
-        .padding()
+        .frame(width: 600, height: 440)
+    }
+
+    private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) { content() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(20)
     }
 
     private var stations: some View {
-        Form {
-            Picker("Split sessions into stations", selection: $model.config.stationRule) {
+        page {
+            Text("Split sessions into stations").font(.headline)
+            Picker("", selection: $model.config.stationRule) {
                 Text("One station for everything").tag("none")
                 Text("Conductor workspaces are work, the rest private").tag("conductor")
                 Text("Repositories owned by these organisations are work").tag("owner")
             }
             .pickerStyle(.radioGroup)
-            if model.config.stationRule == "owner" {
-                TextField("Work organisations (comma separated)", text: Binding(
+            .labelsHidden()
+            HStack {
+                Text("Work organisations")
+                TextField("comma separated", text: Binding(
                     get: { model.config.workOwners.joined(separator: ", ") },
                     set: { model.config.workOwners = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                    .frame(width: 260)
             }
-            Toggle("Show the crew station (teammates' pull requests)", isOn: $model.config.showCrew)
+            .disabled(model.config.stationRule != "owner")
+            .opacity(model.config.stationRule == "owner" ? 1 : 0.5)
+            Divider()
+            Toggle("Show the crew station with teammates' pull requests", isOn: $model.config.showCrew)
             Text("Per-repository overrides live under Repositories.").font(.caption).foregroundStyle(.secondary)
         }
         .onChange(of: model.config) { _ in model.commit() }
-        .padding()
     }
 
     private var repositories: some View {
-        VStack(alignment: .leading) {
+        page {
             Text("Where each repository's sessions go, and whether teammates' work in it shows on the crew station.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
@@ -82,11 +93,10 @@ struct SettingsView: View {
                 .width(50)
             }
         }
-        .padding()
     }
 
     private var people: some View {
-        VStack(alignment: .leading) {
+        page {
             Text("Display names for GitHub logins seen in your repositories.").font(.caption).foregroundStyle(.secondary)
             Table(model.knownLogins.map(Named.init)) {
                 TableColumn("GitHub login") { Text($0.id) }
@@ -99,20 +109,21 @@ struct SettingsView: View {
                 }
             }
         }
-        .padding()
     }
 
     private var general: some View {
-        Form {
+        page {
             Toggle("Music", isOn: $model.musicOn).onChange(of: model.musicOn) { onMusic($0) }
             Toggle("Float on top of other windows", isOn: $model.floatOn).onChange(of: model.floatOn) { onFloat($0) }
             Toggle("Open at login", isOn: $model.launchAtLogin).onChange(of: model.launchAtLogin) { onLaunchAtLogin($0) }
+            Divider()
             Stepper("Ask GitHub every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
             Stepper("Minions sleep after \(model.config.sleepMinutes) quiet min", value: $model.config.sleepMinutes, in: 1...60)
+            Divider()
             Button("Check for Updates…") { onCheckUpdates() }
+            Spacer()
             Text("Config file: \(AppConfig.url.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
         .onChange(of: model.config) { _ in model.commit() }
-        .padding()
     }
 }

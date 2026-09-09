@@ -165,7 +165,7 @@ final class StationView: SCNView {
 /// One Claude session, walking between the rooms of its station.
 final class Minion {
     enum State { case arriving, settled, leaving }
-    enum Errand { case fetch(room: String), carry(room: String) }
+    enum Errand { case fetch(room: String), carry(room: String), pickup(Int), deliver(Int) }
 
     let id: String
     var station: String
@@ -301,6 +301,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var crewBusyUntil: [String: Date] = [:]
     private var hangarAnchors: [String: SCNNode] = [:]
     private var knownSpine: [String: Int] = [:]
+    private var roomPower: [String: Bool] = [:]
+    private var haulingRooms: Set<String> = []
+    private var hauledAt: [String: Date] = [:]
+    /// A box being carried from one floor to another by whichever minion is free.
+    private struct Haul { let id: Int; let station: String; let box: SCNNode; let from: Cell; let to: Cell; let drop: SIMD3<Double>; let onDone: () -> Void; var carrier: String? }
+    private var hauls: [Haul] = []
+    private var nextHaulId = 1
+    private var pendingLaunch: [String: (node: SCNNode, remaining: Int, since: Double)] = [:]
+    private var lastHaulSchedule = 0.0
+    static let powerWindow: TimeInterval = 2 * 3600
     private var shipsInFlight: [String: Int] = [:]
     static let crewRecent: TimeInterval = 30 * 60
     private var beams: [String: SCNNode] = [:]
@@ -332,6 +342,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var didLoadLayout = false
     let demo: Bool
     private var demoClock = 0.0
+    private var demoMerged = false
 
     static let activeWindow: TimeInterval = 12 * 3600   // a minion sleeps as long as its office stands
     static let busyWindow: TimeInterval = 90
@@ -497,6 +508,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if station.hangarCells.contains(c) { return "kind:hangar" }
+        if station.storageCells.contains(c) { return "kind:storage" }
         if station.padCells.contains(c) { return "kind:pad" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
@@ -617,6 +629,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for c in station.padCells {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
             }
+            for c in station.storageCells {
+                addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
+            }
             if station.hasPad {
                 let pc = station.padCenter
                 let ring = SCNNode(geometry: SCNTube(innerRadius: 0.55, outerRadius: 0.62, height: 0.01))
@@ -666,8 +681,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 var tiles: [SCNNode] = []
                 // Construction progress: no branch = empty grey floor; a local branch starts the tiling,
                 // commits add more, and pushing finishes it.
-                // Dark while it's just a conversation; lit as soon as a branch exists.
+                // Dark while it's just a conversation; lit as soon as a branch exists; power cut when left alone.
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
+                let powered = room.key.hasPrefix("kind:") || room.key.hasPrefix("crew:") || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
+                roomPower[key] = powered
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
@@ -682,7 +699,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if pending {
                         addTile(station: station, cell: c, owner: room.key, color: grey, name: "room:" + key)
                     }
-                    let color = progress == 0 ? full.darker(0.32) : (i < tiled ? full : subfloor)
+                    var color = progress == 0 ? full.darker(0.32) : (i < tiled ? full : subfloor)
+                    if !powered { color = color.darker(0.2) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     tiles.append(t)
@@ -739,6 +757,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
+                let storeLabel = floorSign("storage", color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
+                storeLabel.node.position.y = 0.012
+                let sc = station.storageCells
+                let scorner = SIMD2(Double(sc.map(\.x).max()!) + 0.42 - storeLabel.width / 2, Double(sc.map(\.y).max()!) + 0.42 - storeLabel.height / 2)
+                add(storeLabel.node, yaw: 0, center: scorner + SIMD2(ox, oz))
                 let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
                 padLabel.node.position.y = 0.012
                 let pc = station.padCells
@@ -849,9 +872,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
                 } else {
                     let local = localState(room)
-                    if local.commits == 0 { continue }                        // no commits, no boxes
+                    if local.commits == 0 || haulingRooms.contains(key) { continue }   // nothing to show, or on its way to storage
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                    count = min(16, local.commits)
+                    count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
                 }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
@@ -873,7 +896,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let cells = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 for i in 0..<count {
-                    let size = 0.16 + 0.15 * rnd()
+                    let size = [0.18, 0.26, 0.34][min(2, Int(rnd() * 3))]
                     let shade = CGFloat(rnd() * 0.1 - 0.04)
                     let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
                     let tint = color.lighter(shade)
@@ -913,6 +936,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if let dest = room.cells.filter({ $0 != m.cell }).randomElement() { walk(m, to: dest) }
                 }
                 lastBoxCount[key] = count
+            }
+            // Merged work waiting in storage, purple, four to a tile.
+            if station.hasPad && station.storedBoxes > 0 {
+                var seed = UInt64(truncatingIfNeeded: station.name.hashValue) | 1
+                func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
+                let purple = NSColor(rgb: (0.6, 0.4, 0.9))
+                let cells = station.storageCells
+                for i in 0..<min(16, station.storedBoxes) {
+                    let size = [0.18, 0.24, 0.3][min(2, Int(rnd() * 3))]
+                    let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
+                    box.materials = [flat(purple), flat(purple.darker(0.13)), flat(purple), flat(purple.darker(0.13)), flat(purple.lighter(0.14)), flat(purple)]
+                    let n = SCNNode(geometry: box)
+                    let cell = cells[(i / 4) % cells.count]
+                    let slot: [SIMD2<Double>] = [SIMD2(-0.25, -0.25), SIMD2(0.25, -0.25), SIMD2(-0.25, 0.25), SIMD2(0.25, 0.25)]
+                    let o = slot[i % 4]
+                    n.position = v3(station.offset.x + Double(cell.x) + o.x, size / 2 + Double(i / 16) * 0.3, station.offset.y + Double(cell.y) + o.y)
+                    n.eulerAngles.y = rnd() * 0.8
+                    n.name = "storage:" + station.name
+                    markerRoot.addChildNode(n)
+                }
             }
         }
     }
@@ -1055,7 +1098,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 return n
             }()
             node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-            liftOff(node)
+            if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node) } else { liftOff(node) }
             logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
             ringBell(seed: launch.pr.number)
         }
@@ -1259,6 +1302,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         } else if h.hasPrefix("rocket:") {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+        } else if h.hasPrefix("storage:") {
+            let n = fleet.stations[String(h.dropFirst(8))]?.storedBoxes ?? 0
+            infoLabel.text = "storage · \(n) merged boxes waiting for a release"
         } else if h.hasPrefix("pad:") {
             infoLabel.text = "launch pad · release pull requests wait here; merging launches"
         } else if h.hasPrefix("hangar:") {
@@ -1321,7 +1367,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func carriedRoom(of m: Minion) -> String? {
         switch m.errand {
         case .fetch(let r), .carry(let r): return "\(m.station)|\(r)"
-        case nil: return nil
+        default: return nil
         }
     }
 
@@ -1486,18 +1532,24 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func addPyramid(for m: Minion) {
-        guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false),
-              let cell = station.cells(of: .room(key)).randomElement() else { return }
+        guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false) else { return }
+        let cells = station.cells(of: .room(key)).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        let boxed = lastBoxCount["\(m.station)|\(key)"].map { ($0 + 2) / 3 } ?? 0
+        guard let cell = (cells.count > boxed ? Array(cells.dropFirst(boxed)) : cells).randomElement() else { return }
+        let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         if m.pyramids.count >= 3, let old = m.pyramids.first {
             old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))
             m.pyramids.removeFirst()
         }
-        let n = SCNNode(geometry: SCNPyramid(width: 0.26, height: 0.26, length: 0.26))
-        n.geometry!.firstMaterial = lit(Palette.pyramid)
+        let cone = SCNCone(topRadius: 0, bottomRadius: 0.15, height: 0.3)
+        cone.radialSegmentCount = 6
+        let n = SCNNode(geometry: cone)
+        n.geometry!.firstMaterial = lit(tint)
         let ox = Double.random(in: -0.25...0.25), oz = Double.random(in: -0.25...0.25)
-        n.position = v3(station.offset.x + Double(cell.x) + ox, 0, station.offset.y + Double(cell.y) + oz)
-        n.scale = SCNVector3(0.01, 0.01, 0.01)
-        n.runAction(.scale(to: 1, duration: 0.25))
+        n.position = v3(station.offset.x + Double(cell.x) + ox, -0.32, station.offset.y + Double(cell.y) + oz)
+        let rise = SCNAction.move(to: v3(station.offset.x + Double(cell.x) + ox, 0.15, station.offset.y + Double(cell.y) + oz), duration: 0.5)
+        rise.timingMode = .easeOut
+        n.runAction(rise)
         propRoot.addChildNode(n)
         m.pyramids.append(n)
         m.pyramidCell = cell
@@ -1542,7 +1594,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
 
         // Every session touched today keeps its office alive; archived worktrees lose theirs.
-        var liveRooms: [String: Set<String>] = [:]
         var newRooms: [String: String] = [:]   // session id -> room key
         let cfg = ConfigStore.shared.current
         for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
@@ -1566,7 +1617,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 switch m.errand {
                 case .fetch: m.errand = .fetch(room: home.key)
                 case .carry: m.errand = .carry(room: home.key)
-                case nil: break
+                default: break
                 }
                 if m.place == .room(m.home.key) { m.place = .room(home.key) }
                 changed = true
@@ -1587,15 +1638,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
                 if let w = room.worktree { github.refreshCommits(worktree: w) }
             }
-            liveRooms[stationName, default: []].insert(home.key)
         }
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
-                let isWorkspace = station.name == "work" && room.worktree.map { FileManager.default.fileExists(atPath: $0) } == true
+                let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
-                let stale = now.timeIntervalSince(room.lastActive) > StationController.roomsWindow
-                let expired = stale && (!isWorkspace || merged)
-                if liveRooms[station.name]?.contains(room.key) != true || expired {
+                let cleared = merged && (hauledAt[roomKey(station, room)].map { now.timeIntervalSince($0) > 5 * 60 } ?? !station.hasPad)
+                if gone || cleared {
                     archive(station: station, room: room, announce: !firstRun)
                     changed = true
                 }
@@ -1626,6 +1675,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
             logEvent("\(who): \(change.pr.summary)")
             ringBell(seed: change.pr.number)
+        }
+        for station in fleet.stations.values where station.hasPad {
+            for room in station.rooms.values where room.branch != nil {
+                if let pr = room.repoRoot.flatMap({ github.pull(branch: room.branch!, repoRoot: $0) }), pr.state == "MERGED" { haulMergedBoxes(station: station, room: room) }
+            }
         }
         var seen = Set<String>()
         // Old sessions in a workspace that still exists keep one sleeper per workspace: the latest.
@@ -1708,6 +1762,101 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 } else if case .carry(let r) = m.errand, let station = fleet.stations[m.station], let door = station.doorCell(of: r) {
                     walk(m, to: door)
                 }
+            }
+        }
+    }
+
+    // MARK: hauling and power
+
+    private func addHaul(station: Station, box: SCNNode, from: Cell, to: Cell, drop: SIMD3<Double>, onDone: @escaping () -> Void) {
+        hauls.append(Haul(id: nextHaulId, station: station.name, box: box, from: from, to: to, drop: drop, onDone: onDone, carrier: nil))
+        nextHaulId += 1
+    }
+
+    /// Merged: everything in the office is carried to the storage bay, one box per trip.
+    private func haulMergedBoxes(station: Station, room: Room) {
+        let key = roomKey(station, room)
+        guard station.hasPad, !haulingRooms.contains(key) else { return }
+        let boxes = markerRoot.childNodes.filter { $0.name == "box:" + key }
+        guard !boxes.isEmpty else { return }
+        haulingRooms.insert(key)
+        hauledAt[key] = Date()
+        logEvent("\(room.name): merged, moving to storage")
+        for (i, b) in boxes.enumerated() {
+            let dest = station.storageCells[i % station.storageCells.count]
+            let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
+            b.name = "haul"
+            addHaul(station: station, box: b, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
+                guard let self else { return }
+                station.storedBoxes += 1
+                b.removeFromParentNode()
+                rebuildMarkers()
+                fleet.save()
+            }
+        }
+    }
+
+    /// A release merged: storage is emptied into the rocket before it lifts off.
+    private func loadRocket(station: Station, rocket: SCNNode) {
+        let boxes = markerRoot.childNodes.filter { $0.name == "storage:" + station.name }
+        guard !boxes.isEmpty else { liftOff(rocket); return }
+        pendingLaunch[station.name] = (rocket, boxes.count, clock)
+        logEvent("\(station.name): loading the rocket")
+        let padCell = station.padCells.first ?? Station.rect(1, 1)[0]
+        let pc = station.padCenter
+        for b in boxes {
+            let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
+            b.name = "haul"
+            addHaul(station: station, box: b, from: fromCell, to: padCell, drop: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y)) { [weak self] in
+                guard let self else { return }
+                station.storedBoxes = max(0, station.storedBoxes - 1)
+                b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
+                if var p = pendingLaunch[station.name] {
+                    p.remaining -= 1
+                    pendingLaunch[station.name] = p
+                    if p.remaining <= 0 { pendingLaunch[station.name] = nil; liftOff(p.node); fleet.save() }
+                }
+            }
+        }
+    }
+
+    /// Gives waiting hauls to free minions on the same station.
+    private func scheduleHauls() {
+        for i in hauls.indices where hauls[i].carrier == nil {
+            let h = hauls[i]
+            guard let station = fleet.stations[h.station] else { continue }
+            let free = minions.values.filter { $0.station == h.station && $0.errand == nil && $0.carried == nil && !$0.isSubagent && $0.state != .leaving }
+            guard let m = free.min(by: { abs($0.cell.x - h.from.x) + abs($0.cell.y - h.from.y) < abs($1.cell.x - h.from.x) + abs($1.cell.y - h.from.y) }) else { continue }
+            hauls[i].carrier = m.id
+            m.errand = .pickup(h.id)
+            m.setSleeping(false)
+            m.bed = nil
+            m.path = station.path(from: m.cell, to: h.from)
+        }
+        for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
+            pendingLaunch[name] = nil
+            liftOff(p.node)
+        }
+    }
+
+    /// Lights flicker on when a dark office gets activity, and dim when it is left alone.
+    private func updatePower() {
+        for station in fleet.stations.values {
+            for room in station.rooms.values where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
+                let key = roomKey(station, room)
+                let powered = Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
+                    || minions.values.contains { $0.station == station.name && $0.place == .room(room.key) && $0.busy }
+                guard powered != (roomPower[key] ?? powered) else { continue }
+                roomPower[key] = powered
+                let full = NSColor(room.color)
+                let base = room.key.hasPrefix("proj:") ? full.darker(0.32) : full
+                let color = powered ? base : base.darker(0.2)
+                for t in roomTiles[key] ?? [] {
+                    t.geometry?.firstMaterial?.diffuse.contents = color
+                    let flicker = SCNAction.sequence([.fadeOpacity(to: 0.35, duration: 0.05), .fadeOpacity(to: 1, duration: 0.08), .fadeOpacity(to: 0.5, duration: 0.05), .fadeOpacity(to: 1, duration: 0.12), .fadeOpacity(to: 0.7, duration: 0.05), .fadeOpacity(to: 1, duration: 0.1)])
+                    t.runAction(flicker)
+                }
+                if powered { logEvent("\(room.name): lights on") }
             }
         }
     }
@@ -1900,7 +2049,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if m.toolCount % 2 == 0 { addPyramid(for: m) } else { clearPyramids(m) }
                 ringBell(seed: m.id.hashValue)
             }
-            if clock > 12, let r = rockets["work|1"], !r.hasActions, r.parent != nil {
+            // Demo: a merge sends #450's boxes to storage, then a release loads them into the rocket.
+            if clock > 7, !demoMerged, let st = fleet.stations["work"], let room = st.rooms["task:tattoodo-web#450"] {
+                demoMerged = true
+                let key = roomKey(st, room)
+                for (i, c) in room.cells.prefix(3).enumerated() {
+                    let b = SCNNode(geometry: SCNBox(width: 0.26, height: 0.26, length: 0.26, chamferRadius: 0))
+                    b.geometry!.firstMaterial = lit(NSColor(rgb: (0.6, 0.4, 0.9)))
+                    b.position = v3(st.offset.x + Double(c.x) + Double(i) * 0.1 - 0.2, 0.13, st.offset.y + Double(c.y))
+                    b.name = "box:" + key
+                    markerRoot.addChildNode(b)
+                }
+                haulMergedBoxes(station: st, room: room)
+            }
+            if clock > 26, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work"] == nil, let st = fleet.stations["work"] {
+                r.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
+                loadRocket(station: st, rocket: r)
+                logEvent("tattoodo-web launched to production: release 2.14")
+                rockets["work|1"] = nil
+            }
+            if false, let r = rockets["work|1"], !r.hasActions, r.parent != nil {
                 liftOff(r)
                 logEvent("tattoodo-web launched to production: release 2.14")
             }
@@ -1929,7 +2097,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         lastTick = now
         clock += dt
         if demo { tickDemo(dt: dt) }
-        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest() }
+        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest(); updatePower() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleHauls() }
         if Int(clock) % 2 == 0 && Int(clock - dt) % 2 != 0 {
             var load: [Int: Int] = [:]
             for m in minions.values where m.busy && !m.isCrew && !m.isSubagent && m.state != .leaving {
@@ -2010,6 +2179,34 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     m.carried = nil
                     m.errand = nil
                     reveal("\(m.station)|\(r)")
+                    send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
+                    continue
+                case .pickup(let id):
+                    guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; continue }
+                    let world = h.box.worldPosition
+                    h.box.removeAllActions()
+                    h.box.removeFromParentNode()
+                    m.node.addChildNode(h.box)
+                    h.box.position = m.node.convertPosition(world, from: nil)
+                    let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.4); lift.timingMode = .easeOut
+                    h.box.runAction(lift)
+                    m.carried = h.box
+                    m.errand = .deliver(id)
+                    walk(m, to: h.to)
+                    continue
+                case .deliver(let id):
+                    guard let idx = hauls.firstIndex(where: { $0.id == id }) else { m.errand = nil; m.carried = nil; continue }
+                    let h = hauls.remove(at: idx)
+                    let world = h.box.worldPosition
+                    h.box.removeFromParentNode()
+                    h.box.position = world
+                    propRoot.addChildNode(h.box)
+                    let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.35); down.timingMode = .easeIn
+                    h.box.runAction(.sequence([down, .run { _ in }]))
+                    let done = h.onDone
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.enqueue { done() } }
+                    m.carried = nil
+                    m.errand = nil
                     send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
                     continue
                 case nil:

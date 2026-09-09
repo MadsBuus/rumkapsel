@@ -124,6 +124,14 @@ final class Station {
         return [Cell(x: x, y: 0), Cell(x: x, y: 1), Cell(x: x - 1, y: 0), Cell(x: x - 1, y: 1)]
     }
     var padCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 0.5) }
+    /// The storage bay: a 2x2 next to the launch pad where merged work is kept until a release.
+    var storageCells: [Cell] {
+        guard hasPad else { return [] }
+        let x = -spineHalfLength - 1
+        return [Cell(x: x, y: 2), Cell(x: x, y: 3), Cell(x: x - 1, y: 2), Cell(x: x - 1, y: 3)]
+    }
+    var storageCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 1.5, 2.5) }
+    var storedBoxes = 0
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Six beds on the quarters floor, as local positions and the cell they belong to.
     var beds: [(pos: SIMD2<Double>, cell: Cell)] {
@@ -152,7 +160,7 @@ final class Station {
             out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
             out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
         }
-        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) }
+        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) }
     }
 
     /// The corridor axes are never built on, however far they extend.
@@ -172,6 +180,7 @@ final class Station {
         var w = Set(coreCells)
         w.formUnion(hangarCells)
         w.formUnion(padCells)
+        w.formUnion(storageCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -185,6 +194,7 @@ final class Station {
         case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
         case .room("kind:hangar"): return hangarCells
         case .room("kind:pad"): return padCells + [Cell(x: -spineHalfLength, y: 0), Cell(x: -spineHalfLength, y: 1)]
+        case .room("kind:storage"): return storageCells
         case .room(let key): return rooms[key]?.cells ?? []
         }
     }
@@ -260,7 +270,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell]) -> [Cell] {
@@ -321,20 +331,24 @@ final class Station {
     struct Saved: Codable {
         var spine: Int
         var rooms: [String: SavedRoom]
+        var stored: Int?
     }
-    struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date }
+    struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
 
     var saved: Saved {
         Saved(spine: spineHalfLength, rooms: rooms.mapValues {
-            SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive)
-        })
+            SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
+        }, stored: storedBoxes)
     }
 
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
-        for (key, r) in s.rooms where key != "kind:hangar" {
+        storedBoxes = s.stored ?? 0
+        for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
-            rooms[key] = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
+            let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
+            room.worktree = r.worktree; room.branch = r.branch; room.repoRoot = r.repoRoot
+            rooms[key] = room
             for c in r.cells { occupied[c] = key }
         }
         walkableCache = nil
@@ -352,7 +366,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v13.json")
+        return dir.appendingPathComponent("fleet-v14.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
