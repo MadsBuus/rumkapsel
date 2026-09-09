@@ -393,6 +393,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var crewLoaded = false
     private var crewBusyUntil: [String: Date] = [:]
     private var hangarAnchors: [String: SCNNode] = [:]
+    private var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
     private var knownSpine: [String: Int] = [:]
     // Peers on the local network: their snapshots, the stations built from them, and their minions.
     let peers = PeerHub()
@@ -735,6 +736,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
 
         for station in fleet.stations.values {
+            let anchor = stationAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); stationAnchors[station.name] = n; return n }()
+            anchor.position = v3(station.offset.x, 0, station.offset.y)
             let oldSpine = knownSpine[station.name] ?? station.spineHalfLength
             knownSpine[station.name] = station.spineHalfLength
             for c in station.corridorCells + station.coreCells {
@@ -1682,6 +1685,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func archive(station: Station, room: Room, announce: Bool) {
         let key = roomKey(station, room)
         cancelHauls(roomKey: key)
+        for m in minions.values where m.station == station.name && m.home.key == room.key { clearPyramids(m) }
+        stationAnchors[station.name]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
         haulingRooms.remove(key)
         undelivered.remove(key)
         outlines.removeValue(forKey: key)?.removeFromParentNode()
@@ -1740,11 +1745,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
         let n = Props.pyramid(color: tint, size: 0.32, floor: floorColor)
         let ox = Double.random(in: -0.25...0.25), oz = Double.random(in: -0.25...0.25)
-        n.position = v3(station.offset.x + Double(cell.x) + ox, -0.35, station.offset.y + Double(cell.y) + oz)
-        let rise = SCNAction.move(to: v3(station.offset.x + Double(cell.x) + ox, 0, station.offset.y + Double(cell.y) + oz), duration: 0.5)
+        n.position = v3(Double(cell.x) + ox, -0.35, Double(cell.y) + oz)
+        let rise = SCNAction.move(to: v3(Double(cell.x) + ox, 0, Double(cell.y) + oz), duration: 0.5)
         rise.timingMode = .easeOut
         n.runAction(rise)
-        propRoot.addChildNode(n)
+        n.name = "room:\(station.name)|\(key)"
+        let anchor = stationAnchors[station.name] ?? { let a = SCNNode(); a.position = v3(station.offset.x, 0, station.offset.y); propRoot.addChildNode(a); stationAnchors[station.name] = a; return a }()
+        anchor.addChildNode(n)
         if queued {
             n.opacity = 0.35
             m.queuedCones.append(n)
@@ -2639,7 +2646,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let atCone = working && !m.pyramids.isEmpty && m.pyramidCell == m.cell
             if atCone, let cone = m.pyramids.last {
                 // Stand a step back from the cone and face it.
-                let conePos = SIMD2(Double(cone.position.x) - station.offset.x, Double(cone.position.z) - station.offset.y)
+                let conePos = SIMD2(Double(cone.position.x), Double(cone.position.z))
                 let mates = minions.values.filter { $0.station == m.station && $0.pyramidCell == m.pyramidCell && !$0.pyramids.isEmpty }.map(\.id).sorted()
                 let slot = Double(mates.firstIndex(of: m.id) ?? 0)
                 let angle = .pi + slot * 2 * .pi / 3
@@ -2668,7 +2675,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         m.weldLight = l
                     }
                     if let l = m.weldLight, let cone {
-                        l.position = v3(cone.position.x, 0.25, cone.position.z)
+                        l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
                         let on = Double.random(in: 0...1) < 0.55
                         l.light?.intensity = on ? Double.random(in: 300...1200) : 0
                         l.opacity = on ? 1 : 0
