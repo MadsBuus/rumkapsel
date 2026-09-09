@@ -35,6 +35,7 @@ struct ReleasePR: Equatable {
     let state: String
     let url: String
     let labels: [String]
+    let mergedAt: Date?
     var isProduction: Bool { base == ConfigStore.shared.current.productionBranch }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
 }
@@ -108,6 +109,14 @@ final class GitHubResolver {
     }
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
+    /// Packages waiting per repo: merged into trunk but not yet on staging, and on staging but not yet in production.
+    struct Cargo: Equatable { var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int] }
+    private var cargo: [String: Cargo] = [:]
+
+    func cargo(repoRoot: String) -> Cargo? {
+        lock.lock(); defer { lock.unlock() }
+        return cargo[repoRoot]
+    }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []
     private var feeds: [String: ([FeedEvent], Date)] = [:]
@@ -247,14 +256,32 @@ final class GitHubResolver {
             let heads: Set<String> = [cfg.trunkBranch, cfg.stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
             for base in bases {
                 guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
-                                     "--json", "number,title,baseRefName,headRefName,state,url,labels"], cwd: repoRoot),
+                                     "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
                 for o in arr {
                     let head = o["headRefName"] as? String ?? ""
                     guard heads.contains(head) else { continue }
                     let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
                     found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
-                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels))
+                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
+                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))))
+                }
+            }
+            // Cargo: PRs merged into trunk, split by the last staging and production releases.
+            let iso = ISO8601DateFormatter()
+            let lastStaging = found.filter { $0.base == cfg.stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+            let lastProduction = found.filter { $0.base == cfg.productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+            var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
+            if let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
+               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                for o in arr {
+                    guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
+                    let a = o["author"] as? [String: Any]
+                    let login = a?["login"] as? String ?? ""
+                    if (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]") { continue }
+                    if let lp = lastProduction, m <= lp { continue }                 // already shipped
+                    if cfg.stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
+                    else { newCargo.deck += 1; newCargo.deckNumbers.append(n) }
                 }
             }
             lock.lock()
@@ -262,7 +289,8 @@ final class GitHubResolver {
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
             }
-            let changed = previous != found
+            let changed = previous != found || cargo[repoRoot] != newCargo
+            cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)
             lock.unlock()

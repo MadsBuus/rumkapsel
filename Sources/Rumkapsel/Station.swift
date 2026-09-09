@@ -30,6 +30,7 @@ enum Place: Hashable {
     case room(String)
 
     static let quarters = Place.room("kind:quarters")
+    static let lounge = Place.room("kind:lounge")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -225,8 +226,10 @@ final class Station {
 
     @discardableResult
     func ensureFixedRoom(_ place: Place) -> Bool {
-        guard case .room(let key) = place, key == "kind:quarters" else { return false }
-        return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4))
+        guard case .room(let key) = place else { return false }
+        if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4)) }
+        if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(2, 2)) }
+        return false
     }
 
     /// The room cell that touches the corridor: the doorway, and where a carried box gets set down.
@@ -379,7 +382,7 @@ final class Fleet {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v14.json")
+        return dir.appendingPathComponent("fleet-v15.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
@@ -401,6 +404,7 @@ final class Fleet {
         let s = Station(name: name)
         if name == "crew" { s.hasPad = false }
         s.ensureFixedRoom(.quarters)
+        s.ensureFixedRoom(.lounge)
         stations[name] = s
         return s
     }
@@ -457,6 +461,7 @@ final class Fleet {
             if name == "crew" { station.hasPad = false }
             station.restore(s)
             station.ensureFixedRoom(.quarters)
+            station.ensureFixedRoom(.lounge)
             stations[name] = station
         }
     }
