@@ -264,7 +264,8 @@ final class GitHubResolver {
                 for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
             let stagingBranch = remoteBranches.contains(cfg.stagingBranch) ? cfg.stagingBranch : ""
-            let productionBranch = remoteBranches.contains(cfg.productionBranch) ? cfg.productionBranch : ""
+            // Production: the configured branch if the repo has it, else main, else master (never the trunk itself).
+            let productionBranch = [cfg.productionBranch, "main", "master"].first { !$0.isEmpty && $0 != cfg.trunkBranch && remoteBranches.contains($0) } ?? ""
             let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
             let heads: Set<String> = [cfg.trunkBranch, stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
             for base in bases {

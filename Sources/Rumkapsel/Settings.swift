@@ -68,7 +68,7 @@ struct SettingsView: View {
     private var pipeline: some View {
         page {
             Text("How work flows to production").font(.headline)
-            Text("Merged pull requests go to storage. A release into the staging branch moves them to the test deck. A release into the production branch loads the rocket. Leave staging empty if you release straight from trunk.")
+            Text("Merged pull requests go to storage. A release into the staging branch moves them to the test deck. A release into the production branch loads the rocket. Repositories without the staging branch skip the deck; a repository without the production branch falls back to main or master.")
                 .font(.caption).foregroundStyle(.secondary)
             Grid(alignment: .leading, verticalSpacing: 10) {
                 GridRow { Text("Trunk branch"); TextField("develop", text: $model.config.trunkBranch).frame(width: 200) }
