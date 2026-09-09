@@ -24,6 +24,14 @@ final class Drone: @unchecked Sendable {
     private struct Bell { var freq: Double; var t: Double }
     private var bells: [Bell] = []
 
+    // Work layers: one per repo, a chord that stacks a note per minion working there.
+    private struct Layer { var notes: [Double]; var level: Double; var target: Double; var phases: [Double] }
+    private var layers: [Int: Layer] = [:]
+    private var pendingWorkload: [Int: Int]?
+    private struct Sweep { var t: Double; var up: Bool }
+    private var sweeps: [Sweep] = []
+    private static let repoDegrees = [0, 7, 4, 11, 2, 9, 14, 16]   // semitones above the drone root per repo colour
+
     // Voicings in MIDI note numbers. D minor colour throughout, never resolving too hard.
     private static let chords: [[Int]] = [
         [38, 45, 53, 60, 64],   // D m9
@@ -85,6 +93,31 @@ final class Drone: @unchecked Sendable {
 
     private static func hz(_ midi: Int) -> Double { 440 * pow(2, Double(midi - 69) / 12) }
 
+    /// Repo colour index -> minions working there. Layers fade in and out with the work.
+    func setWorkload(_ load: [Int: Int]) {
+        lock.lock(); pendingWorkload = load; lock.unlock()
+    }
+
+    /// A slow glide: up for a launch, down for a shuttle coming in.
+    func sweep(up: Bool) {
+        lock.lock(); if sweeps.count < 4 { sweeps.append(Sweep(t: 0, up: up)) }; lock.unlock()
+    }
+
+    private func applyWorkload(_ load: [Int: Int]) {
+        for (index, count) in load {
+            let root = 62 + Drone.repoDegrees[index % Drone.repoDegrees.count]
+            let chord = [0, 7, 12, 16].prefix(max(1, min(4, count))).map { Drone.hz(root + $0) }
+            if var l = layers[index] {
+                l.notes = chord; l.target = 1
+                while l.phases.count < chord.count { l.phases.append(Double.random(in: 0..<1)) }
+                layers[index] = l
+            } else {
+                layers[index] = Layer(notes: chord, level: 0, target: 1, phases: chord.map { _ in Double.random(in: 0..<1) })
+            }
+        }
+        for index in layers.keys where load[index] == nil { layers[index]?.target = 0 }
+    }
+
     private func render(into buf: UnsafeMutablePointer<Float>, frames: Int) {
         let dt = 1.0 / sampleRate
         let chordLength = 28.0
@@ -95,7 +128,11 @@ final class Drone: @unchecked Sendable {
         lock.lock()
         var localBells = bells
         bells.removeAll()
+        if let load = pendingWorkload { applyWorkload(load); pendingWorkload = nil }
+        var localSweeps = sweeps
+        sweeps.removeAll()
         lock.unlock()
+        let layerRamp = 1.0 - exp(-dt / 4.0)
 
         for i in 0..<frames {
             chordClock += dt
@@ -132,14 +169,41 @@ final class Drone: @unchecked Sendable {
             }
             s += b * 0.07
 
+            // Work layers: soft stacked notes per repo, breathing with the pad.
+            var w = 0.0
+            for (index, var l) in layers {
+                l.level += (l.target - l.level) * layerRamp
+                if l.level > 0.001 {
+                    for (k, f) in l.notes.enumerated() where k < l.phases.count {
+                        l.phases[k] += f * dt; if l.phases[k] >= 1 { l.phases[k] -= 1 }
+                        let p = l.phases[k] * 2 * .pi
+                        w += (sin(p) + 0.25 * sin(2 * p)) * l.level / Double(l.notes.count + 1)
+                    }
+                }
+                layers[index] = l
+            }
+            s += w * 0.05 * swell
+
+            // Sweeps: a slow glide up (launch) or down (arrival), fading as it goes.
+            for k in localSweeps.indices {
+                let t = localSweeps[k].t
+                let progress = min(1, t / 6)
+                let f = localSweeps[k].up ? 110 * pow(2, progress * 2) : 440 * pow(2, -progress * 2)
+                let env = sin(progress * .pi) * 0.05
+                s += sin(t * f * 2 * .pi) * env
+                localSweeps[k].t = t + dt
+            }
+
             filterState += (s - filterState) * cutoff
             master += (masterTarget - master) * masterRamp
             buf[i] = Float(filterState * master)
         }
 
         localBells.removeAll { $0.t > 6 }
+        localSweeps.removeAll { $0.t > 6 }
         lock.lock()
         bells = localBells + bells
+        sweeps = localSweeps + sweeps
         lock.unlock()
     }
 }
