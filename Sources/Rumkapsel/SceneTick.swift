@@ -91,6 +91,14 @@ extension StationController {
     }
 
     /// Every worker, once a frame: its walk, its pose, its props.
+    /// A shuttle that dropped this office's crate and has not risen from the slot yet.
+    func shipStillOver(roomKey: String, station: String) -> Bool {
+        shuttles.contains { s in
+            guard s.station == station, case .flight(let kind, _, _) = s.command.kind, case .dropCrate(let key) = kind, key == roomKey else { return false }
+            return s.phase < 3   // approach, descend, unload
+        }
+    }
+
     func tickMinions(dt: Double) {
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
@@ -132,6 +140,7 @@ extension StationController {
                         advance(m); continue
                     case .approach:
                         if boxes[key] != nil, !world.truth.isInBay(key) { continue }   // the shuttle has not set it down yet
+                        if shipStillOver(roomKey: r, station: m.station) { continue }  // and it has not lifted off the slot yet
                         if let spot = m.fetchSpot {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
@@ -146,6 +155,7 @@ extension StationController {
                             box.removeFromParentNode()
                             m.node.addChildNode(box)
                             box.position = m.node.convertPosition(world, from: nil)
+                            box.eulerAngles.y = CGFloat(Double(box.eulerAngles.y) - m.smoothFacing)   // keep its turn, now on the arms
                             let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.5); lift.timingMode = .easeOut
                             box.runAction(lift)
                             m.carried = box

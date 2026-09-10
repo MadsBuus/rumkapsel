@@ -57,7 +57,11 @@ extension StationController {
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
                     count = min(16, max(1, cb.count))
-                    pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
+                    // A teammate's pull request is a crate with its sticker; pushes before a PR are cubes.
+                    let prNumber = world.crewRoomInfo[key]?.prNumber
+                    let state = world.isClosed(key) ? "CLOSED" : (prNumber != nil ? "OPEN" : cb.state)
+                    pr = PullRequest(number: prNumber ?? 0, title: "", state: state, reviewDecision: "", isDraft: false, url: "")
+                    packaged = prNumber != nil || world.isClosed(key)
                 } else {
                     let local = world.localState(room)
                     let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
@@ -65,7 +69,7 @@ extension StationController {
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                     count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
                     ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
-                    packaged = pr != nil && pr!.state != "CLOSED"
+                    packaged = pr != nil
                 }
                 // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)

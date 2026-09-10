@@ -89,6 +89,7 @@ final class SimulatorModel: ObservableObject {
 
     private var sessions: [String: SimSession] = [:]
     private var board: [ProjectItem] = []
+    private var teammateBranches: [String: [(Int, String)]] = [:]
     private var openPRs: [String: [OpenPR]] = [:]
     private var feeds: [String: [FeedEvent]] = [:]
     private var releases: [String: [ReleasePR]] = [:]
@@ -286,7 +287,7 @@ final class SimulatorModel: ObservableObject {
                 "Session goes quiet", "Session ends", "Session switches branch",
             ]),
             Group(id: "Teammates", picker: "repo", buttons: [
-                "Teammate opens PR", "Teammate pushes", "Teammate PR merged", "Teammate PR closed (not merged)",
+                "Teammate starts a branch", "Teammate opens PR", "Teammate pushes", "Teammate PR merged", "Teammate PR closed (not merged)",
             ]),
             Group(id: "Own office", picker: "office", buttons: [
                 "Open PR", "PR approved", "Checks failing", "PR merged", "PR closed (not merged)",
@@ -349,10 +350,21 @@ final class SimulatorModel: ObservableObject {
             pushScan()
 
         // Teammates, through the open pull request list and the activity feed
-        case "Teammate opens PR":
+        case "Teammate starts a branch":
+            // A new branch on the board and in the feed: a new office, by shuttle. No pull request yet.
             nextIssue += 1
             let n = nextIssue
             let branch = "gh-\(n)/teammate-\(n)"
+            board.append(item(repo, n, "teammate work \(n)", statuses.development, teammate))
+            teammateBranches[repo, default: []].append((n, branch))
+            feedEvent("branch_create", repo: repo, branch: branch, pr: nil, title: nil)
+            feedEvent("push", repo: repo, branch: branch, pr: nil, title: nil, detail: "1")
+            pushGitHub()
+        case "Teammate opens PR":
+            // On the teammate's latest branch without one: the office exists, a crate appears in it.
+            guard let (n, branch) = teammateBranches[repo]?.last(where: { b in !(openPRs[repo] ?? []).contains { $0.branch == b.1 } }) else {
+                return miss("\(teammate) has no branch without a pull request on \(repo); start a branch first")
+            }
             openPRs[repo, default: []].append(OpenPR(number: n, title: "teammate work \(n)", author: teammate, isBot: false,
                                                      branch: branch, url: "https://example.invalid/\(repo)/\(n)", createdAt: Date()))
             feedEvent("pr_open", repo: repo, branch: branch, pr: n, title: "teammate work \(n)")
