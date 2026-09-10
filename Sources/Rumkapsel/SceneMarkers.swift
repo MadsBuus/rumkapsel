@@ -211,9 +211,7 @@ extension StationController {
                            abs(was.x - slot.pos.x) < 0.001, abs(was.z - slot.pos.z) < 0.001,
                            was.y > slot.pos.y + 0.05, vacated(was, slot.pos) {
                             pkg.position = v3(was.x, was.y, was.z)
-                            let down = SCNAction.move(to: v3(slot.pos.x, slot.pos.y, slot.pos.z), duration: Hands.settleSeconds)
-                            down.timingMode = .easeInEaseOut
-                            pkg.runAction(down)
+                            moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
                         }
                     }
                 }
@@ -388,7 +386,9 @@ extension StationController {
                 r?.pending.remove(command.id)
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
                 else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
-                b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
+                // Into the hold: it shrinks away where it stands; the rocket is far too small for it.
+                let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
+                moveCrate(b, legs: [MotionLeg(to: at, seconds: 0.3, scale: 0.01)]) { b.removeFromParentNode() }
                 fleet.save()
             }
         }

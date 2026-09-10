@@ -100,10 +100,11 @@ extension StationController {
     func dropWhereStanding(_ m: Minion) {
         guard let held = m.carried else { return }
         let at = held.worldPosition
+        stopCrate(held)
         held.removeFromParentNode()
         held.position = at
         propRoot.addChildNode(held)
-        held.runAction(.sequence([.move(to: v3(Double(at.x), 0.12, Double(at.z)), duration: 0.35), .run { [weak self] _ in self?.drone.thud() }]))
+        moveCrate(held, legs: [MotionLeg(to: SIMD3(Double(at.x), 0.12, Double(at.z)), seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
         world.truth.dropped(by: m.id)
     }
@@ -291,9 +292,7 @@ extension StationController {
                        unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
             box.opacity = 1
             box.position = v3(slot.x, 0.42, slot.z)
-            let drop = SCNAction.move(to: v3(slot.x, 0.09, slot.z), duration: 0.5)
-            drop.timingMode = .easeIn
-            box.runAction(drop)
+            self?.moveCrate(box, legs: [MotionLeg(to: SIMD3(slot.x, 0.09, slot.z), seconds: 0.5, ease: .easeIn)])
             self?.world.truth.crateInBay(key)   // the crate is on the floor now: a carrier may fetch it
         })
         drone.sweep(up: false)

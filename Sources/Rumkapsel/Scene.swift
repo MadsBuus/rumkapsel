@@ -177,6 +177,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Where each yard crate stood at the last redraw, by its node name. A crate whose column lost the
     /// one under it settles down to its new level over a beat instead of blinking there.
     var crateStood: [String: SIMD3<Double>] = [:]
+    /// Crates under way, by node: the one table that moves a crate's picture.
+    var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
@@ -888,6 +890,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
         tickShuttles()
         tickPallets()
+        tickCrateMotions()
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p

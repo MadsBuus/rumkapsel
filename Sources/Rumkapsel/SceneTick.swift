@@ -112,9 +112,9 @@ extension StationController {
     /// carry, an office delivery, anything later — goes through `startLift`/`lift` and
     /// `startSetDown`/`setDown`/`release`, so there is one lift on the station and one set-down.
     ///
-    /// The arcs are `SCNAction`s, because they ease nicely, and the phases are on the station clock.
-    /// Both are derived from the numbers below and nowhere else, so the two cannot drift: a phase is
-    /// exactly its arc plus the beat around it, whatever those durations are changed to.
+    /// The arcs are crate motions on the station clock (`CrateMotion`), and so are the phases. Both
+    /// are derived from the numbers below and nowhere else, so the two cannot drift: a phase is exactly
+    /// its arc plus the beat around it, whatever those durations are changed to.
     enum Hands {
         /// The crate's two legs off its slot: back at its own height, then up onto the arms.
         static let liftFirst = 0.3, liftSecond = 0.35
@@ -161,21 +161,20 @@ extension StationController {
     /// waist high from level one, above the head from higher up.
     func lift(_ m: Minion, _ node: SCNNode) {
         let at = node.worldPosition
-        node.removeAllActions()
+        stopCrate(node)
         node.removeFromParentNode()
         m.node.addChildNode(node)
         node.position = m.node.convertPosition(at, from: nil)
         node.eulerAngles.y = CGFloat(Double(node.eulerAngles.y) - m.smoothFacing)   // keeps its own turn, now on the arms
         let y = Double(node.position.y)
-        let via: SCNVector3
+        let via: SIMD3<Double>
         switch m.handsAt {
-        case 0: via = v3(0, m.headHeight * 0.45, 0.3)
-        case 1: via = v3(0, y, 0.2)
-        default: via = v3(0, max(m.headHeight + 0.2, y), 0.15)
+        case 0: via = SIMD3(0, m.headHeight * 0.45, 0.3)
+        case 1: via = SIMD3(0, y, 0.2)
+        default: via = SIMD3(0, max(m.headHeight + 0.2, y), 0.15)
         }
-        let first = SCNAction.move(to: via, duration: Hands.liftFirst); first.timingMode = .easeOut
-        let onto = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: Hands.liftSecond); onto.timingMode = .easeInEaseOut
-        node.runAction(.sequence([first, onto]))
+        moveCrate(node, legs: [MotionLeg(to: via, seconds: Hands.liftFirst, ease: .easeOut),
+                               MotionLeg(to: SIMD3(0, m.headHeight + 0.14, 0), seconds: Hands.liftSecond)])
         m.carried = node
     }
 
@@ -189,22 +188,22 @@ extension StationController {
     /// level 1 slides forward onto the top at waist height; level 2 goes over the head and slides in;
     /// higher, with a hop. It is turned on the way down the way the layout will draw it.
     func setDown(_ m: Minion, _ node: SCNNode, to pos: SIMD3<Double>, yaw: Double, level: Int) {
-        let target = m.node.convertPosition(v3(pos.x, pos.y, pos.z), from: nil)
-        let via: SCNVector3
+        let t = m.node.convertPosition(v3(pos.x, pos.y, pos.z), from: nil)
+        let target = SIMD3(Double(t.x), Double(t.y), Double(t.z))
+        let via: SIMD3<Double>
         switch level {
-        case 0: via = v3(0, m.headHeight * 0.45, 0.3)
-        case 1: via = v3(0, Double(target.y), 0.2)
-        default: via = v3(0, max(m.headHeight + 0.2, Double(target.y)), 0.15)
+        case 0: via = SIMD3(0, m.headHeight * 0.45, 0.3)
+        case 1: via = SIMD3(0, target.y, 0.2)
+        default: via = SIMD3(0, max(m.headHeight + 0.2, target.y), 0.15)
         }
-        let first = SCNAction.move(to: via, duration: Hands.setDownFirst); first.timingMode = .easeInEaseOut
-        let second = SCNAction.move(to: target, duration: Hands.setDownSecond); second.timingMode = level == 0 ? .easeIn : .easeOut
-        let turn = SCNAction.rotateTo(x: 0, y: CGFloat(yaw - m.smoothFacing), z: 0, duration: Hands.setDownArc)
-        node.runAction(.group([.sequence([first, second]), turn]))
+        moveCrate(node, legs: [MotionLeg(to: via, seconds: Hands.setDownFirst),
+                               MotionLeg(to: target, seconds: Hands.setDownSecond, ease: level == 0 ? .easeIn : .easeOut)],
+                  yawTo: yaw - m.smoothFacing)
     }
 
     /// Out of the hands: it stands exactly where the layout will draw it, and nothing moves it from here.
     func release(_ m: Minion, _ node: SCNNode, at pos: SIMD3<Double>, yaw: Double) {
-        node.removeAllActions()
+        stopCrate(node)
         node.removeFromParentNode()
         node.position = v3(pos.x, pos.y, pos.z)
         node.eulerAngles = SCNVector3(0, yaw, 0)
@@ -248,11 +247,14 @@ extension StationController {
                     m.commitDrop = false
                     m.carried = nil
                     let world = c.worldPosition
+                    stopCrate(c)
                     c.removeFromParentNode()
                     c.position = world
                     propRoot.addChildNode(c)
-                    let down = SCNAction.move(to: v3(world.x, 0.12, world.z), duration: 0.35); down.timingMode = .easeIn
-                    c.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }, .wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))
+                    moveCrate(c, legs: [MotionLeg(to: SIMD3(Double(world.x), 0.12, Double(world.z)), seconds: 0.35, ease: .easeIn)]) { [weak self] in
+                        self?.drone.thud()
+                        c.runAction(.sequence([.wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))   // a fade, not a move
+                    }
                 }
                 switch m.current?.kind {
                 case .deliverOffice(let r):
