@@ -53,8 +53,9 @@ since real stations mandate both.
 - A shuttle lands only in the bay and leaves before anyone walks under it. A rocket leaves only
   with its cargo aboard.
 - A rocket is loaded at its foot: the carrier walks up to the hull, an arm's length off, and sets
-  the crate down on the loading hatch at its base; the hatch takes the crate up into the hold and
-  closes. Nothing is thrown, nothing goes in from a corner of the pad.
+  the crate down on the loading hatch at its base; the hatch takes the crate up into the hold, the
+  crate shrinking as it goes since the rocket is far too small for it, and the hatch closes. The
+  rocket grows a little with what it holds. Nothing is thrown, nothing goes in from a corner of the pad.
 - A moving pallet is as solid as a standing one. When the floor changes under a walk, the walk is
   re-planned; nobody finishes a leg through something that arrived in the way.
 
