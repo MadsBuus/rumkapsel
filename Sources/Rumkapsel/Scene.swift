@@ -1492,50 +1492,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             let purple = NSColor(rgb: (0.6, 0.4, 0.9))
-            for (area, piles, cells, neat) in [("storage", station.stored, station.storageCells, false), ("deck", station.staged, station.deckCells, true)] where station.hasPad && !cells.isEmpty {
-                var seed = UInt64(truncatingIfNeeded: (station.name + area).hashValue) | 1
-                func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                // Every other row holds crates; the rows between are aisles to walk down.
-                let rows = Set(cells.map(\.y)).sorted()
-                let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
-                let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                // The deck keeps its two rows apart: tested nearest the pad (north, the lower row number),
-                // untested on the far row. Within a row, crates group by repository in stacks of three, so a
-                // repository's lineup stands together and loads in one sweep.
-                let rowList = crateRows.sorted()
-                let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
-                var nextSlot: [Int: Int] = [:]   // per row group: the first free stack
-                func place(_ pkg: SCNNode, group: Int, row: [Cell], slot: Int, level: Int) {
-                    let cap = row.count * 2
-                    let cell = row[(slot % cap) / 2], side = Double(slot % 2) * 0.5 - 0.25
-                    let y = Double(level + 3 * (slot / cap)) * 0.34
-                    let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
-                    pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, y, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
-                }
-                let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
-                    github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
-                for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
-                    let c = NSColor(fleet.color(forRepo: repo))
-                    let numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
-                    var placedInGroup: [Int: Int] = [:]   // this repository's crates so far, per row group
-                    let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
-                    for k in 0..<min(n, 48) {
-                        let size = 0.38
-                        let prNumber = k < numbers.count ? numbers[k] : 0
-                        let cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(prNumber) ?? false)
-                        if area == "deck", haulingCrates.contains("\(repo)|\(prNumber)") { continue }
-                        let pkg = Props.package(color: c.lighter(0.1), band: cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: size, approved: cleared)
-                        let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
-                        let row = area == "deck" && rowList.count > 1 ? (cleared ? testedRow : untestedRow) : sorted
-                        let j = placedInGroup[group, default: 0]
-                        place(pkg, group: group, row: row, slot: starts[group]! + j / 3, level: j % 3)
-                        placedInGroup[group] = j + 1
-                        pkg.eulerAngles.y = neat ? 0 : (rnd() - 0.5) * 0.7
-                        pkg.name = "\(area):\(station.name)|\(repo)|\(prNumber)"
-                        pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
-                        markerRoot.addChildNode(pkg)
-                    }
-                    for (g, count) in placedInGroup where count > 0 { nextSlot[g] = starts[g]! + (count + 2) / 3 }
+            for area in ["storage", "deck"] where station.hasPad {
+                for slot in yardLayout(station: station, area: area) {
+                    if area == "deck", haulingCrates.contains("\(slot.repo)|\(slot.number)") { continue }
+                    let c = NSColor(fleet.color(forRepo: slot.repo))
+                    let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: 0.38, approved: slot.cleared)
+                    pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
+                    pkg.eulerAngles.y = slot.yaw
+                    pkg.name = "\(area):\(station.name)|\(slot.repo)|\(slot.number)"
+                    pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
+                    markerRoot.addChildNode(pkg)
                 }
             }
         }
@@ -2663,6 +2629,56 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         hauls.removeAll { $0.roomKey == roomKey }
     }
 
+    /// One crate's place in a yard: which repository's, its number, where it stands and which way it turns.
+    struct YardSlot { let repo: String; let number: Int; let index: Int; let cleared: Bool; let cell: Cell; let pos: SIMD3<Double>; let yaw: Double }
+
+    /// Where every crate stands in storage or on the deck, from the counts alone, so a carrier can be
+    /// sent to the exact spot a crate will occupy and nothing jumps when the layout is redrawn.
+    /// Every other row holds crates with aisles between; the deck keeps tested crates on the row nearest
+    /// the pad and untested on the far row; within a row, crates group by repository in stacks of three.
+    /// `extra` adds one more crate of a repository, as it will be once a haul in flight has landed.
+    private func yardLayout(station: Station, area: String, extra: (repo: String, number: Int)? = nil) -> [YardSlot] {
+        let cells = area == "deck" ? station.deckCells : station.storageCells
+        let neat = area == "deck"
+        var piles = area == "deck" ? station.staged : station.stored
+        if let extra { piles[extra.repo, default: 0] += 1 }
+        guard !cells.isEmpty else { return [] }
+        let rows = Set(cells.map(\.y)).sorted()
+        let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
+        let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        let rowList = crateRows.sorted()
+        let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
+        let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
+            github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
+        var nextSlot: [Int: Int] = [:]
+        var out: [YardSlot] = []
+        for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
+            var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
+            if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
+            var placed: [Int: Int] = [:]
+            let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
+            for k in 0..<min(n, 48) {
+                let number = k < numbers.count ? numbers[k] : 0
+                let cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(number) ?? false)
+                let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
+                let row = area == "deck" && rowList.count > 1 ? (cleared ? testedRow : untestedRow) : sorted
+                let j = placed[group, default: 0]
+                let slot = starts[group]! + j / 3, level = j % 3
+                let cap = row.count * 2
+                let cell = row[(slot % cap) / 2], side = Double(slot % 2) * 0.5 - 0.25
+                // A little disorder in storage, fixed per crate so it never shuffles.
+                var seed = UInt64(truncatingIfNeeded: "\(repo)#\(number)#\(k)".hashValue) | 1
+                func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
+                let jx = neat ? 0.0 : (rnd() - 0.5) * 0.22, jz = neat ? 0.0 : (rnd() - 0.5) * 0.3, yaw = neat ? 0.0 : (rnd() - 0.5) * 0.7
+                let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level + 3 * (slot / cap)) * 0.34, station.offset.y + Double(cell.y) + jz)
+                out.append(YardSlot(repo: repo, number: number, index: k, cleared: cleared, cell: cell, pos: pos, yaw: yaw))
+                placed[group] = j + 1
+            }
+            for (g, count) in placed where count > 0 { nextSlot[g] = starts[g]! + (count + 2) / 3 }
+        }
+        return out
+    }
+
     /// Merged: the office's package is carried to the storage bay in one trip.
     private func haulMergedBoxes(station: Station, room: Room) {
         let key = roomKey(station, room)
@@ -2672,10 +2688,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         haulingRooms.insert(key)
         logEvent("\(room.name): merged, package to storage")
         let repo = room.repo ?? "work"
-        let dest = station.storageCells.randomElement() ?? Station.rect(1, 1)[0]
+        let number = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } } ?? crewRoomInfo[key]?.prNumber ?? 0
+        let slot = yardLayout(station: station, area: "storage", extra: (repo, number)).last { $0.repo == repo }
+        let dest = slot?.cell ?? station.storageCells.randomElement() ?? Station.rect(1, 1)[0]
+        let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0.0, station.offset.y + Double(dest.y))
         let fromCell = Cell(x: Int((Double(pkg.position.x) - station.offset.x).rounded()), y: Int((Double(pkg.position.z) - station.offset.y).rounded()))
         pkg.name = "haul"
-        addHaul(station: station, box: pkg, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.16, station.offset.y + Double(dest.y)), roomKey: key) { [weak self] in
+        addHaul(station: station, box: pkg, from: fromCell, to: dest, drop: drop, roomKey: key) { [weak self] in
             guard let self else { return }
             station.stored[repo, default: 0] += 1
             pkg.removeFromParentNode()
@@ -2685,16 +2704,29 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Where crate `index` of a repository will stand on the deck once `index + 1` of them are staged.
+    private func deckSlot(station: Station, repo: String, index: Int, number: Int) -> (cell: Cell, pos: SIMD3<Double>) {
+        let saved = station.staged
+        station.staged[repo] = index + 1
+        defer { station.staged = saved }
+        if let s = yardLayout(station: station, area: "deck", extra: nil).first(where: { $0.repo == repo && $0.index == index }) { return (s.cell, s.pos) }
+        let c = station.deckCells[index % station.deckCells.count]
+        return (c, SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y)))
+    }
+
     /// A staging release merged: the repo's storage boxes are carried to the test deck.
     private func stageCargo(station: Station, repo: String) {
         let boxes = markerRoot.childNodes.filter { $0.name == "storage:\(station.name)|\(repo)" }
         guard !boxes.isEmpty else { return }
         logEvent("\(repo): deployed to staging, moving to the test deck")
+        let already = station.staged[repo] ?? 0
         for (i, b) in boxes.enumerated() {
-            let dest = station.deckCells[i % station.deckCells.count]
+            // Its number rides in the node name; its slot is where the deck layout will put crate `already + i`.
+            let number = Int(b.name?.split(separator: "|").last ?? "") ?? 0
+            let dest = deckSlot(station: station, repo: repo, index: already + i, number: number)
             let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
             b.name = "haul"
-            addHaul(station: station, box: b, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
+            addHaul(station: station, box: b, from: fromCell, to: dest.cell, drop: dest.pos) { [weak self] in
                 guard let self else { return }
                 station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
                 station.staged[repo, default: 0] += 1
@@ -2978,14 +3010,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 logEvent("\(label): passed QA, ready to ship")
                 if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
                     // Someone carries it across the aisle to the tested row; the layout redraws it there once set down.
-                    let rows = Set(station.deckCells.map(\.y)).sorted()
-                    let testedY = rows.first ?? 0   // the row nearest the pad
-                    let dest = station.deckCells.filter { $0.y == testedY }.min { $0.x < $1.x } ?? station.deckCells[0]
+                    let slot = yardLayout(station: station, area: "deck").first { $0.repo == item.repo && $0.number == item.number }
+                    let dest = slot?.cell ?? station.deckCells[0]
+                    let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0, station.offset.y + Double(dest.y))
                     let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
                     let id = "\(item.repo)|\(item.number)"
                     haulingCrates.insert(id)
                     crate.name = "haul"
-                    addHaul(station: station, box: crate, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
+                    addHaul(station: station, box: crate, from: fromCell, to: dest, drop: drop) { [weak self] in
                         guard let self else { return }
                         haulingCrates.remove(id)
                         crate.removeFromParentNode()
@@ -3259,18 +3291,29 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .pickup(let id):
                     guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; m.bendUntil = 0; continue }
                     // Face the crate, bend down and take hold before straightening up with it.
-                    let toBox = SIMD2(Double(h.box.worldPosition.x) - station.offset.x, Double(h.box.worldPosition.z) - station.offset.y) - m.pos
-                    if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                    if m.bendUntil == 0 { m.bendUntil = clock + 0.9; continue }
-                    if clock < m.bendUntil - 0.45 { continue }
+                    // Stand a step back from the crate, facing it, then crouch and bring it up past the chest.
+                    let boxAt = SIMD2(Double(h.box.worldPosition.x) - station.offset.x, Double(h.box.worldPosition.z) - station.offset.y)
+                    let toBox = boxAt - m.pos
+                    let dist = (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot()
+                    if dist > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
+                    if m.bendUntil == 0 {
+                        if dist < 0.28 || dist > 0.42, dist > 0.001 {   // shuffle to arm's length
+                            let want = boxAt - toBox / dist * 0.34
+                            m.pos += (want - m.pos) * min(1, dt * 6)
+                            if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
+                        }
+                        m.bendUntil = clock + 1.1; continue
+                    }
+                    if clock < m.bendUntil - 0.7 { continue }
                     if m.carried == nil {
                         let world = h.box.worldPosition
                         h.box.removeAllActions()
                         h.box.removeFromParentNode()
                         m.node.addChildNode(h.box)
                         h.box.position = m.node.convertPosition(world, from: nil)
-                        let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.45); lift.timingMode = .easeInEaseOut
-                        h.box.runAction(lift)
+                        let toChest = SCNAction.move(to: v3(0, m.headHeight * 0.45, 0.3), duration: 0.3); toChest.timingMode = .easeOut
+                        let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
+                        h.box.runAction(.sequence([toChest, overhead]))
                         m.carried = h.box
                     }
                     if clock < m.bendUntil { continue }
@@ -3282,16 +3325,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     guard let idx = hauls.firstIndex(where: { $0.id == id }) else { m.errand = nil; m.carried = nil; m.bendUntil = 0; continue }
                     // Bend and set the crate down squarely, then a beat before straightening up.
                     let h = hauls[idx]
-                    let toSpot = SIMD2(h.drop.x - station.offset.x, h.drop.z - station.offset.y) - m.pos
-                    if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                    let spot = SIMD2(h.drop.x - station.offset.x, h.drop.z - station.offset.y)
+                    let toSpot = spot - m.pos
+                    let dist = (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot()
+                    if dist > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                     if m.bendUntil == 0 {
-                        m.bendUntil = clock + 1.0
+                        // A step back from the spot so the crate goes down in front, not underfoot.
+                        if dist < 0.28 || dist > 0.42, dist > 0.001 {
+                            let want = spot - toSpot / dist * 0.34
+                            m.pos += (want - m.pos) * min(1, dt * 6)
+                            if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
+                        }
+                        m.bendUntil = clock + 1.1
                         let world = h.box.worldPosition
                         h.box.removeFromParentNode()
                         h.box.position = world
                         propRoot.addChildNode(h.box)
-                        let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.55); down.timingMode = .easeInEaseOut
-                        h.box.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }]))
+                        let chest = SIMD3(Double(world.x), m.headHeight * 0.45, Double(world.z)) + SIMD3(sin(m.facing) * 0.3, 0, cos(m.facing) * 0.3)
+                        let toChest = SCNAction.move(to: v3(chest.x, chest.y, chest.z), duration: 0.3); toChest.timingMode = .easeInEaseOut
+                        let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.4); down.timingMode = .easeIn
+                        h.box.runAction(.sequence([toChest, down, .run { [weak self] _ in self?.drone.thud() }]))
                         m.carried = nil
                         continue
                     }
@@ -3507,7 +3560,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
-            if m.bendUntil > clock { tilt = max(tilt, 0.5); roll = 0 }
+            if m.bendUntil > clock { tilt = max(tilt, 0.28); roll = 0 }
+            m.tilt.position.y = m.bendUntil > clock ? -0.12 : 0   // a crouch, knees bent, rather than a bow
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
