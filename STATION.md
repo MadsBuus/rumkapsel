@@ -17,7 +17,9 @@ row nearest the pad, untested on the far row) and the **pad** (rockets). Blocks 
 have aisles down the middle; crates stack against the far walls, aisles stay clear.
 
 **Offices** are where work happens. One office per branch. A hexagon crate delivered by shuttle
-becomes an office. Offices belong to whoever has the branch checked out; teammates' offices are darker
+becomes an office: it lands squarely on the bay's hexagon, aligned with it; a minion carries it to
+the middle of the new office, steps back to the doorway, and the office ripples out from the crate,
+its colour filling the floor tile by tile from the centre, then the name fades in. Offices belong to whoever has the branch checked out; teammates' offices are darker
 and carry their name on the floor, mine carry mine. The **dorm**, **lounge** and **bath** stand
 together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
 since real stations mandate both.
@@ -59,7 +61,10 @@ since real stations mandate both.
 - A change of orders is visible: the minion stops, stands a beat with its head up, as if wondering,
   then goes. The same beat everywhere. A message from you cuts the beat short and it hurries.
 - Minions walk around things, never through, and stand an arm's length from what they work on,
-  facing it. Two never share a couch, a bed, a shower or a crate.
+  facing it. Two never share a couch, a bed, a shower or a crate. Two never stand on the same spot,
+  not even at the start of the day: they arrive one by one, or spread before they set off.
+- Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
+  through a room. With something in their hands they need even more room.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
   with the pixels where they belong. Nobody wanders off mid-shower.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
