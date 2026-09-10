@@ -29,6 +29,8 @@ import SwiftUI
 final class SimulatorController {
     let station: StationController
     let model: SimulatorModel
+    /// Set by whoever owns the window: tear everything down and seed again.
+    var onReset: (() -> Void)? { get { model.onReset } set { model.onReset = newValue } }
     let view = NSView()
     private let panelWidth = 280.0
 
@@ -113,6 +115,7 @@ private struct SimSession {
 
 @MainActor
 final class SimulatorModel: ObservableObject {
+    var onReset: (() -> Void)?
     let station: StationController
     private var github: GitHubResolver { station.world.github }
 
@@ -872,6 +875,7 @@ struct SimulatorPanel: View {
             HStack(spacing: 6) {
                 Button(model.paused ? "Resume" : "Pause") { model.press(model.paused ? "Resume" : "Pause") }
                 Button("Step") { model.press("Step") }
+                Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org")
                 ForEach(["1x", "4x", "16x"], id: \.self) { s in
                     Button(s) { model.press(s) }
                         .buttonStyle(.borderedProminent)

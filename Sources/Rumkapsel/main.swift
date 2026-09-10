@@ -205,6 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             w.center()
             simulator = sc
             simulatorWindow = w
+            sc.onReset = { [weak self] in
+                guard let self else { return }
+                simulatorWindow?.close(); simulatorWindow = nil; simulator = nil
+                openSimulator()
+            }
         }
         simulatorWindow?.makeKeyAndOrderFront(nil)
         simulatorWindow?.makeFirstResponder(simulator?.station.view)
