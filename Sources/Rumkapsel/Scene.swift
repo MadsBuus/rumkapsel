@@ -1,6 +1,7 @@
 // The scene's spine: shared helpers, every stored property, the build, the scan glue and the tick.
 
 import AppKit
+import QuartzCore
 import SceneKit
 import SpriteKit
 
@@ -120,7 +121,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         for w in work { w() }
-        if sim != nil { advanceSimulated(to: time) } else { tick(now: time) }
+        // Wall time rather than the renderer's: a frame asked for by hand carries no timestamp.
+        let now = CACurrentMediaTime()
+        if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
     }
 
     let view: StationView
@@ -157,14 +160,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
     let rocketRoot = SCNNode()
-    var rockets: [String: SCNNode] = [:]
+    /// One rocket actor per repository with a release on the pad, keyed "station|repo".
+    var rocketActors: [String: Rocket] = [:]
+    /// Every shuttle in the air right now, each running its flight command.
+    var shuttles: [Shuttle] = []
     var lastBoxCount: [String: Int] = [:]
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
-    var crewBusyUntil: [String: Date] = [:]
     var hangarAnchors: [String: SCNNode] = [:]
     private var lastBusy: [String: Double] = [:]
-    var loadedRockets: [String: Int] = [:]          // rocket key -> crates loaded, waiting for ignition
     var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
     var knownSpine: [String: Int] = [:]
     // Peers on the local network: their snapshots, the stations built from them, and their minions.
@@ -178,14 +182,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
     struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = "" }
     var cargo: [Int: Cargo] = [:]
-    var pendingLaunch: [String: (node: SCNNode, remaining: Int, since: Double)] = [:]
-    var pendingIgnition: [String: Bool] = [:]
-    /// Launches waiting for crates still on someone's arms before the rocket can be loaded.
-    var loadWaiting: Set<String> = []
-    var loadTotals: [String: Int] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
-    var shipsInFlight: [String: Int] = [:]
     var beams: [String: SCNNode] = [:]
     let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
@@ -327,7 +325,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         world.haulInFlight = { [weak self] key in self?.cargo.values.contains { $0.roomKey == key } ?? false }
         world.haulingRoom = { [weak self] key in self?.haulingRooms.contains(key) ?? false }
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
-        world.rocketBusy = { [weak self] key in (self?.pendingLaunch[key] ?? nil) != nil || (self?.loadedRockets[key] ?? nil) != nil }
+        world.rocketBusy = { [weak self] key in self?.rocketActors[key]?.isBusy ?? false }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
@@ -440,8 +438,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0):\(checks)"
         } }.sorted().joined()
         if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
-        rebuildRockets()
         handle(world.applyGitHub(now: Date()))
+        refreshRockets()
         flushScene()
         flushDeliveries()
     }
@@ -536,15 +534,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     case .pushed: logEvent("\(who) pushed")
                     case .committed: logEvent("\(who) committed")
                     case .skill: if case .skill(let name) = s.activity { logEvent("\(who) used /\(name)") }
-                    case .prompt:
-                        if !m.isSubagent {
-                            // One cone per message that arrived since last time; a queued cone lights up when picked up.
-                            let newPrompts = max(1, s.promptCount - m.promptCount)
-                            for _ in 0..<min(newPrompts, 5) {
-                                if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
-                                addPyramid(for: m)
-                            }
-                        }
+                    case .prompt: break   // the model says so, as a .prompt event: the cones went up already
                     case .tool: continue
                     }
                     ringBell(seed: s.id.hashValue &+ event.rawValue.hashValue)
@@ -748,6 +738,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func handle(_ events: [WorldEvent]) { for e in events { handle(e) } }
 
+    /// A message landed in an office: one cone per message that arrived since last time, and its
+    /// worker walks over to work them. A queued cone lights up when it is picked up.
+    private func promptLanded(station: String, key: String, minionId: String, count: Int) {
+        guard let m = minions[minionId], !m.isSubagent else { return }
+        for _ in 0..<min(count, 5) {
+            if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
+            addPyramid(for: m)
+        }
+    }
+
     /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.
     func handle(_ event: WorldEvent) {
         sim?.onEvent?(event)
@@ -808,6 +808,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             setCrewRoster(members, bots: bots)
         case .crewActivity(let a):
             playCrew(a)
+        case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
+            break    // the rocket command that comes with it is the cue; the log line came as a .log
+        case .releaseMerged(let stationName, let repo, _, _, _, false):
+            // A staging release without a board: the crates move because nothing else will move them.
+            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
+        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
+            handle(rocket: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
+        case .prompt(let stationName, let key, let minionId, let count):
+            promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:
             for m in minions.values where m.isCrew { despawn(m) }
         case .boardMoved(let item, let from, let to):
@@ -833,8 +842,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
-        case .pullRequestClosed(_, let author, _):
-            if let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = Date().addingTimeInterval(240); send(m, to: .core) }
+        case .pullRequestClosed(let repo, let author, _):
+            if let m = minions["crew:" + author], !m.onJob {
+                react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
+            }
         case .peerArrived(let name):
             logEvent("\(name) is in range")
         case .peerLeft(let name):
@@ -849,8 +860,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         lastTick = now
         clock += dt
         if demo { tickDemo(dt: dt) }
-        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest(); updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles(); retryLoads() }
+        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
+        tickShuttles()
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p

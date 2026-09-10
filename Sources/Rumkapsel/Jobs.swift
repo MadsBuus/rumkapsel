@@ -58,8 +58,14 @@ extension StationController {
         return phase.interruptible
     }
 
+    /// Every command issued, whoever runs it, goes past the taps: the log line and the panel.
+    func issue(_ c: Command, by who: String, announce: Bool = false) {
+        sim?.onCommand?(c, who)
+        if announce { logEvent(c.words) }
+    }
+
     func start(_ m: Minion, _ c: Command, announce: Bool = false) {
-        sim?.onCommand?(c, m)
+        issue(c, by: m.home.name)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
         let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
         m.current = c
@@ -189,29 +195,31 @@ extension StationController {
         m.path = station.path(from: m.pos, to: cell)
     }
 
+    /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.
+    func shipsInFlight(_ station: String) -> Int { shuttles.filter { $0.station == station }.count }
+
     /// A new worker arrives by shuttle: it stays invisible until the ship has set down, then steps out.
     func arriveByShuttle(_ m: Minion) {
         guard let station = fleet.stations[m.station], station.hasHangar, let anchor = hangarAnchors[m.station] else { return }
-        let slotIndex = (shipsInFlight[m.station] ?? 0) % station.hangarSlots.count
-        shipsInFlight[m.station, default: 0] += 1
+        let slotIndex = shipsInFlight(m.station) % station.hangarSlots.count
         let slot = station.hangarSlots[slotIndex]
         m.pos = slot
         m.opacity = 0
         m.node.opacity = 0
-        m.wakeUntil = clock + 8.5   // held until the ship lands
+        m.wakeUntil = clock + 8.1   // held until the ship lands
         let ship = shuttle(color: NSColor(fleet.color(forRepo: m.home.repo)))
         let local = SIMD3(slot.x - station.hangarCenter.x, 0, slot.y - station.hangarCenter.y)
         let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
         let start = local + corners.randomElement()!, high = local + SIMD3(0, 5, 0), down = local + SIMD3(0, 0.55, 0), exit = local + corners.randomElement()!
         ship.position = v3(start.x, start.y, start.z)
         anchor.addChildNode(ship)
-        let approach = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0); approach.timingMode = .easeOut
-        let descend = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5); descend.timingMode = .easeInEaseOut
-        let rise = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5); rise.timingMode = .easeIn
-        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0); leave.timingMode = .easeIn
-        ship.runAction(.sequence([approach, descend, .wait(duration: 0.6), .run { [weak self] _ in self?.enqueue { m.opacity = 1; m.wakeUntil = 0 } }, .wait(duration: 1.0), rise, leave,
-                                  .run { [weak self] _ in self?.enqueue { self?.shipsInFlight[m.station, default: 1] -= 1 } }, .removeFromParentNode()]))
-        logEvent("shuttle inbound: a new worker for \(m.home.name)")
+        let command = Command.flight(.bringWorker(m.id), station: m.station, slot: slotIndex,
+                                     what: "a new worker for \(m.home.name)")
+        launch(Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
+                       restYaw: nil, drift: 0, unloadAt: 0.6, unloadFor: 1.0) { [weak m] in
+            m?.opacity = 1
+            m?.wakeUntil = 0
+        })
         drone.sweep(up: false)
     }
 
@@ -240,14 +248,25 @@ extension StationController {
         return ship
     }
 
+    /// Hands a flight to a new shuttle: the log and the panel see the command, the tick flies it.
+    private func launch(_ ship: Shuttle) {
+        issue(ship.command, by: "shuttle", announce: true)
+        ship.begin(at: clock)
+        shuttles.append(ship)
+    }
+
+    /// One frame of every flight in the air.
+    func tickShuttles() {
+        shuttles.removeAll { !$0.advance(at: clock) }
+    }
+
     /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away.
     /// Everything is parented to the hangar anchor, so a station shifting underneath does not misalign it.
     func startDelivery(_ m: Minion, roomKey: String) {
         guard let station = fleet.stations[m.station], station.hasHangar, let room = station.rooms[roomKey],
               let anchor = hangarAnchors[m.station] else { return }
         let key = "\(station.name)|\(roomKey)"
-        let slotIndex = (shipsInFlight[m.station] ?? 0) % station.hangarSlots.count
-        shipsInFlight[m.station, default: 0] += 1
+        let slotIndex = shipsInFlight(m.station) % station.hangarSlots.count
         let slotLocal = station.hangarSlots[slotIndex] - station.hangarCenter
         let slot = SIMD3(slotLocal.x, 0, slotLocal.y)
 
@@ -258,60 +277,27 @@ extension StationController {
         anchor.addChildNode(box)
         boxes[key] = box
 
-        let ship = SCNNode()
-        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
-        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
-        ship.addChildNode(hull)
-        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
-        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
-        cockpit.position = v3(0.16, 0.11, 0)
-        ship.addChildNode(cockpit)
-        for side in [-1.0, 1.0] {
-            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
-            wing.geometry!.firstMaterial = lit(NSColor(room.color))
-            wing.position = v3(-0.14, 0, side * 0.34)
-            ship.addChildNode(wing)
-        }
-        for side in [-1.0, 1.0] {
-            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
-            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            skid.position = v3(0, -0.14, side * 0.16)
-            ship.addChildNode(skid)
-        }
+        let ship = shuttle(color: NSColor(room.color))
         let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
         let start = slot + corners.randomElement()!
         let high = slot + SIMD3(0, 5.0, 0)
         let down = slot + SIMD3(0, 0.55, 0)
-        let exit = slot + corners.randomElement()! * SIMD3(1, 0.9, 1) + SIMD3(0, 0, 0)
-        let restYaw = Double.random(in: 0..<(2 * .pi))
-        let drift = Double.random(in: -0.6...0.6)
+        let exit = slot + corners.randomElement()! * SIMD3(1, 0.9, 1)
         ship.position = v3(start.x, start.y, start.z)
         ship.look(at: v3(high.x, high.y, high.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
         anchor.addChildNode(ship)
-        let approach = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0); approach.timingMode = .easeOut
-        let descend = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5); descend.timingMode = .easeInEaseOut
-        let settleYaw = SCNAction.rotateTo(x: 0, y: restYaw + drift, z: 0, duration: 4.5, usesShortestUnitArc: true); settleYaw.timingMode = .easeInEaseOut
-        let rise = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5); rise.timingMode = .easeIn
-        let leave = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0); leave.timingMode = .easeIn
-        ship.runAction(.sequence([
-            approach,
-            .run { n in n.eulerAngles = SCNVector3(0, restYaw, 0) },
-            .group([descend, settleYaw]),
-            .wait(duration: 0.8),
-            .run { _ in
-                box.opacity = 1
-                box.position = v3(slot.x, 0.42, slot.z)
-                let drop = SCNAction.move(to: v3(slot.x, 0.09, slot.z), duration: 0.5); drop.timingMode = .easeIn
-                box.runAction(drop)
-            },
-            .wait(duration: 1.2),
-            rise,
-            .run { n in n.look(at: v3(exit.x, exit.y, exit.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0)) },
-            leave,
-            .run { [weak self] _ in self?.enqueue { self?.shipsInFlight[m.station, default: 1] -= 1 } },
-            .removeFromParentNode(),
-        ]))
-        logEvent("shuttle inbound: \(room.name)")
+        let command = Command.flight(.dropCrate(roomKey: roomKey), station: m.station, slot: slotIndex,
+                                     what: "the office for \(room.name)")
+        launch(Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
+                       restYaw: Double.random(in: 0..<(2 * .pi)), drift: Double.random(in: -0.6...0.6),
+                       unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
+            box.opacity = 1
+            box.position = v3(slot.x, 0.42, slot.z)
+            let drop = SCNAction.move(to: v3(slot.x, 0.09, slot.z), duration: 0.5)
+            drop.timingMode = .easeIn
+            box.runAction(drop)
+            self?.world.truth.crateInBay(key)   // the crate is on the floor now: a carrier may fetch it
+        })
         drone.sweep(up: false)
         assign(m, .deliverOffice(key: roomKey, name: room.name), announce: false)
         m.place = .hangar
@@ -402,7 +388,11 @@ extension StationController {
         m.pyramids.append(n)
         m.pyramidCell = cell
         refreshObstacles()
-        if !m.onJob { m.place = .room(key); walk(m, to: cell) }
+        guard !m.onJob else { return }
+        m.place = .room(key)
+        // Working the message is a job like any other: it shows in the log and on hover.
+        if m.isResting { start(m, Command(kind: .work(office: key), words: "working your message in \(m.home.name)")) }
+        walk(m, to: cell)
     }
 
     func clearPyramids(_ m: Minion) {
@@ -468,7 +458,7 @@ extension StationController {
             world.landedInStorage(station: station, repo: repo, number: number)
             pkg.removeFromParentNode()
             rebuildMarkers()
-            rebuildRockets()
+            refreshRockets()
         }
     }
 
@@ -487,7 +477,7 @@ extension StationController {
                 station.staged[repo, default: 0] += 1
                 node.removeFromParentNode()
                 rebuildMarkers()
-                rebuildRockets()
+                refreshRockets()
                 fleet.save()
             }
         }
@@ -520,24 +510,17 @@ extension StationController {
             m.couch = nil   // off the couch: the seat is free for someone else
             m.path = station.path(from: m.pos, to: from.cell)
         }
-        for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
-            pendingLaunch[name] = nil
-            if pendingIgnition[name] ?? true { liftOff(p.node) } else { loadedRockets[name] = p.remaining; addSteam(to: p.node) }
-            pendingIgnition[name] = nil
-        }
+        tickRockets()
     }
 
     // MARK: crew
 
-    /// Crew minions rest once their last activity is old.
-    func tickCrewRest() {
-        let now = Date()
-        for m in minions.values where m.isCrew && m.busy {
-            if let until = crewBusyUntil[m.id], now < until { continue }
-            m.busy = false; m.activity = .sleeping
-            clearPyramids(m)
-            send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
-        }
+    /// A teammate's reaction has run its course: back to the quarters, or the bots' room.
+    func crewRested(_ m: Minion) {
+        m.busy = false
+        m.activity = .sleeping
+        clearPyramids(m)
+        send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
     }
 
     /// The crew's minions, brought in line with who the model says is around.
@@ -562,32 +545,39 @@ extension StationController {
         }
     }
 
-    /// What a teammate just did, played out on the floor.
+    /// What a teammate just did, played out on the floor as a command of its own: they walk there,
+    /// work at it until the time is up, and then go back to the quarters.
     func playCrew(_ a: CrewActivity) {
-        let now = Date()
         guard let m = minions["crew:" + a.login], !m.onJob else { return }
+        let who = world.crewName(a.login)
         switch a.kind {
         case "push" where a.hasRoom:
-            m.activity = .coding("x"); m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(20 * 60)
-            if m.place != .room(a.roomKey) { send(m, to: .room(a.roomKey)) }
-            if a.ready { logEvent("\(world.crewName(a.login)) pushed to \(a.label)") }
+            react(m, .coding("x"), place: .room(a.roomKey), minutes: 20, words: "\(who) pushing to \(a.label)")
+            if a.ready { logEvent("\(who) pushed to \(a.label)") }
         case "review" where a.hasRoom:
-            m.activity = .exploring; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(10 * 60)
-            send(m, to: .room(a.roomKey))
             let verb = a.detail == "approved" ? "approved" : a.detail == "changes_requested" ? "requested changes on" : "reviewed"
-            logEvent("\(world.crewName(a.login)) \(verb) \(a.label)")
+            react(m, .exploring, place: .room(a.roomKey), minutes: 10, words: "\(who) reading \(a.label) over")
+            logEvent("\(who) \(verb) \(a.label)")
         case "comment" where a.hasRoom:
-            m.activity = .writing; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(8 * 60)
-            send(m, to: .room(a.roomKey))
+            react(m, .writing, place: .room(a.roomKey), minutes: 8, words: "\(who) writing on \(a.label)")
         case "branch_create":
-            m.activity = .planning; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(10 * 60)
-            send(m, to: .core)
-            logEvent("\(world.crewName(a.login)) started \(a.branch ?? "a branch")")
+            react(m, .planning, place: .core, minutes: 10, words: "\(who) planning \(a.branch ?? "a branch") at the monolith")
+            logEvent("\(who) started \(a.branch ?? "a branch")")
         case "issue_open":
-            logEvent("\(world.crewName(a.login)) filed \(a.label) \(a.title?.prefix(40) ?? "")")
+            logEvent("\(who) filed \(a.label) \(a.title?.prefix(40) ?? "")")
+            react(m, .writing, place: .room(m.home.key), minutes: 8, words: "\(who) filing \(a.label)")
             addPyramid(for: m)
         default: break
         }
+    }
+
+    /// Hands a teammate a reaction: where to be, what to do there, and until when.
+    func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) {
+        let until = Date().addingTimeInterval(minutes * 60)
+        m.activity = activity
+        m.busy = true
+        if m.place != place || m.path.isEmpty { send(m, to: place) }
+        start(m, .react(activity, place: place, until: until, words: words))
     }
 
     /// A tested crate crosses the aisle to the tested row on someone's arms. Anything stacked on top of
@@ -614,7 +604,7 @@ extension StationController {
                 info.station == station.name && (github.cargo(repoRoot: root).map { $0.deckNumbers.count > $0.clearedNumbers.count } ?? false)
             }
         }
-        let cleared = loadedRockets.keys.contains { $0.hasPrefix(station.name + "|") }
+        let cleared = rocketActors.values.contains { $0.station == station.name && $0.isSteaming }
         let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
         let current = minions.values.first { $0.station == station.name && $0.isQA }
         if wanted, current == nil, let m = free.first(where: { !$0.onJob }) {

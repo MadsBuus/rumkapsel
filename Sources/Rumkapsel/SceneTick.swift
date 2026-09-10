@@ -36,14 +36,10 @@ extension StationController {
         for m in minions.values { send(m, to: m.place) }
         logEvent("#450 opened a pull request")
         if let st = fleet.stations["work"] {
-            for (i, tall) in [false, true].enumerated() {
-                let n = Props.rocket(color: NSColor(fleet.color(forRepo: i == 0 ? "api-node-nest" : "tattoodo-web")), tall: tall)
-                let pc = st.padCenter + (i == 0 ? SIMD2(0.45, -0.45) : SIMD2(0, 0))
-                n.position = v3(st.offset.x + pc.x, 0, st.offset.y + pc.y)
-                n.name = "rocket:https://github.com|demo release"
-                if tall { let d = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: true); d.name = "hold"; n.addChildNode(d) }
-                rocketRoot.addChildNode(n)
-                rockets["work|\(i)"] = n
+            for (i, repo) in ["api-node-nest", "tattoodo-web"].enumerated() {
+                handle(rocket: st.name, repo: repo, label: "rocket:https://github.com|demo release",
+                       untested: i == 1, tall: i == 1, cargo: 0,
+                       command: .rocket(.standBy, station: st.name, repo: repo))
             }
         }
     }
@@ -71,14 +67,9 @@ extension StationController {
                 haulMergedBoxes(station: st, key: key, roomName: room.name, repo: room.repo ?? "work", number: 0)
             }
             if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 { demoStaged = true; stageCargo(station: st, repo: "tattoodo-web") }
-            if clock > 30, let r = rockets["work|1"], !r.hasActions, r.parent != nil, pendingLaunch["work|tattoodo-web"] == nil, let st = fleet.stations["work"] {
-                r.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-                loadRocket(station: st, rocket: r, repo: "tattoodo-web")
-                logEvent("tattoodo-web launched to production: release 2.14")
-                rockets["work|1"] = nil
-            }
-            if false, let r = rockets["work|1"], !r.hasActions, r.parent != nil {
-                liftOff(r)
+            if clock > 30, let r = rocketActors["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {
+                handle(rocket: st.name, repo: "tattoodo-web", label: r.label, untested: false, tall: true, cargo: 0,
+                       command: .rocket(.launch, station: st.name, repo: "tattoodo-web"))
                 logEvent("tattoodo-web launched to production: release 2.14")
             }
             if clock > 6, !minions.keys.contains("demo-new") {
@@ -140,7 +131,7 @@ extension StationController {
                     case .walk:
                         advance(m); continue
                     case .approach:
-                        if let box = boxes[key], box.opacity < 1 { continue }   // shuttle has not set it down yet
+                        if boxes[key] != nil, !world.truth.isInBay(key) { continue }   // the shuttle has not set it down yet
                         if let spot = m.fetchSpot {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
@@ -148,6 +139,7 @@ extension StationController {
                         }
                         advance(m); continue
                     case .lift:
+                        world.truth.tookFromBay(key)
                         if let box = boxes[key] {
                             box.removeAllActions()
                             let world = box.worldPosition
@@ -171,6 +163,10 @@ extension StationController {
                         finish(m)
                         continue
                     }
+                case .react(_, _, let until):
+                    // There: work at it until the time is up, then back to the quarters.
+                    if m.phaseKind == .walk { advance(m); continue }
+                    if Date() >= until { crewRested(m) }
                 case .carry(let crate, _, let to):
                     guard let id = m.current?.id, let job = cargo[id] else {
                         // The crate went away: put down whatever is on the arms, where it stands.

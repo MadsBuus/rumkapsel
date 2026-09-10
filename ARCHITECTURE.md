@@ -56,13 +56,17 @@ The scene is split by reason to change, all of it one `StationController` in ext
 shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
 the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
 `SceneMarkers.swift` the crates, cones, rockets and power; `SceneTick.swift` the per-frame worker loop and the demo
-clock; `Jobs.swift` what a worker is told to do; `HUD.swift` the overlay; `Minion.swift` one worker's body.
+clock; `Jobs.swift` what a worker is told to do; `HUD.swift` the overlay; `Minion.swift` one worker's body;
+`Actors.swift` the props that run commands of their own, a shuttle's flight and a rocket's stages.
 
 ## Debts
 
-- Minions run one `Command` at a time with a phase index (`Commands.swift`), so "what am I doing now" has a
-  single owner. What is left outside it: `place`, `activity` and the wander timers still steer the day, and
-  crew minions and shuttles are not actors in the same sense.
+- Every actor runs one `Command` at a time with a phase index (`Commands.swift`), so "what am I doing now"
+  has a single owner: minions, the crew, the shuttles and the rockets alike. What is left outside it:
+  `place`, `activity` and the wander timers still steer a worker's day.
+- What is still on a timer is pure decoration, nothing the model can read: the steam emitter puffing off a
+  loaded rocket, the flame and the twelve-second climb of a lift-off, the shower drops, the weld light, the
+  ghost of an archived room sinking through the floor. None of it decides anything.
 - `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
   that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
 
@@ -106,10 +110,20 @@ a new one replaces the old at the next interruptible phase, at most one waits, a
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
 it holds where it stands.
 
-What still does not: shuttles, rockets and the crew are driven by SceneKit actions and timers rather than
-commands; the crate a merged office sends to storage is still found by node name in the scene, so the command's
-`from` spot is the office door rather than the exact package position; `Spot` carries a world position, which
-means the scene's geometry leaks a little into the model side.
+Shuttles, rockets and the crew are actors too (`Actors.swift`). A `Shuttle` flies one `.flight` command —
+`bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave, and the unload writes truth:
+the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
+go from approach to lift. A `Rocket`, one per station and repository, runs `.rocket` stages that only ever
+move forward: stand by, load, steam, launch. `World.applyReleases` reads the launch queue and the open
+releases and hands out those stages as commands — untested stands by, cleared loads, merged launches, and a
+launch loads first if it has to. The load phase issues the same `carryToPad` carries as before and ends when
+station truth says nothing of the repository is left on the rows or on anyone's arms. A teammate's reaction
+to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
+runs the same machine as everyone else and says so on hover.
+
+What still does not: the crate a merged office sends to storage is still found by node name in the scene, so
+the command's `from` spot is the office door rather than the exact package position; `Spot` carries a world
+position, which means the scene's geometry leaks a little into the model side.
 
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.

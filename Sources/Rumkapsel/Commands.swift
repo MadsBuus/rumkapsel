@@ -71,9 +71,36 @@ struct Command {
         case leave
         case sleep
         case work(office: String)
+        /// A shuttle flight to one bay slot: a new worker, or an office's crate.
+        case flight(kind: Flight, station: String, slot: Int)
+        /// A rocket on the pad, one stage at a time.
+        case rocket(stage: RocketStage, station: String, repo: String)
+        /// A teammate acting on something they just did, until the time runs out.
+        case react(activity: Activity, place: Place, until: Date)
     }
 
     enum Bath { case shower, quick }
+
+    /// What a shuttle is carrying in.
+    enum Flight: Equatable {
+        case bringWorker(String)
+        case dropCrate(roomKey: String)
+    }
+
+    /// A rocket's stages, in the order they can only ever go.
+    enum RocketStage: Equatable {
+        case standBy, load(Int), steam, launch
+
+        /// Stages only move forward: a wish for an earlier one is stale and ignored.
+        var rank: Int {
+            switch self {
+            case .standBy: return 0
+            case .load: return 1
+            case .steam: return 2
+            case .launch: return 3
+            }
+        }
+    }
 
     /// A command is a sequence of phases; the actor holds an index into it.
     enum Phase {
@@ -91,11 +118,23 @@ struct Command {
         case stepOut
         /// Being there: resting, working, walking the rows.
         case settle
+        /// A shuttle coming down onto its slot: not now.
+        case descend
+        /// A shuttle setting its cargo out: not now.
+        case unload
+        /// A shuttle lifting off the slot again.
+        case rise
+        /// A shuttle on its way out of the frame.
+        case leave
+        /// A rocket taking its crates aboard.
+        case load
+        /// A rocket on its way up: nothing stops that.
+        case climb
 
         var interruptible: Bool {
             switch self {
-            case .walk, .approach, .settle: return true
-            case .lift, .setDown, .stepOut, .haul: return false
+            case .walk, .approach, .settle, .load: return true
+            case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .climb: return false
             }
         }
         /// Carrying can be redirected, but only to another destination for the crate on the arms.
@@ -108,6 +147,13 @@ struct Command {
         switch kind {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
+        case .flight: return [.approach, .descend, .unload, .rise, .leave]
+        case .rocket(let stage, _, _):
+            switch stage {
+            case .standBy, .steam: return [.settle]
+            case .load: return [.load]
+            case .launch: return [.load, .climb]
+            }
         default: return [.walk, .settle]
         }
     }
@@ -171,6 +217,28 @@ struct Command {
 
     static let leave = Command(kind: .leave, words: "off the station through the airlock")
 
+    /// A shuttle on its way in. `what` is what the log and the bubble call the cargo.
+    static func flight(_ flight: Flight, station: String, slot: Int, what: String) -> Command {
+        Command(kind: .flight(kind: flight, station: station, slot: slot),
+                words: "shuttle inbound with \(what)")
+    }
+
+    static func rocket(_ stage: RocketStage, station: String, repo: String) -> Command {
+        let words: String
+        switch stage {
+        case .standBy: words = "\(repo) standing by on the pad"
+        case .load(let n): words = "loading \(n == 1 ? "one crate" : "\(n) crates") of \(repo) into the rocket"
+        case .steam: words = "\(repo) loaded and steaming, waiting for the release to merge"
+        case .launch: words = "\(repo) lifting off"
+        }
+        return Command(kind: .rocket(stage: stage, station: station, repo: repo), words: words)
+    }
+
+    /// A teammate acting on what they just did: coding in their office, walking the halls, at the core.
+    static func react(_ activity: Activity, place: Place, until: Date, words: String) -> Command {
+        Command(kind: .react(activity: activity, place: place, until: until), words: words)
+    }
+
     /// Where a minion should be when it has no job: asleep in the dorm, at work in its office, or just there.
     static func rest(place: Place, home: String, name: String, asleep: Bool) -> Command {
         if asleep && place == .quarters { return Command(kind: .sleep, words: "asleep in the dorm") }
@@ -213,6 +281,8 @@ struct StationTruth {
     private(set) var crates: [String: Placement] = [:]
     /// Offices on the floor whose crate has not been walked in yet, by "station|roomKey".
     private(set) var pendingOffices: Set<String> = []
+    /// Office crates a shuttle has set down in the bay, waiting to be fetched, by "station|roomKey".
+    private(set) var bayCrates: Set<String> = []
     /// Crates set down in storage by hand that the source has not counted yet.
     private(set) var landed: [String: (repo: String, number: Int, at: Date)] = [:]
     /// Crates on their way from storage to the deck, by "station|repo".
@@ -288,9 +358,33 @@ struct StationTruth {
 
     mutating func officeOrdered(_ key: String) { pendingOffices.insert(key) }
     @discardableResult
-    mutating func officeDelivered(_ key: String) -> Bool { pendingOffices.remove(key) != nil }
+    mutating func officeDelivered(_ key: String) -> Bool { bayCrates.remove(key); return pendingOffices.remove(key) != nil }
     func isPending(_ key: String) -> Bool { pendingOffices.contains(key) }
     mutating func renameOffice(from old: String, to new: String) {
         if pendingOffices.remove(old) != nil { pendingOffices.insert(new) }
+        if bayCrates.remove(old) != nil { bayCrates.insert(new) }
+    }
+
+    /// A shuttle has set an office's crate down in the bay: from here a carrier may pick it up.
+    mutating func crateInBay(_ key: String) { bayCrates.insert(key) }
+    func isInBay(_ key: String) -> Bool { bayCrates.contains(key) }
+    mutating func tookFromBay(_ key: String) { bayCrates.remove(key) }
+
+    // MARK: the pad
+
+    /// Crates of a repository already set down on the rocket.
+    func aboard(station: String, repo: String) -> Int {
+        crates.filter { key, placement in
+            guard key.hasPrefix("\(station)|\(repo)|") else { return false }
+            if case .slot(let area, _, _) = placement { return area == .pad }
+            return false
+        }.count
+    }
+
+    /// The rocket left: what it carried is off the station.
+    mutating func clearPad(station: String, repo: String) {
+        for (key, placement) in crates where key.hasPrefix("\(station)|\(repo)|") {
+            if case .slot(let area, _, _) = placement, area == .pad { crates[key] = nil }
+        }
     }
 }

@@ -173,6 +173,9 @@ final class World {
     /// What the scene knows about where a session's worker stands, so a renamed office keeps its floor.
     struct MinionHome { var station: String; var key: String; var idle: Bool }
 
+    /// The last prompt marker and count seen per session: a session's first answer is quiet here too.
+    private var sessionPrompts: [String: (marker: String, count: Int)] = [:]
+
     /// Every session touched today keeps its office alive; archived worktrees lose theirs.
     func applyScan(_ result: ScanResult, now: Date, minionHomes: [String: MinionHome]) -> [WorldEvent] {
         var events: [WorldEvent] = []
@@ -208,6 +211,13 @@ final class World {
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
             }
+            // A message arrived since the last scan: cones on the office floor, and its worker over to them.
+            let marker = s.eventMarkers[.prompt] ?? ""
+            if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
+                events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
+                                      count: max(1, s.promptCount - seen.count)))
+            }
+            sessionPrompts[s.id] = (marker, s.promptCount)
             if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
                 room.worktree = s.cwd
                 if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
@@ -288,8 +298,79 @@ final class World {
 
     /// A fresh answer from GitHub: board columns that moved, and the crew's floor rebuilt around it.
     func applyGitHub(now: Date) -> [WorldEvent] {
-        var events = applyBoardMoves()
+        var events = applyReleases()
+        events += applyBoardMoves()
         events += rebuildCrew(now: now)
+        return events
+    }
+
+    // MARK: releases and the pad
+
+    /// Releases already announced, so an open one on the pad is only said once: "station|repo|number|untested".
+    private var announcedReleases: Set<String> = []
+
+    /// Whether the deck, rather than storage, is what a rocket loads from.
+    private var stagingIsDeck: Bool { !ConfigStore.shared.current.stagingBranch.isEmpty }
+
+    /// The release pull request whose rocket a repository's pad should hold, if any.
+    private func padRelease(root: String) -> ReleasePR? {
+        guard let open = github.openReleases(repoRoot: root) else { return nil }
+        let hasProduction = open.contains(where: \.isProduction)
+        return open.first { $0.isProduction || (!hasProduction && !stagingIsDeck) }
+    }
+
+    /// Pads that should hold a rocket right now, as "station|repo".
+    func padRockets() -> Set<String> {
+        Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil })
+    }
+
+    /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
+    private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
+        let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"
+        let label = "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
+        return .rocketCommand(station: station.name, repo: repo, label: label, untested: pr.untested,
+                              tall: pr.isProduction, cargo: cargoWaiting(station: station, repo: repo),
+                              command: .rocket(stage, station: station.name, repo: repo))
+    }
+
+    /// Crates a rocket would load: the deck when there is a staging branch, storage otherwise.
+    func cargoWaiting(station: Station, repo: String) -> Int {
+        (stagingIsDeck ? station.staged : station.stored)[repo] ?? 0
+    }
+
+    /// The launch queue and the open releases, turned into events and rocket commands. A merged
+    /// production release launches; an open one stands by while untested and loads once it is cleared.
+    func applyReleases() -> [WorldEvent] {
+        var events: [WorldEvent] = []
+        var launched: Set<String> = []
+        for launch in github.takeLaunches() {
+            guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
+            let pr = launch.pr
+            events.append(.releaseMerged(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
+                                         title: pr.title, isProduction: pr.isProduction))
+            events.append(.chime(pr.number))
+            guard pr.isProduction else { continue }
+            launched.insert(info.station + "|" + info.repo)
+            announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
+            events.append(.log("\(info.repo) launched to \(pr.base): \(pr.title)"))
+            events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
+        }
+        for (root, info) in repoRoots {
+            guard let station = fleet.stations[info.station], let pr = padRelease(root: root) else { continue }
+            let key = info.station + "|" + info.repo
+            guard !launched.contains(key) else { continue }
+            let mark = "\(key)|\(pr.number)|\(pr.untested)"
+            if !announcedReleases.contains(mark) {
+                announcedReleases.insert(mark)
+                events.append(.releaseOpened(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
+                                             untested: pr.untested, isProduction: pr.isProduction))
+                events.append(.log("\(info.repo): release to \(pr.base) on the pad" + (pr.untested ? " (untested)" : "")))
+            }
+            // Untested, or not for production: the rocket only stands there. Cleared: it takes the cargo aboard.
+            let cleared = pr.isProduction && !pr.untested
+            events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
+                               station: station, repo: info.repo, pr: pr))
+        }
         return events
     }
 

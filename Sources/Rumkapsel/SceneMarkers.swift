@@ -186,65 +186,159 @@ extension StationController {
         node.runAction(.sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])]), .removeFromParentNode()]))
     }
 
-    /// Rockets on the pad for open release pull requests; a merged one lifts off.
-    func rebuildRockets() {
-        for launch in github.takeLaunches() {
-            guard let info = world.repoRoots[launch.repoRoot] else { continue }
-            if !launch.pr.isProduction {
-                if ConfigStore.shared.current.project == nil, let st = fleet.stations[info.station] { stageCargo(station: st, repo: info.repo) }
-                ringBell(seed: launch.pr.number)
+    // MARK: rockets
+
+    /// The reconciler says what a repository's rocket should be doing. An empty pad gets a new actor;
+    /// one already there only takes a stage it has not reached yet, so a repeated wish changes nothing.
+    func handle(rocket station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command) {
+        guard let st = fleet.stations[station], case .rocket(let stage, _, _) = command.kind else { return }
+        let key = station + "|" + repo
+        if let r = rocketActors[key] {
+            r.label = label
+            redraw(r, cargo: cargo, untested: untested)
+            guard stage.rank > r.stage.rank else { return }
+            take(r, command)
+            return
+        }
+        let slot = rocketActors.count % 4
+        let r = Rocket(station: station, repo: repo,
+                       node: rocketNode(station: st, repo: repo, cargo: cargo, untested: untested, tall: tall, label: label, slot: slot),
+                       command: command)
+        r.label = label; r.untested = untested; r.tall = tall; r.cargoShown = cargo
+        rocketActors[key] = r
+        take(r, command)
+    }
+
+    /// The rocket prop itself, on its slot on the pad.
+    private func rocketNode(station: Station, repo: String, cargo: Int, untested: Bool, tall: Bool, label: String, slot: Int) -> SCNNode {
+        let n = Props.rocket(color: NSColor(fleet.color(forRepo: repo)), tall: tall, cargo: cargo)
+        if untested {
+            let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: tall)
+            deco.name = "hold"
+            n.addChildNode(deco)
+        }
+        let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
+        let pc = station.padCenter + offsets[slot]
+        n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
+        n.name = label
+        n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = label } }
+        rocketRoot.addChildNode(n)
+        return n
+    }
+
+    /// A production rocket grows with what it will carry. Only one standing by is redrawn: once it is
+    /// loading it keeps the size it had, and the steam and the flame stay where they are.
+    private func redraw(_ r: Rocket, cargo: Int, untested: Bool) {
+        guard r.stage.rank == 0, !r.node.hasActions, let st = fleet.stations[r.station] else { return }
+        guard cargo / 3 != r.cargoShown / 3 || untested != r.untested else {
+            r.node.name = r.label
+            r.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
+            return
+        }
+        let slot = Array(rocketActors.keys).sorted().firstIndex(of: r.key) ?? 0
+        let position = r.node.position
+        r.node.removeFromParentNode()
+        r.node = rocketNode(station: st, repo: r.repo, cargo: cargo, untested: untested, tall: r.tall, label: r.label, slot: slot % 4)
+        r.node.position = position
+        r.cargoShown = cargo
+        r.untested = untested
+    }
+
+    /// The rocket takes a new command and starts its first phase.
+    private func take(_ r: Rocket, _ command: Command) {
+        r.command = command
+        r.phase = 0
+        r.since = clock
+        issue(command, by: "rocket", announce: true)
+        beginRocketPhase(r)
+    }
+
+    private func beginRocketPhase(_ r: Rocket) {
+        switch r.phaseKind {
+        case .load:
+            r.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()   // cleared: the tape comes down
+            loadCrates(r)
+        case .climb:
+            world.truth.clearPad(station: r.station, repo: r.repo)
+            liftOff(r.node)
+            r.until = clock + 15
+            fleet.save()
+        default:
+            if r.isSteaming { addSteam(to: r.node) }
+        }
+    }
+
+    /// One pass over every rocket: loading watches station truth, the climb watches the clock.
+    func tickRockets() {
+        for r in Array(rocketActors.values) {
+            switch r.phaseKind {
+            case .load:
+                loadCrates(r)
+                // Done when nothing of this repository is left on the rows and nothing is on someone's
+                // arms. A haul that got stuck may not ground a launch forever.
+                guard padClear(r) || clock - r.since > 90 else { continue }
+                advanceRocket(r)
+            case .climb:
+                if clock >= r.until { r.node.removeFromParentNode(); rocketActors[r.key] = nil }
+            default: continue
+            }
+        }
+    }
+
+    /// The end of the load phase: on to the climb if the command has one, otherwise the rocket steams.
+    private func advanceRocket(_ r: Rocket) {
+        if r.phase + 1 < r.command.phases.count {
+            r.phase += 1
+            r.since = clock
+            beginRocketPhase(r)
+            return
+        }
+        take(r, .rocket(.steam, station: r.station, repo: r.repo))
+    }
+
+    /// Which row a rocket loads from: the deck when releases go through staging, storage otherwise.
+    private var loadSource: String { ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck" }
+
+    /// Nothing of this repository left standing on its row, and nothing on anyone's arms.
+    private func padClear(_ r: Rocket) -> Bool {
+        let onFloor = markerRoot.childNodes.contains { ($0.name ?? "").hasPrefix("\(loadSource):\(r.station)|\(r.repo)|") }
+        return !onFloor && world.truth.carriedCount(station: r.station, repo: r.repo) == 0
+    }
+
+    /// Hands out a carry for every crate of the repository still standing on its row. A crate already
+    /// spoken for is off the floor, so this can run every pass without doubling up.
+    private func loadCrates(_ r: Rocket) {
+        guard let station = fleet.stations[r.station] else { return }
+        let source = loadSource
+        let repo = r.repo
+        let boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(source):\(r.station)|\(repo)|") }
+        guard !boxes.isEmpty else { return }
+        let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
+        for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
+            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
+                  let b = crateNode(source, crate, at: from) else { continue }
+            carry(command, node: b) { [weak self] in
+                guard let self else { return }
+                if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
+                else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
+                b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
+                fleet.save()
+            }
+        }
+    }
+
+    /// Pads whose release is gone lose their rocket, and the ones standing by are resized to the pile.
+    func refreshRockets() {
+        let live = world.padRockets()
+        for (key, r) in rocketActors {
+            guard let st = fleet.stations[r.station] else { continue }
+            if !live.contains(key), !r.isBusy, !r.node.hasActions {
+                r.node.removeFromParentNode()
+                rocketActors[key] = nil
                 continue
             }
-            let key = "\(info.station)|\(launch.pr.number)"
-            let existing = rockets.keys.first { $0.hasPrefix(key + "|") || $0 == key }
-            let node = existing.flatMap { rockets.removeValue(forKey: $0) } ?? {
-                let n = Props.rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: launch.pr.isProduction)
-                if let st = fleet.stations[info.station] { n.position = v3(st.offset.x + st.padCenter.x, 0, st.offset.y + st.padCenter.y) }
-                rocketRoot.addChildNode(n)
-                return n
-            }()
-            node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-            let pk = info.station + "|" + info.repo
-            if loadedRockets[pk] != nil { loadedRockets[pk] = nil; liftOff(node) }
-            else if let st = fleet.stations[info.station] { loadRocket(station: st, rocket: node, repo: info.repo) } else { liftOff(node) }
-            logEvent("\(info.repo) launched to \(launch.pr.base): \(launch.pr.title)")
-            ringBell(seed: launch.pr.number)
+            redraw(r, cargo: world.cargoWaiting(station: st, repo: r.repo), untested: r.untested)
         }
-        var live = Set<String>()
-        for (root, info) in world.repoRoots {
-            guard let station = fleet.stations[info.station], let open = github.openReleases(repoRoot: root) else { continue }
-            let hasProduction = open.contains(where: \.isProduction)
-            let stagingIsDeck = !ConfigStore.shared.current.stagingBranch.isEmpty
-            for pr in open where pr.isProduction || (!hasProduction && !stagingIsDeck) {
-                let cargoBucket = max((stagingIsDeck ? station.staged : station.stored)[info.repo] ?? 0, loadedRockets[info.station + "|" + info.repo] ?? 0) / 3
-                let key = "\(info.station)|\(pr.number)\(pr.untested ? "|hold" : "")|c\(cargoBucket)"
-                live.insert(key)
-                if rockets[key] != nil { continue }
-                let cargoPile = stagingIsDeck ? station.staged : station.stored
-                let n = Props.rocket(color: NSColor(fleet.color(forRepo: info.repo)), tall: pr.isProduction, cargo: max(cargoPile[info.repo] ?? 0, loadedRockets[info.station + "|" + info.repo] ?? 0))
-                if pr.untested {
-                    let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: pr.isProduction)
-                    deco.name = "hold"
-                    n.addChildNode(deco)
-                }
-                let slot = rockets.values.filter { $0.parent != nil }.count % 4
-                let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
-                let pc = station.padCenter + offsets[slot]
-                n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
-                let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"
-                n.name = "rocket:\(pr.url)|\(info.repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
-                let pk = info.station + "|" + info.repo
-                if pr.isProduction, !pr.untested {
-                    if loadedRockets[pk] != nil { addSteam(to: n) }
-                    else if pendingLaunch[pk] == nil { DispatchQueue.main.async { [weak self] in self?.enqueue { self?.loadRocket(station: station, rocket: n, repo: info.repo, thenLaunch: false) } } }
-                }
-                n.enumerateChildNodes { c, _ in if c.name != "flame" { c.name = n.name } }
-                rocketRoot.addChildNode(n)
-                rockets[key] = n
-                logEvent("\(info.repo): release to \(pr.base) on the pad" + (pr.untested ? " (untested)" : ""))
-            }
-        }
-        for (key, n) in rockets where !live.contains(key) && !n.hasActions { n.removeFromParentNode(); rockets[key] = nil }
         rebuildDueRings()
     }
 
@@ -289,57 +383,6 @@ extension StationController {
             }
         }
         emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
-    }
-
-    /// Cleared to launch: the deck (or storage, without a staging branch) is loaded into the rocket, which then steams until ignition.
-    func loadRocket(station: Station, rocket: SCNNode, repo: String, thenLaunch: Bool = true) {
-        let source = ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck"
-        let boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(source):\(station.name)|\(repo)|") }
-        let pk = station.name + "|" + repo
-        // Crates on someone's arms count too: the rocket waits for them rather than leaving without them.
-        let carriedNow = world.truth.carriedCount(station: station.name, repo: repo)
-        guard !boxes.isEmpty || carriedNow > 0 else { if thenLaunch { liftOff(rocket) } else { addSteam(to: rocket) }; return }
-        if pendingLaunch[pk] == nil {
-            pendingLaunch[pk] = (rocket, boxes.count + carriedNow, clock)
-            pendingIgnition[pk] = thenLaunch
-            loadTotals[pk] = boxes.count + carriedNow
-            logEvent("\(repo): cleared, loading the rocket")
-        }
-        if boxes.isEmpty { loadWaiting.insert(pk); return }
-        if carriedNow > 0 { loadWaiting.insert(pk) }   // come back for the rest once they land
-        let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
-        for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
-            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
-                  let b = crateNode(source, crate, at: from) else { continue }
-            carry(command, node: b) { [weak self] in
-                guard let self else { return }
-                if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) } else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
-                b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
-                let pk = station.name + "|" + repo
-                if var p = pendingLaunch[pk] {
-                    p.remaining -= 1
-                    pendingLaunch[pk] = p
-                    if p.remaining <= 0 {
-                        pendingLaunch[pk] = nil
-                        if pendingIgnition[pk] ?? true { liftOff(p.node) } else { loadedRockets[pk] = loadTotals[pk] ?? boxes.count; addSteam(to: p.node); logEvent("\(repo): loaded and steaming, waiting for the release to merge") }
-                        pendingIgnition[pk] = nil; loadTotals[pk] = nil; loadWaiting.remove(pk)
-                        fleet.save()
-                    }
-                }
-            }
-        }
-    }
-
-    /// A launch that was waiting for crates in the air: once they have landed, load what is on the floor now.
-    func retryLoads() {
-        for pk in loadWaiting {
-            guard let p = pendingLaunch[pk] else { loadWaiting.remove(pk); continue }
-            let parts = pk.split(separator: "|", maxSplits: 1).map(String.init)
-            guard parts.count == 2, let station = fleet.stations[parts[0]] else { loadWaiting.remove(pk); continue }
-            guard world.truth.carriedCount(station: station.name, repo: parts[1]) == 0 else { continue }
-            loadWaiting.remove(pk)
-            loadRocket(station: station, rocket: p.node, repo: parts[1], thenLaunch: pendingIgnition[pk] ?? true)
-        }
     }
 
     /// Lights flicker on when a dark office gets activity, and dim when it is left alone.

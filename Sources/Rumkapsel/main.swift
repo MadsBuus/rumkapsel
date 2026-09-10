@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var gallery: GalleryController?
     var simulatorWindow: NSWindow?
     var simulator: SimulatorController?
+    /// A scripted run's heartbeat: see below.
+    private var frameBeat: Timer?
     let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel"
 
@@ -98,6 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
+            // Off screen nothing asks SceneKit for a frame, so a scripted run would never tick.
+            // Ask for one thirty times a second and the station lives while the script plays.
+            frameBeat = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { _ = (self?.simulator?.station.view ?? self?.controller.view)?.snapshot() }
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4)) { [self] in
                 if galleryMode { gallery?.snapshot(to: path) }
                 else if let sim = simulator {

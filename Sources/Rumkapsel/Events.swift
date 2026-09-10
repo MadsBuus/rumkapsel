@@ -40,6 +40,14 @@ enum WorldEvent {
     case carryToDeck(station: String, repo: String, commands: [Command])
     /// One crate passed QA: it crosses the aisle to the tested row.
     case crateCleared(station: String, repo: String, number: Int)
+    /// A release pull request appeared: a rocket belongs on the pad.
+    case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
+    /// A release pull request merged. A production one ships; a staging one moves the yard.
+    case releaseMerged(station: String, repo: String, number: Int, base: String, title: String, isProduction: Bool)
+    /// What a repository's rocket should be doing now, as a command for it to run.
+    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command)
+    /// A message landed in a session's office: cones on the floor, and its worker goes to them.
+    case prompt(station: String, key: String, minionId: String, count: Int)
     /// Who is on the crew right now, and how many bot pull requests are open.
     case crewRoster(members: [String: CrewMember], bots: Int)
     /// Something a teammate just did, fresh enough to move their minion.

@@ -78,7 +78,6 @@ final class SimulatorModel: ObservableObject {
     let teammate = "leo"
     let peerName = "kim"
 
-    @Published var log: [(at: String, kind: String, text: String)] = []
     @Published var office = ""
     @Published var repo = "web"
     @Published var issue = ""
@@ -110,12 +109,10 @@ final class SimulatorModel: ObservableObject {
     init(station: StationController) {
         self.station = station
         station.sim?.onEvent = { [weak self] e in
-            let text = SimulatorModel.describe(e)
-            DispatchQueue.main.async { self?.note("event", text) }
+            self?.note("event", SimulatorModel.describe(e))
         }
-        station.sim?.onCommand = { [weak self] c, m in
-            let text = "\(m.home.name): \(c.words)"
-            DispatchQueue.main.async { self?.note("command", text) }
+        station.sim?.onCommand = { [weak self] c, who in
+            self?.note("command", "\(who): \(c.words)")
         }
         // A peer that stops talking is dropped after twenty seconds, so keep saying the same thing.
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
@@ -412,8 +409,16 @@ final class SimulatorModel: ObservableObject {
                                                          url: "https://example.invalid/\(repo)/\(nextRelease)", labels: ["untested"], mergedAt: nil))
             pushGitHub()
         case "Mark tested / ready to ship (board)":
+            // QA passing takes the untested label off an open production release as well as
+            // moving the column: that is what clears the rocket to load.
+            if let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.isProduction && $0.untested }) {
+                let pr = releases[repo]![i]
+                releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head,
+                                               state: pr.state, url: pr.url, labels: pr.labels.filter { !$0.lowercased().contains("untested") },
+                                               mergedAt: nil)
+            }
             let onDeck = board.filter { $0.repo == repo && $0.status == statuses.deck }
-            guard !onDeck.isEmpty else { return miss("nothing on the deck for \(repo)") }
+            guard !onDeck.isEmpty else { pushGitHub(); return miss("nothing on the deck for \(repo)") }
             move(onDeck, to: statuses.cleared)
         case "Production release merges (ship)":
             guard let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.isProduction }) else { return miss("no open production release on \(repo)") }
@@ -488,20 +493,20 @@ final class SimulatorModel: ObservableObject {
 
     private func miss(_ why: String) { note("skipped", why) }
 
+
+
     // MARK: the log
 
-    private static let stamp: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
-    }()
+    /// The event and command taps fire on the scene's render thread, so the log is kept behind a
+    /// lock and the panel only asks it for text.
+    private let lines = SimLog()
 
-    private func note(_ kind: String, _ text: String) {
-        log.insert((SimulatorModel.stamp.string(from: Date()), kind, text), at: 0)
-        if log.count > 400 { log.removeLast(log.count - 400) }
+    nonisolated func note(_ kind: String, _ text: String) {
+        lines.add(kind: kind, text: text)
+        DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
-    var logText: String {
-        log.map { "\($0.at)  \($0.kind)  \($0.text)" }.joined(separator: "\n")
-    }
+    var logText: String { lines.text }
 
     static func describe(_ e: WorldEvent) -> String {
         switch e {
@@ -525,7 +530,33 @@ final class SimulatorModel: ObservableObject {
         case .worldLoaded: return "worldLoaded"
         case .log(let t): return "log: \(t)"
         case .chime(let s): return "chime \(s)"
+        case .releaseOpened(_, let repo, let n, let base, let untested, _):
+            return "releaseOpened \(repo)#\(n) -> \(base)\(untested ? " untested" : "")"
+        case .releaseMerged(_, let repo, let n, let base, _, let production):
+            return "releaseMerged \(repo)#\(n) -> \(base)\(production ? " production" : "")"
+        case .rocketCommand(_, let repo, _, _, _, _, let c): return "rocketCommand \(repo): \(c.words)"
+        case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"
         }
+    }
+}
+
+/// The simulator's log, written from any thread and read by the panel.
+final class SimLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
+    }()
+
+    func add(kind: String, text: String) {
+        lock.lock(); defer { lock.unlock() }
+        lines.insert("\(SimLog.stamp.string(from: Date()))  \(kind)  \(text)", at: 0)
+        if lines.count > 400 { lines.removeLast(lines.count - 400) }
+    }
+
+    var text: String {
+        lock.lock(); defer { lock.unlock() }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -622,7 +653,8 @@ struct SimulatorPanel: View {
 /// and the two things no source drives. A normal window leaves `sim` nil and none of this runs.
 final class SimHooks {
     var onEvent: ((WorldEvent) -> Void)?
-    var onCommand: ((Command, Minion) -> Void)?
+    /// The command and who is running it: a worker's office, or "shuttle" and "rocket".
+    var onCommand: ((Command, String) -> Void)?
     /// 1, 4 or 16: how fast the tick's dt runs.
     var timeScale = 1.0
     var paused = false
