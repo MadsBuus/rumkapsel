@@ -12,6 +12,18 @@ IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Applica
 
 sed -i '' "s|<key>CFBundleShortVersionString</key><string>[^<]*</string>|<key>CFBundleShortVersionString</key><string>$VERSION</string>|" build.sh
 sed -i '' "s|<key>CFBundleVersion</key><string>[^<]*</string>|<key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M)</string>|" build.sh
+# Release notes: the commit subjects since the previous tag, or a notes file given as the second argument.
+mkdir -p build/release
+NOTES_FILE="Resources/WhatsNew.md"
+if [ -n "$2" ] && [ -f "$2" ]; then
+  cp "$2" "$NOTES_FILE"
+else
+  PREV=$(git describe --tags --abbrev=0 2>/dev/null || true)
+  { echo "## What's new in $VERSION"; echo
+    git log ${PREV:+$PREV..}HEAD --no-merges --format='- %s' | grep -v '^- Release ' | grep -v '^- $'; } > "$NOTES_FILE"
+fi
+# Sparkle shows the same notes in its update window: generate_appcast picks up an .html beside the zip.
+{ echo "<ul>"; git log ${PREV:+$PREV..}HEAD --no-merges --format='%s' | grep -v '^Release ' | sed 's/&/\&amp;/g; s/</\&lt;/g; s/^/<li>/; s/$/<\/li>/'; echo "</ul>"; } > "build/release/rumkapsel-$VERSION.html"
 ./build.sh
 APP=build/rumkapsel.app
 
@@ -42,18 +54,6 @@ else
   echo "notarisation skipped (no credentials stored under profile rumkapsel)"
 fi
 
-# Release notes: the commit subjects since the previous tag, or a notes file given as the second argument.
-NOTES_FILE="build/release/notes-$VERSION.md"
-if [ -n "$2" ] && [ -f "$2" ]; then
-  cp "$2" "$NOTES_FILE"
-else
-  PREV=$(git describe --tags --abbrev=0 2>/dev/null || true)
-  { echo "## What's new"; echo
-    git log ${PREV:+$PREV..}HEAD --no-merges --format='- %s' | grep -v '^- Release ' | grep -v '^- $'
-    echo; echo "Unzip and move to Applications. Updates arrive in-app."; } > "$NOTES_FILE"
-fi
-# Sparkle shows the same notes in its update window: generate_appcast picks up an .html beside the zip.
-{ echo "<ul>"; git log ${PREV:+$PREV..}HEAD --no-merges --format='%s' | grep -v '^Release ' | sed 's/&/\&amp;/g; s/</\&lt;/g; s/^/<li>/; s/$/<\/li>/'; echo "</ul>"; } > "build/release/rumkapsel-$VERSION.html"
 # Appcast for Sparkle, hosted in the public releases repo.
 WORK=build/releases-repo
 rm -rf "$WORK"
@@ -61,8 +61,9 @@ gh repo clone "$RELEASES_REPO" "$WORK" -- -q
 cp "$ZIP" "$WORK/"
 .build/artifacts/sparkle/Sparkle/bin/generate_appcast --download-url-prefix "https://github.com/$RELEASES_REPO/releases/download/v$VERSION/" -o "$WORK/appcast.xml" build/release
 (cd "$WORK" && git add appcast.xml && git -c user.name="Mads Buus" -c user.email="mads.buus@tattoodo.com" commit -q -m "rumkapsel $VERSION" && git push -q)
-gh release create "v$VERSION" "$ZIP" --repo "$RELEASES_REPO" --title "rumkapsel $VERSION" --notes-file "$NOTES_FILE" --latest
+{ cat "$NOTES_FILE"; echo; echo "Unzip and move to Applications. Updates arrive in-app."; } > "build/release/notes-$VERSION.md"
+gh release create "v$VERSION" "$ZIP" --repo "$RELEASES_REPO" --title "rumkapsel $VERSION" --notes-file "build/release/notes-$VERSION.md" --latest
 
-git add build.sh && git -c user.name="Mads Buus" -c user.email="mads.buus@tattoodo.com" commit -q -m "Release $VERSION" || true
+git add build.sh Resources/WhatsNew.md && git -c user.name="Mads Buus" -c user.email="mads.buus@tattoodo.com" commit -q -m "Release $VERSION" || true
 git tag -f "v$VERSION" && git push -q origin main --tags
 echo "released v$VERSION"

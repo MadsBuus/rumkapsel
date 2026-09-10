@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var floatItem: NSMenuItem!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
+    var notesWindow: NSWindow?
     var galleryWindow: NSWindow?
     var gallery: GalleryController?
     let settingsModel = SettingsModel()
@@ -100,6 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
         app.addItem(check)
+        if Bundle.main.url(forResource: "WhatsNew", withExtension: "md") != nil {
+            let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+            app.addItem(withTitle: "What's New in \(v)…", action: #selector(openWhatsNew), keyEquivalent: "")
+        }
         app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
@@ -145,6 +150,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         galleryWindow?.makeKeyAndOrderFront(nil)
         galleryWindow?.makeFirstResponder(gallery?.view)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The release notes bundled with this build, in a small scrollable window.
+    @objc func openWhatsNew() {
+        if notesWindow == nil {
+            guard let url = Bundle.main.url(forResource: "WhatsNew", withExtension: "md"), let md = try? String(contentsOf: url, encoding: .utf8) else { return }
+            let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+            // Headings become bold lines; the rest is inline markdown with its line breaks kept.
+            let prepared = md.split(separator: "\n", omittingEmptySubsequences: false)
+                .map { $0.hasPrefix("## ") ? "**" + $0.dropFirst(3) + "**" : $0.hasPrefix("- ") ? "•  " + $0.dropFirst(2) : String($0) }.joined(separator: "\n")
+            let text: NSAttributedString
+            if let a = try? AttributedString(markdown: prepared, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+                var styled = a
+                styled.font = .systemFont(ofSize: 13)
+                styled.foregroundColor = .labelColor
+                text = NSAttributedString(styled)
+            } else { text = NSAttributedString(string: md) }
+            let scroll = NSTextView.scrollableTextView()
+            let tv = scroll.documentView as! NSTextView
+            tv.isEditable = false
+            tv.textContainerInset = NSSize(width: 16, height: 14)
+            tv.textStorage?.setAttributedString(text)
+            tv.backgroundColor = .textBackgroundColor
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 400), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            w.contentView = scroll
+            w.title = "What's new in rumkapsel \(v)"
+            w.isReleasedWhenClosed = false
+            w.center()
+            notesWindow = w
+        }
+        notesWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
