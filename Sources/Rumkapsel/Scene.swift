@@ -972,16 +972,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
-                // A low slab on four legs: a table, not a crate.
-                let table = SCNNode(geometry: SCNBox(width: 0.7, height: 0.05, length: 0.5, chamferRadius: 0))
+                // A low coffee table: a thin top on two side panels, with a magazine left on it.
+                let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
                 table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3)))
-                table.position = v3(station.offset.x + cx, 0.3, station.offset.y + cy)
-                for (lx, lz) in [(-0.3, -0.2), (0.3, -0.2), (-0.3, 0.2), (0.3, 0.2)] {
-                    let leg = SCNNode(geometry: SCNBox(width: 0.04, height: 0.28, length: 0.04, chamferRadius: 0))
-                    leg.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.32, 0.24)))
-                    leg.position = v3(lx, -0.16, lz)
-                    table.addChildNode(leg)
+                table.position = v3(station.offset.x + cx, 0.2, station.offset.y + cy)
+                for lx in [-0.4, 0.4] {
+                    let panel = SCNNode(geometry: SCNBox(width: 0.03, height: 0.19, length: 0.34, chamferRadius: 0))
+                    panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.32, 0.24)))
+                    panel.position = v3(lx, -0.1, 0)
+                    table.addChildNode(panel)
                 }
+                let magazine = SCNNode(geometry: SCNBox(width: 0.16, height: 0.01, length: 0.22, chamferRadius: 0))
+                magazine.geometry!.firstMaterial = flat(NSColor(rgb: (0.85, 0.85, 0.8)))
+                magazine.position = v3(0.15, 0.02, 0.02)
+                magazine.eulerAngles.y = 0.3
+                table.addChildNode(magazine)
                 table.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(table)
                 let lxs = lounge.cells.map(\.x)
@@ -1059,19 +1064,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 bowl.addChildNode(tank)
                 bowl.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(bowl)
-                let post = SCNNode(geometry: faceted(SCNCylinder(radius: 0.025, height: 0.7), 4))
-                post.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-                post.position = v3(station.offset.x + Double(sc.x) + 0.3, 0.35, station.offset.y + Double(sc.y) + 0.3)
-                let head = SCNNode(geometry: faceted(SCNCylinder(radius: 0.09, height: 0.03), 4))
-                head.geometry!.firstMaterial = post.geometry!.firstMaterial
-                head.position = v3(-0.12, 0.33, -0.12)
-                post.addChildNode(head)
-                let tray = SCNNode(geometry: SCNBox(width: 0.7, height: 0.03, length: 0.7, chamferRadius: 0))
-                tray.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.76, 0.8)))
-                tray.position = v3(-0.15, -0.34, -0.15)
-                post.addChildNode(tray)
-                post.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(post)
+                // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
+                // It takes the corner across from the toilet; the far corner is the sign's.
+                let sc2 = cells.count > 1 ? cells[1] : sc
+                let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
+                arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
+                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3, 0.62, station.offset.y + Double(sc2.y) - 0.35)
+                let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
+                nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
+                nozzle.position = v3(0, -0.03, 0.1)
+                arm.addChildNode(nozzle)
+                arm.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(arm)
+                let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
+                drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
+                drain.position = v3(station.offset.x + Double(sc2.x) + 0.3, 0.01, station.offset.y + Double(sc2.y) - 0.25)
+                drain.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(drain)
             }
             if station.hasHangar {
                 let hc = station.hangarCenter
@@ -3560,7 +3569,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
                         if let bath = station.rooms["kind:bath"] {
                             let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                            let spot = m.showering ? cells.last! : cells.first!
+                            let spot = m.showering ? (cells.count > 1 ? cells[1] : cells.last!) : cells.first!
                             m.path = station.path(from: m.pos, to: spot)
                             m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
                         }
