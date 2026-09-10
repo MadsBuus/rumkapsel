@@ -2697,7 +2697,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let key = "task:\(it.repo)#\(it.number)"
                 guard let login = it.assignees.first, login != me else { continue }
                 if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
-                let working = !it.prURLs.isEmpty || branched.contains("\(it.repo)#\(it.number)") || station.rooms[key] != nil
+                let working = !it.prURLs.isEmpty || branched.contains("\(it.repo)#\(it.number)") || peerOffices[sk + key] != nil || station.rooms[key]?.worktree != nil
                 guard working else { continue }
                 boardOffices.append((it.repo, it, login))
             }
