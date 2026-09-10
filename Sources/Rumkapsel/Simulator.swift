@@ -97,7 +97,9 @@ final class SimulatorModel: ObservableObject {
     private var launches: [(repo: String, pr: ReleasePR)] = []
     private var peerHere = false
     private var peerBeat: Timer?
-    private var nextIssue = 700
+    /// Issue numbers per repository, continuing each one's own range so a new office reads like its neighbours.
+    private var nextIssues: [String: Int] = ["web": 460, "api": 5160, "ios": 300]
+    private func nextIssue(_ repo: String) -> Int { nextIssues[repo, default: 700] += 1; return nextIssues[repo]! }
     private var nextRelease = 9000
     private var nextSession = 0
 
@@ -283,7 +285,7 @@ final class SimulatorModel: ObservableObject {
     var groups: [Group] {
         [
             Group(id: "Sessions", picker: "office", buttons: [
-                "New session on a new branch", "Session prompt (adds a cone)", "Session goes busy",
+                "New session on a new branch (in this repo)", "Session prompt (adds a cone)", "Session goes busy",
                 "Session goes quiet", "Session ends", "Session switches branch",
             ]),
             Group(id: "Teammates", picker: "repo", buttons: [
@@ -312,9 +314,8 @@ final class SimulatorModel: ObservableObject {
         switch name {
 
         // Sessions
-        case "New session on a new branch":
-            nextIssue += 1
-            let n = nextIssue
+        case "New session on a new branch (in this repo)":
+            let n = nextIssue(repo)
             let branch = "gh-\(n)/new-work-\(n)"
             addSession(repo: repo, slug: "sim-\(n)", branch: branch, activity: .coding("src"), commits: 2)
             board.append(item(repo, n, "new work \(n)", statuses.development, "me"))
@@ -343,8 +344,8 @@ final class SimulatorModel: ObservableObject {
             pushScan()
         case "Session switches branch":
             guard var s = selectedSession else { return miss("no session in that office") }
-            nextIssue += 1
-            s.branch = "gh-\(nextIssue)/switched-\(nextIssue)"
+            let n = nextIssue(s.repo)
+            s.branch = "gh-\(n)/switched-\(n)"
             s.last = Date()
             setSession(s)
             pushScan()
@@ -352,8 +353,7 @@ final class SimulatorModel: ObservableObject {
         // Teammates, through the open pull request list and the activity feed
         case "Teammate starts a branch":
             // A new branch on the board and in the feed: a new office, by shuttle. No pull request yet.
-            nextIssue += 1
-            let n = nextIssue
+            let n = nextIssue(repo)
             let branch = "gh-\(n)/teammate-\(n)"
             board.append(item(repo, n, "teammate work \(n)", statuses.development, teammate))
             teammateBranches[repo, default: []].append((n, branch))
@@ -472,8 +472,7 @@ final class SimulatorModel: ObservableObject {
             pushPeer()
         case "Peer starts a new office":
             peerHere = true
-            nextIssue += 1
-            let n = nextIssue
+            let n = nextIssue(repo)
             peerOffices.append(peerOffice(repo: repo, branch: "gh-\(n)/peer-work-\(n)", name: "#\(n) peer work",
                                           started: Date(), pushed: false))
             pushPeer()
