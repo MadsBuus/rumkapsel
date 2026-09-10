@@ -52,10 +52,14 @@ after the caller has finished placing its workers.
 Shapes mean things: a hexagon is a packed office, a cube is a piece of work, a square strapped crate is a pull
 request, a pyramid is a session input. Nothing is round.
 
+The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
+shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
+the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
+`SceneMarkers.swift` the crates, cones, rockets and power; `SceneTick.swift` the per-frame worker loop and the demo
+clock; `Jobs.swift` what a worker is told to do; `HUD.swift` the overlay; `Minion.swift` one worker's body.
+
 ## Debts
 
-- `Scene.swift` is still one file: nodes, minions, HUD, camera and input share it. Minions are the next thing
-  to lift out.
 - Minions run one `Command` at a time with a phase index (`Commands.swift`), so "what am I doing now" has a
   single owner. What is left outside it: `place`, `activity` and the wander timers still steer the day, and
   crew minions and shuttles are not actors in the same sense.
