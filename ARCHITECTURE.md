@@ -60,3 +60,36 @@ request, a pyramid is a session input. Nothing is round.
   of "what am I doing now" would remove the class of bug where two per-frame rules fight.
 - `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
   that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
+
+## Where this is going
+
+Agreed direction, in the order things flow. Not all of it exists yet.
+
+1. **Sources** poll and cache, each on its own cadence: local git every few seconds, the board once a
+   minute, feeds and PR lists with conditional requests so an unchanged answer costs nothing, per-branch
+   detail batched and only for branches that exist here or moved in the feed. A push, a feed event, a
+   peer's fresher answer or a conflict re-asks that one entity at once. Three setups feed the same facts:
+   a project board, plain GitHub pull requests, or local git with tags and homemade release scripts.
+2. **Facts** are one entity-keyed map: offices by branch key, crates by repository and number, peers by
+   name. Sources write deltas; each field has an authority (the remote for a branch's existence, the PR
+   for its state, the board for its stage, the scanner for who works here) and freshness decides between
+   copies of the same authority. A weaker source fills a field the authority has not spoken on, never
+   overrides it. Disagreement is not an event; it schedules a re-ask of the authority. This is the peer
+   boundary too: what goes over the LAN is facts.
+3. **Diffing** happens on write, per entity: old value, new value, zero or one event. No sweeps. A
+   source's first answer, per slice, is quiet.
+4. **World state** applies events and holds intent: this office exists and is solid, this crate belongs on
+   the deck. It is what gets persisted.
+5. **Reconciliation** compares intent with **station truth**, the second state: which crate is on which
+   slot, which office is delivered, who carries what. It issues **commands** as values: carry crate 5210
+   from storage slot 3 to deck slot 1, deliver office X by shuttle. A command has phases, each marked
+   interruptible or not (walking yes, holding mid-lift no, setting down no), and a "must be true by" after
+   which the reconciler lets the change appear in place rather than lag the world.
+6. **Actors** execute commands over time: minions, shuttles, rockets, crates. Animations live here. A
+   new command replaces the old one at the next interruptible phase; a command whose target vanished
+   cancels itself and the actor sets down what it holds.
+7. **Completions** write station truth only, never facts: "5210 landed", "office X connected". That is
+   what keeps a source snap from undoing what a minion just did.
+
+Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
+in the log when the command is issued.
