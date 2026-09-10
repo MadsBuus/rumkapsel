@@ -219,12 +219,12 @@ final class Station {
 
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
-    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil) -> Bool {
+    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count])
+        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count], near: near)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         walkableCache = nil
@@ -234,10 +234,28 @@ final class Station {
     @discardableResult
     func ensureFixedRoom(_ place: Place) -> Bool {
         guard case .room(let key) = place else { return false }
-        if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4)) }
+        // The living quarters cluster: the lounge first, then the dorm and the bath beside it.
+        let beside = (rooms["kind:lounge"]?.cells ?? []) + (rooms["kind:quarters"]?.cells ?? [])
+        if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4), near: beside.isEmpty ? nil : beside) }
         if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
-        if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2)) }
+        if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2), near: beside.isEmpty ? nil : beside) }
         return false
+    }
+
+    /// Whether two rooms share a wall.
+    func touching(_ a: String, _ b: String) -> Bool {
+        guard let ra = rooms[a], let rb = rooms[b] else { return false }
+        let set = Set(rb.cells)
+        return ra.cells.contains { $0.neighbours.contains(where: set.contains) }
+    }
+
+    /// Restored layouts from before the cluster rule: put the dorm and bath back beside the lounge.
+    func clusterQuarters() {
+        guard rooms["kind:lounge"] != nil else { return }
+        if !touching("kind:quarters", "kind:lounge") || !(touching("kind:bath", "kind:lounge") || touching("kind:bath", "kind:quarters")) {
+            removeRoom(key: "kind:quarters"); removeRoom(key: "kind:bath")
+            ensureFixedRoom(.quarters); ensureFixedRoom(.bath)
+        }
     }
 
     /// The room cell that touches the corridor: the doorway, and where a carried box gets set down.
@@ -324,7 +342,7 @@ final class Station {
         isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c)
     }
 
-    private func placeShape(_ shape: [Cell]) -> [Cell] {
+    private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
         let variants = rotations(of: shape)
         var rounds = 0
         while rounds < 40 {   // bounded: a station can never wedge the render thread
@@ -332,6 +350,27 @@ final class Station {
             let reach = spineHalfLength + 4
             var anchors: [Cell] = []
             for x in -reach...reach { for y in -reach...reach { anchors.append(Cell(x: x, y: y)) } }
+            if let near, !near.isEmpty {
+                // Beside the given rooms: closest to their floor first, then the usual order.
+                let set = Set(near)
+                func gap(_ c: Cell) -> Int { near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }
+                anchors.sort {
+                    let ga = gap($0), gb = gap($1)
+                    if ga != gb { return ga < gb }
+                    return (max(abs($0.x), abs($0.y)), $0.x, $0.y) < (max(abs($1.x), abs($1.y)), $1.x, $1.y)
+                }
+                for anchor in anchors {
+                    for v in variants {
+                        let cells = v.map { $0 + anchor }
+                        guard cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil && !set.contains($0) }) else { continue }
+                        guard cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) else { continue }
+                        guard cells.contains(where: { $0.neighbours.contains(where: set.contains) }) else { continue }
+                        guard flatTowardsCorridor(cells) else { continue }
+                        return cells
+                    }
+                }
+                // Nothing beside them fits: fall through to the usual search.
+            }
             anchors.sort {
                 let a = max(abs($0.x), abs($0.y)), b = max(abs($1.x), abs($1.y))
                 if a != b { return a < b }
@@ -605,6 +644,7 @@ final class Fleet {
             station.ensureFixedRoom(.quarters)
             station.ensureFixedRoom(.lounge)
             station.ensureFixedRoom(.bath)
+            station.clusterQuarters()
             stations[name] = station
         }
     }

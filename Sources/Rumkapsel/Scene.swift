@@ -1978,6 +1978,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.couch))
             m.couch = station.couches.indices.first { !used.contains($0) }
         }
+        // One to a couch: if someone already holds this seat, give it up and stand at the table.
+        if place == .lounge, let c = m.couch, minions.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.couch == c }) {
+            m.couch = nil
+        }
         let cells = station.cells(of: place)
         let target: Cell
         if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
