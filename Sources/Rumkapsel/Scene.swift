@@ -992,13 +992,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 // A potted plant in one corner and a low shelf in another: somewhere to look at.
                 let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
-                let pot = SCNNode(geometry: faceted(SCNCylinder(radius: 0.11, height: 0.16), 4))
+                // A square pot with a few flat leaves fanned out on a thin stem.
+                let pot = SCNNode(geometry: SCNBox(width: 0.2, height: 0.16, length: 0.2, chamferRadius: 0))
                 pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
                 pot.position = v3(station.offset.x + Double(xs.min()!) - 0.28, 0.08, station.offset.y + Double(ys.min()!) - 0.28)
-                let leaves = SCNNode(geometry: SCNBox(width: 2 * (0.17), height: 2 * (0.17), length: 2 * (0.17), chamferRadius: 0))
-                leaves.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.62, 0.38)))
-                leaves.position = v3(0, 0.2, 0)
-                pot.addChildNode(leaves)
+                let stem = SCNNode(geometry: SCNBox(width: 0.03, height: 0.3, length: 0.03, chamferRadius: 0))
+                stem.geometry!.firstMaterial = lit(NSColor(rgb: (0.25, 0.45, 0.28)))
+                stem.position = v3(0, 0.22, 0)
+                pot.addChildNode(stem)
+                for (i, (w, yaw, tiltZ)) in [(0.22, 0.0, 0.6), (0.2, 2.1, 0.5), (0.24, 4.2, 0.7), (0.16, 1.0, -0.2)].enumerated() {
+                    let leaf = SCNNode(geometry: SCNBox(width: w, height: 0.02, length: 0.09, chamferRadius: 0))
+                    leaf.geometry!.firstMaterial = lit(NSColor(rgb: (0.3 + Double(i) * 0.03, 0.62, 0.38)))
+                    leaf.pivot = SCNMatrix4MakeTranslation(-w / 2, 0, 0)
+                    leaf.position = v3(0, 0.3 + Double(i) * 0.03, 0)
+                    leaf.eulerAngles = SCNVector3(0, yaw, tiltZ)
+                    pot.addChildNode(leaf)
+                }
                 pot.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(pot)
                 let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
