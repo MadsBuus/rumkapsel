@@ -315,10 +315,12 @@ final class SimulatorModel: ObservableObject {
 
         // Sessions
         case "New session on a new branch (in this repo)":
-            let n = nextIssue(repo)
+            // The office picker says which repository: a new branch beside the office chosen there.
+            let inRepo = selectedSession?.repo ?? office.split(separator: "|").last.flatMap { $0.split(separator: "#").first.map { String($0.dropFirst($0.hasPrefix("task:") ? 5 : 0)) } } ?? repo
+            let n = nextIssue(inRepo)
             let branch = "gh-\(n)/new-work-\(n)"
-            addSession(repo: repo, slug: "sim-\(n)", branch: branch, activity: .coding("src"), commits: 2)
-            board.append(item(repo, n, "new work \(n)", statuses.development, "me"))
+            addSession(repo: inRepo, slug: "sim-\(n)", branch: branch, activity: .coding("src"), commits: 2)
+            board.append(item(inRepo, n, "new work \(n)", statuses.development, "me"))
             pushGitHub()
             pushScan()
         case "Session prompt (adds a cone)":
