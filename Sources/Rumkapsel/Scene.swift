@@ -211,12 +211,10 @@ final class StationView: SCNView {
 /// One Claude session, walking between the rooms of its station.
 final class Minion {
     enum State { case arriving, settled, leaving }
-    enum Errand { case fetch(room: String), carry(room: String), pickup(Int), deliver(Int) }
 
     var id: String
     var freeSince = 0.0        // clock when the worker's session went away; 0 while assigned
     var couch: Int?
-    var isTester = false
     var nextImpatience = 0.0
     var station: String
     var home: Home
@@ -224,7 +222,14 @@ final class Minion {
     var busy = false
     var activity: Activity = .waiting
     var place: Place = .core
-    var errand: Errand?
+    /// The one job in hand, and how far into its phases the actor is. Everything a minion does is
+    /// one of these: a carry, a delivery, somewhere to be, the bath, a chore, QA, leaving.
+    var current: Command?
+    var phase = 0
+    /// At most one waits for the next interruptible phase.
+    var pending: Command?
+    /// When the phase in hand runs out: a crouch, a shower, a chore.
+    var phaseUntil = 0.0
     var carried: SCNNode?
     var fetchSpot: SIMD2<Double>?
     var commitDrop = false
@@ -232,8 +237,6 @@ final class Minion {
     var hammerUp = false
     var lying = false
     var wakeUntil = 0.0
-    /// Bent over a crate until this clock time: lifting or setting down takes a moment.
-    var bendUntil = 0.0
     private(set) var shadow: SCNNode!
     /// The hammer's grip end, so the swing pivots in the hand rather than at the handle's middle.
     private(set) var hammerPivot: SCNNode?
@@ -273,10 +276,7 @@ final class Minion {
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false
-    var bathUntil = 0.0
-    var bathReturn: Place?
     var nextChoreAt = 0.0
-    var choreUntil = 0.0       // out on a chore until this clock time, 0 when not
     var showering = false
     var nextDropAt = 0.0
     private var staticNode: SCNNode?
@@ -350,6 +350,24 @@ final class Minion {
         visor.name = node.name
         node.opacity = 0
     }
+
+    /// The phase in hand.
+    var phaseKind: Command.Phase {
+        guard let c = current else { return .settle }
+        let p = c.phases
+        return p[min(phase, p.count - 1)]
+    }
+    /// Carrying, delivering or leaving: holding something, not free for anything else.
+    var onJob: Bool { current?.isJob ?? false }
+    /// Resting: only then do the couch and the bed pull.
+    var isResting: Bool { current?.isRest ?? true }
+    var isQA: Bool { if case .qa = current?.kind { return true }; return false }
+    var isChore: Bool { if case .chore = current?.kind { return true }; return false }
+    var bathing: Bool { if case .bath = current?.kind { return true }; return false }
+    /// Crouched over a crate: lifting it or setting it down.
+    var bending: Bool { (phaseKind == .lift || phaseKind == .setDown) && phaseUntil > 0 }
+    /// What it would say if you asked.
+    var words: String { current?.words ?? "nothing in particular" }
 
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
     var headHeight: Double { bodyHeight }
@@ -523,9 +541,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var openEdges: Set<String> = []
     private var roomLabels: [String: SCNNode] = [:]
     private var floorLabels: [(node: SCNNode, baseYaw: Double)] = []
-    /// Rooms whose office has not been delivered yet, keyed by "station|room". Purely a cue: the model
-    /// has already put the room on the floor, this only holds its tiles back until a carrier walks it in.
-    private var undelivered: Set<String> = []
+    /// Rooms whose office has not been delivered yet, keyed by "station|room". Station truth keeps the
+    /// list; the model has already put the room on the floor, this only holds its tiles back until a
+    /// carrier walks it in.
+    private var undelivered: Set<String> { world.truth.pendingOffices }
     private var boxes: [String: SCNNode] = [:]
     private var outlines: [String: SCNNode] = [:]
     private let beamRoot = SCNNode()
@@ -548,12 +567,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerColorBook: [String: RGB] = [:]
     private var roomPower: [String: Bool] = [:]
     private var haulingRooms: Set<String> = []
-    /// Deck crates on someone's arms, "repo|number": the deck layout skips them until set down.
-    private var haulingCrates: Set<String> = []
-    /// A box being carried from one floor to another by whichever minion is free.
-    private struct Haul { let id: Int; let station: String; let box: SCNNode; let from: Cell; let to: Cell; let drop: SIMD3<Double>; let onDone: () -> Void; var carrier: String?; var roomKey: String = "" }
-    private var hauls: [Haul] = []
-    private var nextHaulId = 1
+    /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
+    private struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = "" }
+    private var cargo: [Int: Cargo] = [:]
     private var pendingLaunch: [String: (node: SCNNode, remaining: Int, since: Double)] = [:]
     private var pendingIgnition: [String: Bool] = [:]
     private var lastHaulSchedule = 0.0
@@ -563,6 +579,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
     private let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    /// What a hovered minion is doing, on a dark plate above its head.
+    private let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
+    private let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
     private let shareDot = SKSpriteNode(color: NSColor(rgb: (0.35, 0.85, 0.5)), size: CGSize(width: 7, height: 7))
     private let shareLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     private var legendNodes: [SKNode] = []
@@ -679,10 +698,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.delegate = self
 
         // What the model cannot see for itself: a crate already on someone's arms, or a rocket mid-load.
-        world.haulInFlight = { [weak self] key in self?.hauls.contains { $0.roomKey == key } ?? false }
+        world.haulInFlight = { [weak self] key in self?.cargo.values.contains { $0.roomKey == key } ?? false }
         world.haulingRoom = { [weak self] key in self?.haulingRooms.contains(key) ?? false }
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
-        world.stagingInFlight = { [weak self] key in self?.stagingInFlight[key] ?? 0 }
         world.rocketBusy = { [weak self] key in (self?.pendingLaunch[key] ?? nil) != nil || (self?.loadedRockets[key] ?? nil) != nil }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
@@ -1392,8 +1410,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // and only the rest is redrawn. Decide that before the old crates are taken off the floor.
         for station in fleet.stations.values where station.hasPad {
             for (root, info) in world.repoRoots where info.station == station.name {
-                if let c = github.cargo(repoRoot: root), case .carryToDeck(let n) = world.reconcile(station: station, repo: info.repo, root: root, cargo: c) {
-                    handle(.carryToDeck(station: station.name, repo: info.repo, count: n))
+                if let c = github.cargo(repoRoot: root), case .carryToDeck(let commands) = world.reconcile(station: station, repo: info.repo, root: root, cargo: c) {
+                    handle(.carryToDeck(station: station.name, repo: info.repo, commands: commands))
                 }
             }
         }
@@ -1500,7 +1518,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 // More commits than last time while the owner is in: it carries the new box in.
                 if let last = lastBoxCount[key], count > last, room.branch != nil,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && $0.errand == nil && $0.carried == nil }) {
+                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && $0.carried == nil }) {
                     let carry = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
                     carry.geometry!.firstMaterial = lit(color)
                     carry.position = v3(0, m.headHeight + 0.14, 0)
@@ -1514,7 +1532,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let purple = NSColor(rgb: (0.6, 0.4, 0.9))
             for area in ["storage", "deck"] where station.hasPad {
                 for slot in world.yardLayout(station: station, area: area) {
-                    if area == "deck", haulingCrates.contains("\(slot.repo)|\(slot.number)") { continue }
+                    if area == "deck", world.truth.isCarried(station: station.name, repo: slot.repo, number: slot.number) { continue }
                     let c = NSColor(fleet.color(forRepo: slot.repo))
                     let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: 0.38, approved: slot.cleared)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
@@ -1649,6 +1667,34 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         statusLabel.horizontalAlignmentMode = .right
         statusLabel.verticalAlignmentMode = .bottom
         hud.addChild(statusLabel)
+        bubbleLabel.fontSize = 11
+        bubbleLabel.fontColor = Palette.text
+        bubbleLabel.horizontalAlignmentMode = .center
+        bubbleLabel.verticalAlignmentMode = .bottom
+        bubbleLabel.zPosition = 2
+        bubblePlate.zPosition = 1
+        bubbleLabel.isHidden = true
+        bubblePlate.isHidden = true
+        hud.addChild(bubblePlate)
+        hud.addChild(bubbleLabel)
+    }
+
+    /// Hovering a minion holds it still and says what it is doing, above its head.
+    private func updateBubble() {
+        guard let h = hovered, h.hasPrefix("minion:"), let m = minions[String(h.dropFirst(7))], m.opacity > 0.2 else {
+            bubbleLabel.isHidden = true; bubblePlate.isHidden = true
+            return
+        }
+        let head = v3(Double(m.node.position.x), Double(m.node.position.y) + m.headHeight + 0.35, Double(m.node.position.z))
+        let p = view.projectPoint(head)
+        guard p.z > 0, p.z < 1 else { bubbleLabel.isHidden = true; bubblePlate.isHidden = true; return }
+        bubbleLabel.text = m.words
+        bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
+        bubbleLabel.isHidden = false
+        let f = bubbleLabel.frame.insetBy(dx: -7, dy: -4)
+        bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
+        bubblePlate.size = f.size
+        bubblePlate.isHidden = false
     }
 
     /// Top: repos in their colours with counts. Bottom: jobs with one tiny minion per worker, like the game.
@@ -1923,6 +1969,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func despawn(_ m: Minion) {
         if let key = carriedRoom(of: m) { reveal(key) }
+        // A crate on its arms goes down where it stands, and the carry waits for someone else.
+        if m.current?.crate != nil { dropWhereStanding(m) }
+        for (id, c) in cargo where c.carrier == m.id { cargo[id]?.carrier = nil }
+        world.truth.dropped(by: m.id)
+        world.truth.jobs[m.id] = nil
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
         m.queuedCones.forEach { $0.removeFromParentNode() }
@@ -1932,15 +1983,78 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func carriedRoom(of m: Minion) -> String? {
-        switch m.errand {
-        case .fetch(let r), .carry(let r): return "\(m.station)|\(r)"
-        default: return nil
+        if case .deliverOffice(let key) = m.current?.kind { return "\(m.station)|\(key)" }
+        return nil
+    }
+
+    // MARK: commands
+
+    /// Hands a command to an actor. It replaces the one in hand at the next interruptible phase;
+    /// mid-lift or setting down it waits its turn, and only one waits at a time.
+    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) {
+        guard m.current == nil || canInterrupt(m, with: c) else { m.pending = c; return }
+        start(m, c, announce: announce)
+    }
+
+    /// Walking and standing about can be cut into; a crouch cannot, and a carry only to send the
+    /// crate on the arms somewhere else.
+    private func canInterrupt(_ m: Minion, with c: Command) -> Bool {
+        guard m.wakeUntil == 0 else { return false }   // still stepping out of the shuttle
+        let phase = m.phaseKind
+        if phase.takesNewDestination {
+            guard let held = m.current?.crate, let want = c.crate else { return false }
+            return held == want
         }
+        return phase.interruptible
+    }
+
+    private func start(_ m: Minion, _ c: Command, announce: Bool = false) {
+        // Redirected mid-carry: keep the crate and walk on to the new spot.
+        let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
+        m.current = c
+        m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
+        m.phaseUntil = 0
+        m.pending = nil
+        world.truth.jobs[m.id] = (c, m.phase)
+        if announce { logEvent(c.words) }
+        if redirected, case .carry(_, _, let to) = c.kind { walk(m, to: to.cell) }
+    }
+
+    /// On to the next phase of the command in hand.
+    private func advance(_ m: Minion) {
+        guard let c = m.current else { return }
+        m.phaseUntil = 0
+        if m.phase + 1 < c.phases.count { m.phase += 1 }
+        world.truth.jobs[m.id] = (c, m.phase)
+    }
+
+    /// Done, or given up: whatever was queued starts now, else the minion goes back to resting.
+    private func finish(_ m: Minion) {
+        world.truth.jobs[m.id] = nil
+        m.current = nil
+        m.phase = 0
+        m.phaseUntil = 0
+        m.fetchSpot = nil
+        if let next = m.pending { m.pending = nil; start(m, next, announce: next.isJob) }
+        else { send(m, to: restPlace(m)) }
+    }
+
+    /// A command whose target went away: put down what is on the arms, where the minion stands.
+    private func dropWhereStanding(_ m: Minion) {
+        guard let held = m.carried else { return }
+        let at = held.worldPosition
+        held.removeFromParentNode()
+        held.position = at
+        propRoot.addChildNode(held)
+        held.runAction(.sequence([.move(to: v3(Double(at.x), 0.12, Double(at.z)), duration: 0.35), .run { [weak self] _ in self?.drone.thud() }]))
+        m.carried = nil
+        world.truth.dropped(by: m.id)
     }
 
     /// Off the station: through the airlock when there is one, and gone once inside.
     private func dismiss(_ m: Minion) {
         m.state = .leaving
+        start(m, .leave)
         m.couch = nil; m.bed = nil
         guard let station = fleet.stations[m.station], let airlock = station.rooms["kind:airlock"], let cell = airlock.cells.randomElement() else { return }
         m.place = .airlock
@@ -1966,7 +2080,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// After the floor changes, everyone carries on: settled somewhere still valid, stay; walking to a
     /// spot that still exists, keep it and re-plan from here; only if the target is gone, go somewhere new.
     private func resettle(_ station: Station) {
-        for m in minions.values where m.station == station.name && m.errand == nil && m.state != .leaving {
+        for m in minions.values where m.station == station.name && !m.onJob && m.state != .leaving {
             let cells = station.cells(of: m.place)
             if m.path.isEmpty {
                 if m.place == .core || cells.contains(m.cell) { continue }
@@ -2009,6 +2123,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
+        // A bath or a chore in hand survives a re-plan to where it already is; anything else rests.
+        let keep = (m.bathing && place == .bath) || (m.isChore && place == m.place)
+        if !keep { start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping)) }
         m.path = station.path(from: m.pos, to: target)
         // No way found and far off: walk straight rather than stand still or slide.
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
@@ -2144,7 +2261,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         ]))
         logEvent("shuttle inbound: \(room.name)")
         drone.sweep(up: false)
-        m.errand = .fetch(room: roomKey)
+        assign(m, .deliverOffice(key: roomKey, name: room.name), announce: false)
         m.place = .hangar
         m.fetchSpot = station.hangarSlots[slotIndex] + SIMD2(-0.3, 0)
         walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
@@ -2153,11 +2270,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
     /// detaches, sinks and fades. The model drops the room at once; only the visuals linger.
     private func archive(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String) {
-        cancelHauls(roomKey: key)
+        cancelCarries(roomKey: key)
         for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
         stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
         haulingRooms.remove(key)
-        undelivered.remove(key)
+        world.truth.officeDelivered(key)
         outlines.removeValue(forKey: key)?.removeFromParentNode()
         boxes.removeValue(forKey: key)?.removeFromParentNode()
         if announce {
@@ -2186,7 +2303,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func reveal(_ key: String) {
         boxes.removeValue(forKey: key)?.removeFromParentNode()
         if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
-        guard undelivered.remove(key) != nil else { return }
+        guard world.truth.officeDelivered(key) else { return }
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0.6
         roomTiles[key]?.forEach { $0.opacity = 1 }
@@ -2233,7 +2350,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         m.pyramids.append(n)
         m.pyramidCell = cell
         refreshObstacles()
-        if m.errand == nil { m.place = .room(key); walk(m, to: cell) }
+        if !m.onJob { m.place = .room(key); walk(m, to: cell) }
     }
 
     private func clearPyramids(_ m: Minion) {
@@ -2268,7 +2385,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let now = Date()
         // The model works out what the floor should look like; the scene then places the workers on it.
         var homes: [String: World.MinionHome] = [:]
-        for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: m.errand == nil) }
+        for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
         newRooms = [:]
         let events = world.applyScan(result, now: now, minionHomes: homes)
         let firstRun = events.contains { if case .worldLoaded = $0 { return true }; return false }
@@ -2290,14 +2407,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             var reused = false
             if isNew && !s.isSubagent {
                 // A free worker on this station takes the new session before the shuttle brings another.
-                if let free = minions.values.filter({ $0.station == stationName && !$0.isCrew && !$0.isSubagent && $0.freeSince > 0 && $0.errand == nil })
+                if let free = minions.values.filter({ $0.station == stationName && !$0.isCrew && !$0.isSubagent && $0.freeSince > 0 && !$0.onJob })
                     .min(by: { $0.freeSince < $1.freeSince }) {
                     minions[free.id] = nil
                     free.id = s.id
                     free.node.name = "minion:" + s.id
                     free.node.enumerateChildNodes { c, _ in c.name = "minion:" + s.id }
                     free.freeSince = 0
-                    free.isTester = false
+                    if free.isQA { free.current = nil }
                     free.markers = s.eventMarkers
                     free.promptCount = s.promptCount
                     free.toolCount = s.toolCount
@@ -2370,9 +2487,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
-            if let key = newRooms[s.id], m.errand == nil, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
+            if let key = newRooms[s.id], !m.onJob, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
                 startDelivery(m, roomKey: key)
-            } else if m.errand == nil {
+            } else if !m.onJob {
                 let place = restPlace(m)
                 if place != m.place || isNew { send(m, to: place) }
             }
@@ -2400,13 +2517,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let night = isNight(station)
             let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
                 .sorted { $0.freeSince < $1.freeSince }
-            for (i, m) in free.enumerated() where !m.isTester {
+            for (i, m) in free.enumerated() where !m.isQA {
                 let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
                     dismiss(m)
-                    if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
-                } else if m.errand == nil && m.place != restPlace && m.place != .bath && m.choreUntil == 0 && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
+                    if let key = carriedRoom(of: m) { reveal(key); m.carried?.removeFromParentNode(); m.carried = nil }
+                } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
                     send(m, to: restPlace)
                 }
@@ -2417,18 +2534,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let pending = Set(minions.values.compactMap { m in carriedRoom(of: m) ?? newRooms[m.id].map { "\(m.station)|\($0)" } })
         for key in undelivered where !pending.contains(key) {
             layoutDirty = true
-            undelivered.remove(key)
+            world.truth.officeDelivered(key)
             outlines.removeValue(forKey: key)?.removeFromParentNode()
             boxes.removeValue(forKey: key)?.removeFromParentNode()
         }
         if layoutDirty {
             flushScene(firstRun: firstRun)
             for m in minions.values {
-                if case .fetch = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
-                    walk(m, to: c)
-                } else if case .carry(let r) = m.errand, let station = fleet.stations[m.station], let door = station.doorCell(of: r) {
-                    walk(m, to: door)
-                }
+                guard case .deliverOffice(let r) = m.current?.kind, let station = fleet.stations[m.station] else { continue }
+                if m.carried == nil, let c = station.hangarCells.randomElement() { walk(m, to: c) }
+                else if let door = station.doorCell(of: r) { walk(m, to: door) }
             }
         } else {
             flushScene()
@@ -2515,35 +2630,40 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: hauling and power
 
-    private func addHaul(station: Station, box: SCNNode, from: Cell, to: Cell, drop: SIMD3<Double>, roomKey: String = "", onDone: @escaping () -> Void) {
-        hauls.append(Haul(id: nextHaulId, station: station.name, box: box, from: from, to: to, drop: drop, onDone: onDone, carrier: nil, roomKey: roomKey))
-        nextHaulId += 1
+    /// Takes a carry command and the crate it moves. The crate is spoken for from here on, so nothing
+    /// else is told to move it and the yard layout leaves its spot alone.
+    private func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
+        guard let crate = command.crate else { return }
+        world.truth.claimed(crate)
+        node.name = "haul"
+        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey)
     }
 
-    /// Drops every haul tied to a room, freeing whoever was carrying.
-    private func cancelHauls(roomKey: String) {
-        for h in hauls where h.roomKey == roomKey {
-            h.box.removeFromParentNode()
-            if let c = h.carrier, let m = minions[c] { m.errand = nil; m.carried = nil; send(m, to: restPlace(m)) }
+    /// Drops every carry tied to a room, freeing whoever was carrying.
+    private func cancelCarries(roomKey: String) {
+        for (id, c) in cargo where c.roomKey == roomKey {
+            c.node.removeFromParentNode()
+            if let crate = c.command.crate { world.truth.forget(crate) }
+            cargo[id] = nil
+            if let who = c.carrier, let m = minions[who] { m.carried = nil; world.truth.dropped(by: m.id); finish(m) }
         }
-        hauls.removeAll { $0.roomKey == roomKey }
     }
 
-    private var stagingInFlight: [String: Int] = [:]   // "station|repo" -> crates on their way from storage to the deck
+    /// The node a crate stands on, by the name the yard gave it.
+    private func crateNode(_ area: String, _ crate: CrateRef) -> SCNNode? {
+        markerRoot.childNodes.first { $0.name == "\(area):\(crate.station)|\(crate.repo)|\(crate.number)" }
+    }
 
     /// Merged: the office's package is carried to the storage bay in one trip. The model has already
     /// noted that the office is free to clear; this only moves what is on the floor.
     private func haulMergedBoxes(station: Station, key: String, roomName: String, repo: String, number: Int) {
-        guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) else { return }
+        guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }),
+              let room = station.rooms[key.split(separator: "|", maxSplits: 1).map(String.init).last ?? ""] else { return }
         haulingRooms.insert(key)
         world.hauled(roomKey: key)
         logEvent("\(roomName): merged, package to storage")
-        let slot = world.yardLayout(station: station, area: "storage", extra: (repo, number)).last { $0.repo == repo }
-        let dest = slot?.cell ?? station.storageCells.randomElement() ?? Station.rect(1, 1)[0]
-        let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0.0, station.offset.y + Double(dest.y))
-        let fromCell = Cell(x: Int((Double(pkg.position.x) - station.offset.x).rounded()), y: Int((Double(pkg.position.z) - station.offset.y).rounded()))
-        pkg.name = "haul"
-        addHaul(station: station, box: pkg, from: fromCell, to: dest, drop: drop, roomKey: key) { [weak self] in
+        let command = world.carryToStorage(station: station, room: room, repo: repo, number: number)
+        carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
             world.landedInStorage(station: station, repo: repo, number: number)
             pkg.removeFromParentNode()
@@ -2552,42 +2672,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// Where crate `index` of a repository will stand on the deck once `index + 1` of them are staged.
-    private func deckSlot(station: Station, repo: String, index: Int, number: Int) -> (cell: Cell, pos: SIMD3<Double>) {
-        let saved = station.staged
-        station.staged[repo] = index + 1
-        defer { station.staged = saved }
-        if let s = world.yardLayout(station: station, area: "deck", extra: nil).first(where: { $0.repo == repo && $0.index == index }) { return (s.cell, s.pos) }
-        let c = station.deckCells[index % station.deckCells.count]
-        return (c, SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y)))
-    }
-
-    /// A staging release merged: the repo's storage boxes are carried to the test deck.
-    private func stageCargo(station: Station, repo: String, count: Int? = nil) {
-        var boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("storage:\(station.name)|\(repo)|") }
-        if let count { boxes = Array(boxes.prefix(count)) }
-        guard !boxes.isEmpty else { return }
-        logEvent("\(repo): deployed to staging, moving to the test deck")
-        let already = station.staged[repo] ?? 0
-        let k = station.name + "|" + repo
-        stagingInFlight[k, default: 0] += boxes.count
-        for (i, b) in boxes.enumerated() {
-            // Its number rides in the node name; its slot is where the deck layout will put crate `already + i`.
-            let number = Int(b.name?.split(separator: "|").last ?? "") ?? 0
-            let dest = deckSlot(station: station, repo: repo, index: already + i, number: number)
-            let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
-            b.name = "haul"
-            addHaul(station: station, box: b, from: fromCell, to: dest.cell, drop: dest.pos) { [weak self] in
+    /// A staging release merged: the repo's storage crates are carried to the test deck.
+    private func stageCargo(station: Station, repo: String, commands: [Command]? = nil) {
+        let list = commands ?? world.carryToDeck(station: station, repo: repo, count: station.stored[repo] ?? 0)
+        var started = 0
+        for command in list {
+            guard let crate = command.crate, let node = crateNode("storage", crate) else { continue }
+            started += 1
+            carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                stagingInFlight[k] = max(0, (stagingInFlight[k] ?? 1) - 1)
+                world.truth.finishedToDeck(station: station.name, repo: repo)
                 station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
                 station.staged[repo, default: 0] += 1
-                b.removeFromParentNode()
+                node.removeFromParentNode()
                 rebuildMarkers()
                 rebuildRockets()
                 fleet.save()
             }
         }
+        guard started > 0 else { return }
+        world.truth.startedToDeck(station: station.name, repo: repo, count: started)
+        logEvent("\(repo): deployed to staging, moving to the test deck")
     }
 
     /// Steam venting from a loaded rocket waiting for ignition.
@@ -2617,12 +2722,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         pendingLaunch[station.name + "|" + repo] = (rocket, boxes.count, clock)
         pendingIgnition[station.name + "|" + repo] = thenLaunch
         logEvent("\(repo): cleared, loading the rocket")
-        let padCell = station.padCells.first ?? Station.rect(1, 1)[0]
-        let pc = station.padCenter
-        for b in boxes {
-            let fromCell = Cell(x: Int((Double(b.position.x) - station.offset.x).rounded()), y: Int((Double(b.position.z) - station.offset.y).rounded()))
-            b.name = "haul"
-            addHaul(station: station, box: b, from: fromCell, to: padCell, drop: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y)) { [weak self] in
+        let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
+        for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
+            guard let crate = command.crate, let b = crateNode(source, crate) else { continue }
+            carry(command, node: b) { [weak self] in
                 guard let self else { return }
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) } else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
                 b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))
@@ -2641,18 +2744,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// Gives waiting hauls to free minions on the same station.
-    private func scheduleHauls() {
-        for i in hauls.indices where hauls[i].carrier == nil {
-            let h = hauls[i]
-            guard let station = fleet.stations[h.station] else { continue }
-            let free = minions.values.filter { $0.station == h.station && $0.errand == nil && $0.carried == nil && !$0.isSubagent && $0.state != .leaving }
-            guard let m = free.min(by: { abs($0.cell.x - h.from.x) + abs($0.cell.y - h.from.y) < abs($1.cell.x - h.from.x) + abs($1.cell.y - h.from.y) }) else { continue }
-            hauls[i].carrier = m.id
-            m.errand = .pickup(h.id)
+    /// Gives waiting carries to free minions on the same station. A carry nobody picked up by its
+    /// deadline lands where it stands, rather than holding the world back.
+    private func scheduleCarries() {
+        for (id, job) in cargo where job.carrier == nil {
+            guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
+            let free = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
+            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
+                if let by = job.command.deadline, Date() > by {
+                    cargo[id] = nil
+                    job.node.removeFromParentNode()
+                    world.truth.forget(crate)
+                    job.onDone()
+                }
+                continue
+            }
+            assign(m, job.command, announce: true)
+            guard m.current?.id == job.command.id else { continue }
+            cargo[id]?.carrier = m.id
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = station.path(from: m.pos, to: h.from)
+            m.path = station.path(from: m.pos, to: from.cell)
         }
         for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
             pendingLaunch[name] = nil
@@ -2721,7 +2833,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// What a teammate just did, played out on the floor.
     private func playCrew(_ a: CrewActivity) {
         let now = Date()
-        guard let m = minions["crew:" + a.login], m.errand == nil else { return }
+        guard let m = minions["crew:" + a.login], !m.onJob else { return }
         switch a.kind {
         case "push" where a.hasRoom:
             m.activity = .coding("x"); m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(20 * 60)
@@ -2773,13 +2885,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func flushDeliveries() {
         let station = fleet.station("work")
         for roomKey in peerDeliveries {
-            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && $0.errand == nil && $0.carried == nil && !$0.busy }
+            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && $0.carried == nil && !$0.busy }
                 .min(by: { $0.freeSince > $1.freeSince })
             if let m = free { startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
         }
         peerDeliveries = []
         for d in pendingCrewDeliveries {
-            if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal(station.name + "|" + d.key) }
+            if let m = minions["crew:" + d.login], !m.onJob { startDelivery(m, roomKey: d.key) } else { reveal(station.name + "|" + d.key) }
         }
         pendingCrewDeliveries = []
     }
@@ -2805,7 +2917,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case .appear: break
             case .fade: fadeIn.insert(full)
             case .shuttle:
-                undelivered.insert(full)
+                world.truth.officeOrdered(full)
                 switch source {
                 case .session(let id): newRooms[id] = key
                 case .peer: peerDeliveries.append(key)
@@ -2815,18 +2927,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .officeRenamed(let station, let from, let to, let name, let session, let promoted):
             let oldKey = "\(station)|\(from)", newKey = "\(station)|\(to)"
             if promoted {
-                undelivered.insert(newKey)
+                world.truth.officeOrdered(newKey)
                 newRooms[session] = to
                 logEvent("\(name): branch created, office ordered")
             }
-            if undelivered.remove(oldKey) != nil { undelivered.insert(newKey) }
+            world.truth.renameOffice(from: oldKey, to: newKey)
             if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
             if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
             if let m = minions[session] {
-                switch m.errand {
-                case .fetch: m.errand = .fetch(room: to)
-                case .carry: m.errand = .carry(room: to)
-                default: break
+                // The office kept its floor under a new name: the delivery follows it.
+                if case .deliverOffice = m.current?.kind, let old = m.current {
+                    m.current = Command(kind: .deliverOffice(key: to), words: old.words)
+                    world.truth.jobs[m.id] = (m.current!, m.phase)
                 }
                 if m.place == .room(from) { m.place = .room(to) }
             }
@@ -2835,9 +2947,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .officeMerged(let stationName, let key, let repo, let number):
             guard let station = fleet.stations[stationName], let room = station.rooms[key] else { return }
             haulMergedBoxes(station: station, key: stationName + "|" + key, roomName: room.name, repo: repo, number: number)
-        case .carryToDeck(let stationName, let repo, let count):
+        case .carryToDeck(let stationName, let repo, let commands):
             guard let station = fleet.stations[stationName] else { return }
-            stageCargo(station: station, repo: repo, count: count)
+            stageCargo(station: station, repo: repo, commands: commands)
         case .crateCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             carryAcrossDeck(station: station, repo: repo, number: number)
@@ -2881,18 +2993,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// A tested crate crosses the aisle to the tested row on someone's arms.
     private func carryAcrossDeck(station: Station, repo: String, number: Int) {
-        guard let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(repo)|\(number)" }) else { return }
-        let slot = world.yardLayout(station: station, area: "deck").first { $0.repo == repo && $0.number == number }
-        let dest = slot?.cell ?? station.deckCells[0]
-        let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0, station.offset.y + Double(dest.y))
-        let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
-        let id = "\(repo)|\(number)"
-        haulingCrates.insert(id)
-        crate.name = "haul"
-        addHaul(station: station, box: crate, from: fromCell, to: dest, drop: drop) { [weak self] in
+        let ref = CrateRef(station: station.name, repo: repo, number: number)
+        guard let node = crateNode("deck", ref), let command = world.carryToTested(station: station, repo: repo, number: number) else { return }
+        carry(command, node: node) { [weak self] in
             guard let self else { return }
-            haulingCrates.remove(id)
-            crate.removeFromParentNode()
+            node.removeFromParentNode()
             drone.ping(seed: number)
             rebuildMarkers()
         }
@@ -2909,15 +3014,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         let cleared = loadedRockets.keys.contains { $0.hasPrefix(station.name + "|") }
         let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
-        let current = minions.values.first { $0.station == station.name && $0.isTester }
-        if wanted, current == nil, let m = free.first(where: { $0.errand == nil }) {
-            m.isTester = true
+        let current = minions.values.first { $0.station == station.name && $0.isQA }
+        if wanted, current == nil, let m = free.first(where: { !$0.onJob }) {
             m.activity = .qa
             m.busy = true
             send(m, to: .room("kind:deck"))
+            start(m, .qa(deck: station.name))
             logEvent("staging ready for QA · \(m.home.name) walks the rows")
         } else if !wanted, let m = current {
-            m.isTester = false
             m.busy = false
             m.activity = .waiting
             m.setTool(nil)
@@ -2973,7 +3077,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         demoClock += dt
         if demoClock > 3.0 {
             demoClock = 0
-            if let m = minions.values.filter({ $0.busy && !$0.isSubagent && $0.errand == nil }).randomElement() {
+            if let m = minions.values.filter({ $0.busy && !$0.isSubagent && !$0.onJob }).randomElement() {
                 m.toolCount += 1
                 if m.toolCount % 2 == 0 { addPyramid(for: m) } else { clearPyramids(m) }
                 ringBell(seed: m.id.hashValue)
@@ -3008,9 +3112,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let station = fleet.station("work")
                 let h = Home.from(repo: "tattoodo-web", branch: "gh-470/artist-search", cwd: cwd)
                 station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
-                undelivered.insert("work|\(h.key)")
+                world.truth.officeOrdered("work|\(h.key)")
                 rebuildStatic()
-                for mm in minions.values where mm.errand == nil { send(mm, to: mm.place) }
+                for mm in minions.values where !mm.onJob { send(mm, to: mm.place) }
                 let s = SessionInfo(id: "demo-new", cwd: cwd, repo: "tattoodo-web", repoRoot: nil, owner: nil, lastModified: Date(), activity: .coding("app"), area: nil,
                                     title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
                 let m = spawnMinion(s, station: "work", home: h)
@@ -3028,7 +3132,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         clock += dt
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest(); updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleHauls(); refreshObstacles() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p
@@ -3082,9 +3186,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
+            // Hovered: this one holds still while you read what it is up to. The rest carry on.
+            if hovered == "minion:" + m.id { continue }
             let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
-            let jumping = m.activity == .waiting && waitingAge < 60 && m.errand == nil
-            let pacing = m.activity == .waiting && waitingAge >= 60 && m.errand == nil
+            let jumping = m.activity == .waiting && waitingAge < 60 && !m.onJob
+            let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
             let speed = m.busy ? 2.4 : (pacing ? 0.8 : 1.4)
             if m.lying, !m.path.isEmpty {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
@@ -3109,110 +3215,132 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let down = SCNAction.move(to: v3(world.x, 0.12, world.z), duration: 0.35); down.timingMode = .easeIn
                     c.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }, .wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))
                 }
-                switch m.errand {
-                case .fetch(let r):
+                switch m.current?.kind {
+                case .deliverOffice(let r):
+                    // Off the shuttle and into the office: take the crate from the bay and walk it in.
                     let key = "\(m.station)|\(r)"
-                    if let box = boxes[key], box.opacity < 1 { continue }   // shuttle has not set it down yet
-                    if let spot = m.fetchSpot {
-                        let d = spot - m.pos
-                        if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
-                        m.fetchSpot = nil
+                    switch m.phaseKind {
+                    case .walk:
+                        advance(m); continue
+                    case .approach:
+                        if let box = boxes[key], box.opacity < 1 { continue }   // shuttle has not set it down yet
+                        if let spot = m.fetchSpot {
+                            let d = spot - m.pos
+                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
+                            m.fetchSpot = nil
+                        }
+                        advance(m); continue
+                    case .lift:
+                        if let box = boxes[key] {
+                            box.removeAllActions()
+                            let world = box.worldPosition
+                            box.removeFromParentNode()
+                            m.node.addChildNode(box)
+                            box.position = m.node.convertPosition(world, from: nil)
+                            let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.5); lift.timingMode = .easeOut
+                            box.runAction(lift)
+                            m.carried = box
+                        }
+                        advance(m)
+                        // The office went away while the crate was in the air: nothing to walk it into.
+                        if let door = station.doorCell(of: r) { walk(m, to: door) } else { reveal(key); finish(m) }
+                        continue
+                    case .haul:
+                        advance(m); continue
+                    default:
+                        m.carried?.removeFromParentNode()
+                        m.carried = nil
+                        reveal(key)
+                        finish(m)
+                        continue
                     }
-                    if let box = boxes[key] {
-                        box.removeAllActions()
-                        let world = box.worldPosition
-                        box.removeFromParentNode()
-                        m.node.addChildNode(box)
-                        box.position = m.node.convertPosition(world, from: nil)
-                        let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.5); lift.timingMode = .easeOut
-                        box.runAction(lift)
-                        m.carried = box
+                case .carry(let crate, _, let to):
+                    guard let id = m.current?.id, let job = cargo[id] else {
+                        // The crate went away: put down whatever is on the arms, where it stands.
+                        dropWhereStanding(m)
+                        finish(m); continue
                     }
-                    m.errand = .carry(room: r)
-                    if let door = station.doorCell(of: r) { walk(m, to: door) } else { m.errand = nil; reveal(key) }
-                    continue
-                case .carry(let r):
-                    m.carried?.removeFromParentNode()
-                    m.carried = nil
-                    m.errand = nil
-                    reveal("\(m.station)|\(r)")
-                    send(m, to: restPlace(m))
-                    continue
-                case .pickup(let id):
-                    guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; m.bendUntil = 0; continue }
-                    // Face the crate, bend down and take hold before straightening up with it.
-                    // Stand a step back from the crate, facing it, then crouch and bring it up past the chest.
-                    let boxAt = SIMD2(Double(h.box.worldPosition.x) - station.offset.x, Double(h.box.worldPosition.z) - station.offset.y)
-                    let toBox = boxAt - m.pos
-                    let dist = (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot()
-                    if dist > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                    if m.bendUntil == 0 {
+                    switch m.phaseKind {
+                    case .walk:
+                        advance(m); continue
+                    case .approach:
+                        // Stand a step back from the crate, facing it, before crouching.
+                        let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
+                        let toBox = boxAt - m.pos
+                        let dist = (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot()
+                        if dist > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
                         if dist < 0.28 || dist > 0.42, dist > 0.001 {   // shuffle to arm's length
                             let want = boxAt - toBox / dist * 0.34
                             m.pos += (want - m.pos) * min(1, dt * 6)
                             if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
                         }
-                        m.bendUntil = clock + 1.1; continue
-                    }
-                    if clock < m.bendUntil - 0.7 { continue }
-                    if m.carried == nil {
-                        let world = h.box.worldPosition
-                        h.box.removeAllActions()
-                        h.box.removeFromParentNode()
-                        m.node.addChildNode(h.box)
-                        h.box.position = m.node.convertPosition(world, from: nil)
-                        let toChest = SCNAction.move(to: v3(0, m.headHeight * 0.45, 0.3), duration: 0.3); toChest.timingMode = .easeOut
-                        let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
-                        h.box.runAction(.sequence([toChest, overhead]))
-                        m.carried = h.box
-                    }
-                    if clock < m.bendUntil { continue }
-                    m.bendUntil = 0
-                    m.errand = .deliver(id)
-                    walk(m, to: h.to)
-                    continue
-                case .deliver(let id):
-                    guard let idx = hauls.firstIndex(where: { $0.id == id }) else { m.errand = nil; m.carried = nil; m.bendUntil = 0; continue }
-                    // Bend and set the crate down squarely, then a beat before straightening up.
-                    let h = hauls[idx]
-                    let spot = SIMD2(h.drop.x - station.offset.x, h.drop.z - station.offset.y)
-                    let toSpot = spot - m.pos
-                    let dist = (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot()
-                    if dist > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
-                    if m.bendUntil == 0 {
-                        // A step back from the spot so the crate goes down in front, not underfoot.
-                        if dist < 0.28 || dist > 0.42, dist > 0.001 {
-                            let want = spot - toSpot / dist * 0.34
-                            m.pos += (want - m.pos) * min(1, dt * 6)
-                            if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
+                        advance(m)
+                        m.phaseUntil = clock + 1.1
+                        continue
+                    case .lift:
+                        // Crouched: take hold, bring it up past the chest, then straighten.
+                        let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
+                        let toBox = boxAt - m.pos
+                        if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
+                        if clock < m.phaseUntil - 0.7 { continue }
+                        if m.carried == nil {
+                            let world = job.node.worldPosition
+                            job.node.removeAllActions()
+                            job.node.removeFromParentNode()
+                            m.node.addChildNode(job.node)
+                            job.node.position = m.node.convertPosition(world, from: nil)
+                            let toChest = SCNAction.move(to: v3(0, m.headHeight * 0.45, 0.3), duration: 0.3); toChest.timingMode = .easeOut
+                            let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
+                            job.node.runAction(.sequence([toChest, overhead]))
+                            m.carried = job.node
+                            self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
                         }
-                        m.bendUntil = clock + 1.1
-                        let world = h.box.worldPosition
-                        h.box.removeFromParentNode()
-                        h.box.position = world
-                        propRoot.addChildNode(h.box)
-                        let chest = SIMD3(Double(world.x), m.headHeight * 0.45, Double(world.z)) + SIMD3(sin(m.facing) * 0.3, 0, cos(m.facing) * 0.3)
-                        let toChest = SCNAction.move(to: v3(chest.x, chest.y, chest.z), duration: 0.3); toChest.timingMode = .easeInEaseOut
-                        let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.4); down.timingMode = .easeIn
-                        h.box.runAction(.sequence([toChest, down, .run { [weak self] _ in self?.drone.thud() }]))
-                        m.carried = nil
+                        if clock < m.phaseUntil { continue }
+                        advance(m)
+                        walk(m, to: to.cell)
+                        continue
+                    case .haul:
+                        advance(m); continue
+                    default:
+                        // Bend and set the crate down squarely, then a beat before straightening up.
+                        let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
+                        let toSpot = spot - m.pos
+                        let dist = (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot()
+                        if dist > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                        if m.phaseUntil == 0 {
+                            // A step back from the spot so the crate goes down in front, not underfoot.
+                            if dist < 0.28 || dist > 0.42, dist > 0.001 {
+                                let want = spot - toSpot / dist * 0.34
+                                m.pos += (want - m.pos) * min(1, dt * 6)
+                                if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
+                            }
+                            m.phaseUntil = clock + 1.1
+                            let world = job.node.worldPosition
+                            job.node.removeFromParentNode()
+                            job.node.position = world
+                            propRoot.addChildNode(job.node)
+                            let chest = SIMD3(Double(world.x), m.headHeight * 0.45, Double(world.z)) + SIMD3(sin(m.facing) * 0.3, 0, cos(m.facing) * 0.3)
+                            let toChest = SCNAction.move(to: v3(chest.x, chest.y, chest.z), duration: 0.3); toChest.timingMode = .easeInEaseOut
+                            let down = SCNAction.move(to: v3(to.pos.x, to.pos.y, to.pos.z), duration: 0.4); down.timingMode = .easeIn
+                            job.node.runAction(.sequence([toChest, down, .run { [weak self] _ in self?.drone.thud() }]))
+                            m.carried = nil
+                            continue
+                        }
+                        if clock < m.phaseUntil { continue }
+                        cargo[id] = nil
+                        self.world.truth.setDown(crate, at: to)
+                        job.onDone()
+                        finish(m)
                         continue
                     }
-                    if clock < m.bendUntil { continue }
-                    m.bendUntil = 0
-                    hauls.remove(at: idx)
-                    h.onDone()
-                    m.errand = nil
-                    send(m, to: restPlace(m))
-                    continue
-                case nil:
+                default:
                     break
                 }
                 switch m.state {
                 case .arriving:
                     m.state = .settled
                 case .settled:
-                    if m.isTester, clock >= m.nextWanderAt {
+                    if m.isQA, clock >= m.nextWanderAt {
                         let choices = station.deckCells.filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
                         m.nextWanderAt = clock + Double.random(in: 1.5...3.5)
@@ -3223,7 +3351,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         }
                     }
                     // Bath rules: a shower after a long stretch of work, maybe a pee after a short one,
-                    // and loungers go now and then. Never while busy, carrying, on an errand or in bed.
+                    // and loungers go now and then. Never while busy, carrying, on a job or in bed.
                     if m.busy && !m.wasBusy { m.busySince = clock; m.bathDue = 0 }
                     if !m.busy && m.wasBusy && !m.isSubagent {
                         let stretch = clock - m.busySince
@@ -3238,18 +3366,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let settled = m.path.isEmpty
                     // Chores: a lounger with nothing to do wanders off to check on the yard, the bay or the
                     // hallway, lingers a while, and comes back to the couch.
-                    if m.choreUntil > 0 {
-                        if settled, clock >= m.choreUntil { m.choreUntil = 0; m.nextChoreAt = clock + Double.random(in: 180...480); send(m, to: .lounge) }
-                    } else if m.place == .lounge, !m.busy, m.errand == nil, settled, !m.isSubagent, m.bathDue == 0 {
+                    if m.isChore {
+                        if settled, clock >= m.phaseUntil { m.nextChoreAt = clock + Double.random(in: 180...480); send(m, to: .lounge) }
+                    } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0 {
                         if m.nextChoreAt == 0 { m.nextChoreAt = clock + Double.random(in: 60...240) }
                         if clock >= m.nextChoreAt {
                             let spots = station.corridorCells + station.storageCells + station.deckCells + station.hangarCells
                             if let spot = spots.randomElement() {
+                                start(m, .chore(spot: spot))
                                 m.couch = nil
                                 m.place = .core
                                 m.path = station.path(from: m.pos, to: spot)
-                                m.choreUntil = clock + Double.random(in: 10...25)
-                                m.nextWanderAt = m.choreUntil
+                                m.phaseUntil = clock + Double.random(in: 10...25)
+                                m.nextWanderAt = m.phaseUntil
                             }
                         }
                     }
@@ -3267,17 +3396,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.1), .removeFromParentNode()]))
                             }
                         }
-                        if (clock >= m.bathUntil && settled) || m.busy {   // done, or work calls
+                        if (clock >= m.phaseUntil && settled) || m.busy {   // done, or work calls
                             m.setStatic(false, frame: 0)
-                            send(m, to: m.busy ? restPlace(m) : (m.bathReturn ?? restPlace(m)))
-                            m.bathReturn = nil
+                            var back = restPlace(m)
+                            if !m.busy, case .bath(_, let where_) = m.current?.kind { back = where_ }
+                            send(m, to: back)
                         }
-                    } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, m.errand == nil, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
+                    } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                         // Off to the bath for a moment, then back to wherever it was.
                         m.bathDue = 0
-                        m.bathUntil = clock + (m.showering ? 10 : 6)
-                        m.bathReturn = m.place
+                        let back = m.place
                         send(m, to: .bath)
+                        start(m, .bath(m.showering ? .shower : .quick, back: back))
+                        m.phaseUntil = clock + (m.showering ? 10 : 6)
                         // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
                         if let bath = station.rooms["kind:bath"] {
                             let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
@@ -3286,7 +3417,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                             m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
                         }
                     }
-                    if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
+                    if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                         if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
                     } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
@@ -3301,10 +3432,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
             var bunkLift = 0.0
             // Seats and beds draw a minion in only while it has nothing else to do.
-            if m.path.isEmpty, m.errand == nil, m.place == .lounge, let c = m.couch, c < station.couches.count {
+            if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
                 m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
             }
-            if m.path.isEmpty, m.errand == nil, m.place == .quarters {
+            if m.path.isEmpty, m.isResting, m.place == .quarters {
                 if let b = m.bed, b < station.beds.count {
                     m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
                     bunkLift = station.beds[b].level == 1 ? 0.36 : 0
@@ -3429,8 +3560,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
-            if m.bendUntil > clock { tilt = max(tilt, 0.28); roll = 0 }
-            m.tilt.position.y = m.bendUntil > clock ? -0.12 : 0   // a crouch, knees bent, rather than a bow
+            if m.bending { tilt = max(tilt, 0.28); roll = 0 }
+            m.tilt.position.y = m.bending ? -0.12 : 0   // a crouch, knees bent, rather than a bow
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
@@ -3451,6 +3582,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             label.opacity += (want - Double(label.opacity)) * min(1, dt * 6)
         }
         updateInfo()
+        updateBubble()
         if clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 

@@ -45,8 +45,10 @@ final class World {
     private var retired: [String: Date] = [:]     // merged offices cleared away while their session lingers
     private(set) var roomCreated: [String: Date] = [:]
     private(set) var hauledAt: [String: Date] = [:]
-    /// Crates set down in storage by hand that the source has not counted yet: kept until it does.
-    private var landed: [String: (repo: String, number: Int, at: Date)] = [:]
+
+    /// What is actually on the floor: crates by slot or on someone's arms, offices delivered or
+    /// pending, who is doing what. Completions write here; the sources never do.
+    var truth = StationTruth()
 
     /// Repositories GitHub has answered for at least once. A repository's first answer is taken quietly:
     /// nothing in it is new, whatever it holds. Only changes after that are events.
@@ -62,7 +64,6 @@ final class World {
     var haulingRoom: (String) -> Bool = { _ in false }
     /// Whether an office has a package standing on its floor at all.
     var hasPackage: (String) -> Bool = { _ in false }
-    var stagingInFlight: (String) -> Int = { _ in 0 }
     var rocketBusy: (String) -> Bool = { _ in false }
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
@@ -498,8 +499,8 @@ final class World {
 
     /// What the yard reconciliation decided for one repository.
     enum YardChange {
-        /// Crates the board says reached staging: carry this many from storage across to the deck.
-        case carryToDeck(Int)
+        /// Crates the board says reached staging: one carry each, from storage across to the deck.
+        case carryToDeck([Command])
         /// Nothing to carry: the counts were redrawn where they stand.
         case snapped
         /// Not now: carriers are still on their way.
@@ -528,7 +529,7 @@ final class World {
         var out: [YardSlot] = []
         for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
             var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
-            if area == "storage" { numbers += freshLanded(station: station, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
+            if area == "storage" { numbers += truth.freshLanded(station: station.name, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
             if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
             var placed: [Int: Int] = [:]
             let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
@@ -554,30 +555,98 @@ final class World {
         return out
     }
 
-    /// Numbers of hand-landed crates the source still lacks for a repository.
-    private func freshLanded(station: Station, repo: String, counted: [Int]) -> [Int] {
-        let now = Date()
-        for (k, l) in landed where now.timeIntervalSince(l.at) > 15 * 60 || counted.contains(l.number) { landed[k] = nil }
-        return landed.filter { $0.key.hasPrefix(station.name + "|") && $0.value.repo == repo }.map(\.value.number).sorted()
-    }
-
     /// Brings the yard in line with GitHub. Crates the board says went to staging are carried across
     /// from storage; counts snap only for what cannot be carried, and never for a deck that is about to
     /// be loaded into a rocket.
     @discardableResult
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) -> YardChange {
         let k = station.name + "|" + repo
-        guard stagingInFlight(k) == 0 else { return .waiting }   // let the carriers land first
+        guard truth.inFlightToDeck(k) == 0 else { return .waiting }   // let the carriers land first
         let shownStorage = station.stored[repo] ?? 0, shownDeck = station.staged[repo] ?? 0
-        let fresh = freshLanded(station: station, repo: repo, counted: c.storageNumbers)
+        let fresh = truth.freshLanded(station: station.name, repo: repo, counted: c.storageNumbers)
         let toDeck = min(c.deck - shownDeck, shownStorage)
         if toDeck > 0, station.hasPad, !station.deckCells.isEmpty, !ConfigStore.shared.current.stagingBranch.isEmpty {
-            return .carryToDeck(toDeck)
+            let commands = carryToDeck(station: station, repo: repo, count: toDeck)
+            if !commands.isEmpty { return .carryToDeck(commands) }
         }
         let launching = rocketBusy(k) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
         station.stored[repo] = c.storage + fresh.count
         if !(launching && c.deck < shownDeck) { station.staged[repo] = c.deck }
         return .snapped
+    }
+
+    // MARK: commands the reconciler issues
+
+    /// Where crate `index` of a repository will stand on the deck once `index + 1` of them are staged.
+    func deckSlot(station: Station, repo: String, index: Int, number: Int) -> Spot {
+        let saved = station.staged
+        station.staged[repo] = index + 1
+        defer { station.staged = saved }
+        let cleared = yardLayout(station: station, area: "deck").first { $0.repo == repo && $0.index == index }
+        if let s = cleared {
+            return Spot(area: s.cleared ? .tested : .deck, station: station.name, owner: repo, label: repo, cell: s.cell, pos: s.pos)
+        }
+        let c = station.deckCells[index % max(1, station.deckCells.count)]
+        return Spot(area: .deck, station: station.name, owner: repo, label: repo, cell: c,
+                    pos: SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y)))
+    }
+
+    private func yardSpot(_ area: Spot.Area, station: Station, repo: String, cell: Cell, pos: SIMD3<Double>) -> Spot {
+        Spot(area: area, station: station.name, owner: repo, label: repo, cell: cell, pos: pos)
+    }
+
+    /// Storage crates the board says reached staging: one carry each, from the slot a crate stands on
+    /// to the slot the deck layout will give it.
+    func carryToDeck(station: Station, repo: String, count: Int) -> [Command] {
+        let stored = yardLayout(station: station, area: "storage").filter { $0.repo == repo }
+        let already = station.staged[repo] ?? 0
+        var out: [Command] = []
+        for (i, slot) in stored.prefix(count).enumerated() {
+            let crate = CrateRef(station: station.name, repo: repo, number: slot.number)
+            guard !truth.isCarried(crate) else { continue }
+            out.append(.carry(crate, from: yardSpot(.storage, station: station, repo: repo, cell: slot.cell, pos: slot.pos),
+                              to: deckSlot(station: station, repo: repo, index: already + i, number: slot.number)))
+        }
+        return out
+    }
+
+    /// A merged office's package, from the office floor to the slot storage will give it.
+    func carryToStorage(station: Station, room: Room, repo: String, number: Int) -> Command {
+        let slot = yardLayout(station: station, area: "storage", extra: (repo, number)).last { $0.repo == repo }
+        let cell = slot?.cell ?? station.storageCells.first ?? Cell(x: 0, y: 0)
+        let pos = slot?.pos ?? SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
+        let door = station.doorCell(of: room.key) ?? room.cells.first ?? cell
+        let from = Spot(area: .office, station: station.name, owner: room.key, label: room.name, cell: door,
+                        pos: SIMD3(station.offset.x + Double(door.x), 0, station.offset.y + Double(door.y)))
+        return .carry(CrateRef(station: station.name, repo: repo, number: number), from: from,
+                      to: yardSpot(.storage, station: station, repo: repo, cell: cell, pos: pos))
+    }
+
+    /// One crate passed QA: across the aisle to the tested row.
+    func carryToTested(station: Station, repo: String, number: Int) -> Command? {
+        let crate = CrateRef(station: station.name, repo: repo, number: number)
+        guard !truth.isCarried(crate) else { return nil }
+        let slot = yardLayout(station: station, area: "deck").first { $0.repo == repo && $0.number == number }
+        let cell = slot?.cell ?? station.deckCells.first ?? Cell(x: 0, y: 0)
+        let pos = slot?.pos ?? SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
+        return .carry(crate, from: yardSpot(.deck, station: station, repo: repo, cell: cell, pos: pos),
+                      to: yardSpot(.tested, station: station, repo: repo, cell: cell, pos: pos))
+    }
+
+    /// Cleared to launch: every crate named goes from its row into the rocket on the pad.
+    func carryToPad(station: Station, repo: String, from area: String, numbers: [Int]) -> [Command] {
+        let cell = station.padCells.first ?? Cell(x: 0, y: 0)
+        let pc = station.padCenter
+        let to = Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
+                      pos: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y))
+        let slots = yardLayout(station: station, area: area)
+        return numbers.map { number in
+            let slot = slots.first { $0.repo == repo && $0.number == number }
+            let c = slot?.cell ?? cell
+            let p = slot?.pos ?? SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y))
+            return .carry(CrateRef(station: station.name, repo: repo, number: number),
+                          from: yardSpot(area == "deck" ? .deck : .storage, station: station, repo: repo, cell: c, pos: p), to: to)
+        }
     }
 
     /// Merged: the office's package belongs in the storage bay. The office is free to clear from now on,
@@ -597,7 +666,7 @@ final class World {
 
     /// A crate was set down in storage by hand: ours to keep until GitHub counts it.
     func landedInStorage(station: Station, repo: String, number: Int) {
-        landed["\(station.name)|\(repo)|\(number)"] = (repo, number, Date())
+        truth.landedByHand(CrateRef(station: station.name, repo: repo, number: number))
         station.stored[repo, default: 0] += 1
         fleet.save()
     }

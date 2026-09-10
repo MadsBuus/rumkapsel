@@ -36,8 +36,8 @@ enum WorldEvent {
     case officeArchived(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String)
     /// Merged: the office's package belongs in storage. The scene hauls it, then calls `landedInStorage`.
     case officeMerged(station: String, key: String, repo: String, number: Int)
-    /// Crates the board says reached staging: carry this many from storage across to the deck.
-    case carryToDeck(station: String, repo: String, count: Int)
+    /// Crates the board says reached staging: one carry command each, storage across to the deck.
+    case carryToDeck(station: String, repo: String, commands: [Command])
     /// One crate passed QA: it crosses the aisle to the tested row.
     case crateCleared(station: String, repo: String, number: Int)
     /// Who is on the crew right now, and how many bot pull requests are open.

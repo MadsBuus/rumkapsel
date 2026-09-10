@@ -56,8 +56,9 @@ request, a pyramid is a session input. Nothing is round.
 
 - `Scene.swift` is still one file: nodes, minions, HUD, camera and input share it. Minions are the next thing
   to lift out.
-- Minions have no explicit state machine; place, activity, errand and a few timers cooperate. A single owner
-  of "what am I doing now" would remove the class of bug where two per-frame rules fight.
+- Minions run one `Command` at a time with a phase index (`Commands.swift`), so "what am I doing now" has a
+  single owner. What is left outside it: `place`, `activity` and the wander timers still steer the day, and
+  crew minions and shuttles are not actors in the same sense.
 - `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
   that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
 
@@ -91,5 +92,61 @@ Agreed direction, in the order things flow. Not all of it exists yet.
 7. **Completions** write station truth only, never facts: "5210 landed", "office X connected". That is
    what keeps a source snap from undoing what a minion just did.
 
+Steps 5, 6 and 7 exist as of this commit. `Commands.swift` holds `Command` (a kind, a phase list with each
+phase marked interruptible or not, a "must be true by" deadline, and words for humans) and `StationTruth`
+(crates by slot or on someone's arms, offices delivered or pending, per-minion command and phase, crates
+landed by hand the source has not counted yet, carries in flight to the deck). `World` owns the truth and
+issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — and the scene
+binds each command to the crate's node and hands it to a minion. Minions execute one command at a time:
+a new one replaces the old at the next interruptible phase, at most one waits, a carry can only be redirected
+to another destination for the crate already on the arms, and a command whose target vanished sets down what
+it holds where it stands.
+
+What still does not: shuttles, rockets and the crew are driven by SceneKit actions and timers rather than
+commands; the crate a merged office sends to storage is still found by node name in the scene, so the command's
+`from` spot is the office door rather than the exact package position; `Spot` carries a world position, which
+means the scene's geometry leaks a little into the model side.
+
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.
+
+## Next: the staging pallet
+
+A staging release (a pull request into the staging branch) needs a picture again now that the staging
+rocket is gone. The sequence, all of it commands on one minion, the dispatcher:
+
+1. **The PR opens.** A free minion takes a clipboard and walks to storage. It stops at the storage
+   console, a small panel on the wall by the door, and the panel flashes: the order has been placed.
+2. **A hover pallet fades in** on the storage floor by the near wall, the side toward the deck. Crates
+   stack against the far wall, so the near rows are the pallet's space. If there is no room, or a pallet is
+   already out, the dispatcher waits by the console; one pallet per station at a time, the rest queue.
+3. **Loading.** The dispatcher carries the manifested crates, the ones the PR's commits name, from their
+   stacks onto the pallet one by one, the crouch-and-lift carry, and sets them in neat rows and stacks:
+   twelve at most per pallet, three rows of four, stacked as needed. Crates not in the release stay put.
+4. **Waiting.** Loaded, the pallet sits by the near wall with the dispatcher beside it until the PR merges.
+   Nothing else may move those crates: they are station truth, "on pallet".
+5. **The PR merges.** The dispatcher pushes the pallet out through the storage doorway, down the aisle
+   and through the deck doorway, walking with it. The pallet hovers a hand above the floor.
+6. **Unloading.** On the deck the dispatcher sets the crates down one by one on the untested row, in the
+   repository's group where there is space, next to any crates of the same colour already there. The
+   pallet fades out empty and the dispatcher returns to the lounge.
+
+Facts needed: which crates a staging PR carries (its commits' PR numbers), when it opens, when it merges.
+Station truth: a pallet per station, its crates, its position. Commands: `dispatch(pr)`, `loadPallet`,
+`pushPallet(to:)`, `unloadPallet`. A closed-without-merge PR unloads back into storage the same way.
+
+## Carries must know the stack
+
+Picking up and setting down crates is wrong today because a minion treats every crate as if it stood on
+the floor at a rough spot. The carry command's phases must be slot-aware:
+
+- A crate is picked only from the top of its stack. Where crates are interchangeable (storage to deck
+  within a repository) the reconciler picks the top one; where a specific crate must move (a tested crate
+  to the tested row) the ones above it move first, each its own carry to the nearest free slot in the group.
+- Pickup is height-aware: an arm's length from the stack, facing it; crouch for a floor crate, waist height
+  for level one, a reach up for level two. The crate travels via the chest to overhead.
+- Set-down is the mirror: the destination is the exact slot from `yardLayout`, position, level and yaw,
+  so the redraw after landing changes nothing visible. A stack is built bottom-up; nothing is set on level
+  one of an empty slot.
+- The office crate is on the floor at a known spot and is picked the same way; the carry from an office
+  to storage lands on the repository's next free slot, top of the current stack or a new one.
