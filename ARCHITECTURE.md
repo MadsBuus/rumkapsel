@@ -163,6 +163,11 @@ own nudge and turn wherever it lands.
 - The office package is picked off the office floor the same way and lands on the repository's next
   free slot in storage, top of a stack or a new one.
 
+Still owed, the set-down by level as Mads wants it: level 0, crouch and set it down carefully;
+level 1, waist height, almost a slide forward onto the top; level 2, raise it above the head and slide it
+in; higher, a little jump up, then slide it on. Pickup mirrors each. Today's lean and reach are the
+placeholder.
+
 ## Closed, not merged
 
 Two different closes:
