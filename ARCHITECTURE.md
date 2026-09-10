@@ -140,21 +140,28 @@ Station truth: a pallet per station, its crates, its position. Commands: `dispat
 The telekinesis tool joins the tool set (goggles, tablet, scanner, hammer, flashlight): a short wand
 with a glowing tip, faceted like everything else.
 
-## Carries must know the stack
+## Carries know the stack
 
-Picking up and setting down crates is wrong today because a minion treats every crate as if it stood on
-the floor at a rough spot. The carry command's phases must be slot-aware:
+Done. `yardLayout` hands out slots with a `column` — one square of floor, half a cell wide — and a
+`level` counted from the floor, and `Spot` carries that level and the slot's yaw along with the
+position. Storage jitter is seeded per crate rather than per place in the pile, so a crate keeps its
+own nudge and turn wherever it lands.
 
-- A crate is picked only from the top of its stack. Where crates are interchangeable (storage to deck
-  within a repository) the reconciler picks the top one; where a specific crate must move (a tested crate
-  to the tested row) the ones above it move first, each its own carry to the nearest free slot in the group.
-- Pickup is height-aware: an arm's length from the stack, facing it; crouch for a floor crate, waist height
-  for level one, a reach up for level two. The crate travels via the chest to overhead.
-- Set-down is the mirror: the destination is the exact slot from `yardLayout`, position, level and yaw,
-  so the redraw after landing changes nothing visible. A stack is built bottom-up; nothing is set on level
-  one of an empty slot.
-- The office crate is on the floor at a known spot and is picked the same way; the carry from an office
-  to storage lands on the repository's next free slot, top of the current stack or a new one.
+- A crate is picked from the top of its stack. Where crates are interchangeable (storage to the deck)
+  `carryToDeck` orders them by level, highest first. Where a named crate must move — a tested crate
+  crossing to the tested row — `carryToTested` issues one carry per crate stacked above it, each to
+  the slot the redraw will give it, and the wanted crate's carry waits on them: a command lists the
+  commands that must finish before it (`after`), and the scheduler holds it back until they are gone.
+  `carryToPad` empties stacks from the top down the same way.
+- Pickup and set-down are height-aware. The minion stands an arm's length away, facing the stack, and
+  the posture follows the height: level 0 a crouch, level 1 a lean at waist height, level 2 and up a
+  reach with the head back. A crate off the floor comes up past the chest; one taken off a stack goes
+  straight overhead.
+- Set-down lands on the exact slot the layout will draw: position, level and yaw, so the redraw after
+  landing changes nothing. `grounded` keeps stacks bottom-up — a slot with air under it drops to the
+  lowest free level of its column, counting a crate already on someone's arms as gone.
+- The office package is picked off the office floor the same way and lands on the repository's next
+  free slot in storage, top of a stack or a new one.
 
 ## Closed, not merged
 
