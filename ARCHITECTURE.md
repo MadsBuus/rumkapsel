@@ -155,3 +155,13 @@ the floor at a rough spot. The carry command's phases must be slot-aware:
   one of an empty slot.
 - The office crate is on the floor at a known spot and is picked the same way; the carry from an office
   to storage lands on the repository's next free slot, top of the current stack or a new one.
+
+## Closed, not merged
+
+Two different closes:
+
+- **An issue's pull request closed without merging.** The work goes nowhere: not storage, not the deck.
+  The crate in its office turns red and sits there for ten minutes, then fades out. After that the office
+  clears the way a merged one does: a teammate's archives, one's own retires while the session lingers.
+- **A staging release closed without merging.** Those crates are still merged work waiting for a release:
+  the loaded pallet unloads back into storage the same slow way it was loaded.
