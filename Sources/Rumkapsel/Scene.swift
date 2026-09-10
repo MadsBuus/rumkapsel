@@ -926,7 +926,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
                 // New corridor beyond the old length is built tile by tile, outward.
                 let reach = max(abs(c.x), abs(c.y))
-                if reach > oldSpine {
+                if reach > oldSpine, station.isCorridor(c) {   // the core sits past the spine's end; it is never new
                     t.opacity = 0
                     t.runAction(.sequence([.wait(duration: 0.3 * Double(reach - oldSpine)), .fadeIn(duration: 0.5)]))
                 }
@@ -960,8 +960,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 table.position = v3(station.offset.x + cx, 0.14, station.offset.y + cy)
                 table.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(table)
-                for (k, c) in station.couches.enumerated() {
-                    let along = k < 4   // couches on the side walls run along z, the far wall along x
+                let lxs = lounge.cells.map(\.x)
+                for c in station.couches {
+                    let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1   // side walls run along z, the far wall along x
                     let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: 0.18, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
                     couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.45, 0.4)))
                     couch.position = v3(station.offset.x + c.x, 0.09, station.offset.y + c.y)
@@ -1930,6 +1931,24 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
     }
 
+    /// After the floor changes, everyone carries on: settled somewhere still valid, stay; walking to a
+    /// spot that still exists, keep it and re-plan from here; only if the target is gone, go somewhere new.
+    private func resettle(_ station: Station) {
+        for m in minions.values where m.station == station.name && m.errand == nil && m.state != .leaving {
+            let cells = station.cells(of: m.place)
+            if m.path.isEmpty {
+                if m.place == .core || cells.contains(m.cell) { continue }
+            } else if let last = m.path.last {
+                let dest = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
+                if cells.contains(dest) {
+                    m.path = station.path(from: m.pos, to: dest)
+                    if !m.path.isEmpty || m.cell == dest { continue }
+                }
+            }
+            send(m, to: m.place)
+        }
+    }
+
     private func send(_ m: Minion, to place: Place) {
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
@@ -2471,7 +2490,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if changed {
             rebuildStatic()
             if firstRun, !viewPinned { restoreView() }
-            for m in minions.values where m.errand == nil { send(m, to: m.place) }
+            for st in fleet.stations.values { resettle(st) }
             for m in minions.values {
                 if case .fetch = m.errand, let station = fleet.stations[m.station], let c = station.hangarCells.randomElement() {
                     walk(m, to: c)
@@ -2560,7 +2579,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if changed {
             rebuildStatic()
-            for m in minions.values where m.errand == nil { send(m, to: m.place) }
+            resettle(station)
         } else if !snap.offices.isEmpty {
             rebuildMarkers()
         }
@@ -2953,7 +2972,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             minionRoot.addChildNode(m.node); minions[m.id] = m
             send(m, to: .room("kind:bots"))
         }
-        if changed { rebuildStatic(); for m in minions.values where m.errand == nil { send(m, to: m.place) } } else { rebuildMarkers() }
+        if changed { rebuildStatic(); resettle(station) } else { rebuildMarkers() }
         for d in pendingDeliveries {
             if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal(sk + d.key) }
         }
@@ -3668,7 +3687,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             archive(station: station, room: room, announce: false)
             logEvent("kicked \(room.name) off the station")
             rebuildStatic()
-            for m in minions.values where m.errand == nil { send(m, to: m.place) }
+            resettle(station)
         }
     }
 
