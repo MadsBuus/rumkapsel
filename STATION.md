@@ -6,9 +6,12 @@ read against. If a behaviour is not allowed here, it is a bug, however pretty.
 ## The place
 
 A station is a corridor cross with rooms snapped against it, like the game's. The **monolith** at the
-north end is the station's computer; standing at it is how you talk to it. The **bay** at the south
-end is outside: shuttles land there and nowhere else. The **airlock** is the only door to the bay;
-everyone who arrives or leaves goes through the hatch. The **yard** along the west side is three
+north end is the ancient artefact the game's minions researched for new skills. Here it stands for the
+outside world: sessions that search the web or talk to other systems send their subagents to it, and
+it answers with cones of light, never lightning. The **bay** at the south end is outside: shuttles land
+there and nowhere else. The **airlock** sits in the corridor's own line between its south end and the
+bay, two cells wide, so corridor, hatch and bay read as one straight way out. Everyone who arrives or
+leaves goes through it. Space walks, visits to other stations and other ships docking are its future. The **yard** along the west side is three
 blocks: **storage** (merged work waiting for a release), the **deck** (work on staging, tested on the
 row nearest the pad, untested on the far row) and the **pad** (rockets). Blocks connect by doorways and
 have aisles down the middle; crates stack against the far walls, aisles stay clear.
@@ -16,13 +19,17 @@ have aisles down the middle; crates stack against the far walls, aisles stay cle
 **Offices** are where work happens. One office per branch. A hexagon crate delivered by shuttle
 becomes an office. Offices belong to whoever has the branch checked out; teammates' offices are darker
 and carry their name on the floor, mine carry mine. The **dorm**, **lounge** and **bath** stand
-together off the corridor, as living quarters would.
+together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
+since real stations mandate both.
 
 ## Shapes mean things
 
 - hexagon: a packed office, on its way to being built
 - cube: a piece of work (a commit); ghost cubes are uncommitted work
-- square strapped crate: a pull request; the plate on its side is its state, a sticker on the lid means tested
+- square strapped crate: a pull request. The plate on its side is a light: blinking while checks run,
+  red when they fail, green when all is well; the whole crate turns red when the PR is closed unmerged.
+  In storage and on the deck the light is off; a tested crate on the deck shows green and a sticker on
+  the lid. Storage looks a little unorganised, the deck ordered.
 - pyramid: something you said to a session, waiting to be worked
 - pallet: a staging release being assembled
 - rocket: a production release; steam means loaded and waiting, a hold ring means untested
@@ -53,7 +60,11 @@ together off the corridor, as living quarters would.
   facing it. Two never share a couch, a bed, a shower or a crate.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
   with the pixels where they belong. Nobody wanders off mid-shower.
-- Speed is what the task needs, not who you are: carrying is one pace, pacing another, a stroll a third.
+- Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
+  pace, a stroll a third; getting up from bed is slow, then quicker.
+- Minions never occupy the same spot and wait for each other to pass in a narrow place.
+- Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
+- When a rocket stands loaded and steaming, the idle drift toward the pad to watch.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
   chores when bored; leave through the airlock when there is nothing left to do.
@@ -62,15 +73,25 @@ together off the corridor, as living quarters would.
 
 - Sources are truth about the world. The station is truth about the floor. They may disagree for
   as long as it takes a minion to carry something.
-- A first answer from any source is never news. Only changes after it are.
+- A first answer from any source is never news. Only changes after it are. History is for GitHub
+  and other boring tools; the station shows now.
 - Nothing appears or disappears without a cue: a shuttle, a carry, a fade, a red crate that sits ten
   minutes before it goes. Offices are held for those who left before they clear.
 - Counts follow the source through the minions' hands. What cannot be carried is redrawn, once,
   and only if nobody is holding it.
 
+## Names
+
+Minions may get names, or ridiculous job titles in the manner of The Office or Severance. Later.
+
+## Ideas parked
+
+Weightlessness when the station loses gravity. Enemy ships were the game's; this is not a game.
+
 ## Humour, kept dry
 
-The station takes its work seriously and itself not at all. Minions pee with the door open and a
+The station takes its work seriously and itself not at all. It has a voice: the log is the station's
+computer speaking, plainly and a little dry. Minions pee with the door open and a
 pixel patch. The QA walker paces the rows like a foreman. The dispatcher gets impatient. The log
 speaks plainly: "web: a pallet floats out in storage". Jokes live in the words and the routines,
 never in the shapes.
