@@ -1989,6 +1989,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         else { return }
         m.place = place
         m.path = station.path(from: m.pos, to: target)
+        // No way found and far off: walk straight rather than stand still or slide.
+        if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
         m.nextWanderAt = clock + Double.random(in: 1...3)
     }
 
@@ -2853,6 +2855,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             hauls[i].carrier = m.id
             m.errand = .pickup(h.id)
             m.bed = nil
+            m.couch = nil   // off the couch: the seat is free for someone else
             m.path = station.path(from: m.pos, to: h.from)
         }
         for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
@@ -3488,10 +3491,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
             var bunkLift = 0.0
-            if m.path.isEmpty, m.place == .lounge, let c = m.couch, c < station.couches.count {
+            // Seats and beds draw a minion in only while it has nothing else to do.
+            if m.path.isEmpty, m.errand == nil, m.place == .lounge, let c = m.couch, c < station.couches.count {
                 m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
             }
-            if m.path.isEmpty, m.place == .quarters {
+            if m.path.isEmpty, m.errand == nil, m.place == .quarters {
                 if let b = m.bed, b < station.beds.count {
                     m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
                     bunkLift = station.beds[b].level == 1 ? 0.36 : 0
