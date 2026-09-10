@@ -262,6 +262,8 @@ final class Minion {
     var nextBathAt = 0.0
     var bathUntil = 0.0
     var bathReturn: Place?
+    var showering = false
+    var nextDropAt = 0.0
     private var staticNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
@@ -278,11 +280,12 @@ final class Minion {
     func setStatic(_ on: Bool, frame: Int) {
         if !on { staticNode?.removeFromParentNode(); staticNode = nil; return }
         if staticNode == nil {
-            let p = SCNNode(geometry: SCNPlane(width: 0.36, height: bodyHeight + 0.12))
+            // A small patch of pixels over the proper place, nothing more.
+            let p = SCNNode(geometry: SCNPlane(width: 0.2, height: 0.15))
             p.geometry!.firstMaterial = flat(.white)
             p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
             p.constraints = [SCNBillboardConstraint()]
-            p.position = v3(0, bodyHeight / 2, 0)
+            p.position = v3(0, bodyHeight * 0.3, 0)
             p.renderingOrder = 20
             node.addChildNode(p)
             staticNode = p
@@ -3302,7 +3305,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 90...400) }
                     let settled = m.path.isEmpty
                     if m.place == .bath {
-                        if settled { m.setStatic(true, frame: Int(clock * 12)) }
+                        if settled {
+                            m.setStatic(true, frame: Int(clock * 12))
+                            if m.showering, clock >= m.nextDropAt {
+                                // Pixel water from the shower head, falling past the shoulders.
+                                m.nextDropAt = clock + 0.07
+                                let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
+                                drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
+                                drop.position = v3(m.node.position.x + Double.random(in: -0.14...0.14), m.headHeight + 0.3, m.node.position.z + Double.random(in: -0.14...0.14))
+                                propRoot.addChildNode(drop)
+                                let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.35); fall.timingMode = .easeIn
+                                drop.runAction(.sequence([fall, .fadeOut(duration: 0.1), .removeFromParentNode()]))
+                            }
+                        }
                         if clock >= m.bathUntil, settled {
                             m.setStatic(false, frame: 0)
                             send(m, to: m.bathReturn ?? Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
@@ -3314,6 +3329,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         m.bathUntil = clock + Double.random(in: 7...12)
                         m.bathReturn = m.place
                         send(m, to: .bath)
+                        // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
+                        if let bath = station.rooms["kind:bath"] {
+                            let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+                            m.showering = Bool.random()
+                            let spot = m.showering ? cells.last! : cells.first!
+                            m.path = station.path(from: m.pos, to: spot)
+                            m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
+                        }
                     }
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
                         if m.cell != pc { walk(m, to: pc) }
