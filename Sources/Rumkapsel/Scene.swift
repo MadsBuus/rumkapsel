@@ -2686,7 +2686,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         // Issues the board says are in development, assigned to someone else: offices too, even before a pull request.
         var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
-        if cfg.project != nil, let items = github.projectItems() {
+        if cfg.project != nil, !me.isEmpty, let items = github.projectItems() {   // not before GitHub has said who I am
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
             // The column says an office is solid; it does not make one. An issue needs a sign of work:
             // a linked pull request, a branch seen in the feed, or a room a session or peer already claims.
