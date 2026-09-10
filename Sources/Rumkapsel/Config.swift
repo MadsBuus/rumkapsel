@@ -4,7 +4,7 @@ import Foundation
 struct AppConfig: Codable, Equatable {
     struct RepoOverride: Codable, Equatable {
         var station: String = "auto"   // auto, work, private, hidden
-        var crew: Bool = true
+        var crew: Bool = true          // unused since 0.18, kept so old config files still decode
         var share: Bool = false        // visible to other rumkapsels on the local network
     }
     var stationRule: String = "none"          // conductor, owner, none
@@ -56,7 +56,7 @@ struct AppConfig: Codable, Equatable {
         }
     }
 
-    func crewEnabled(repo: String) -> Bool { showCrew && (repos[repo]?.crew ?? true) }
+    func crewEnabled(repo: String) -> Bool { showCrew && repos[repo]?.station != "hidden" }
     func shared(repo: String) -> Bool { shareOnLAN && (repos[repo]?.share ?? false) }
 }
 

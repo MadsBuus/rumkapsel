@@ -31,6 +31,10 @@ final class PeerHub {
     private var incoming: [NWConnection] = []
     private let queue = DispatchQueue(label: "rumkapsel.peers")
     private var timer: DispatchSourceTimer?
+    private var pathMonitor: NWPathMonitor?
+    private(set) var networkUp = true
+    /// Peers we are actually talking to right now.
+    var connectedCount: Int { queue.sync { outgoing.values.filter { $0.state == .ready }.count } }
     private(set) var name = ""
     private(set) var since = Date()
     var isRunning: Bool { listener != nil }
@@ -55,6 +59,10 @@ final class PeerHub {
         b.browseResultsChangedHandler = { [weak self] results, _ in self?.browsed(results) }
         b.start(queue: queue)
         browser = b
+        let pm = NWPathMonitor()
+        pm.pathUpdateHandler = { [weak self] path in self?.networkUp = path.status == .satisfied }
+        pm.start(queue: queue)
+        pathMonitor = pm
         let t = DispatchSource.makeTimerSource(queue: queue)
         t.schedule(deadline: .now() + 2, repeating: 3)
         t.setEventHandler { [weak self] in self?.broadcast() }
@@ -64,6 +72,7 @@ final class PeerHub {
 
     func stop() {
         timer?.cancel(); timer = nil
+        pathMonitor?.cancel(); pathMonitor = nil
         listener?.cancel(); listener = nil
         browser?.cancel(); browser = nil
         outgoing.values.forEach { $0.cancel() }; outgoing = [:]

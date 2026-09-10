@@ -109,6 +109,7 @@ final class StationView: SCNView {
     var onMove: ((SIMD2<Double>, Double) -> Void)?
     private var heldKeys: Set<String> = []
     var onClick: ((SCNNode?) -> Void)?
+    var onContextMenu: ((SCNNode?, NSEvent) -> Void)?
     private var tracking: NSTrackingArea?
     private var downPoint = NSPoint.zero
 
@@ -181,6 +182,7 @@ final class StationView: SCNView {
     }
 
     override func mouseExited(with event: NSEvent) { onHover?(nil) }
+    override func rightMouseDown(with event: NSEvent) { onContextMenu?(node(at: convert(event.locationInWindow, from: nil)), event) }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -221,7 +223,14 @@ final class Minion {
     var hammerUp = false
     var lying = false
     var wakeUntil = 0.0
-    enum Tool { case goggles, tablet, scanner, hammer }
+    /// Bent over a crate until this clock time: lifting or setting down takes a moment.
+    var bendUntil = 0.0
+    private(set) var shadow: SCNNode!
+    /// The hammer's grip end, so the swing pivots in the hand rather than at the handle's middle.
+    private(set) var hammerPivot: SCNNode?
+    /// The flashlight's grip, swept about to play its cone over the work.
+    private(set) var lightPivot: SCNNode?
+    enum Tool { case goggles, tablet, scanner, hammer, flashlight }
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
 
@@ -278,6 +287,7 @@ final class Minion {
         shadow.position = v3(0.03, 0.003, 0.02)
         shadow.name = "minion:" + id
         node.addChildNode(shadow)
+        self.shadow = shadow
         self.tilt = tiltNode
         self.body = body
         self.bodyHeight = h
@@ -293,11 +303,15 @@ final class Minion {
 
     /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
     /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
+    /// Where the hammer rests (about one o'clock seen from the side) and where it lands, as pitches of its grip.
+    static let hammerRest = -1.05, hammerStrike = 0.55
+
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t
         toolNode?.removeFromParentNode()
         toolNode = nil
+        hammerPivot = nil; lightPivot = nil
         guard let t else { return }
         let n = SCNNode()
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
@@ -337,16 +351,56 @@ final class Minion {
             grip.addChildNode(tip)
             n.addChildNode(grip)
         case .hammer:
-            // Handle pointing forward, head at the far end: tilting the body brings it down on the work.
+            // Held at the grip: at rest it points up and a little forward, and swings down onto the work.
+            let pivot = SCNNode()
+            pivot.position = v3(0.07, h * 0.42, d / 2 + 0.04)
+            pivot.eulerAngles.x = Minion.hammerRest
             let handle = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 0.26, chamferRadius: 0))
             handle.geometry!.firstMaterial = lit(NSColor(rgb: (0.6, 0.45, 0.3)))
-            handle.position = v3(0.07, h * 0.42, d / 2 + 0.14)
-            handle.eulerAngles.x = 0.35
+            handle.position = v3(0, 0, 0.13)
             let head = SCNNode(geometry: SCNBox(width: 0.08, height: 0.1, length: 0.06, chamferRadius: 0))
             head.geometry!.firstMaterial = dark
-            head.position = v3(0, -0.02, 0.13)
+            head.position = v3(0, 0, 0.12)
             handle.addChildNode(head)
-            n.addChildNode(handle)
+            pivot.addChildNode(handle)
+            n.addChildNode(pivot)
+            hammerPivot = pivot
+        case .flashlight:
+            // A torch held out front, with its cone of light drawn as a soft translucent cone.
+            let pivot = SCNNode()
+            pivot.position = v3(0.06, h * 0.34, d / 2 + 0.04)
+            let barrel = SCNNode(geometry: SCNCylinder(radius: 0.025, height: 0.12))
+            barrel.geometry!.firstMaterial = dark
+            barrel.eulerAngles.x = .pi / 2
+            barrel.position = v3(0, 0, 0.06)
+            pivot.addChildNode(barrel)
+            let lens = SCNNode(geometry: SCNCylinder(radius: 0.028, height: 0.01))
+            lens.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.7)))
+            lens.eulerAngles.x = .pi / 2
+            lens.position = v3(0, 0, 0.125)
+            pivot.addChildNode(lens)
+            let beamLength = 0.9
+            let beam = SCNNode(geometry: SCNCone(topRadius: 0.028, bottomRadius: 0.22, height: beamLength))
+            beam.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.75)))
+            beam.geometry!.firstMaterial?.transparency = 0.18
+            beam.geometry!.firstMaterial?.writesToDepthBuffer = false
+            beam.geometry!.firstMaterial?.isDoubleSided = true
+            beam.eulerAngles.x = -.pi / 2
+            beam.position = v3(0, 0, 0.13 + beamLength / 2)
+            pivot.addChildNode(beam)
+            let light = SCNNode()
+            light.light = SCNLight()
+            light.light!.type = .spot
+            light.light!.color = NSColor(rgb: (1.0, 0.95, 0.75))
+            light.light!.intensity = 900
+            light.light!.spotInnerAngle = 12
+            light.light!.spotOuterAngle = 32
+            light.light!.attenuationEndDistance = 2.2
+            light.eulerAngles.y = .pi   // a light shines down its -z; the torch points along +z
+            light.position = v3(0, 0, 0.13)
+            pivot.addChildNode(light)
+            n.addChildNode(pivot)
+            lightPivot = pivot
         }
         n.name = node.name
         body.addChildNode(n)
@@ -531,6 +585,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
+        view.onContextMenu = { [weak self] node, event in self?.showContextMenu(for: node?.name, event: event) }
         view.onZoom = { [weak self] f, point in
             // Zoom about the ground point under the cursor: it stays put on screen while the view scales.
             let ground = point.flatMap { self?.groundPoint(at: $0) }
@@ -759,7 +814,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
     private func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
-        return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key)
+        return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key)
     }
 
     /// The office key for a teammate's branch: the same key a local checkout of it would get.
@@ -975,15 +1030,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 roomTiles[key] = tiles
                 if provisional, !pending {
-                    // A thin frame round the floor: reserved, not built.
-                    let b = (minX: room.cells.map(\.x).min()!, maxX: room.cells.map(\.x).max()!, minY: room.cells.map(\.y).min()!, maxY: room.cells.map(\.y).max()!)
-                    let frame = SCNNode(geometry: SCNPlane(width: CGFloat(b.maxX - b.minX + 1), height: CGFloat(b.maxY - b.minY + 1)))
-                    frame.geometry!.firstMaterial = flat(full.lighter(0.2))
-                    frame.geometry!.firstMaterial?.fillMode = .lines
-                    frame.eulerAngles.x = -.pi / 2
-                    frame.position = v3(station.offset.x + Double(b.minX + b.maxX) / 2, 0.004, station.offset.y + Double(b.minY + b.maxY) / 2)
-                    frame.name = "room:" + key
-                    staticRoot.addChildNode(frame)
+                    // A thin frame round each tile's outer edges: reserved, not built.
+                    let cellSet = Set(room.cells)
+                    for c in room.cells {
+                        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] where !cellSet.contains(Cell(x: c.x + dx, y: c.y + dy)) {
+                            let edge = SCNNode(geometry: SCNBox(width: dx == 0 ? 1.0 : 0.04, height: 0.01, length: dy == 0 ? 1.0 : 0.04, chamferRadius: 0))
+                            edge.geometry!.firstMaterial = flat(full.lighter(0.25))
+                            edge.position = v3(station.offset.x + Double(c.x) + Double(dx) * 0.48, 0.006, station.offset.y + Double(c.y) + Double(dy) * 0.48)
+                            edge.name = "room:" + key
+                            staticRoot.addChildNode(edge)
+                        }
+                    }
                 }
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
             }
@@ -1147,6 +1204,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// An office's floor from the far corners in: boxes go there first, so the doorway stays clear.
+    private func farCells(_ station: Station, _ room: Room) -> [Cell] {
+        let door = station.doorCell(of: room.key) ?? room.cells.first!
+        return room.cells.sorted { a, b in
+            let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
+            return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
+        }
+    }
+
     /// Grey boxes pile up in an office as commits land; the pull request state colours them.
     private func rebuildMarkers() {
         markerRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -1189,9 +1255,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let floorShadow = NSColor(room.color).darker(0.16)
                 if packaged {
                     // One package for the whole pull request, sized by the work in it, strapped in the status colour.
-                    let cell = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.first!
+                    let cell = farCells(station, room).first!
                     let size = 0.42 + min(0.28, Double(count) * 0.03)
-                    let pkg = Props.package(color: NSColor(room.color).lighter(0.1), band: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
+                    let pkg = Props.stickeredCrate(color: NSColor(room.color).lighter(0.1), sticker: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
                     pkg.opacity = undelivered.contains(key) ? 0 : 1
@@ -1209,7 +1275,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                let cells = room.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+                let cells = farCells(station, room)
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 for i in 0..<(count + ghosts) {
                     let ghost = i >= count
@@ -1557,11 +1623,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             shareDot.isHidden = !sharing
             shareLabel.isHidden = !sharing
             if sharing {
+                // Grey without a network, amber while looking, green once someone answers.
                 let n = peerSnapshots.count
-                shareLabel.text = "sharing as \(peers.name)" + (n > 0 ? " · \(n) peer\(n == 1 ? "" : "s") in range" : "")
+                let up = peers.networkUp
+                let status = !up ? "no network" : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range" : "nobody in range"
+                shareLabel.text = "sharing as \(peers.name) · " + status
+                shareDot.color = !up ? NSColor(rgb: (0.45, 0.46, 0.5)) : n > 0 ? NSColor(rgb: (0.35, 0.85, 0.5)) : NSColor(rgb: (0.9, 0.7, 0.3))
                 shareLabel.position = CGPoint(x: hud.size.width - 14, y: hud.size.height - 14)
                 shareDot.position = CGPoint(x: hud.size.width - 14 - shareLabel.frame.width - 10, y: hud.size.height - 19)
-                shareDot.alpha = 0.7 + 0.3 * sin(clock * 2)
+                shareDot.alpha = n > 0 && up ? 0.7 + 0.3 * sin(clock * 2) : 0.8
             }
         }
 
@@ -2035,7 +2105,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
-                let cleared = merged && (hauledAt[roomKey(station, room)].map { now.timeIntervalSince($0) > 5 * 60 } ?? !station.hasPad)
+                if merged, station.hasPad, hauledAt[roomKey(station, room)] == nil { haulMergedBoxes(station: station, room: room) }
+                let cleared = merged && (!station.hasPad || (hauledAt[roomKey(station, room)] != nil && !hauls.contains { $0.roomKey == roomKey(station, room) }))
                 // Held for a teammate: nobody here, nothing on GitHub, and no word from a peer for a day.
                 let orphan = room.worktree == nil && crewRoomInfo[roomKey(station, room)] == nil && now.timeIntervalSince(room.lastActive) > StationController.holdWindow
                 if gone || cleared || orphan {
@@ -2287,7 +2358,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let cfg = ConfigStore.shared.current
         let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
         var live: Set<String> = []
-        for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" {
+        for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
             let key = sk + o.key
             live.insert(key)
             peerOffices[key, default: [:]][snap.name] = o
@@ -2386,9 +2457,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func haulMergedBoxes(station: Station, room: Room) {
         let key = roomKey(station, room)
         guard station.hasPad, !haulingRooms.contains(key) else { return }
+        hauledAt[key] = Date()   // even with nothing to carry, the office is now free to clear
         guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) else { return }
         haulingRooms.insert(key)
-        hauledAt[key] = Date()
         logEvent("\(room.name): merged, package to storage")
         let repo = room.repo ?? "work"
         let dest = station.storageCells.randomElement() ?? Station.rect(1, 1)[0]
@@ -2552,16 +2623,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
         let liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
-            let author = crewRoomInfo[sk + room.key]?.author ?? ""
-            crewRoomInfo[sk + room.key] = nil; crewBoxes[sk + room.key] = nil
+            let key = sk + room.key
+            let author = crewRoomInfo[key]?.author ?? ""
             // A teammate's office that we also have checked out stays: the local scan decides its fate.
-            guard room.worktree == nil else { continue }
+            guard room.worktree == nil else { crewRoomInfo[key] = nil; crewBoxes[key] = nil; continue }
+            // Its crate goes to storage on someone's arms first; the office clears once that is done.
+            if hauledAt[key] == nil, station.hasPad {
+                haulMergedBoxes(station: station, room: room)
+                if crewLoaded, let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(240); send(m, to: .core) }
+            }
+            guard !station.hasPad || !hauls.contains(where: { $0.roomKey == key }) else { continue }
+            crewRoomInfo[key] = nil; crewBoxes[key] = nil
             archive(station: station, room: room, announce: crewLoaded)
-            if crewLoaded, let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(240); send(m, to: .core) }
             changed = true
         }
         var pendingDeliveries: [(login: String, key: String)] = []
-        for (repo, pr) in open where !pr.isBot {
+        for (repo, pr) in open where !pr.isBot && !isKicked(sk + Home.from(repo: repo, branch: pr.branch, cwd: "").key) {
             let home = Home.from(repo: repo, branch: pr.branch, cwd: "")
             let key = home.key
             let name = crewName(pr.author) + " · " + home.name
@@ -2892,30 +2969,48 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
                     continue
                 case .pickup(let id):
-                    guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; continue }
-                    let world = h.box.worldPosition
-                    h.box.removeAllActions()
-                    h.box.removeFromParentNode()
-                    m.node.addChildNode(h.box)
-                    h.box.position = m.node.convertPosition(world, from: nil)
-                    let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.4); lift.timingMode = .easeOut
-                    h.box.runAction(lift)
-                    m.carried = h.box
+                    guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; m.bendUntil = 0; continue }
+                    // Face the crate, bend down and take hold before straightening up with it.
+                    let toBox = SIMD2(Double(h.box.worldPosition.x) - station.offset.x, Double(h.box.worldPosition.z) - station.offset.y) - m.pos
+                    if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
+                    if m.bendUntil == 0 { m.bendUntil = clock + 0.9; continue }
+                    if clock < m.bendUntil - 0.45 { continue }
+                    if m.carried == nil {
+                        let world = h.box.worldPosition
+                        h.box.removeAllActions()
+                        h.box.removeFromParentNode()
+                        m.node.addChildNode(h.box)
+                        h.box.position = m.node.convertPosition(world, from: nil)
+                        let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.45); lift.timingMode = .easeInEaseOut
+                        h.box.runAction(lift)
+                        m.carried = h.box
+                    }
+                    if clock < m.bendUntil { continue }
+                    m.bendUntil = 0
                     m.errand = .deliver(id)
                     walk(m, to: h.to)
                     continue
                 case .deliver(let id):
-                    guard let idx = hauls.firstIndex(where: { $0.id == id }) else { m.errand = nil; m.carried = nil; continue }
-                    let h = hauls.remove(at: idx)
-                    let world = h.box.worldPosition
-                    h.box.removeFromParentNode()
-                    h.box.position = world
-                    propRoot.addChildNode(h.box)
-                    let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.35); down.timingMode = .easeIn
-                    h.box.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }]))
-                    let done = h.onDone
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.enqueue { done() } }
-                    m.carried = nil
+                    guard let idx = hauls.firstIndex(where: { $0.id == id }) else { m.errand = nil; m.carried = nil; m.bendUntil = 0; continue }
+                    // Bend and set the crate down squarely, then a beat before straightening up.
+                    let h = hauls[idx]
+                    let toSpot = SIMD2(h.drop.x - station.offset.x, h.drop.z - station.offset.y) - m.pos
+                    if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                    if m.bendUntil == 0 {
+                        m.bendUntil = clock + 1.0
+                        let world = h.box.worldPosition
+                        h.box.removeFromParentNode()
+                        h.box.position = world
+                        propRoot.addChildNode(h.box)
+                        let down = SCNAction.move(to: v3(h.drop.x, h.drop.y, h.drop.z), duration: 0.55); down.timingMode = .easeInEaseOut
+                        h.box.runAction(.sequence([down, .run { [weak self] _ in self?.drone.thud() }]))
+                        m.carried = nil
+                        continue
+                    }
+                    if clock < m.bendUntil { continue }
+                    m.bendUntil = 0
+                    hauls.remove(at: idx)
+                    h.onDone()
                     m.errand = nil
                     send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
                     continue
@@ -2963,6 +3058,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if resting && m.activity == .sleeping && m.place == .quarters { m.setSleeping(true) }
             let jump = jumping && resting && m.place != .lounge ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0
             m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
+            m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
@@ -2993,7 +3089,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // Working the cone: welding, hammering, pushing and pulling, or bent over it.
                 let tool = (m.toolSeed + Int(clock / 7)) % 4
                 let cone = m.pyramids.last
-                m.setTool([Minion.Tool.goggles, .hammer, .scanner, nil][tool])
+                m.setTool([Minion.Tool.goggles, .hammer, .scanner, .flashlight][tool])
                 switch tool {
                 case 0:
                     tilt = 0.32
@@ -3014,15 +3110,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         l.opacity = on ? 1 : 0
                     }
                 case 1:
-                    let swing = sin(t * 7)
-                    tilt = max(0, swing) * 0.45
-                    if swing > 0.95 && !m.hammerUp { m.hammerUp = true; drone.thud(); cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)])) }
-                    if swing < 0 { m.hammerUp = false }
+                    // Quick drop onto the peak, slower lift back: the grip pitches, the body only leans a little.
+                    let phase = (t * 1.1).truncatingRemainder(dividingBy: 1)
+                    let swing = phase < 0.25 ? pow(phase / 0.25, 2) : 1 - pow((phase - 0.25) / 0.75, 1.5)
+                    m.hammerPivot?.eulerAngles.x = Minion.hammerRest + (Minion.hammerStrike - Minion.hammerRest) * swing
+                    tilt = swing * 0.14
+                    if swing > 0.97 && !m.hammerUp { m.hammerUp = true; drone.thud(); cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)])) }
+                    if swing < 0.2 { m.hammerUp = false }
                 case 2:
                     lean = sin(t * 2.5) * 0.05
                     tilt = 0.12 + sin(t * 2.5) * 0.08
                 default:
-                    tilt = 0.22 + sin(t * 1.5) * 0.05
+                    // Inspecting the cone by torchlight: the beam wanders over it.
+                    tilt = 0.18 + sin(t * 1.5) * 0.04
+                    m.lightPivot?.eulerAngles = SCNVector3(0.35 + sin(t * 1.3) * 0.25, sin(t * 0.9) * 0.45, 0)
                 }
             }
             if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
@@ -3038,12 +3139,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if working && !atCone {
                 switch m.activity {
                 case .testing, .running: m.setTool(.scanner); m.blinkScanner(Int(clock * 6) % 2 == 0)
-                case .coding, .exploring, .reading, .writing, .qa, .planning, .skill: m.setTool(.tablet)
+                case .exploring: m.setTool(.flashlight)
+                case .coding, .reading, .writing, .qa, .planning, .skill: m.setTool(.tablet)
                 default: m.setTool(nil)
                 }
                 switch m.activity {
                 case .coding: tilt = sin(t * 14) * 0.06                       // typing: quick nods
-                case .exploring: tilt = 0.18; spin = sin(t * 1.2) * 0.7       // reading code: clipboard, scanning left and right
+                case .exploring:                                              // reading code: the torch plays over the boxes
+                    tilt = 0.12; spin = sin(t * 1.2) * 0.7
+                    m.lightPivot?.eulerAngles = SCNVector3(0.3 + sin(t * 1.7) * 0.2, sin(t * 0.8) * 0.3, 0)
                 case .writing: tilt = 0.2 + sin(t * 3) * 0.06                 // writing: head down over the clipboard, small nods
                 case .thinking: tilt = -0.18; roll = sin(t * 1.4) * 0.14      // thinking: head back, slow sway
                 case .planning: tilt = -0.12 + sin(t * 2) * 0.05              // planning: looking up
@@ -3067,6 +3171,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
+            if m.bendUntil > clock { tilt = max(tilt, 0.5); roll = 0 }
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
@@ -3133,6 +3238,49 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// How long an office is held for whoever last had it checked out, refreshed by their work.
     static let holdWindow: TimeInterval = 24 * 3600
+
+    // MARK: kicking
+
+    /// Offices thrown off the station, by room key: peers and GitHub may not put them back for a day.
+    private var kicked: [String: Date] {
+        get { (UserDefaults.standard.dictionary(forKey: "kicked") as? [String: Date]) ?? [:] }
+        set { UserDefaults.standard.set(newValue.filter { Date().timeIntervalSince($0.value) < StationController.holdWindow }, forKey: "kicked") }
+    }
+
+    private func isKicked(_ key: String) -> Bool { kicked[key].map { Date().timeIntervalSince($0) < StationController.holdWindow } ?? false }
+
+    /// Right-click on an office that a peer or GitHub put here: offer to kick it.
+    private func showContextMenu(for name: String?, event: NSEvent) {
+        guard let name, name.hasPrefix("room:") || name.hasPrefix("box:") else { return }
+        let key = String(name.dropFirst(name.hasPrefix("room:") ? 5 : 4))
+        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]], !room.key.hasPrefix("kind:") else { return }
+        let menu = NSMenu()
+        if room.worktree == nil {
+            let item = NSMenuItem(title: "Kick \(room.name)", action: #selector(kickOffice(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            menu.addItem(item)
+        } else {
+            menu.addItem(withTitle: "\(room.name) is your own checkout", action: nil, keyEquivalent: "")
+        }
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+    }
+
+    @objc private func kickOffice(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        enqueue { [self] in
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return }
+            var k = kicked; k[key] = Date(); kicked = k
+            crewRoomInfo[key] = nil; crewBoxes[key] = nil; peerOffices[key] = nil; peerBoxes[key] = nil; pushedByPeer.remove(key)
+            for m in minions.values where m.isCrew && m.home.key == room.key { m.activity = .sleeping; m.busy = false; send(m, to: .quarters) }
+            archive(station: station, room: room, announce: false)
+            logEvent("kicked \(room.name) off the station")
+            rebuildStatic()
+            for m in minions.values where m.errand == nil { send(m, to: m.place) }
+        }
+    }
 
     private var viewPinned = false   // set from the command line: never overridden by the remembered view
     func setView(yawDegrees: Double, pitchDegrees: Double, zoom: Double) {

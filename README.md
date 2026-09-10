@@ -33,6 +33,7 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 | M | music (off by default) |
 | F | float on top |
 | click a box | open the pull request or issue |
+| right-click an office | kick it off the station (offices put there by peers or GitHub) |
 
 ## Sharing on the local network
 

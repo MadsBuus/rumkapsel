@@ -60,7 +60,7 @@ struct SettingsView: View {
             .opacity(model.config.stationRule == "owner" ? 1 : 0.5)
             Divider()
             Toggle("Show teammates' branches and pull requests on the work station", isOn: $model.config.showCrew)
-            Text("Per-repository overrides live under Repositories.").font(.caption).foregroundStyle(.secondary)
+            Text("Hide a repository under Repositories to keep it off the station entirely.").font(.caption).foregroundStyle(.secondary)
         }
         .onChange(of: model.config) { _ in model.commit() }
     }
@@ -81,7 +81,7 @@ struct SettingsView: View {
 
     private var repositories: some View {
         page {
-            Text("Where each repository's sessions go, whether teammates' work in it shows on the work station, and whether it is shared on the local network. Nothing is shared unless ticked.")
+            Text("Where each repository's sessions go, and whether it is shared on the local network. Nothing is shared unless ticked.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
                 TableColumn("Repository") { Text($0.id) }
@@ -98,14 +98,6 @@ struct SettingsView: View {
                     .labelsHidden()
                 }
                 .width(130)
-                TableColumn("Crew") { (row: Named) in
-                    let repo = row.id
-                    Toggle("", isOn: Binding(
-                        get: { model.config.repos[repo]?.crew ?? true },
-                        set: { model.config.repos[repo, default: .init()].crew = $0; model.commit() }))
-                    .labelsHidden()
-                }
-                .width(50)
                 TableColumn("Share") { (row: Named) in
                     let repo = row.id
                     Toggle("", isOn: Binding(
@@ -146,7 +138,7 @@ struct SettingsView: View {
             Toggle("Share my station on the local network", isOn: $model.config.shareOnLAN)
             HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
                 .disabled(!model.config.shareOnLAN).opacity(model.config.shareOnLAN ? 1 : 0.5)
-            Text("Only repositories ticked under Repositories are shared, and only the picture: rooms, package counts and where minions stand. No paths, branches or transcripts.").font(.caption).foregroundStyle(.secondary)
+            Text("Only repositories ticked under Repositories are shared: the offices you have checked out, their branch names and package counts, and where minions stand. No paths or transcripts. Right-click an office someone else put on your station to kick it.").font(.caption).foregroundStyle(.secondary)
             Divider()
             Button("Check for Updates…") { onCheckUpdates() }
             Spacer()

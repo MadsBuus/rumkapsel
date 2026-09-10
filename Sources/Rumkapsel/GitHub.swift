@@ -486,14 +486,21 @@ final class GitHubResolver {
                 return pr
             }
             let fields = "number,title,state,reviewDecision,isDraft,url,statusCheckRollup"
+            var answered = false   // a failed call is not "no pull request": keep what we knew
             if let out = run(["gh", "pr", "view", branch, "--json", fields], cwd: repoRoot),
                let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
-                pr = parse(o)
+                pr = parse(o); answered = true
             } else if let out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", fields], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
-                pr = parse(o)
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                pr = arr.first.map(parse); answered = true
             }
             lock.lock()
+            if !answered, let old = pulls[key] {
+                pulls[key] = (old.0, Date().addingTimeInterval(60 - interval))   // try again in a minute
+                inFlight.remove(key)
+                lock.unlock()
+                return
+            }
             let changed = pulls[key]?.0 != pr
             if changed, let pr, pulls[key] != nil { stateChanges.append((branch, pr)) }
             pulls[key] = (pr, Date())
