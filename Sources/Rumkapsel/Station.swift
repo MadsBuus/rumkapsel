@@ -350,7 +350,70 @@ final class Station {
     }
 
     /// Breadth-first path over walkable cells. Returns cells to visit, excluding `from`.
-    func path(from: Cell, to: Cell) -> [Cell] {
+    // MARK: walking round things
+
+    /// Props on the floor, as blocked spots on a finer grid: three steps to a cell side, so a minion
+    /// (a fifth of a cell wide) can squeeze past a crate sideways. Set by the controller from the scene.
+    var obstacles: Set<Cell> = []
+    static let fine = 3
+    static func sub(_ p: SIMD2<Double>) -> Cell { Cell(x: Int((p.x * Double(fine)).rounded()), y: Int((p.y * Double(fine)).rounded())) }
+    static func cell(ofSub s: Cell) -> Cell { Cell(x: Int((Double(s.x) / Double(fine)).rounded()), y: Int((Double(s.y) / Double(fine)).rounded())) }
+    static func point(ofSub s: Cell) -> SIMD2<Double> { SIMD2(Double(s.x) / Double(fine), Double(s.y) / Double(fine)) }
+
+    /// Waypoints from a position to a cell, threading between crates, boxes and pyramids. Ends on the
+    /// cell's centre when that is clear, else on the clearest spot in it. Falls back to wading through
+    /// on the coarse grid only when nothing is passable at all.
+    func path(from: SIMD2<Double>, to: Cell) -> [SIMD2<Double>] {
+        guard walkable.contains(to) else { return [] }
+        let start = Station.sub(from)
+        let centre = Cell(x: to.x * Station.fine, y: to.y * Station.fine)
+        let inCell = (-1...1).flatMap { dx in (-1...1).map { dy in Cell(x: centre.x + dx, y: centre.y + dy) } }
+        let free = inCell.filter { !obstacles.contains($0) }
+        let goals: Set<Cell> = !obstacles.contains(centre) ? [centre] : (free.isEmpty ? [centre] : Set(free))
+        if goals.contains(start) { return [] }
+        var prev: [Cell: Cell] = [start: start]
+        var queue = [start]
+        var head = 0
+        var found: Cell?
+        let steps = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+        func open(_ s: Cell) -> Bool { walkable.contains(Station.cell(ofSub: s)) && (!obstacles.contains(s) || goals.contains(s)) }
+        while head < queue.count, head < 12000 {
+            let c = queue[head]; head += 1
+            if goals.contains(c) { found = c; break }
+            let cc = Station.cell(ofSub: c)
+            for (dx, dy) in steps {
+                let n = Cell(x: c.x + dx, y: c.y + dy)
+                guard prev[n] == nil, open(n) else { continue }
+                let nc = Station.cell(ofSub: n)
+                if cc != nc && !canStep(from: cc, to: nc) { continue }
+                if dx != 0 && dy != 0 {   // no cutting corners round a crate or through a wall
+                    let a = Cell(x: c.x + dx, y: c.y), b = Cell(x: c.x, y: c.y + dy)
+                    guard open(a), open(b), canStep(from: cc, to: Station.cell(ofSub: a)), canStep(from: cc, to: Station.cell(ofSub: b)) else { continue }
+                }
+                prev[n] = c
+                queue.append(n)
+            }
+        }
+        guard let end = found else {
+            return coarsePath(from: Station.cell(ofSub: start), to: to).map { SIMD2(Double($0.x), Double($0.y)) }
+        }
+        var subs: [Cell] = []
+        var cur = end
+        while cur != start { subs.append(cur); cur = prev[cur]! }
+        subs.reverse()
+        // Merge straight runs so the walk is a few clean legs rather than a stutter of tiny steps.
+        var out: [SIMD2<Double>] = []
+        var last = start
+        var dir = Cell(x: 0, y: 0)
+        for s in subs {
+            let d = Cell(x: s.x - last.x, y: s.y - last.y)
+            if d == dir, !out.isEmpty { out[out.count - 1] = Station.point(ofSub: s) } else { out.append(Station.point(ofSub: s)) }
+            dir = d; last = s
+        }
+        return out
+    }
+
+    func coarsePath(from: Cell, to: Cell) -> [Cell] {
         guard from != to, walkable.contains(to) else { return [] }
         var prev: [Cell: Cell] = [from: from]
         var queue = [from]

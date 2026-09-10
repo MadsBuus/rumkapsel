@@ -256,7 +256,7 @@ final class Minion {
     var busyUntil = 0.0        // replay seconds, for crew minions
     var bed: Int?
     var pos: SIMD2<Double>
-    var path: [Cell] = []
+    var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
     var waitingSince = 0.0
     let bobPhase = Double.random(in: 0..<6.28)
@@ -1204,6 +1204,30 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Tells each station what is standing on its floor, so walks thread between the props.
+    private func refreshObstacles() {
+        var blocked: [String: Set<Cell>] = [:]
+        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>) {
+            let (lo, hi) = node.boundingBox
+            let p = SIMD2(Double(node.position.x) - offset.x, Double(node.position.z) - offset.y)
+            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8
+            let f = Double(Station.fine)
+            for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
+                for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[station, default: []].insert(Cell(x: sx, y: sy)) }
+            }
+        }
+        for n in markerRoot.childNodes {
+            guard let name = n.name, let colon = name.firstIndex(of: ":"), let bar = name.firstIndex(of: "|"), colon < bar else { continue }
+            let stationName = String(name[name.index(after: colon)..<bar])
+            guard let st = fleet.stations[stationName] else { continue }
+            mark(stationName, n, offset: st.offset)
+        }
+        for m in minions.values {
+            for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
+        }
+        for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
+    }
+
     /// An office's floor from the far corners in: boxes go there first, so the doorway stays clear.
     private func farCells(_ station: Station, _ room: Room) -> [Cell] {
         let door = station.doorCell(of: room.key) ?? room.cells.first!
@@ -1338,7 +1362,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for (area, piles, cells, neat) in [("storage", station.stored, station.storageCells, false), ("deck", station.staged, station.deckCells, true)] where station.hasPad && !cells.isEmpty {
                 var seed = UInt64(truncatingIfNeeded: (station.name + area).hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                let sorted = cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+                // Every other row holds crates; the rows between are aisles to walk down.
+                let rows = Set(cells.map(\.y)).sorted()
+                let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
+                let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                 var i = 0
                 let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
                     github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
@@ -1363,6 +1390,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
+        refreshObstacles()
     }
 
     /// Flame on, a slow climb that carries the rocket out of the frame, then gone.
@@ -1795,13 +1823,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
-        m.path = station.path(from: m.cell, to: target)
+        m.path = station.path(from: m.pos, to: target)
         m.nextWanderAt = clock + Double.random(in: 1...3)
     }
 
     private func walk(_ m: Minion, to cell: Cell) {
         guard let station = fleet.stations[m.station] else { return }
-        m.path = station.path(from: m.cell, to: cell)
+        m.path = station.path(from: m.pos, to: cell)
     }
 
     /// A new worker arrives by shuttle: it stays invisible until the ship has set down, then steps out.
@@ -1958,7 +1986,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             ghost.runAction(.sequence([.wait(duration: 0.6), .group([sink, .sequence([.wait(duration: 0.8), .fadeOut(duration: 1.4)])]), .removeFromParentNode()]))
             if let hall = station.doorOutside(of: room.key) {
                 for m in minions.values where m.station == station.name && m.place == .room(room.key) {
-                    m.path = station.path(from: m.cell, to: hall)
+                    m.path = station.path(from: m.pos, to: hall)
                     m.place = .core   // parked in the hallway until the next scan sends it on
                     m.nextWanderAt = clock + 4
                 }
@@ -2013,6 +2041,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         m.pyramids.append(n)
         m.pyramidCell = cell
+        refreshObstacles()
         if m.errand == nil { m.place = .room(key); walk(m, to: cell) }
     }
 
@@ -2020,6 +2049,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for p in m.pyramids { p.runAction(.sequence([.fadeOut(duration: 0.8), .removeFromParentNode()])) }
         m.pyramids = []
         m.pyramidCell = nil
+        refreshObstacles()
     }
 
     private func ringBell(seed: Int) {
@@ -2557,7 +2587,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             hauls[i].carrier = m.id
             m.errand = .pickup(h.id)
             m.bed = nil
-            m.path = station.path(from: m.cell, to: h.from)
+            m.path = station.path(from: m.pos, to: h.from)
         }
         for (name, p) in pendingLaunch where clock - p.since > 90 {   // never let a stuck haul ground a launch
             pendingLaunch[name] = nil
@@ -2857,7 +2887,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         clock += dt
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest(); updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleHauls() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleHauls(); refreshObstacles() }
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p
@@ -2921,8 +2951,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if m.wakeUntil > 0 {
                 if clock < m.wakeUntil { m.node.opacity = m.opacity; continue } else { m.wakeUntil = 0 }
             }
-            if let next = m.path.first {
-                let target = SIMD2(Double(next.x), Double(next.y))
+            if let target = m.path.first {
                 let d = target - m.pos
                 let dist = (d.x * d.x + d.y * d.y).squareRoot()
                 let step = speed * dt
@@ -3023,7 +3052,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 case .settled:
                     if m.isTester, clock >= m.nextWanderAt {
                         let choices = station.deckCells.filter { $0 != m.cell }
-                        if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
+                        if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
                         m.nextWanderAt = clock + Double.random(in: 1.5...3.5)
                         m.setTool(.scanner)
                         if clock >= m.nextImpatience {
@@ -3035,7 +3064,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         if m.cell != pc { walk(m, to: pc) }
                     } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
-                        if let dest = choices.randomElement() { m.path = station.path(from: m.cell, to: dest) }
+                        if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
                     }
                 case .leaving:
