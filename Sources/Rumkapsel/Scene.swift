@@ -537,6 +537,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var pushedByPeer: Set<String> = []
     private var fadeIn: Set<String> = []
     private var held: [String: Date] = [:]        // offices a peer left behind, held for a day
+    private var retired: [String: Date] = [:]     // merged offices cleared away while their session lingers
     private var roomCreated: [String: Date] = [:]
     private let peerRoot = SCNNode()
     private var peerMinions: [String: (node: SCNNode, target: SIMD3<Double>)] = [:]
@@ -1919,6 +1920,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// A session's office, unless that office was merged and cleared while the session lingers on the
+    /// branch: then the minion waits in the lounge rather than rebuilding the office every scan.
+    private func homeFor(_ s: SessionInfo, station: String) -> Home {
+        let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+        if let at = retired["\(station)|\(home.key)"], Date().timeIntervalSince(at) < StationController.holdWindow {
+            return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
+        }
+        return home
+    }
+
     /// Night on a station: late hours, or nobody has worked there for an hour.
     private func isNight(_ station: Station) -> Bool {
         let busyRecently = minions.values.contains { $0.station == station.name && $0.busy && !$0.isCrew } || (lastBusy[station.name].map { clock - $0 < 3600 } ?? false)
@@ -2248,7 +2259,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < StationController.roomsWindow) {
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let station = fleet.station(stationName)
-            let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+            let home = homeFor(s, station: stationName)
             if let m = minions[s.id], m.home.key != home.key, station.rooms[home.key] == nil, station.rooms[m.home.key] != nil,
                !minions.values.contains(where: { $0.id != s.id && $0.home.key == m.home.key && $0.station == stationName }) {
                 let oldKey = "\(stationName)|\(m.home.key)", newKey = "\(stationName)|\(home.key)"
@@ -2282,7 +2293,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
             }
-            if let room = station.rooms[home.key] {
+            if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
                 room.worktree = s.cwd
                 if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
                 if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
@@ -2302,6 +2313,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > StationController.holdWindow } ?? true)
                 if gone || cleared || orphan {
+                    if cleared { retired[roomKey(station, room)] = now }
                     archive(station: station, room: room, announce: !firstRun, reason: gone ? "worktree gone" : cleared ? "merged and hauled" : "nobody's")
                     changed = true
                 }
@@ -2351,7 +2363,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for s in liveSessions {
             seen.insert(s.id)
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
-            let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+            let home = homeFor(s, station: stationName)
             var isNew = minions[s.id] == nil
             var reused = false
             if isNew && !s.isSubagent {
