@@ -1930,11 +1930,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return home
     }
 
-    /// Night on a station: late hours, or nobody has worked there for an hour.
+    /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
     private func isNight(_ station: Station) -> Bool {
-        let busyRecently = minions.values.contains { $0.station == station.name && $0.busy && !$0.isCrew } || (lastBusy[station.name].map { clock - $0 < 3600 } ?? false)
         let hour = Calendar.current.component(.hour, from: Date())
-        return !busyRecently || hour >= 22 || hour < 7
+        return hour >= 22 || hour < 7
     }
 
     /// Where a minion belongs given what it is doing and the hour.

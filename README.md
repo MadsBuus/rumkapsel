@@ -40,7 +40,7 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 - **Working**: at its office, on the cone or with a tool. Every stretch of work is timed.
 - **Just done** (under a minute): hops at the office, eager for your reply.
 - **Waiting** (a minute to the quiet limit in Settings): paces its office.
-- **Quiet**: by day it reads on a lounge couch; by night it sleeps in the dorm. Night is 22 to 07, or an hour with nobody working on the station.
+- **Quiet**: by day it reads on a lounge couch; by night it sleeps in the dorm. Night is 22 to 07.
 - **Bath**: a shower after twenty minutes or more of work, sometimes a pee after a shorter stretch, and loungers go every half hour or so. Never while busy, carrying, on an errand or in bed; if work calls mid-visit, it leaves at once.
 - **Session over**: lounge by day, dorm by night. After twenty minutes the extras leave; two stay on standby.
 - **QA**: while untested crates sit on the deck, one free worker walks the rows.
