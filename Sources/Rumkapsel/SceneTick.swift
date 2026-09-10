@@ -163,6 +163,9 @@ extension StationController {
                         finish(m)
                         continue
                     }
+                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
+                    palletStep(m, station: station)
+                    continue
                 case .react(_, _, let until):
                     // There: work at it until the time is up, then back to the quarters.
                     if m.phaseKind == .walk { advance(m); continue }
@@ -452,7 +455,7 @@ extension StationController {
                 }
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working && !(m.place == .lounge && resting && m.couch != nil) { m.setTool(nil) }
+            if !working && !(m.place == .lounge && resting && m.couch != nil) && palletErrand(of: m) == nil { m.setTool(nil) }
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)

@@ -292,7 +292,8 @@ final class SimulatorModel: ObservableObject {
                 "Open PR", "PR approved", "Checks failing", "PR merged", "PR closed (not merged)",
             ]),
             Group(id: "Releases", picker: "repo", buttons: [
-                "Staging release opens", "Staging release merges", "Production release opens (untested)",
+                "Staging release opens", "Staging release merges", "Staging release closes (not merged)",
+                "Production release opens (untested)",
                 "Mark tested / ready to ship (board)", "Production release merges (ship)",
             ]),
             Group(id: "Board", picker: "issue", buttons: ["Move issue"]),
@@ -394,13 +395,20 @@ final class SimulatorModel: ObservableObject {
             pushGitHub()
         case "Staging release merges":
             let cfg = ConfigStore.shared.current
-            guard let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && !$0.isProduction }) else { return miss("no open staging release on \(repo)") }
+            guard let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.isStaging }) else { return miss("no open staging release on \(repo)") }
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
                                            url: pr.url, labels: pr.labels, mergedAt: Date())
             // With a board, the merge is a bell; the crates move because the columns move.
             if cfg.project != nil { launches.append((repo, releases[repo]![i])) }
+            pushGitHub()
             move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
+        case "Staging release closes (not merged)":
+            guard let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.isStaging }) else { return miss("no open staging release on \(repo)") }
+            let pr = releases[repo]![i]
+            releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "CLOSED",
+                                           url: pr.url, labels: pr.labels, mergedAt: nil)
+            pushGitHub()
         case "Production release opens (untested)":
             let cfg = ConfigStore.shared.current
             nextRelease += 1
@@ -535,6 +543,9 @@ final class SimulatorModel: ObservableObject {
         case .releaseMerged(_, let repo, let n, let base, _, let production):
             return "releaseMerged \(repo)#\(n) -> \(base)\(production ? " production" : "")"
         case .rocketCommand(_, let repo, _, _, _, _, let c): return "rocketCommand \(repo): \(c.words)"
+        case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
+        case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
+        case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"
         case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"
         }
     }

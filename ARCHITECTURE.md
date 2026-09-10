@@ -57,7 +57,8 @@ shared helpers, every stored property, `buildScene`, the scan and event glue and
 the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
 `SceneMarkers.swift` the crates, cones, rockets and power; `SceneTick.swift` the per-frame worker loop and the demo
 clock; `Jobs.swift` what a worker is told to do; `HUD.swift` the overlay; `Minion.swift` one worker's body;
-`Actors.swift` the props that run commands of their own, a shuttle's flight and a rocket's stages.
+`Actors.swift` the props that run commands of their own, a shuttle's flight, a rocket's stages and a pallet's
+load; `Pallets.swift` the dispatcher's errand from the console to the deck.
 
 ## Debts
 
@@ -128,35 +129,51 @@ position, which means the scene's geometry leaks a little into the model side.
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.
 
-## Next: the staging pallet
+## The staging pallet
 
-A staging release (a pull request into the staging branch) needs a picture again now that the staging
-rocket is gone. The sequence, all of it commands on one minion, the dispatcher:
+Done. A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`
+sits beside `isProduction`, and `World.applyStaging` diffs each repository's release list into
+`.stagingOpened`, `.stagingMerged` and `.stagingClosed`. The first answer per repository is quiet.
 
-1. **The PR opens.** A free minion takes a clipboard and walks to storage. It stops at the storage
-   console, a small panel on the wall by the door, and the panel flashes: the order has been placed.
-2. **A hover pallet fades in** on the storage floor by the near wall, the side toward the deck. Crates
-   stack against the far wall, so the near rows are the pallet's space. If there is no room, or a pallet is
-   already out, the dispatcher waits by the console and gets impatient: hops and paces, like a minion
-   waiting on you. One pallet per station at a time, the rest queue.
-3. **Loading, by magic.** The dispatcher swaps the clipboard for a telekinesis tool and points it at the
-   stack: one crate at a time lifts off, floats slowly across and settles on the pallet in neat rows and
-   stacks, twelve at most, three rows of four. Only the manifested crates, the ones the PR's commits
-   name; the rest stay put. The tool glows while a crate is in the air.
-4. **Waiting.** Loaded, the pallet hovers by the near wall, bobbing slowly, the dispatcher beside it,
-   until the PR merges. Those crates are station truth, "on pallet", and nothing else may move them.
-5. **The PR merges.** The dispatcher pushes the pallet, hands on its edge, out through the storage
-   doorway, down the aisle and through the deck doorway, until it stands beside the repository's
-   group on the untested row.
-6. **Unloading, by magic again.** Crates float off the pallet one by one, slowly, onto their slots on the
-   untested row next to any crates of the same colour already there. The empty pallet fades out and the
-   dispatcher returns to the lounge.
+Station truth gains one pallet per station (`StationTruth.Pallet`: repo, number, the cell it hovers over,
+its state — arriving, loading, loaded, moving, unloading — and its crates by pallet slot, three rows of
+four counted from the pallet's floor up). Further requests queue in `palletQueue` in the order they came.
+A crate on it is `Placement.pallet`, so `yardLayout` leaves it out of the rows and `reconcile` returns
+`.waiting` for that repository: from the moment a pallet is ordered until it is empty, the pallet is the
+hand carry for those crates and no `carryToDeck` is issued for them.
 
-Facts needed: which crates a staging PR carries (its commits' PR numbers), when it opens, when it merges.
-Station truth: a pallet per station, its crates, its position. Commands: `dispatch(pr)`, `loadPallet`,
-`pushPallet(to:)`, `unloadPallet`. A closed-without-merge PR unloads back into storage the same way.
-The telekinesis tool joins the tool set (goggles, tablet, scanner, hammer, flashlight): a short wand
-with a glowing tip, faceted like everything else.
+Five commands run it, all on one minion, the dispatcher: `dispatch` (clipboard out, to the storage console),
+`waitPallet` (at the console with the hops and pacing of a minion waiting on you, or beside a loaded pallet
+until the release moves), `loadPallet` (the wand out, one crate at a time off the top of its stack, through
+an arc, onto its pallet slot), `pushPallet` (hands on the edge, the pallet half a step ahead of the minion
+along its own path out through the storage doorway and across to the untested row) and `unloadPallet`
+(the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
+unmerged, and the empty pallet fades). The `Pallet` actor in `Actors.swift` holds the node, what is aboard
+and the crate in the air. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
+cushion of light, bobbing on a sine; and `Props.console`, the small panel on the wall by the storage doorway,
+which blinks while an order stands unanswered. Two new tools: `.clipboard` and `.telekinesis`, a short
+faceted wand whose tip lights, with a small omni light, while a crate is in the air.
+
+What differs from the plan above:
+
+- **Which crates it carries.** Every crate of that repository standing in storage, twelve at most, taken
+  by yard order from the top of each stack — not the pull request's own commit list, which the sources do
+  not break down per staging release.
+- **A crate in the air is moved by the tick, not by an SCNAction.** Actions do not advance in a headless
+  `--snapshot` run, so a load that depended on one never landed. The arc, the turn and the pallet's own
+  fade all ride the station clock, like everything else that decides something.
+- **The pallet is bigger than a cell** (1.8 by 1.4) so twelve crates at their one size fit on it. It
+  hovers over the near row on the two columns of the deck doorway and overhangs the wall a little.
+- **A release that ends while the dispatcher is still walking** is remembered (`palletWishes`) and handed
+  to the pallet the moment it is out, because the simulator presses "opens" and "merges" two seconds apart
+  and GitHub can answer just as fast.
+- **A dispatcher that goes away mid-errand** is replaced: the pallet is adopted by whoever is free, and one
+  caught half way across unloads where it stands.
+
+Still owed: nothing queues behind a pallet in practice, because a station has one storage yard and one
+console; a second repository's release simply waits. And while an order stands with nobody free to run it,
+that repository's crates do not move at all — the reconciler is holding them for a pallet that has not
+come out yet.
 
 ## Carries know the stack
 
@@ -192,10 +209,11 @@ thing, and nothing moves it afterwards, neither an action nor the redraw. Pickup
 
 ## Closed, not merged
 
-Done for issue pull requests (red crate, ten minutes, then the office clears); the pallet half waits for the pallet. Two different closes:
+Done. Two different closes:
 
 - **An issue's pull request closed without merging.** The work goes nowhere: not storage, not the deck.
   The crate in its office turns red and sits there for ten minutes, then fades out. After that the office
   clears the way a merged one does: a teammate's archives, one's own retires while the session lingers.
 - **A staging release closed without merging.** Those crates are still merged work waiting for a release:
-  the loaded pallet unloads back into storage the same slow way it was loaded.
+  the loaded pallet unloads back into storage the same slow way it was loaded. `.stagingClosed` sets the
+  pallet's wish, and `unloadPallet(back: true)` floats each crate onto the slot `storageSlot` gives it.

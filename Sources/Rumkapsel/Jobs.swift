@@ -511,6 +511,7 @@ extension StationController {
             m.path = station.path(from: m.pos, to: from.cell)
         }
         tickRockets()
+        servicePallets()
     }
 
     // MARK: crew

@@ -164,6 +164,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var rocketActors: [String: Rocket] = [:]
     /// Every shuttle in the air right now, each running its flight command.
     var shuttles: [Shuttle] = []
+    /// The one hover pallet a station may have out, keyed by station name.
+    var pallets: [String: Pallet] = [:]
+    /// The panel on the wall by each storage doorway, so an order can make it blink.
+    var consolePanels: [String: SCNNode] = [:]
+    /// Props on their way out, fading on the station's clock rather than on an action.
+    var fadingProps: [(node: SCNNode, at: Double)] = []
+    /// A staging release that ended before its pallet was out, by "station|repo": true pushes the
+    /// pallet to the deck once it is loaded, false empties it back into storage.
+    var palletWishes: [String: Bool] = [:]
     var lastBoxCount: [String: Int] = [:]
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
@@ -808,11 +817,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             setCrewRoster(members, bots: bots)
         case .crewActivity(let a):
             playCrew(a)
+        case .stagingOpened(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            orderPallet(station: station, repo: repo, number: number)
+        case .stagingMerged(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            logEvent("\(repo): staging release #\(number) merged")
+            palletMerged(station: station, repo: repo)
+        case .stagingClosed(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            logEvent("\(repo): staging release #\(number) closed, not merged")
+            palletClosed(station: station, repo: repo)
         case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
             break    // the rocket command that comes with it is the cue; the log line came as a .log
         case .releaseMerged(let stationName, let repo, _, _, _, false):
-            // A staging release without a board: the crates move because nothing else will move them.
-            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
+            // A staging release without a board and without a pallet: nothing else would move the crates.
+            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName],
+               world.truth.pallets[stationName]?.repo != repo { stageCargo(station: st, repo: repo) }
         case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
             handle(rocket: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
@@ -863,6 +884,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
         if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
         tickShuttles()
+        tickPallets()
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p

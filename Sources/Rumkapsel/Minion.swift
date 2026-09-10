@@ -37,7 +37,10 @@ final class Minion {
     private(set) var hammerPivot: SCNNode?
     /// The flashlight's grip, swept about to play its cone over the work.
     private(set) var lightPivot: SCNNode?
-    enum Tool { case goggles, tablet, scanner, hammer, flashlight }
+    enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis }
+    /// The wand's tip and the little light in it, lit only while a crate is in the air.
+    private(set) var wandTip: SCNNode?
+    private(set) var wandLight: SCNNode?
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
 
@@ -188,7 +191,7 @@ final class Minion {
         tool = t
         toolNode?.removeFromParentNode()
         toolNode = nil
-        hammerPivot = nil; lightPivot = nil
+        hammerPivot = nil; lightPivot = nil; wandTip = nil; wandLight = nil
         guard let t else { return }
         let n = SCNNode()
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
@@ -242,6 +245,48 @@ final class Minion {
             pivot.addChildNode(handle)
             n.addChildNode(pivot)
             hammerPivot = pivot
+        case .clipboard:
+            // A flat board held at the side, paper clipped to it.
+            let board = SCNNode(geometry: SCNBox(width: 0.15, height: 0.19, length: 0.012, chamferRadius: 0))
+            board.geometry!.firstMaterial = lit(NSColor(rgb: (0.45, 0.34, 0.24)))
+            board.position = v3(w / 2 + 0.05, h * 0.24, d / 2 + 0.02)
+            board.eulerAngles = SCNVector3(0.25, -0.5, 0.15)
+            let paper = SCNNode(geometry: SCNBox(width: 0.12, height: 0.15, length: 0.004, chamferRadius: 0))
+            paper.geometry!.firstMaterial = flat(NSColor(rgb: (0.9, 0.9, 0.86)))
+            paper.position = v3(0, -0.01, 0.009)
+            board.addChildNode(paper)
+            let clip = SCNNode(geometry: SCNBox(width: 0.07, height: 0.025, length: 0.012, chamferRadius: 0))
+            clip.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.65, 0.72)))
+            clip.position = v3(0, 0.08, 0.012)
+            board.addChildNode(clip)
+            n.addChildNode(board)
+        case .telekinesis:
+            // A short faceted wand, held out front. Its tip lights while a crate is in the air.
+            let pivot = SCNNode()
+            pivot.position = v3(0.07, h * 0.36, d / 2 + 0.04)
+            pivot.eulerAngles.x = -0.5
+            let shaft = SCNNode(geometry: faceted(SCNCylinder(radius: 0.022, height: 0.2), 5))
+            shaft.geometry!.firstMaterial = dark
+            shaft.eulerAngles.x = .pi / 2
+            shaft.position = v3(0, 0, 0.1)
+            pivot.addChildNode(shaft)
+            let tip = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: 0.04, height: 0.09), 5))
+            tip.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.9, 1.0)))
+            tip.eulerAngles.x = .pi / 2
+            tip.position = v3(0, 0, 0.23)
+            tip.opacity = 0.45
+            pivot.addChildNode(tip)
+            let light = SCNNode()
+            light.light = SCNLight()
+            light.light!.type = .omni
+            light.light!.color = NSColor(rgb: (0.62, 0.9, 1.0))
+            light.light!.intensity = 0
+            light.light!.attenuationEndDistance = 2.0
+            light.position = v3(0, 0, 0.24)
+            pivot.addChildNode(light)
+            n.addChildNode(pivot)
+            wandTip = tip
+            wandLight = light
         case .flashlight:
             // A torch held out front, with its cone of light drawn as a soft translucent cone.
             let pivot = SCNNode()
@@ -282,6 +327,12 @@ final class Minion {
         n.name = node.name
         body.addChildNode(n)
         toolNode = n
+    }
+
+    /// The wand at work: the tip brightens and throws a little light while a crate is in the air.
+    func setWand(lifting: Bool) {
+        wandTip?.opacity = lifting ? 1 : 0.45
+        wandLight?.light?.intensity = lifting ? 420 : 0
     }
 
     /// Blink the scanner tip, if held.

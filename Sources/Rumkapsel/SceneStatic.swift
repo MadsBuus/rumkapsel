@@ -125,6 +125,16 @@ extension StationController {
                     addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
                 }
             }
+            if station.hasPad, !station.storageCells.isEmpty {
+                // The storage console: a small panel on the wall by the doorway, where a pallet is ordered.
+                let (cell, facing) = station.storageConsole
+                let console = Props.console(color: NSColor(rgb: (0.4, 0.72, 0.9)))
+                console.position = v3(station.offset.x + Double(cell.x) + facing.x * 0.46, 0.5, station.offset.y + Double(cell.y) + facing.y * 0.46)
+                console.eulerAngles.y = atan2(-facing.x, -facing.y)   // hung on the wall, face turned into the room
+                console.name = "storage:" + station.name
+                staticRoot.addChildNode(console)
+                consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
+            }
             if station.hasPad {
                 let pc = station.padCenter
                 let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01)))

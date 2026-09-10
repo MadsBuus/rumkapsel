@@ -90,6 +90,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
         if simulatorOnly { openSimulator() }
+        // The simulator runs its own station, so the view flags have to reach that one too.
+        if let sim = simulator {
+            if num("--yaw") != nil || num("--pitch") != nil || num("--zoom") != nil {
+                sim.station.setView(yawDegrees: num("--yaw") ?? 0, pitchDegrees: num("--pitch") ?? -30, zoom: num("--zoom") ?? 1)
+            }
+            if let i = args.firstIndex(of: "--focus"), args.count > i + 1 {
+                let name = args[i + 1]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sim.station.focus(on: name) }
+            }
+        }
         // A scripted run: presses the named buttons in order, two seconds apart.
         if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
             if !simulatorOnly { openSimulator() }

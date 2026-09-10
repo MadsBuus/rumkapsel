@@ -77,6 +77,69 @@ enum Props {
         return n
     }
 
+    /// The hover pallet: a flat two-tier slab that floats a hand's breadth off the floor, with a
+    /// glowing rim and a cushion of light under it. Three rows of four crates stand on the top plate.
+    static let palletWidth = 1.8, palletDepth = 1.4, palletLift = 0.12
+
+    static func pallet(color: NSColor) -> SCNNode {
+        let n = SCNNode()
+        let deckColor = NSColor(rgb: (0.34, 0.37, 0.46))
+        let top = SCNNode(geometry: SCNBox(width: palletWidth, height: 0.05, length: palletDepth, chamferRadius: 0))
+        top.geometry!.materials = [flat(deckColor), flat(deckColor.darker(0.1)), flat(deckColor), flat(deckColor.darker(0.1)),
+                                   flat(deckColor.lighter(0.1)), flat(deckColor.darker(0.14))]
+        n.addChildNode(top)
+        // A narrower plate under it, so the silhouette is cut rather than a plain brick.
+        let under = SCNNode(geometry: SCNBox(width: palletWidth - 0.16, height: 0.05, length: palletDepth - 0.16, chamferRadius: 0))
+        under.geometry!.firstMaterial = lit(deckColor.darker(0.18))
+        under.position = v3(0, -0.05, 0)
+        n.addChildNode(under)
+        // The rim strip: the only thing that says it is under power.
+        for side in [-1.0, 1.0] {
+            let strip = SCNNode(geometry: SCNBox(width: palletWidth - 0.1, height: 0.014, length: 0.03, chamferRadius: 0))
+            strip.geometry!.firstMaterial = flat(color.lighter(0.2))
+            strip.position = v3(0, 0.02, side * (palletDepth / 2 - 0.02))
+            n.addChildNode(strip)
+        }
+        // The cushion of light it rides on.
+        let glow = SCNNode(geometry: SCNPlane(width: palletWidth - 0.1, height: palletDepth - 0.1))
+        glow.geometry!.firstMaterial = flat(color)
+        glow.opacity = 0.22
+        glow.eulerAngles.x = -.pi / 2
+        glow.position = v3(0, -palletLift + 0.01, 0)
+        n.addChildNode(glow)
+        return n
+    }
+
+    /// Where crate `index` stands on a pallet: four across, three rows back, stacked past twelve.
+    static func palletSlot(_ index: Int) -> (row: Int, column: Int, level: Int) {
+        (row: (index / 4) % 3, column: index % 4, level: index / 12)
+    }
+
+    /// That slot's place on the pallet's own top plate.
+    static func palletOffset(row: Int, column: Int, level: Int) -> SIMD3<Double> {
+        SIMD3((Double(column) - 1.5) * 0.42, 0.025 + Double(level) * 0.34, (Double(row) - 1) * 0.42)
+    }
+
+    /// A small wall panel: the storage console, where a pallet is ordered.
+    static func console(color: NSColor) -> SCNNode {
+        let n = SCNNode()
+        let shell = SCNNode(geometry: SCNBox(width: 0.34, height: 0.26, length: 0.09, chamferRadius: 0))
+        shell.geometry!.firstMaterial = lit(NSColor(rgb: (0.26, 0.28, 0.34)))
+        n.addChildNode(shell)
+        let panel = SCNNode(geometry: SCNBox(width: 0.24, height: 0.16, length: 0.02, chamferRadius: 0))
+        panel.geometry!.firstMaterial = flat(color)
+        panel.position = v3(0, 0.02, 0.055)
+        panel.name = "panel"
+        n.addChildNode(panel)
+        for k in 0..<3 {
+            let key = SCNNode(geometry: SCNBox(width: 0.05, height: 0.03, length: 0.02, chamferRadius: 0))
+            key.geometry!.firstMaterial = flat(NSColor(rgb: (0.5, 0.53, 0.6)))
+            key.position = v3(-0.07 + Double(k) * 0.07, -0.09, 0.05)
+            n.addChildNode(key)
+        }
+        return n
+    }
+
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
         // A production rocket grows with what it will carry: small for a couple of boxes, big for a dozen.

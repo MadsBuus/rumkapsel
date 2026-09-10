@@ -127,3 +127,51 @@ final class Rocket {
     var isSteaming: Bool { if case .steam = stage { return true }; return false }
     var isLaunching: Bool { if case .launch = stage { return true }; return false }
 }
+
+/// One station's hover pallet. It has no command of its own: the dispatcher's does the talking, and
+/// the pallet carries the crates, bobs where it stands and floats them on and off by magic.
+final class Pallet {
+    let station: String
+    let repo: String
+    let number: Int
+    let node: SCNNode
+    /// Which minion is running the errand.
+    var dispatcher: String
+    /// Where it hovers, in the station's own coordinates, and the phase of its bob.
+    var spot: SIMD2<Double>
+    let bobPhase = Double.random(in: 0..<6.28)
+    /// Crates still to lift, top of each stack first, and where each one goes.
+    var toLoad: [(crate: CrateRef, node: SCNNode, slot: StationTruth.PalletSlot)] = []
+    /// What stands on it now, in the order it was loaded.
+    var aboard: [(crate: CrateRef, node: SCNNode)] = []
+    /// The crate in the air right now, if any. One at a time, and the wand glows while it flies.
+    var flight: Flight?
+    /// When the pallet faded in, so its opacity can ride the station's own clock.
+    var bornAt = 0.0
+
+    /// A crate on its way through the air, moved by the tick rather than by an action, so it lands
+    /// whether or not anything is drawing frames.
+    struct Flight {
+        let node: SCNNode
+        let from: SIMD3<Double>, to: SIMD3<Double>
+        let fromYaw: Double, toYaw: Double
+        let at: Double
+        let seconds: Double
+        let land: () -> Void
+    }
+    /// The clock the next crate leaves the ground.
+    var nextAt = 0.0
+    /// Asked for while it was still loading: push it out, or empty it back into storage.
+    var wantsPush = false
+    var wantsBack = false
+    /// Where it is in its errand, mirrored into station truth.
+    var state: StationTruth.Pallet.State = .arriving
+
+    init(station: String, repo: String, number: Int, node: SCNNode, dispatcher: String, spot: SIMD2<Double>) {
+        self.station = station; self.repo = repo; self.number = number
+        self.node = node; self.dispatcher = dispatcher; self.spot = spot
+    }
+
+    var isEmpty: Bool { aboard.isEmpty && toLoad.isEmpty && flight == nil }
+    var isSettled: Bool { toLoad.isEmpty && flight == nil }
+}

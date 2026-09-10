@@ -37,6 +37,11 @@ struct ReleasePR: Equatable {
     let labels: [String]
     let mergedAt: Date?
     var isProduction: Bool { base == ConfigStore.shared.current.productionBranch }
+    /// A release into the staging branch: what the pallet carries crates for.
+    var isStaging: Bool {
+        let staging = ConfigStore.shared.current.stagingBranch
+        return !staging.isEmpty && base == staging
+    }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
 }
 
@@ -283,6 +288,12 @@ final class GitHubResolver {
     func openReleases(repoRoot: String) -> [ReleasePR]? {
         lock.lock(); defer { lock.unlock() }
         return releases[repoRoot]?.0.filter { $0.state == "OPEN" }
+    }
+
+    /// Every release pull request a repository has answered with, whatever its state.
+    func releases(repoRoot: String) -> [ReleasePR]? {
+        lock.lock(); defer { lock.unlock() }
+        return releases[repoRoot]?.0
     }
 
     /// Release pull requests that merged since the last poll, each returned once.

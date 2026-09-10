@@ -136,6 +136,15 @@ final class Station {
     var deckCells: [Cell] { yardBlock(1) }
     var padCells: [Cell] { yardBlock(2) }
     var padCenter: SIMD2<Double> { yardCenter(2) }
+    /// The storage row nearest the deck. Crates stack from the far wall, so this row is the pallet's.
+    var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }
+    /// Where a hover pallet stands in storage: the near row, on the column of a deck doorway.
+    var palletCell: Cell { Cell(x: -spineHalfLength - 3, y: storageNearRow) }
+    /// The console on the wall by the storage doorway: the cell it hangs in, and which way it faces.
+    var storageConsole: (cell: Cell, facing: SIMD2<Double>) {
+        (Cell(x: -spineHalfLength - 1, y: storageNearRow), SIMD2(0, -1))
+    }
+
     var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
     var storedBoxes: Int { stored.values.reduce(0, +) }
     var staged: [String: Int] = [:]          // boxes on the test deck, per repo

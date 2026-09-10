@@ -309,6 +309,11 @@ final class World {
     /// Releases already announced, so an open one on the pad is only said once: "station|repo|number|untested".
     private var announcedReleases: Set<String> = []
 
+    /// The staging release each repository is known to have, by "station|repo": its number and state.
+    private var stagingPRs: [String: (number: Int, state: String)] = [:]
+    /// Repositories whose releases have answered once. The first answer is quiet: whatever it holds already existed.
+    private var stagingSeen: Set<String> = []
+
     /// Whether the deck, rather than storage, is what a rocket loads from.
     private var stagingIsDeck: Bool { !ConfigStore.shared.current.stagingBranch.isEmpty }
 
@@ -370,6 +375,37 @@ final class World {
             let cleared = pr.isProduction && !pr.untested
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr))
+        }
+        return events + applyStaging()
+    }
+
+    /// The staging release of each repository, diffed against the last answer: opened, merged, or
+    /// closed without merging. One open staging release per repository at a time, which is what the
+    /// one pallet per station is for.
+    private func applyStaging() -> [WorldEvent] {
+        guard !ConfigStore.shared.current.stagingBranch.isEmpty else { return [] }
+        var events: [WorldEvent] = []
+        for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
+            guard fleet.stations[info.station] != nil, let all = github.releases(repoRoot: root) else { continue }
+            let key = info.station + "|" + info.repo
+            let staging = all.filter(\.isStaging)
+            let open = staging.first { $0.state == "OPEN" }
+            guard stagingSeen.contains(key) else {
+                stagingSeen.insert(key)
+                if let open { stagingPRs[key] = (open.number, "OPEN") }
+                continue
+            }
+            if let open, stagingPRs[key]?.number != open.number {
+                stagingPRs[key] = (open.number, "OPEN")
+                events.append(.stagingOpened(station: info.station, repo: info.repo, number: open.number))
+                continue
+            }
+            guard let known = stagingPRs[key], known.state == "OPEN",
+                  let pr = staging.first(where: { $0.number == known.number }), pr.state != "OPEN" else { continue }
+            stagingPRs[key] = (pr.number, pr.state)
+            let merged = pr.state == "MERGED"
+            events.append(merged ? .stagingMerged(station: info.station, repo: info.repo, number: pr.number)
+                                 : .stagingClosed(station: info.station, repo: info.repo, number: pr.number))
         }
         return events
     }
@@ -633,6 +669,8 @@ final class World {
         for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
             var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
             if area == "storage" { numbers += truth.freshLanded(station: station.name, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
+            // A crate on the pallet stands on the pallet: the rows are not to draw it again.
+            numbers = numbers.filter { !truth.isOnPallet(station: station.name, repo: repo, number: $0) }
             if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
             var placed: [Int: Int] = [:]
             let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
@@ -674,6 +712,10 @@ final class World {
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) -> YardChange {
         let k = station.name + "|" + repo
         guard truth.inFlightToDeck(k) == 0 else { return .waiting }   // let the carriers land first
+        // The pallet is the hand carry for this repository from the moment one is ordered: nothing
+        // else moves its crates until it has been emptied.
+        guard truth.pallets[station.name]?.repo != repo,
+              truth.palletQueue[station.name]?.contains(where: { $0.repo == repo }) != true else { return .waiting }
         let shownStorage = station.stored[repo] ?? 0, shownDeck = station.staged[repo] ?? 0
         let fresh = truth.freshLanded(station: station.name, repo: repo, counted: c.storageNumbers)
         let toDeck = min(c.deck - shownDeck, shownStorage)
@@ -759,6 +801,29 @@ final class World {
             out.append(command)
         }
         return out
+    }
+
+    /// What a pallet takes: every crate of a repository standing in storage, top of each stack first,
+    /// twelve at most. Anything already on someone's arms stays where it is.
+    func palletCargo(station: Station, repo: String) -> [(crate: CrateRef, from: Spot)] {
+        yardLayout(station: station, area: "storage").filter { $0.repo == repo }
+            .sorted { ($0.level, $0.index) > ($1.level, $1.index) }
+            .compactMap { slot in
+                let crate = CrateRef(station: station.name, repo: repo, number: slot.number)
+                guard !truth.isCarried(crate) else { return nil }
+                return (crate, yardSpot(.storage, station: station, repo: repo, slot: slot))
+            }
+            .prefix(12).map { $0 }
+    }
+
+    /// Where a crate coming off the pallet lands in storage: the next free place on the repository's
+    /// stacks, the same slot a merged office's package would be given.
+    func storageSlot(station: Station, repo: String, number: Int) -> Spot {
+        let layout = yardLayout(station: station, area: "storage", extra: (repo, number))
+        guard let slot = layout.last(where: { $0.repo == repo && $0.number == number }) ?? layout.last(where: { $0.repo == repo }) else {
+            return floorSpot(.storage, station: station, repo: repo, cell: station.storageCells.first ?? Cell(x: 0, y: 0))
+        }
+        return yardSpot(.storage, station: station, repo: repo, slot: grounded(slot, in: layout, station: station.name))
     }
 
     /// A merged office's package, from the office floor to the slot storage will give it: the next free
