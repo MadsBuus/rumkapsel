@@ -2771,6 +2771,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var out: [YardSlot] = []
         for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
             var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
+            if area == "storage" { numbers += freshLanded(station: station, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
             if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
             var placed: [Int: Int] = [:]
             let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
@@ -2797,6 +2798,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private var stagingInFlight: [String: Int] = [:]   // "station|repo" -> crates on their way from storage to the deck
+    /// Crates set down in storage by hand that the source has not counted yet: kept until it does.
+    private var landed: [String: (repo: String, number: Int, at: Date)] = [:]
+
+    /// Numbers of hand-landed crates the source still lacks for a repository.
+    private func freshLanded(station: Station, repo: String, counted: [Int]) -> [Int] {
+        let now = Date()
+        for (k, l) in landed where now.timeIntervalSince(l.at) > 15 * 60 || counted.contains(l.number) { landed[k] = nil }
+        return landed.filter { $0.key.hasPrefix(station.name + "|") && $0.value.repo == repo }.map(\.value.number).sorted()
+    }
 
     /// Brings the yard in line with GitHub. Crates the board says went to staging are carried across
     /// from storage; counts snap only for what cannot be carried, and never for a deck that is about to
@@ -2805,13 +2815,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let k = station.name + "|" + repo
         guard (stagingInFlight[k] ?? 0) == 0 else { return }   // let the carriers land first
         let shownStorage = station.stored[repo] ?? 0, shownDeck = station.staged[repo] ?? 0
+        let fresh = freshLanded(station: station, repo: repo, counted: c.storageNumbers)
         let toDeck = min(c.deck - shownDeck, shownStorage)
         if toDeck > 0, station.hasPad, !station.deckCells.isEmpty, !ConfigStore.shared.current.stagingBranch.isEmpty {
             stageCargo(station: station, repo: repo, count: toDeck)
             return
         }
         let launching = pendingLaunch[k] != nil || loadedRockets[k] != nil || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
-        station.stored[repo] = c.storage
+        station.stored[repo] = c.storage + fresh.count
         if !(launching && c.deck < shownDeck) { station.staged[repo] = c.deck }
     }
 
@@ -2832,6 +2843,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         pkg.name = "haul"
         addHaul(station: station, box: pkg, from: fromCell, to: dest, drop: drop, roomKey: key) { [weak self] in
             guard let self else { return }
+            landed["\(station.name)|\(repo)|\(number)"] = (repo, number, Date())   // ours to keep until GitHub counts it
             station.stored[repo, default: 0] += 1
             pkg.removeFromParentNode()
             rebuildMarkers()
