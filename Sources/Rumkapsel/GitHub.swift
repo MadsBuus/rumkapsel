@@ -53,6 +53,18 @@ struct FeedEvent: Equatable, Codable {
     let detail: String      // review state, commit count, etc.
 }
 
+/// One issue on the team's GitHub project, with where the Status field says it is.
+struct ProjectItem: Equatable, Codable {
+    let repo: String          // repository name without the owner
+    let number: Int
+    let title: String
+    let status: String
+    let assignees: [String]
+    let prURLs: [String]
+    let url: String
+    var updatedAt: Date? = nil
+}
+
 struct OpenPR: Equatable, Codable {
     let number: Int
     let title: String
@@ -82,6 +94,12 @@ final class GitHubResolver {
 
     /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
     struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
+    struct ProjectKnowledge: Codable { var owner: String; var number: Int; var items: [ProjectItem]; var at: Date }
+    func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? {
+        lock.lock(); defer { lock.unlock() }
+        guard let p = project else { return nil }
+        return ProjectKnowledge(owner: owner, number: number, items: p.0, at: p.1)
+    }
 
     func knowledge(repoRoot: String, repo: String) -> Knowledge? {
         lock.lock(); defer { lock.unlock() }
@@ -142,12 +160,96 @@ final class GitHubResolver {
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
     /// Packages waiting per repo: merged into trunk but not yet on staging, and on staging but not yet in production.
-    struct Cargo: Equatable { var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int] }
+    struct Cargo: Equatable { var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = [] }
     private var cargo: [String: Cargo] = [:]
 
+    /// What waits where for a repository: from the project board when one is configured, else from git history.
     func cargo(repoRoot: String) -> Cargo? {
         lock.lock(); defer { lock.unlock() }
+        if let items = project?.0, let owner = owners[repoRoot] {
+            let repo = String(owner.split(separator: "/").last ?? "")
+            let st = ConfigStore.shared.current.statuses
+            let mine = items.filter { $0.repo == repo }
+            guard !mine.isEmpty else { return cargo[repoRoot] }   // a repository not on the board keeps the git-history yard
+            let storage = mine.filter { $0.status == st.storage }.map(\.number).sorted()
+            let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
+            let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
+            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared)
+        }
         return cargo[repoRoot]
+    }
+
+    // MARK: project board
+
+    private var project: ([ProjectItem], Date)?
+    private var projectMoves: [(item: ProjectItem, from: String?)] = []
+
+    func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
+    func projectFetchedAt() -> Date? { lock.lock(); defer { lock.unlock() }; return project?.1 }
+
+    /// Items whose Status changed since the previous read, each returned once.
+    func takeProjectMoves() -> [(item: ProjectItem, from: String?)] {
+        lock.lock(); defer { lock.unlock() }
+        let out = projectMoves; projectMoves = []; return out
+    }
+
+    /// One read of the whole board: every issue, its status, its assignees and linked pull requests.
+    func refreshProject(owner: String, number: Int) {
+        lock.lock()
+        if Date() < holdUntil { lock.unlock(); return }
+        if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if inFlight.contains("project") { lock.unlock(); return }
+        inFlight.insert("project")
+        lock.unlock()
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove("project"); lock.unlock() }
+            // GraphQL rather than `gh project item-list`: it carries when each item last moved.
+            let iso = ISO8601DateFormatter()
+            var items: [ProjectItem] = []
+            var cursor = "null"
+            for _ in 0..<6 {
+                let query = """
+                { organization(login: "\(owner)") { projectV2(number: \(number)) { items(first: 100, after: \(cursor)) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { updatedAt
+                    fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+                    content { ... on Issue { number title url repository { name } assignees(first: 5) { nodes { login } }
+                      closedByPullRequestsReferences(first: 5) { nodes { url } } } } } } } } }
+                """
+                guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
+                      let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
+                      let itemsObj = ((obj["data"] as? [String: Any])?["organization"] as? [String: Any]).flatMap({ $0["projectV2"] as? [String: Any] })?["items"] as? [String: Any],
+                      let nodes = itemsObj["nodes"] as? [[String: Any]] else { return }
+                for o in nodes {
+                    guard let content = o["content"] as? [String: Any], let n = content["number"] as? Int,
+                          let repo = (content["repository"] as? [String: Any])?["name"] as? String else { continue }
+                    let status = (o["fieldValueByName"] as? [String: Any])?["name"] as? String ?? ""
+                    let assignees = ((content["assignees"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
+                    let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }
+                    items.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
+                                             prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:))))
+                }
+                let page = itemsObj["pageInfo"] as? [String: Any]
+                guard page?["hasNextPage"] as? Bool == true, let end = page?["endCursor"] as? String else { break }
+                cursor = "\"\(end)\""
+            }
+            adoptProject(items, at: Date())
+        }
+    }
+
+    /// Takes a board read, ours or a peer's, when it is fresher than what we hold; notes every move.
+    func adoptProject(_ items: [ProjectItem], at: Date) {
+        lock.lock()
+        guard at > (project?.1 ?? .distantPast) else { lock.unlock(); return }
+        let previous = project?.0
+        if let previous {
+            let before = Dictionary(previous.map { ("\($0.repo)#\($0.number)", $0.status) }, uniquingKeysWith: { a, _ in a })
+            for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
+        }
+        let changed = previous != items
+        project = (items, at)
+        lock.unlock()
+        if changed { DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []

@@ -19,6 +19,7 @@ struct PeerSnapshot: Codable {
     var minions: [Minion]
     /// Parsed GitHub answers for the shared repositories, sent now and then so one poll serves the room.
     var github: [GitHubResolver.Knowledge]?
+    var project: GitHubResolver.ProjectKnowledge?
     static let current = 2
 }
 

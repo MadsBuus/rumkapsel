@@ -499,6 +499,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
     private var pushedByPeer: Set<String> = []
     private var fadeIn: Set<String> = []
+    private var held: [String: Date] = [:]        // offices a peer left behind, held for a day
     private var roomCreated: [String: Date] = [:]
     private let peerRoot = SCNNode()
     private var peerMinions: [String: (node: SCNNode, target: SIMD3<Double>)] = [:]
@@ -1375,7 +1376,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     for k in 0..<min(n, 48) {
                         let size = 0.38
                         let prNumber = k < numbers.count ? numbers[k] : 0
-                        let pkg = Props.package(color: c.lighter(0.1), band: purple, size: size)
+                        let cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(prNumber) ?? false)
+                        let pkg = Props.package(color: c.lighter(0.1), band: cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: size)
                         let cell = sorted[(i / 2) % sorted.count]
                         let level = Double(i / (sorted.count * 2)) * 0.34
                         let side = Double(i % 2) * 0.5 - 0.25
@@ -1736,6 +1738,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let parts = name.split(separator: "|").map(String.init)
         guard parts.count == 3, let n = Int(parts[2]), n > 0 else { return }
         let repo = parts[1]
+        if let item = github.projectItems()?.first(where: { $0.repo == repo && $0.number == n }), let url = URL(string: item.url) {
+            DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            return
+        }
         guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root),
               let url = URL(string: "https://github.com/\(owner)/pull/\(n)") else { return }
         DispatchQueue.main.async { NSWorkspace.shared.open(url) }
@@ -1964,7 +1970,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
     /// detaches, sinks and fades. The model drops the room at once; only the visuals linger.
-    private func archive(station: Station, room: Room, announce: Bool) {
+    private func archive(station: Station, room: Room, announce: Bool, reason: String = "") {
         let key = roomKey(station, room)
         cancelHauls(roomKey: key)
         for m in minions.values where m.station == station.name && m.home.key == room.key { clearPyramids(m) }
@@ -1991,7 +1997,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     m.nextWanderAt = clock + 4
                 }
             }
-            logEvent("archived: \(room.name)")
+            logEvent("archived: \(room.name)" + (reason.isEmpty ? "" : " · \(reason)"))
         }
         roomTiles[key] = nil
         station.removeRoom(key: room.key)
@@ -2140,10 +2146,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
                 if merged, station.hasPad, hauledAt[roomKey(station, room)] == nil { haulMergedBoxes(station: station, room: room) }
                 let cleared = merged && (!station.hasPad || (hauledAt[roomKey(station, room)] != nil && !hauls.contains { $0.roomKey == roomKey(station, room) }))
-                // Held for a teammate: nobody here, nothing on GitHub, and no word from a peer for a day.
-                let orphan = room.worktree == nil && crewRoomInfo[roomKey(station, room)] == nil && now.timeIntervalSince(room.lastActive) > StationController.holdWindow
+                // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
+                // An office a peer left behind is held for a day so their return does not move it.
+                let key = roomKey(station, room)
+                let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && crewLoaded
+                    && (cfg.project == nil || github.projectItems() != nil)
+                let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > StationController.holdWindow } ?? true)
                 if gone || cleared || orphan {
-                    archive(station: station, room: room, announce: !firstRun)
+                    archive(station: station, room: room, announce: !firstRun, reason: gone ? "worktree gone" : cleared ? "merged and hauled" : "nobody's")
                     changed = true
                 }
             }
@@ -2165,10 +2175,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         github.intervalMinutes = cfg.githubMinutes
+        if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }
+        handleProjectMoves()
         for change in github.takeStateChanges() {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
             logEvent("\(who): \(change.pr.summary)")
@@ -2369,10 +2381,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy)
         }
         var knowledge: [GitHubResolver.Knowledge]?
+        var board: GitHubResolver.ProjectKnowledge?
         if withGitHub {
             knowledge = repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
+            if let p = cfg.project { board = github.projectKnowledge(owner: p.owner, number: p.number) }
         }
-        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge)
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board)
     }
 
     /// A peer's claim lands on our work station: its offices get the same key here, adopting the
@@ -2450,7 +2464,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             peerMinions[id]?.node.eulerAngles.x = m.asleep ? -.pi / 2 : 0
         }
-        // Their GitHub answers for repositories we also watch save us a poll.
+        // Their GitHub answers for repositories we also watch save us a poll; same for the board.
+        if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number { github.adoptProject(b.items, at: b.at); handleProjectMoves() }
         for k in snap.github ?? [] where cfg.shared(repo: k.repo) {
             for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.adopt(k, repoRoot: root) }
         }
@@ -2464,7 +2479,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for (id, pm) in peerMinions where id.hasPrefix(name + "/") { pm.node.removeFromParentNode(); peerMinions[id] = nil }
         for (key, claims) in peerOffices where claims[name] != nil {
             peerOffices[key]?[name] = nil
-            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil }
+            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil; held[key] = Date() }
         }
         logEvent("\(name) is out of range")
         rebuildMarkers()
@@ -2639,7 +2654,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard cfg.showCrew else {
             guard !crewRoomInfo.isEmpty || minions.values.contains(where: \.isCrew) else { return }
             for m in minions.values where m.isCrew { despawn(m) }
-            for room in Array(station.rooms.values) where isRemoteOnly(station, room) { archive(station: station, room: room, announce: false) }
+            for room in Array(station.rooms.values) where isRemoteOnly(station, room) { archive(station: station, room: room, announce: false, reason: "crew hidden") }
             crewRoomInfo = [:]; crewBoxes = [:]
             rebuildStatic()
             return
@@ -2651,10 +2666,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !StationController.trunkBranches.contains(pr.branch) { open.append((info.repo, pr)) }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
-        guard !open.isEmpty || !feed.isEmpty else { return }
+        // Issues the board says are in development, assigned to someone else: offices too, even before a pull request.
+        var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
+        if cfg.project != nil, let items = github.projectItems() {
+            let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
+            // Only issues someone touched lately: the column keeps things long after work stopped.
+            let recent = Date().addingTimeInterval(-14 * 24 * 3600)
+            for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) && (it.updatedAt ?? .distantPast) > recent {
+                guard let login = it.assignees.first, login != me else { continue }
+                if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == "task:\(it.repo)#\(it.number)" }) { continue }
+                boardOffices.append((it.repo, it, login))
+            }
+        }
+        guard !open.isEmpty || !feed.isEmpty || !boardOffices.isEmpty else { return }
 
         // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
-        let liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
+        var liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
+        liveKeys.formUnion(boardOffices.map { "task:\($0.repo)#\($0.item.number)" })
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
             let key = sk + room.key
             let author = crewRoomInfo[key]?.author ?? ""
@@ -2667,7 +2695,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             guard !station.hasPad || !hauls.contains(where: { $0.roomKey == key }) else { continue }
             crewRoomInfo[key] = nil; crewBoxes[key] = nil
-            archive(station: station, room: room, announce: crewLoaded)
+            archive(station: station, room: room, announce: crewLoaded, reason: "pull request closed")
             changed = true
         }
         var pendingDeliveries: [(login: String, key: String)] = []
@@ -2684,6 +2712,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
             crewBoxes[sk + key] = (1 + pushes, "OPEN", NSColor(fleet.color(forRepo: repo)))
         }
+        for (repo, it, login) in boardOffices where !isKicked(sk + "task:\(repo)#\(it.number)") {
+            let key = "task:\(repo)#\(it.number)"
+            let name = crewName(login) + " · #\(it.number) " + String(it.title.prefix(22))
+            if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
+            if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
+                changed = true
+                if crewLoaded { undelivered.insert(sk + key); pendingDeliveries.append((login, key)); logEvent("\(crewName(login)) started #\(it.number) \(it.title.prefix(40))") }
+            }
+            let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
+            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: "gh-\(it.number)", prNumber: prNumber, title: it.title, author: login, url: it.url, state: "OPEN", last: now)
+            crewBoxes[sk + key] = (1, "NONE", NSColor(fleet.color(forRepo: repo)))
+        }
         let botCount = open.filter(\.pr.isBot).count
         if botCount > 0 {
             if station.ensureRoom(key: "kind:bots", name: "bots", repo: nil, color: RGB(r: 0.36, g: 0.40, b: 0.50), lastActive: .distantFuture, shape: Station.rect(2, 2)) { changed = true }
@@ -2692,6 +2732,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         // One grey minion per teammate with an open PR or recent activity.
         var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
+        logins.formUnion(boardOffices.map(\.login))
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
         seenLogins.formUnion(feed.filter { !$0.e.isBot }.map(\.e.actor)); seenLogins.formUnion(logins)
         for login in logins where minions["crew:" + login] == nil {
@@ -2755,9 +2796,47 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if repoRoots.filter({ $0.value.station == "work" }).allSatisfy({ github.teamOpenPRs(repoRoot: $0.key) != nil }) { crewLoaded = true }
     }
 
+    /// Status moves on the board are the station's cues: a crate to the deck, a tick from QA, a launch.
+    private func handleProjectMoves() {
+        let st = ConfigStore.shared.current.statuses
+        var staged: Set<String> = []
+        for (item, from) in github.takeProjectMoves() {
+            guard let info = repoRoots.values.first(where: { $0.repo == item.repo }), let station = fleet.stations[info.station] else { continue }
+            let label = "#\(item.number) \(item.title.prefix(36))"
+            switch item.status {
+            case st.deck where from == st.storage || from == nil:
+                if !staged.contains(item.repo) { staged.insert(item.repo); stageCargo(station: station, repo: item.repo) }
+            case st.cleared:
+                logEvent("\(label): passed QA, ready to ship")
+                if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
+                    let tick = SCNNode(geometry: SCNSphere(radius: 0.08))
+                    tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
+                    tick.position = v3(crate.position.x, crate.position.y + 0.5, crate.position.z)
+                    propRoot.addChildNode(tick)
+                    tick.runAction(.sequence([.group([.moveBy(x: 0, y: 0.6, z: 0, duration: 1.0), .sequence([.wait(duration: 0.6), .fadeOut(duration: 0.4)])]), .removeFromParentNode()]))
+                    drone.ping(seed: item.number)
+                }
+            case st.shipped where from != nil:
+                logEvent("\(label): shipped")
+            case st.storage where from == st.development:
+                logEvent("\(label): merged, ready for staging")
+            case st.development where from != nil && from != st.development:
+                logEvent("\(label): in development")
+            default: break
+            }
+        }
+        if !staged.isEmpty { rebuildMarkers() }
+    }
+
     /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
     private func assignTester(station: Station, free: [Minion]) {
-        let cargoOnDeck = station.staged.values.reduce(0, +) > 0
+        var cargoOnDeck = station.staged.values.reduce(0, +) > 0
+        if ConfigStore.shared.current.project != nil {
+            // With a board, QA is done once every crate on the deck is marked ready to ship.
+            cargoOnDeck = repoRoots.contains { root, info in
+                info.station == station.name && (github.cargo(repoRoot: root).map { $0.deckNumbers.count > $0.clearedNumbers.count } ?? false)
+            }
+        }
         let cleared = loadedRockets.keys.contains { $0.hasPrefix(station.name + "|") }
         let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
         let current = minions.values.first { $0.station == station.name && $0.isTester }

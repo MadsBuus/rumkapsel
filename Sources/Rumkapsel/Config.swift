@@ -19,6 +19,25 @@ struct AppConfig: Codable, Equatable {
     var productionBranch: String = "production"
     var shareOnLAN: Bool = false
     var shareName: String = NSUserName()
+    // A GitHub project whose Status field tracks issues through the pipeline. Optional fields, so
+    // config files written before they existed still decode.
+    var projectOwner: String?
+    var projectNumber: Int?
+    var projectStatuses: ProjectStatuses?
+
+    /// The project's Status names for each stage of the station.
+    struct ProjectStatuses: Codable, Equatable {
+        var development = "In Development"      // a branch exists: an office
+        var storage = "Ready for staging"       // merged to trunk: a crate in storage
+        var deck = "QA"                         // on staging: a crate on the test deck
+        var cleared = "Ready to ship"           // QA passed: a ticked crate on the deck
+        var shipped = "Shipped"                 // in production: launched
+    }
+    var project: (owner: String, number: Int)? {
+        guard let o = projectOwner, !o.isEmpty, let n = projectNumber, n > 0 else { return nil }
+        return (o, n)
+    }
+    var statuses: ProjectStatuses { projectStatuses ?? ProjectStatuses() }
 
     static var url: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
@@ -27,7 +46,11 @@ struct AppConfig: Codable, Equatable {
     }
 
     static func load() -> AppConfig {
-        if let data = try? Data(contentsOf: url), let c = try? JSONDecoder().decode(AppConfig.self, from: data) { return c }
+        if let data = try? Data(contentsOf: url), var c = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            // Configs from before the board existed: Tattoodo's own board, once.
+            if c.projectOwner == nil, c.projectNumber == nil, c.workOwners == ["Tattoodo"] { c.projectOwner = "Tattoodo"; c.projectNumber = 4; c.save() }
+            return c
+        }
         var c = AppConfig()
         let home = FileManager.default.homeDirectoryForCurrentUser
         c.stationRule = FileManager.default.fileExists(atPath: home.appendingPathComponent("conductor/workspaces").path) ? "conductor" : "none"
@@ -35,6 +58,7 @@ struct AppConfig: Codable, Equatable {
         let crewURL = url.deletingLastPathComponent().appendingPathComponent("crew.json")
         if let data = try? Data(contentsOf: crewURL), let names = try? JSONDecoder().decode([String: String].self, from: data) { c.crewNames = names }
         if c.crewNames.isEmpty { c.crewNames = ["donlion": "Leo", "johanplenge": "Johan", "skogge": "Chris", "MadsBuus": "Mads"] }
+        if c.workOwners == ["Tattoodo"] { c.projectOwner = "Tattoodo"; c.projectNumber = 4 }
         c.save()
         return c
     }

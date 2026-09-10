@@ -75,8 +75,28 @@ struct SettingsView: View {
                 GridRow { Text("Staging branch"); TextField("optional", text: $model.config.stagingBranch).frame(width: 200) }
                 GridRow { Text("Production branch"); TextField("production", text: $model.config.productionBranch).frame(width: 200) }
             }
+            Divider()
+            Text("GitHub project board").font(.headline)
+            Text("With a project whose Status field follows issues through the pipeline, the yard is filled from the board instead of git history: one read for every repository. Leave the number empty to go without.")
+                .font(.caption).foregroundStyle(.secondary)
+            Grid(alignment: .leading, verticalSpacing: 8) {
+                GridRow {
+                    Text("Organisation"); TextField("owner", text: Binding(get: { model.config.projectOwner ?? "" }, set: { model.config.projectOwner = $0.isEmpty ? nil : $0 })).frame(width: 140)
+                    Text("Project #"); TextField("4", text: Binding(get: { model.config.projectNumber.map(String.init) ?? "" }, set: { model.config.projectNumber = Int($0) })).frame(width: 60)
+                }
+                GridRow { Text("In development"); statusField(\.development) ; Text("Merged to trunk"); statusField(\.storage) }
+                GridRow { Text("On staging"); statusField(\.deck); Text("QA passed"); statusField(\.cleared) }
+                GridRow { Text("Shipped"); statusField(\.shipped) }
+            }
         }
         .onChange(of: model.config) { _ in model.commit() }
+    }
+
+    private func statusField(_ path: WritableKeyPath<AppConfig.ProjectStatuses, String>) -> some View {
+        TextField("", text: Binding(
+            get: { model.config.statuses[keyPath: path] },
+            set: { var s = model.config.statuses; s[keyPath: path] = $0; model.config.projectStatuses = s }))
+            .frame(width: 140)
     }
 
     private var repositories: some View {
