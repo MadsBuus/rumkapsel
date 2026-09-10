@@ -56,6 +56,8 @@ since real stations mandate both.
   the deck". Hover it and it tells you.
 - An order is taken over only at a step where it can be: while walking, yes; mid-lift, no. A new
   order does not reset an old one; it re-plans from where the minion stands.
+- A change of orders is visible: the minion stops, stands a beat with its head up, as if wondering,
+  then goes. The same beat everywhere. A message from you cuts the beat short and it hurries.
 - Minions walk around things, never through, and stand an arm's length from what they work on,
   facing it. Two never share a couch, a bed, a shower or a crate.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
