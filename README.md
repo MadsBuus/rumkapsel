@@ -53,6 +53,12 @@ With sharing on, rumkapsels on the same network merge their work stations into o
 
 `--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits.
 
+`--simulator` opens the simulator window on its own: a real station with the scanner, GitHub and the
+network switched off, driven by a panel of buttons that write made-up facts through the same entry
+points production uses. `--simulate "Open PR,PR merged"` presses those buttons in order, two seconds
+apart, and pairs with `--snapshot` for a scripted check; the whole event and command log goes to
+stderr when the snapshot is written.
+
 ## A homage
 
 This exists because of [rymdkapsel](https://rymdkapsel.com), Martin Jonasson's (Grapefrukt) small, perfect space station game.

@@ -79,6 +79,11 @@ struct OpenPR: Equatable, Codable {
 final class GitHubResolver {
     /// Poll interval for pull requests, releases and open PRs; the feed stays at two minutes.
     var intervalMinutes = 5
+    /// Frozen: every refresh is a no-op and nothing is written to disk. Only the simulator sets it,
+    /// and only a frozen resolver accepts injected answers.
+    var frozen = false
+    /// Set while the simulator writes a batch of answers, so one push wakes the scene once.
+    var injectSilently = false
     private var interval: TimeInterval { Double(intervalMinutes) * 60 }
     private var openPRs: [String: ([OpenPR], Date)] = [:]
 
@@ -126,6 +131,7 @@ final class GitHubResolver {
     }
 
     func refreshOpenPRs(repoRoot: String) {
+        if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
         if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
@@ -195,6 +201,7 @@ final class GitHubResolver {
         return (b.items, b.at)
     }
     private func saveBoard(_ items: [ProjectItem], at: Date) {
+        if frozen { return }
         if let data = try? JSONEncoder().encode(SavedBoard(items: items, at: at)) { try? data.write(to: GitHubResolver.boardURL) }
     }
 
@@ -209,6 +216,7 @@ final class GitHubResolver {
 
     /// One read of the whole board: every issue, its status, its assignees and linked pull requests.
     func refreshProject(owner: String, number: Int) {
+        if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
         if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
@@ -303,6 +311,7 @@ final class GitHubResolver {
 
     /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Every two minutes.
     func refreshFeed(repoRoot: String) {
+        if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
         if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < 120 { lock.unlock(); return }
@@ -400,6 +409,7 @@ final class GitHubResolver {
     }
 
     func refreshReleases(repoRoot: String) {
+        if frozen { return }
         lock.lock()
         if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
@@ -528,6 +538,7 @@ final class GitHubResolver {
     }
 
     func refreshCommits(worktree: String) {
+        if frozen { return }
         lock.lock()
         if let (_, at) = commits[worktree], Date().timeIntervalSince(at) < 60 { lock.unlock(); return }
         if inFlight.contains("c:" + worktree) { lock.unlock(); return }
@@ -572,6 +583,7 @@ final class GitHubResolver {
 
     /// Refreshes stale entries; each branch at most once every two minutes.
     func refresh(branch: String, repoRoot: String) {
+        if frozen { return }
         let key = repoRoot + "@" + branch
         lock.lock()
         if let (_, at) = pulls[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
@@ -643,5 +655,96 @@ final class GitHubResolver {
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         return p.terminationStatus == 0 ? data : nil
+    }
+}
+
+// MARK: injection
+
+/// What the simulator writes into the resolver in place of an answer from GitHub. Every one of these
+/// is a no-op unless `frozen` is set, so nothing outside the simulator can push facts in here.
+extension GitHubResolver {
+    /// Forgets every cached answer, including the board read that came off disk at launch.
+    func simulationReset() {
+        guard frozen else { return }
+        lock.lock()
+        openPRs = [:]; feeds = [:]; releases = [:]; cargo = [:]; pulls = [:]; commits = [:]
+        pushed = [:]; dirty = [:]; owners = [:]; project = nil
+        projectMoves = []; pendingLaunches = []; stateChanges = []; me = nil
+        lock.unlock()
+    }
+
+    func inject(login: String) {
+        guard frozen else { return }
+        lock.lock(); me = login; lock.unlock()
+    }
+
+    func inject(owner nameWithOwner: String, for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); owners[repoRoot] = nameWithOwner; lock.unlock()
+    }
+
+    func inject(openPRs prs: [OpenPR], for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); openPRs[repoRoot] = (prs, Date()); lock.unlock()
+        notify()
+    }
+
+    /// A branch's pull request. `changed` puts it in the queue `takeStateChanges` drains, the way a
+    /// real poll would when the state moved.
+    func inject(pull pr: PullRequest?, for branch: String, repoRoot: String, changed: Bool = true) {
+        guard frozen else { return }
+        lock.lock()
+        pulls[repoRoot + "@" + branch] = (pr, Date())
+        if changed, let pr { stateChanges.append((branch, pr)) }
+        lock.unlock()
+        notify()
+    }
+
+    func inject(feed events: [FeedEvent], for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); feeds[repoRoot] = (events, Date()); lock.unlock()
+        notify()
+    }
+
+    func inject(cargo c: Cargo, for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); cargo[repoRoot] = c; lock.unlock()
+        notify()
+    }
+
+    /// Release pull requests for a repository. Anything in `merged` is queued for `takeLaunches`.
+    func inject(releases rs: [ReleasePR], for repoRoot: String, merged: [ReleasePR] = []) {
+        guard frozen else { return }
+        lock.lock()
+        releases[repoRoot] = (rs, Date())
+        for pr in merged { pendingLaunches.append((repoRoot, pr)) }
+        lock.unlock()
+        notify()
+    }
+
+    /// The board, without the freshness check `adoptProject` applies to a peer's copy.
+    func inject(project items: [ProjectItem], at: Date = Date(), quiet: Bool = false) {
+        guard frozen else { return }
+        lock.lock()
+        if !quiet, let previous = project?.0 {
+            let before = Dictionary(previous.map { ("\($0.repo)#\($0.number)", $0.status) }, uniquingKeysWith: { a, _ in a })
+            for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
+        }
+        project = (items, at)
+        lock.unlock()
+        notify()
+    }
+
+    func inject(commits n: Int, pushed isPushed: Bool, dirty files: Int = 0, worktree: String) {
+        guard frozen else { return }
+        lock.lock()
+        commits[worktree] = (n, Date()); pushed[worktree] = isPushed; dirty[worktree] = files
+        lock.unlock()
+        notify()
+    }
+
+    private func notify() {
+        guard !injectSilently else { return }
+        DispatchQueue.main.async { self.onUpdate?() }
     }
 }

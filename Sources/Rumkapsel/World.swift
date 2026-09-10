@@ -11,6 +11,8 @@ final class World {
     let github = GitHubResolver()
     /// The demo runs on made-up rooms with no checkouts, so nothing is ever provisional.
     private let demo: Bool
+    /// The simulator drives a made-up org: nothing here may read or write what the real app saved.
+    var simulated = false
 
     init(demo: Bool) { self.demo = demo }
 
@@ -135,9 +137,13 @@ final class World {
     // MARK: kicking
 
     /// Offices thrown off the station, by room key: peers and GitHub may not put them back for a day.
+    private var simKicked: [String: Date] = [:]
     private var kicked: [String: Date] {
-        get { (UserDefaults.standard.dictionary(forKey: "kicked") as? [String: Date]) ?? [:] }
-        set { UserDefaults.standard.set(newValue.filter { Date().timeIntervalSince($0.value) < World.holdWindow }, forKey: "kicked") }
+        get { simulated ? simKicked : (UserDefaults.standard.dictionary(forKey: "kicked") as? [String: Date]) ?? [:] }
+        set {
+            let live = newValue.filter { Date().timeIntervalSince($0.value) < World.holdWindow }
+            if simulated { simKicked = live } else { UserDefaults.standard.set(live, forKey: "kicked") }
+        }
     }
 
     func isKicked(_ key: String) -> Bool { kicked[key].map { Date().timeIntervalSince($0) < World.holdWindow } ?? false }
@@ -232,7 +238,7 @@ final class World {
 
         // Every Conductor repo with a checkout under ~/dev counts as a work repo for releases,
         // even with no session today, so a release on the pad never depends on someone working.
-        if firstRun {
+        if firstRun, !simulated {
             let home = FileManager.default.homeDirectoryForCurrentUser
             let workspaces = home.appendingPathComponent("conductor/workspaces")
             if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
