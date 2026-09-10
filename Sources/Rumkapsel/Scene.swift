@@ -240,6 +240,8 @@ final class Minion {
     var toolSeed: Int { abs(id.hashValue) % 4 }
     var pyramids: [SCNNode] = []
     var pyramidCell: Cell?
+    /// On the cone's cell or the one beside it: close enough to work it when its own cell is covered.
+    var nearCone: Bool { pyramidCell.map { abs($0.x - cell.x) + abs($0.y - cell.y) <= 1 } ?? false }
     var toolCount: Int
     var title: String?
     var branch: String?
@@ -2185,9 +2187,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
               !key.hasPrefix("kind:") else { return }   // prompts only land in an office
         // Cones land on clear floor, nearest the door: the crates hold the far corners.
         let cells = station.cells(of: .room(key))
+        guard let firstCell = cells.first else { return }   // the office is gone: no cone to land
         let written = labelCells["\(m.station)|\(key)"] ?? []
         let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) && !written.contains(c) }
-        let door = station.doorCell(of: key) ?? cells.first!
+        let door = station.doorCell(of: key) ?? firstCell
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
         guard let cell = nearDoor.prefix(2).randomElement() else { return }
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
@@ -3478,7 +3481,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         }
                     }
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
-                        if m.cell != pc { walk(m, to: pc) }
+                        if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
                     } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
@@ -3510,7 +3513,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
-            if !(working && !m.pyramids.isEmpty && m.pyramidCell == m.cell) && !(m.place == .lounge && resting) {
+            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
                 m.smoothFacing += delta * min(1, dt * 12)
@@ -3519,7 +3522,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // One little routine per activity, so you can tell at a glance what a minion is up to.
             var tilt = 0.0, roll = 0.0, spin = 0.0, lean = 0.0
             let t = clock + m.bobPhase
-            let atCone = working && !m.pyramids.isEmpty && m.pyramidCell == m.cell
+            let atCone = working && !m.pyramids.isEmpty && m.nearCone
             if atCone, let cone = m.pyramids.last {
                 // Stand a step back from the cone and face it.
                 let conePos = SIMD2(Double(cone.position.x), Double(cone.position.z))

@@ -441,11 +441,13 @@ final class Station {
         // A cell buried under a crate is no destination: settle for the nearest cell with free floor.
         var target = to
         if spots(in: to).allSatisfy({ obstacles.contains($0) }) {
+            // Only within the same room (or the same open floor): never send someone next door instead.
+            let owner = room(at: to)?.key
             var seen: Set<Cell> = [to]; var ring = [to]
             search: while !ring.isEmpty {
                 var next: [Cell] = []
                 for c in ring {
-                    for n in c.neighbours where walkable.contains(n) && !seen.contains(n) && canStep(from: c, to: n) {
+                    for n in c.neighbours where walkable.contains(n) && !seen.contains(n) && canStep(from: c, to: n) && room(at: n)?.key == owner {
                         if spots(in: n).contains(where: { !obstacles.contains($0) }) { target = n; break search }
                         seen.insert(n); next.append(n)
                     }
