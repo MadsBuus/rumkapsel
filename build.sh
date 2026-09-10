@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>rumkapsel</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.16</string>
-  <key>CFBundleVersion</key><string>202609092220</string>
+  <key>CFBundleShortVersionString</key><string>0.17</string>
+  <key>CFBundleVersion</key><string>202609100828</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>SUFeedURL</key><string>https://raw.githubusercontent.com/MadsBuus/rumkapsel-releases/main/appcast.xml</string>
