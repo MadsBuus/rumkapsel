@@ -26,6 +26,22 @@ extension StationController {
     /// Sends a free worker to the storage console for anything still queued. One at a time per station.
     func servicePallets() {
         for station in fleet.stations.values where station.hasPad && !station.storageCells.isEmpty {
+            // A pallet out with nobody on it (its operator was called away): someone else takes over.
+            if let p = pallets[station.name], !minions.values.contains(where: { palletErrand(of: $0)?.station == station.name }) {
+                let console = station.storageConsole.cell
+                let free = minions.values.filter {
+                    $0.station == station.name && !$0.onJob && $0.carried == nil && !$0.isSubagent
+                        && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
+                }
+                if let m = free.min(by: { abs($0.cell.x - console.x) + abs($0.cell.y - console.y) < abs($1.cell.x - console.x) + abs($1.cell.y - console.y) }) {
+                    m.couch = nil
+                    m.bed = nil
+                    m.place = .room("kind:storage")
+                    p.dispatcher = m.id
+                    start(m, .waitPallet(station: station.name, repo: p.repo, words: "taking over the pallet"), announce: true)
+                    walk(m, to: console)
+                }
+            }
             for want in world.truth.palletQueue[station.name] ?? [] {
                 // Someone is already on this errand: leave them to it.
                 if minions.values.contains(where: { palletErrand(of: $0)?.station == station.name && palletErrand(of: $0)?.repo == want.repo }) { continue }
@@ -59,6 +75,7 @@ extension StationController {
             return
         }
         palletWishes[station.name + "|" + repo] = push
+        servicePallets()
     }
 
     // MARK: the dispatcher's phases
@@ -115,7 +132,13 @@ extension StationController {
                 m.facing = atan2(dir.x, dir.y)
                 m.smoothFacing = m.facing
                 let d = want - m.pos
-                if abs(d.x) + abs(d.y) > 0.04 { m.pos += d * 0.25; placePusher(m, station: station); return }
+                // Round the pallet on foot, never through it; only the last step is a shuffle.
+                if abs(d.x) + abs(d.y) > 0.6 {
+                    if m.path.isEmpty { m.path = route(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded()))) }
+                    return
+                }
+                guard m.path.isEmpty else { return }
+                if abs(d.x) + abs(d.y) > 0.04 { m.pos += d * min(1, 6 * (1.0 / 60)); placePusher(m, station: station); return }
                 m.pos = want
                 placePusher(m, station: station)
                 m.setTool(.hands)

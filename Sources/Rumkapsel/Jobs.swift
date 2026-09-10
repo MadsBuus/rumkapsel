@@ -334,7 +334,7 @@ extension StationController {
         drone.sweep(up: false)
         assign(m, .deliverOffice(key: roomKey, name: room.name), announce: false)
         m.place = .hangar
-        m.fetchSpot = station.hangarSlots[slotIndex] + SIMD2(-0.3, 0)
+        m.fetchSpot = station.hangarSlots[slotIndex]
         walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
     }
 
@@ -376,9 +376,9 @@ extension StationController {
             let furthest = tiles.map(dist).max() ?? 0
             var last = 0.0
             for t in tiles {
-                let at = 0.5 + (furthest - dist(t)) * 0.14
-                last = max(last, at + 0.25)
-                t.runAction(.sequence([.wait(duration: at), .fadeOut(duration: 0.25)]))
+                let at = 0.5 + (furthest - dist(t)) * 0.1
+                last = max(last, at + 0.5)
+                t.runAction(.sequence([.wait(duration: at), .fadeOut(duration: 0.6)]))
             }
             if let st, let color, let door {
                 let hex = Props.crate(color: color)
@@ -396,6 +396,7 @@ extension StationController {
                     m.path = st.path(from: m.pos, to: hall)
                     m.place = .core   // parked in the hallway until the next scan sends it on
                     m.nextWanderAt = clock + 4
+                    m.strollUntil = clock + 8   // out at a walk, not a run
                 }
             }
             logEvent("archived: \(name)" + (reason.isEmpty ? "" : " · \(reason)"))
@@ -423,9 +424,9 @@ extension StationController {
             let d = door.map { abs(cx - Double($0.x)) + abs(cz - Double($0.y)) } ?? 0
             furthest = max(furthest, d)
             t.opacity = 0
-            t.runAction(.sequence([.wait(duration: 0.3 + d * 0.14), .fadeIn(duration: 0.25)]))
+            t.runAction(.sequence([.wait(duration: 0.3 + d * 0.1), .fadeIn(duration: 0.6)]))
         }
-        let after = 0.3 + furthest * 0.14 + 0.25
+        let after = 0.3 + furthest * 0.1 + 0.5
         roomLabels[key]?.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.5)]))
         markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.4)])) }
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -589,7 +590,7 @@ extension StationController {
             cargo[id]?.carrier = m.id
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = route(m, to: from.cell)
+            m.path = route(m, to: standCell(station, near: from.cell))
         }
         tickRockets()
         servicePallets()

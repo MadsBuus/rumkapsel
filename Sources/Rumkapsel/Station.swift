@@ -208,7 +208,7 @@ final class Station {
         ((c.x == 0 || c.x == 1) && abs(c.y) <= spineHalfLength) || ((c.y == 0 || c.y == 1) && abs(c.x) <= spineHalfLength)
     }
 
-    private var walkable: Set<Cell> {
+    var walkable: Set<Cell> {
         if let w = walkableCache { return w }
         var w = Set(coreCells)
         w.formUnion(hangarCells)

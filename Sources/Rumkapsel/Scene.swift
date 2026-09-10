@@ -156,6 +156,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// list; the model has already put the room on the floor, this only holds its tiles back until a
     /// carrier walks it in.
     var undelivered: Set<String> { world.truth.pendingOffices }
+    /// Offices whose pull request crate is being packed right now: drawn only once the worker is done.
+    var packing: Set<String> = []
     var boxes: [String: SCNNode] = [:]
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
@@ -728,7 +730,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The floor plan or the props changed. The rebuild waits until the caller has finished its own
     /// work, so a scan can place its workers before the station is redrawn under them.
     private var layoutDirty = false
-    private var markersDirty = false
+    var markersDirty = false
     /// Offices ordered this scan, by session id: the worker fetches its own from the bay.
     private var newRooms: [String: String] = [:]
     /// Peer offices waiting for a carrier.
@@ -875,8 +877,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 logEvent("\(label): in development")
             default: break
             }
-        case .pullRequestOpened(let repo, let number, let author, _):
+        case .pullRequestOpened(let repo, let number, let author, let roomKey):
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
+            // My own office with a worker in it: the crate does not appear by itself. The worker
+            // clears the cones and packs it at the office's package slot.
+            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && $0.carried == nil && !$0.onJob }),
+               let st = fleet.stations[m.station], let room = st.rooms[roomKey], let cell = farCells(st, room).first {
+                let key = m.station + "|" + roomKey
+                packing.insert(key)
+                markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 0 }
+                clearPyramids(m)
+                start(m, .pack(office: roomKey), announce: true)
+                walk(m, to: standCell(st, near: cell))
+            }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
         case .pullRequestClosed(let repo, let author, _):

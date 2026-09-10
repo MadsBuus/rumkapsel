@@ -29,6 +29,8 @@ final class Minion {
     var fetchSpot: SIMD2<Double>?
     /// Which stack the QA walker is inspecting next.
     var qaStop = 0
+    /// Until then the walk is a stroll, whatever the state: the way out of a closed office is not a hurry.
+    var strollUntil = 0.0
     /// A carrier, deliverer or pusher walks at one pace whoever it is.
     var isHauling: Bool {
         switch current?.kind {
@@ -187,6 +189,7 @@ final class Minion {
     /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
     var handsAt = 0
     var posture: Posture {
+        if case .pack = current?.kind, phaseKind == .act { return .crouch }   // on the knees over the package
         guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
         switch handsAt {
         case 0: return .crouch

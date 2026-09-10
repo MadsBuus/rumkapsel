@@ -141,13 +141,32 @@ extension StationController {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
         if dist > 0.05 { m.facing = atan2(to.x, to.y) }
-        guard dist < Hands.near || dist > Hands.far, dist > 0.001 else { return true }
-        let want = spot - to / dist * Hands.arm
+        // Far off: walked, round whatever stands in the way. Only the last step is a shuffle.
+        if dist > 0.9 {
+            if m.path.isEmpty, let st = fleet.stations[m.station] { m.path = route(m, to: standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))) }
+            return false
+        }
+        guard m.path.isEmpty else { return false }
+        guard dist < Hands.near || dist > Hands.far else { return true }
+        // Right on top of the slot: a step back the way it is facing, so the crate goes down in front.
+        let dir = dist > 0.001 ? to / dist : SIMD2(sin(m.facing), cos(m.facing))
+        let want = spot - dir * Hands.arm
         m.pos += (want - m.pos) * min(1, dt * 6)
         return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
     }
 
     /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
+    /// Where to stand for a slot: its own cell when the centre is clear, else the neighbouring cell with
+    /// the clearest centre. A crate row is never walked into; the aisle beside it is.
+    func standCell(_ st: Station, near cell: Cell) -> Cell {
+        func blocked(_ c: Cell) -> Int {
+            (-1...1).flatMap { dx in (-1...1).map { dy in st.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) ? 1 : 0 } }.reduce(0, +)
+        }
+        if blocked(cell) == 0 { return cell }
+        let options = cell.neighbours.filter { st.walkable.contains($0) }
+        return options.min { blocked($0) < blocked($1) } ?? cell
+    }
+
     func startLift(_ m: Minion, height: Double) {
         m.handsAt = max(0, Int((height / Hands.level).rounded()))
         m.phaseUntil = clock + Hands.liftSeconds
@@ -250,7 +269,7 @@ extension StationController {
             let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
             // Pace by the task, not by who: a loaded minion is the slowest thing on the station, below
             // a stroll; hurrying to work is the fastest; pacing while waiting is slower still.
-            let speed = m.isHauling ? 1.1 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4))
+            let speed = m.isHauling ? 1.1 : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
             if m.lying, !m.path.isEmpty {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
@@ -304,13 +323,19 @@ extension StationController {
                     case .walk:
                         advance(m); continue
                     case .approach:
+                        // Watching the crate come down, and the shuttle lift off it, before going over.
+                        if let spot = m.fetchSpot {
+                            let d = spot - m.pos
+                            if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
+                        }
                         if boxes[key] != nil, !world.truth.isInBay(key) { continue }   // the shuttle has not set it down yet
                         if shipStillOver(roomKey: r, station: m.station) { continue }  // and it has not lifted off the slot yet
                         if let spot = m.fetchSpot {
-                            let d = spot - m.pos
-                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
                             m.fetchSpot = nil
+                            m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+                            continue
                         }
+                        guard m.path.isEmpty else { continue }
                         // An arm's length from the crate, facing it, then the crouch: the same as any carry.
                         if let box = boxes[key] {
                             let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
@@ -360,6 +385,26 @@ extension StationController {
                 case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
                     palletStep(m, station: station)
                     continue
+                case .pack(let office):
+                    // At the office's package slot: down on the knees over it for a moment, then the
+                    // crate is there, strapped, and the worker straightens up.
+                    let key = "\(m.station)|\(office)"
+                    if m.phaseKind == .walk {
+                        advance(m)
+                        m.phaseUntil = clock + 1.8
+                        continue
+                    }
+                    if clock < m.phaseUntil { continue }
+                    packing.remove(key)
+                    if let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) {
+                        pkg.opacity = 1
+                        let at = SIMD3(Double(pkg.position.x), Double(pkg.position.y), Double(pkg.position.z))
+                        pkg.scale = SCNVector3(0.05, 0.05, 0.05)
+                        moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
+                    } else { markersDirty = true }
+                    finish(m)
+                    send(m, to: m.place)
+                    continue
                 case .react(_, _, let seconds):
                     // There: work at it for its span of station time, then back to the quarters.
                     if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; continue }
@@ -392,7 +437,7 @@ extension StationController {
                         }
                         if clock < m.phaseUntil { continue }
                         advance(m)
-                        walk(m, to: to.cell)
+                        walk(m, to: standCell(station, near: to.cell))
                         continue
                     case .haul:
                         advance(m); continue
@@ -423,7 +468,7 @@ extension StationController {
                 // There: the quiet commands move on from walking to being there, so truth says so too.
                 if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
                     switch c.kind {
-                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave: advance(m)
+                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave, .pack: advance(m)
                     default: break
                     }
                 }

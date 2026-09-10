@@ -120,7 +120,7 @@ extension StationController {
                                             blink: checks == "pending" && !closed)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
-                    pkg.opacity = undelivered.contains(key) ? 0 : 1
+                    pkg.opacity = undelivered.contains(key) || packing.contains(key) ? 0 : 1
                     if failing {
                         let shell = SCNNode(geometry: SCNBox(width: size * 1.2, height: size, length: size * 1.2, chamferRadius: 0))
                         shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
