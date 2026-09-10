@@ -119,21 +119,26 @@ rocket is gone. The sequence, all of it commands on one minion, the dispatcher:
    console, a small panel on the wall by the door, and the panel flashes: the order has been placed.
 2. **A hover pallet fades in** on the storage floor by the near wall, the side toward the deck. Crates
    stack against the far wall, so the near rows are the pallet's space. If there is no room, or a pallet is
-   already out, the dispatcher waits by the console; one pallet per station at a time, the rest queue.
-3. **Loading.** The dispatcher carries the manifested crates, the ones the PR's commits name, from their
-   stacks onto the pallet one by one, the crouch-and-lift carry, and sets them in neat rows and stacks:
-   twelve at most per pallet, three rows of four, stacked as needed. Crates not in the release stay put.
-4. **Waiting.** Loaded, the pallet sits by the near wall with the dispatcher beside it until the PR merges.
-   Nothing else may move those crates: they are station truth, "on pallet".
-5. **The PR merges.** The dispatcher pushes the pallet out through the storage doorway, down the aisle
-   and through the deck doorway, walking with it. The pallet hovers a hand above the floor.
-6. **Unloading.** On the deck the dispatcher sets the crates down one by one on the untested row, in the
-   repository's group where there is space, next to any crates of the same colour already there. The
-   pallet fades out empty and the dispatcher returns to the lounge.
+   already out, the dispatcher waits by the console and gets impatient: hops and paces, like a minion
+   waiting on you. One pallet per station at a time, the rest queue.
+3. **Loading, by magic.** The dispatcher swaps the clipboard for a telekinesis tool and points it at the
+   stack: one crate at a time lifts off, floats slowly across and settles on the pallet in neat rows and
+   stacks, twelve at most, three rows of four. Only the manifested crates, the ones the PR's commits
+   name; the rest stay put. The tool glows while a crate is in the air.
+4. **Waiting.** Loaded, the pallet hovers by the near wall, bobbing slowly, the dispatcher beside it,
+   until the PR merges. Those crates are station truth, "on pallet", and nothing else may move them.
+5. **The PR merges.** The dispatcher pushes the pallet, hands on its edge, out through the storage
+   doorway, down the aisle and through the deck doorway, until it stands beside the repository's
+   group on the untested row.
+6. **Unloading, by magic again.** Crates float off the pallet one by one, slowly, onto their slots on the
+   untested row next to any crates of the same colour already there. The empty pallet fades out and the
+   dispatcher returns to the lounge.
 
 Facts needed: which crates a staging PR carries (its commits' PR numbers), when it opens, when it merges.
 Station truth: a pallet per station, its crates, its position. Commands: `dispatch(pr)`, `loadPallet`,
 `pushPallet(to:)`, `unloadPallet`. A closed-without-merge PR unloads back into storage the same way.
+The telekinesis tool joins the tool set (goggles, tablet, scanner, hammer, flashlight): a short wand
+with a glowing tip, faceted like everything else.
 
 ## Carries must know the stack
 
