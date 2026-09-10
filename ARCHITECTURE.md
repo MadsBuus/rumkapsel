@@ -168,7 +168,9 @@ level 1, waist height, almost a slide forward onto the top; level 2, raise it ab
 in; higher, a little jump up, then slide it on. Pickup mirrors each. Today's lean and reach are the
 placeholder. Also owed: one crate size everywhere, office, yard and in hand (the office crate no longer
 grows with the work in it; the cubes show that), and no spin on release: the crate keeps its world
-rotation when it leaves the hands and turns to the slot's yaw over the set-down.
+rotation when it leaves the hands and turns to the slot's yaw over the set-down. And a crate is heavy:
+it stays in the hands all the way down to the slot, the posture does the lowering, release is the last
+thing, and nothing moves it afterwards, neither an action nor the redraw. Pickup the same in reverse.
 
 ## Closed, not merged
 
