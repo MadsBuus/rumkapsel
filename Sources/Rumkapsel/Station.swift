@@ -277,6 +277,7 @@ final class Station {
     /// Walking between a room and the hallway is only allowed through the doorway.
     /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
     private func yardArea(_ c: Cell) -> String? {
+        if hangarCells.contains(c) { return "hangar" }
         if storageCells.contains(c) { return "storage" }
         if deckCells.contains(c) { return "deck" }
         if padCells.contains(c) { return "pad" }
@@ -289,6 +290,10 @@ final class Station {
         guard hasPad else { return [] }
         let x0 = -spineHalfLength - 1
         var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
+        if hasHangar, airlockHatch == nil {   // no airlock against the bay: the bay opens straight onto the corridor's end
+            let y = spineHalfLength + 1
+            out.append((Cell(x: 0, y: y), Cell(x: 0, y: y - 1))); out.append((Cell(x: 1, y: y), Cell(x: 1, y: y - 1)))
+        }
         for x in [x0 - 1, x0 - 2] {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
             out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
@@ -296,7 +301,19 @@ final class Station {
         return out
     }
 
+    /// The pair of cells where the airlock opens onto the bay, when it stands against it.
+    var airlockHatch: (inside: Cell, bay: Cell)? {
+        guard let a = rooms["kind:airlock"] else { return nil }
+        for c in a.cells { for n in c.neighbours where hangarCells.contains(n) { return (c, n) } }
+        return nil
+    }
+
     private func canStep(from a: Cell, to b: Cell) -> Bool {
+        // The bay is outside: with an airlock against it, the only way in or out is through the hatch.
+        if let hatch = airlockHatch {
+            let ha = hangarCells.contains(a), hb = hangarCells.contains(b)
+            if ha != hb { return (a == hatch.inside && b == hatch.bay) || (a == hatch.bay && b == hatch.inside) }
+        }
         if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
             return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }
         }

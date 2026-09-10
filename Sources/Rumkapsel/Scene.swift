@@ -920,7 +920,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 openEdges.insert("\(station.name):\(d.x),\(d.y)|\(o.x),\(o.y)")
                 openEdges.insert("\(station.name):\(o.x),\(o.y)|\(d.x),\(d.y)")
             }
-            for (a, b) in station.yardDoorways {
+            for (a, b) in station.yardDoorways + (station.airlockHatch.map { [($0.inside, $0.bay)] } ?? []) {
                 openEdges.insert("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
                 openEdges.insert("\(station.name):\(b.x),\(b.y)|\(a.x),\(a.y)")
             }
@@ -1009,10 +1009,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // A round hatch standing at the far end, ringed in a warning stripe.
                 let cells = airlock.cells
                 let door = station.doorCell(of: airlock.key) ?? cells[0]
-                let far = cells.max { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) } ?? cells[0]
+                let far = station.airlockHatch?.inside ?? cells.max { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) } ?? cells[0]
+                let out = station.airlockHatch?.bay ?? Cell(x: far.x + (far.x - door.x), y: far.y + (far.y - door.y))
                 let hatch = SCNNode(geometry: SCNTube(innerRadius: 0.22, outerRadius: 0.32, height: 0.08))
                 hatch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.62, 0.25)))
-                let dx = far.x - door.x, dy = far.y - door.y
+                let dx = out.x - far.x, dy = out.y - far.y
                 hatch.eulerAngles = dx != 0 ? SCNVector3(0, 0, Double.pi / 2) : SCNVector3(Double.pi / 2, 0, 0)
                 hatch.position = v3(station.offset.x + Double(far.x) + Double(dx) * 0.42, 0.42, station.offset.y + Double(far.y) + Double(dy) * 0.42)
                 let pane = SCNNode(geometry: SCNCylinder(radius: 0.22, height: 0.04))
@@ -1963,6 +1964,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard let station = fleet.stations[m.station], let airlock = station.rooms["kind:airlock"], let cell = airlock.cells.randomElement() else { return }
         m.place = .airlock
         m.path = station.path(from: m.pos, to: cell)
+        // Out onto the bay if the hatch opens there: that is where the shuttle would pick them up.
+        if let hatch = station.airlockHatch, let bay = station.hangarCells.randomElement() {
+            let inside = SIMD2(Double(hatch.inside.x), Double(hatch.inside.y))
+            m.path += [inside] + station.path(from: inside, to: bay)
+        }
     }
 
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
