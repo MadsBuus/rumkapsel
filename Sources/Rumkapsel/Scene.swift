@@ -507,6 +507,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerColorBook: [String: RGB] = [:]
     private var roomPower: [String: Bool] = [:]
     private var haulingRooms: Set<String> = []
+    /// Deck crates on someone's arms, "repo|number": the deck layout skips them until set down.
+    private var haulingCrates: Set<String> = []
     private var hauledAt: [String: Date] = [:]
     /// A box being carried from one floor to another by whichever minion is free.
     private struct Haul { let id: Int; let station: String; let box: SCNNode; let from: Cell; let to: Cell; let drop: SIMD3<Double>; let onDone: () -> Void; var carrier: String?; var roomKey: String = "" }
@@ -1274,7 +1276,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Grey boxes pile up in an office as commits land; the pull request state colours them.
     private func rebuildMarkers() {
-        markerRoot.childNodes.forEach { $0.removeFromParentNode() }
+        markerRoot.childNodes.filter { $0.name != "haul" }.forEach { $0.removeFromParentNode() }   // a crate waiting for its carrier stays
         for station in fleet.stations.values {
             for room in station.rooms.values where room.branch != nil || crewBoxes[roomKey(station, room)] != nil || peerBoxes[roomKey(station, room)] != nil {
                 let key = roomKey(station, room)
@@ -1402,7 +1404,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let rows = Set(cells.map(\.y)).sorted()
                 let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
                 let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                var i = 0
+                // The deck keeps its two rows apart: staged but untested on the first, tested on the second.
+                let rowList = crateRows.sorted()
+                let untestedRow = sorted.filter { $0.y == rowList.first }, testedRow = sorted.filter { $0.y == rowList.last }
+                var i = 0, iUntested = 0, iTested = 0
                 let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
                     github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
                 for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
@@ -1412,10 +1417,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         let size = 0.38
                         let prNumber = k < numbers.count ? numbers[k] : 0
                         let cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(prNumber) ?? false)
-                        let pkg = Props.package(color: c.lighter(0.1), band: cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: size)
-                        let cell = sorted[(i / 2) % sorted.count]
-                        let level = Double(i / (sorted.count * 2)) * 0.34
-                        let side = Double(i % 2) * 0.5 - 0.25
+                        if area == "deck", haulingCrates.contains("\(repo)|\(prNumber)") { continue }
+                        let pkg = Props.package(color: c.lighter(0.1), band: cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: size, approved: cleared)
+                        let cell: Cell, level: Double, side: Double
+                        if area == "deck", rowList.count > 1 {
+                            let row = cleared ? testedRow : untestedRow
+                            let j = cleared ? iTested : iUntested
+                            cell = row[(j / 2) % row.count]; level = Double(j / (row.count * 2)) * 0.34; side = Double(j % 2) * 0.5 - 0.25
+                            if cleared { iTested += 1 } else { iUntested += 1 }
+                        } else {
+                            cell = sorted[(i / 2) % sorted.count]; level = Double(i / (sorted.count * 2)) * 0.34; side = Double(i % 2) * 0.5 - 0.25
+                        }
                         let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
                         pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, level, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
                         pkg.eulerAngles.y = neat ? 0 : (rnd() - 0.5) * 0.7
@@ -2851,12 +2863,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case st.cleared:
                 logEvent("\(label): passed QA, ready to ship")
                 if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
-                    let tick = SCNNode(geometry: SCNSphere(radius: 0.08))
-                    tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
-                    tick.position = v3(crate.position.x, crate.position.y + 0.5, crate.position.z)
-                    propRoot.addChildNode(tick)
-                    tick.runAction(.sequence([.group([.moveBy(x: 0, y: 0.6, z: 0, duration: 1.0), .sequence([.wait(duration: 0.6), .fadeOut(duration: 0.4)])]), .removeFromParentNode()]))
-                    drone.ping(seed: item.number)
+                    // Someone carries it across the aisle to the tested row; the layout redraws it there once set down.
+                    let rows = Set(station.deckCells.map(\.y)).sorted()
+                    let testedY = rows.count > 2 ? rows[2] : rows.last ?? 0
+                    let dest = station.deckCells.filter { $0.y == testedY }.min { $0.x < $1.x } ?? station.deckCells[0]
+                    let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
+                    let id = "\(item.repo)|\(item.number)"
+                    haulingCrates.insert(id)
+                    crate.name = "haul"
+                    addHaul(station: station, box: crate, from: fromCell, to: dest, drop: SIMD3(station.offset.x + Double(dest.x), 0.12, station.offset.y + Double(dest.y))) { [weak self] in
+                        guard let self else { return }
+                        haulingCrates.remove(id)
+                        crate.removeFromParentNode()
+                        drone.ping(seed: item.number)
+                        rebuildMarkers()
+                    }
                 }
             case st.shipped where from != nil:
                 logEvent("\(label): shipped")

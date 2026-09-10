@@ -28,7 +28,7 @@ enum Props {
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
     /// a square strapped crate is a pull request, a pyramid is a session input.
-    static func package(color: NSColor, band: NSColor, size: Double) -> SCNNode {
+    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
@@ -42,11 +42,24 @@ enum Props {
         let s = SCNNode(geometry: strap)
         s.position = v3(0, h / 2, 0)
         n.addChildNode(s)
-        // Status tag on the lid.
-        let tag = SCNNode(geometry: SCNBox(width: size * 0.34, height: 0.012, length: size * 0.24, chamferRadius: 0))
-        tag.geometry!.firstMaterial = flat(band)
-        tag.position = v3(size * 0.22, h + 0.006, -size * 0.22)
-        n.addChildNode(tag)
+        // Status plate on the front face, like a lock, so it reads from the side whatever is stacked above.
+        let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
+        plate.geometry!.firstMaterial = flat(band)
+        plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
+        n.addChildNode(plate)
+        if approved {
+            // Passed QA: a pale sticker on the lid with a green mark.
+            let sticker = SCNNode(geometry: SCNBox(width: size * 0.42, height: 0.012, length: size * 0.42, chamferRadius: 0))
+            sticker.geometry!.firstMaterial = flat(NSColor(rgb: (0.93, 0.95, 0.9)))
+            sticker.position = v3(-size * 0.1, h + 0.006, size * 0.1)
+            sticker.eulerAngles.y = 0.2
+            n.addChildNode(sticker)
+            let mark = SCNNode(geometry: SCNBox(width: size * 0.22, height: 0.012, length: size * 0.22, chamferRadius: 0))
+            mark.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.85, 0.45)))
+            mark.position = v3(0, 0.006, 0)
+            mark.eulerAngles.y = .pi / 4
+            sticker.addChildNode(mark)
+        }
         n.addChildNode(foot(size: size * 1.3))
         return n
     }
