@@ -21,11 +21,14 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 
 | Key / gesture | Action |
 |---|---|
-| pinch | zoom |
-| two-finger rotate | spin around the vertical axis |
-| two-finger up/down | tilt |
-| one-finger drag | pan |
-| 1 / 2 / 3 | focus work / private / both |
+| pinch | zoom, around the cursor |
+| two-finger rotate | spin around the point under the cursor |
+| two-finger slide | pan |
+| one-finger drag up/down | tilt |
+| W / A / S / D | pan |
+| E / Q | zoom in / out |
+| 1 / 2 / 3 / 4 | focus a station (work, crew, private, then peers) |
+| 0 | focus the whole fleet |
 | R | reset view |
 | M | music (off by default) |
 | F | float on top |

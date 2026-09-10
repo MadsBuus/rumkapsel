@@ -111,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
         app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
         app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
-        for (title, key) in [("Focus Work", "1"), ("Focus Private", "2"), ("Focus All", "3"), ("Focus Crew", "4")] {
+        for (title, key) in [("Focus All", "0"), ("Focus Station 1", "1"), ("Focus Station 2", "2"), ("Focus Station 3", "3"), ("Focus Station 4", "4")] {
             let item = app.addItem(withTitle: title, action: #selector(focusStation(_:)), keyEquivalent: key)
             item.keyEquivalentModifierMask = []
         }
@@ -212,12 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     @objc func refreshGitHub() { controller.refreshGitHub() }
 
     @objc func focusStation(_ sender: NSMenuItem) {
-        switch sender.keyEquivalent {
-        case "1": controller.focus(on: "work")
-        case "2": controller.focus(on: "private")
-        case "4": controller.focus(on: "crew")
-        default: controller.focus(on: nil)
-        }
+        if let n = Int(sender.keyEquivalent), n > 0 { controller.focus(onIndex: n - 1) } else { controller.focus(on: nil) }
     }
 
     @objc func toggleMusic() { setMusic(!controller.drone.isEnabled) }

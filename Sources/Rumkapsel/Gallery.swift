@@ -40,7 +40,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light!.type = .ambient; ambient.light!.intensity = 550
         scene.rootNode.addChildNode(sun); scene.rootNode.addChildNode(ambient)
 
-        view.onZoom = { [weak self] f in self?.zoom = min(8, max(0.3, (self?.zoom ?? 1) * f)) }
+        view.onZoom = { [weak self] f, _ in self?.zoom = min(8, max(0.3, (self?.zoom ?? 1) * f)) }
         view.onRotate = { [weak self] r, _ in self?.yaw -= r }
         view.onTilt = { [weak self] dy in self?.pitch = min(-0.15, max(-Double.pi / 2 + 0.05, (self?.pitch ?? 0) - dy * 0.004)) }
         view.onPan = { [weak self] dx, dy in

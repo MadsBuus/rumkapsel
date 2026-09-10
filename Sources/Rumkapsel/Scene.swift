@@ -100,33 +100,68 @@ func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, 
 final class StationView: SCNView {
     var onHover: ((SCNNode?) -> Void)?
     var onDoubleClick: ((SCNNode?) -> Void)?
-    var onZoom: ((Double) -> Void)?
-    var onRotate: ((Double, NSPoint) -> Void)?
+    var onZoom: ((Double, NSPoint?) -> Void)?
+    var onRotate: ((Double, NSPoint?) -> Void)?
     var onPan: ((Double, Double) -> Void)?
     var onTilt: ((Double) -> Void)?
     var onKey: ((String) -> Bool)?
+    /// Held WASD keys as a screen-relative direction (x right, y up) and Q/E as a zoom direction (+1 in), zero when none are down.
+    var onMove: ((SIMD2<Double>, Double) -> Void)?
+    private var heldKeys: Set<String> = []
     var onClick: ((SCNNode?) -> Void)?
     private var tracking: NSTrackingArea?
     private var downPoint = NSPoint.zero
 
     override func keyDown(with event: NSEvent) {
+        if let chars = event.charactersIgnoringModifiers?.lowercased(), Self.moveKeys[chars] != nil,
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            if !event.isARepeat { heldKeys.insert(chars); moveChanged() }
+            return
+        }
         if let chars = event.charactersIgnoringModifiers, onKey?(chars) == true { return }
         super.keyDown(with: event)
+    }
+    override func keyUp(with event: NSEvent) {
+        if let chars = event.charactersIgnoringModifiers?.lowercased(), heldKeys.remove(chars) != nil { moveChanged(); return }
+        super.keyUp(with: event)
+    }
+    override func flagsChanged(with event: NSEvent) {
+        // A modifier pressed mid-move would swallow the key-up: let go of everything.
+        if !heldKeys.isEmpty, !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { heldKeys = []; moveChanged() }
+        super.flagsChanged(with: event)
+    }
+    override func resignFirstResponder() -> Bool {
+        if !heldKeys.isEmpty { heldKeys = []; moveChanged() }
+        return super.resignFirstResponder()
+    }
+    private static let moveKeys: [String: SIMD3<Double>] = ["w": SIMD3(0, 1, 0), "s": SIMD3(0, -1, 0), "a": SIMD3(-1, 0, 0), "d": SIMD3(1, 0, 0),
+                                                            "e": SIMD3(0, 0, 1), "q": SIMD3(0, 0, -1)]
+    private func moveChanged() {
+        var v = SIMD3<Double>(0, 0, 0)
+        for k in heldKeys { v += Self.moveKeys[k]! }
+        onMove?(SIMD2(v.x, v.y), v.z)
+    }
+    /// The cursor's view location, or nil when it is outside the view.
+    private func cursor(_ event: NSEvent) -> NSPoint? {
+        let p = convert(event.locationInWindow, from: nil)
+        return bounds.contains(p) ? p : nil
     }
     private var dragAllowed = false
 
     override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { true }
 
-    override func magnify(with event: NSEvent) { onZoom?(1 + event.magnification) }
-    override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180, convert(event.locationInWindow, from: nil)) }
+    override func magnify(with event: NSEvent) { onZoom?(1 + event.magnification, cursor(event)) }
+    override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180, cursor(event)) }
     override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.option) { onZoom?(1 - Double(event.scrollingDeltaY) * 0.01) }
-        else { onTilt?(Double(event.scrollingDeltaY)) }
+        // Two fingers slide the view; a mouse wheel reports in lines, so scale it up to feel like pixels.
+        let k = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
+        if event.modifierFlags.contains(.option) { onZoom?(1 - Double(event.scrollingDeltaY) * 0.01, cursor(event)) }
+        else { onPan?(Double(event.scrollingDeltaX) * k, Double(event.scrollingDeltaY) * k) }
     }
     override func mouseDragged(with event: NSEvent) {
         guard dragAllowed else { return }
-        onPan?(Double(event.deltaX), Double(event.deltaY))
+        onTilt?(Double(event.deltaY))
     }
 
     override func updateTrackingAreas() {
@@ -441,6 +476,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var userZoom = 1.0
     private var userZoomChanged = false
     private var userDriving = 0.0          // seconds left of snappy camera response after a gesture
+    private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up
+    private var keyZoom = 0.0                    // E/Q held: +1 zooms in, -1 out
     private var userYaw = 0.0
     private var userPitch = -Double.pi / 6
     private var userPan = SIMD2<Double>(0, 0)
@@ -489,10 +526,23 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
-        view.onZoom = { [weak self] f in self?.enqueue { guard let self else { return }; self.userZoom = min(6, max(0.4, self.userZoom * f)); self.userZoomChanged = true } }
+        view.onZoom = { [weak self] f, point in
+            // Zoom about the ground point under the cursor: it stays put on screen while the view scales.
+            let ground = point.flatMap { self?.groundPoint(at: $0) }
+            self?.enqueue {
+                guard let self else { return }
+                let before = self.userZoom
+                self.userZoom = min(6, max(0.4, self.userZoom * f))
+                self.userZoomChanged = true
+                guard let g = ground, self.userZoom != before else { return }
+                self.userDriving = 0.5
+                let focus = self.targetFocus + self.userPan
+                self.userPan = g + (focus - g) * (before / self.userZoom) - self.targetFocus
+            }
+        }
         view.onRotate = { [weak self] r, point in
             // Pivot on the ground point under the cursor: rotate the camera focus around it.
-            let ground = self?.groundPoint(at: point)
+            let ground = point.flatMap { self?.groundPoint(at: $0) }
             self?.enqueue {
                 guard let self else { return }
                 let before = self.userYaw
@@ -510,26 +560,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onTilt = { [weak self] dy in
             self?.enqueue { guard let self else { return }; self.userPitch = min(-0.15, max(-Double.pi / 2 + 0.05, self.userPitch - dy * 0.004)) }
         }
-        view.onPan = { [weak self] dx, dy in
-            self?.enqueue {
-                guard let self else { return }
-                self.focused = nil
-                self.userDriving = 0.5
-                let yaw = Double.pi / 4 + self.userYaw
-                let unitsPerPixel = 2 * self.cameraNode.camera!.orthographicScale / Double(max(1, self.viewSize.height))
-                let right = SIMD2(cos(yaw), -sin(yaw))
-                let forward = SIMD2(-sin(yaw), -cos(yaw))
-                self.userPan -= (right * dx - forward * dy) * unitsPerPixel
-            }
-        }
+        view.onPan = { [weak self] dx, dy in self?.enqueue { self?.pan(byPixels: dx, dy) } }
+        view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
-            case "1": focus(on: "work")
-            case "2": focus(on: "private")
-            case "3": focus(on: nil)
-            case "4": focus(on: "crew")
+            case "0": focus(on: nil)
+            case "1", "2", "3", "4": focus(onIndex: Int(key)! - 1)
             case "r": resetView()
             case "g": refreshGitHub()
             default: return false
@@ -2707,6 +2745,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             drone.setWorkload(load)
         }
         if hud.size != viewSize { hud.size = viewSize }
+        if keyMove != .zero {
+            // Held WASD: a steady slide, a bit under the view's height per second.
+            let speed = Double(viewSize.height) * 0.7 * dt
+            pan(byPixels: -keyMove.x * speed, keyMove.y * speed)
+        }
+        if keyZoom != 0 {
+            // Held E/Q: doubles or halves the zoom in about a second.
+            userZoom = min(6, max(0.4, userZoom * exp(keyZoom * dt * 0.7)))
+            userZoomChanged = true
+        }
 
         let k = 1 - exp(-dt * 2)
         let focus = targetFocus + userPan
@@ -3099,6 +3147,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         enqueue { [self] in userZoom = 1; userYaw = 0; userPitch = -.pi / 6; userPan = .zero; focused = nil }
     }
 
+    /// Slides the view by a screen offset: dx to the right, dy down (as drags and scrolls report it).
+    private func pan(byPixels dx: Double, _ dy: Double) {
+        focused = nil
+        userDriving = 0.5
+        let yaw = Double.pi / 4 + userYaw
+        let unitsPerPixel = 2 * cameraNode.camera!.orthographicScale / Double(max(1, viewSize.height))
+        let right = SIMD2(cos(yaw), -sin(yaw))
+        let forward = SIMD2(-sin(yaw), -cos(yaw))
+        userPan -= (right * dx - forward * dy) * unitsPerPixel
+    }
+
     /// The point on the floor plane under a view location, in world x/z.
     private func groundPoint(at p: NSPoint) -> SIMD2<Double>? {
         let near = view.unprojectPoint(SCNVector3(p.x, p.y, 0))
@@ -3142,9 +3201,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         enqueue { [self] in focusNow(on: stationName) }
     }
 
+    /// Focuses the Nth station: your own in fleet order, then peers' as they sit in the void.
+    func focus(onIndex i: Int) {
+        enqueue { [self] in
+            let names = fleet.ordered.map(\.name) + peerStations.keys.sorted()
+            guard names.indices.contains(i) else { return }
+            focusNow(on: names[i])
+        }
+    }
+
     private func focusNow(on stationName: String?) {
         focused = stationName
-        guard let name = stationName, let station = fleet.stations[name] else {
+        guard let name = stationName, let station = fleet.stations[name] ?? peerStations[name] else {
             userPan = .zero; userZoom = 1; userZoomChanged = true; return
         }
         let (center, half) = frame(for: [station])
@@ -3169,7 +3237,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         let f = d.string(forKey: "view.focus") ?? ""
-        if !f.isEmpty, fleet.stations[f] != nil {
+        if !f.isEmpty, fleet.stations[f] != nil || peerStations[f] != nil {
             focusNow(on: f)
         } else {
             userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
