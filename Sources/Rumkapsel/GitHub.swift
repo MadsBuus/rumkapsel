@@ -228,7 +228,7 @@ final class GitHubResolver {
                   nodes { updatedAt
                     fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
                     content { ... on Issue { number title url repository { name } assignees(first: 5) { nodes { login } }
-                      closedByPullRequestsReferences(first: 5) { nodes { url } } } } } } } } }
+                      closedByPullRequestsReferences(first: 5) { nodes { url state } } } } } } } } }
                 """
                 guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
                       let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
@@ -239,7 +239,8 @@ final class GitHubResolver {
                           let repo = (content["repository"] as? [String: Any])?["name"] as? String else { continue }
                     let status = (o["fieldValueByName"] as? [String: Any])?["name"] as? String ?? ""
                     let assignees = ((content["assignees"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
-                    let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["url"] as? String }
+                    let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
+                        .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
                     items.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
                                              prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:))))
                 }
@@ -603,8 +604,8 @@ final class GitHubResolver {
             }
             let fields = "number,title,state,reviewDecision,isDraft,url,statusCheckRollup"
             var answered = false   // a failed call is not "no pull request": keep what we knew
-            if let out = run(["gh", "pr", "view", branch, "--json", fields], cwd: repoRoot),
-               let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] {
+            if let out = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
+               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
                 pr = parse(o); answered = true
             } else if let out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", fields], cwd: repoRoot),
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {

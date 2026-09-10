@@ -1068,6 +1068,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Dark ink for anything written on a tile, whatever the tile's colour.
+    static let inkOnTile = NSColor(rgb: (0.10, 0.10, 0.14))
+
+    /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
+    private func occupant(of key: String) -> String? {
+        if let info = crewRoomInfo[key] { return crewName(info.author) }
+        return peerOffices[key]?.keys.sorted().first
+    }
+
     /// Lays each room's name flat beside it on the side with free floor, or cut into the tile when boxed in.
     private func rebuildLabels() {
         labelRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -1120,8 +1129,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
                 // Tiles are centred on integer coordinates: any tile the text touches counts.
-                let x0 = Int((lo.x + 0.4).rounded(.down)), x1 = max(x0, Int((hi.x - 0.4).rounded(.down)))
-                let y0 = Int((lo.y + 0.4).rounded(.down)), y1 = max(y0, Int((hi.y - 0.4).rounded(.down)))
+                let x0 = Int((lo.x + 0.25).rounded(.down)), x1 = max(x0, Int((hi.x - 0.25).rounded(.down)))
+                let y0 = Int((lo.y + 0.25).rounded(.down)), y1 = max(y0, Int((hi.y - 0.25).rounded(.down)))
                 for x in x0...x1 {
                     for y in y0...y1 where occupied(Cell(x: x, y: y)) {
                         return true
@@ -1187,7 +1196,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let fitDepth = across / (Double(lines) * 1.15)                 // stacked lines must fit too
                     size = max(0.16, min(size, fitWidth, fitDepth))
                     lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
-                    let label = floorText(text, color: NSColor(room.color).darker(0.28), size: size, maxWidth: along, lines: lines)
+                    let label = floorText(text, color: StationController.inkOnTile, size: size, maxWidth: along, lines: lines)
                     let maxYRow = room.cells.map(\.y).max()!
                     let anchor = room.cells.filter { $0.y == maxYRow }.min { $0.x < $1.x }!
                     let center = horizontal
@@ -1196,6 +1205,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     label.node.position.y = 0.02
                     add(label.node, yaw: horizontal ? 0 : .pi / 2, center: center)
                     node = label.node
+                }
+                if let who = occupant(of: key) {
+                    let sign = floorSign(who, color: StationController.inkOnTile, size: 0.3)
+                    sign.node.position.y = 0.012
+                    let maxYRow = room.cells.map(\.y).max()!
+                    let cx = room.cells.filter { $0.y == maxYRow }.map(\.x).max()!
+                    let corner = SIMD2(Double(cx) + 0.42 - sign.width / 2, Double(maxYRow) + 0.42 - sign.height / 2)
+                    add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                    sign.node.name = "room:" + key
                 }
                 guard let node else { continue }
                 node.name = "room:" + key
@@ -2145,7 +2163,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
                 if merged, station.hasPad, hauledAt[roomKey(station, room)] == nil { haulMergedBoxes(station: station, room: room) }
-                let cleared = merged && (!station.hasPad || (hauledAt[roomKey(station, room)] != nil && !hauls.contains { $0.roomKey == roomKey(station, room) }))
+                let cleared = merged && (!station.hasPad || (hauledAt[roomKey(station, room)].map { now.timeIntervalSince($0) > 60 } ?? false && !hauls.contains { $0.roomKey == roomKey(station, room) }))
                 // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
                 // An office a peer left behind is held for a day so their return does not move it.
                 let key = roomKey(station, room)
@@ -2672,8 +2690,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
             // The column says an office is solid; it does not make one. An issue needs a sign of work:
             // a linked pull request, a branch seen in the feed, or a room a session or peer already claims.
-            var branched: Set<String> = []   // "repo#N" with a gh-N/… branch in the feed
-            for (repo, e) in feed { if let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) { branched.insert("\(repo)#\(m.1)") } }
+            var branched: Set<String> = []   // "repo#N" with a gh-N/… branch pushed in the last two weeks
+            let recent = now.addingTimeInterval(-14 * 24 * 3600)
+            for (repo, e) in feed where e.at > recent { if let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) { branched.insert("\(repo)#\(m.1)") } }
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
                 let key = "task:\(it.repo)#\(it.number)"
                 guard let login = it.assignees.first, login != me else { continue }
@@ -2707,7 +2726,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for (repo, pr) in open where !pr.isBot && !isKicked(sk + Home.from(repo: repo, branch: pr.branch, cwd: "").key) {
             let home = Home.from(repo: repo, branch: pr.branch, cwd: "")
             let key = home.key
-            let name = crewName(pr.author) + " · " + home.name
+            let name = home.name
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
@@ -2719,7 +2738,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for (repo, it, login) in boardOffices where !isKicked(sk + "task:\(repo)#\(it.number)") {
             let key = "task:\(repo)#\(it.number)"
-            let name = crewName(login) + " · #\(it.number) " + String(it.title.prefix(22))
+            let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
