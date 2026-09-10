@@ -444,6 +444,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
+    /// The floor changed under a walk, a crate or a pallet arrived in the way: the walk is planned again
+    /// from where the minion stands to where it was going.
+    func replanBlockedWalks() {
+        for m in minions.values where !m.path.isEmpty {
+            guard let station = fleet.stations[m.station] else { continue }
+            let blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
+            guard blocked, let last = m.path.last else { continue }
+            m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
+        }
+    }
+
     /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
     func onGitHubUpdate() {
         let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in
@@ -887,7 +898,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         clock += dt
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles(); replanBlockedWalks() }
         tickShuttles()
         tickPallets()
         tickCrateMotions()

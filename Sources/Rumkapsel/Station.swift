@@ -452,7 +452,28 @@ final class Station {
     /// Waypoints from a position to a cell, threading between crates, boxes and pyramids. Ends on the
     /// cell's centre when that is clear, else on the clearest spot in it. Falls back to wading through
     /// on the coarse grid only when nothing is passable at all.
-    func path(from: SIMD2<Double>, to: Cell) -> [SIMD2<Double>] {
+    /// A lane along a wall: a spot whose next spot over lies where a walk may not go. Kept off unless
+    /// nothing else leads through, so walks run down the middle and never brush the walls.
+    private func isEdge(_ s: Cell) -> Bool {
+        let cc = Station.cell(ofSub: s)
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = Cell(x: s.x + dx, y: s.y + dy)
+            let nc = Station.cell(ofSub: n)
+            if nc == cc { continue }
+            if !walkable.contains(nc) || !canStep(from: cc, to: nc) { return true }
+        }
+        return false
+    }
+
+    /// Waypoints from a position to a cell. `avoiding` are spots taken right now by things that move,
+    /// other minions mostly; they block like props do. Inner lanes first, wall lanes only if that fails.
+    func path(from: SIMD2<Double>, to: Cell, avoiding: Set<Cell> = []) -> [SIMD2<Double>] {
+        if let inner = route(from: from, to: to, avoiding: avoiding, edges: false) { return inner }
+        return route(from: from, to: to, avoiding: avoiding, edges: true) ?? []
+    }
+
+    private func route(from: SIMD2<Double>, to: Cell, avoiding: Set<Cell>, edges: Bool) -> [SIMD2<Double>]? {
+        let obstacles = self.obstacles.union(avoiding)
         guard walkable.contains(to) else { return [] }
         let start = Station.sub(from)
         func spots(in c: Cell) -> [Cell] {
@@ -485,7 +506,9 @@ final class Station {
         var head = 0
         var found: Cell?
         let steps = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-        func open(_ s: Cell) -> Bool { walkable.contains(Station.cell(ofSub: s)) && (!obstacles.contains(s) || goals.contains(s)) }
+        func open(_ s: Cell) -> Bool {
+            walkable.contains(Station.cell(ofSub: s)) && (!obstacles.contains(s) || goals.contains(s)) && (edges || goals.contains(s) || !isEdge(s))
+        }
         while head < queue.count, head < 12000 {
             let c = queue[head]; head += 1
             if goals.contains(c) { found = c; break }
@@ -504,6 +527,7 @@ final class Station {
             }
         }
         guard let end = found else {
+            if !edges { return nil }   // try again with the wall lanes allowed
             return coarsePath(from: Station.cell(ofSub: start), to: to).map { SIMD2(Double($0.x), Double($0.y)) }
         }
         var subs: [Cell] = []

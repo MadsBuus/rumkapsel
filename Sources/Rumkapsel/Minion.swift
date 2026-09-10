@@ -43,6 +43,8 @@ final class Minion {
     var wakeUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
+    /// How long someone has stood in the way.
+    var blockedFor = 0.0
     /// Which bath fixture is held: 0 the bowl, 1 the shower.
     var fixture: Int?
     /// Short stretches of work so far: every other one earns a pee.

@@ -8,7 +8,11 @@ extension StationController {
 
     func spawnMinion(_ s: SessionInfo, station: String, home: Home) -> Minion {
         let st = fleet.stations[station]
-        let start = s.isSubagent ? (st?.coreCenter ?? Cell(x: 0, y: 0)) : (st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0))
+        // Straight into its own office when there is one, each on a cell of its own; subagents at the monolith.
+        let start: Cell
+        if s.isSubagent { start = st?.coreCenter ?? Cell(x: 0, y: 0) }
+        else if let cells = st?.rooms[home.key]?.cells, !cells.isEmpty { start = cells[minions.count % cells.count] }
+        else { start = st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0) }
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         m.markers = s.eventMarkers
         m.promptCount = s.promptCount
@@ -131,7 +135,7 @@ extension StationController {
         m.couch = nil; m.bed = nil
         guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement() else { return }
         m.place = .airlock
-        m.path = station.path(from: m.pos, to: hatch.inside)
+        m.path = route(m, to: hatch.inside)
         // Then out onto the bay: that is where the shuttle would pick them up.
         let inside = SIMD2(Double(hatch.inside.x), Double(hatch.inside.y))
         m.path += [inside] + station.path(from: inside, to: hatch.bay)
@@ -159,7 +163,7 @@ extension StationController {
             } else if let last = m.path.last {
                 let dest = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
                 if cells.contains(dest) {
-                    m.path = station.path(from: m.pos, to: dest)
+                    m.path = route(m, to: dest)
                     if !m.path.isEmpty || m.cell == dest { continue }
                 }
             }
@@ -198,7 +202,7 @@ extension StationController {
         // A bath or a chore in hand survives a re-plan to where it already is; anything else rests.
         let keep = (m.bathing && place == .bath) || (m.isChore && place == m.place)
         if !keep { start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping)) }
-        m.path = station.path(from: m.pos, to: target)
+        m.path = route(m, to: target)
         // No way found and far off: walk straight rather than stand still or slide.
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
         m.nextWanderAt = clock + Double.random(in: 1...3)
@@ -206,7 +210,23 @@ extension StationController {
 
     func walk(_ m: Minion, to cell: Cell) {
         guard let station = fleet.stations[m.station] else { return }
-        m.path = station.path(from: m.pos, to: cell)
+        m.path = route(m, to: cell)
+    }
+
+    /// Spots taken by the other minions on a station, as the pathfinder sees them: solid, like props.
+    func crowd(around m: Minion) -> Set<Cell> {
+        var out: Set<Cell> = []
+        for o in minions.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
+            let s = Station.sub(o.pos)
+            for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } }
+        }
+        return out
+    }
+
+    /// A walk for a minion: round the props and round everyone else.
+    func route(_ m: Minion, to cell: Cell) -> [SIMD2<Double>] {
+        guard let station = fleet.stations[m.station] else { return [] }
+        return station.path(from: m.pos, to: cell, avoiding: crowd(around: m))
     }
 
     /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.
@@ -525,7 +545,7 @@ extension StationController {
             cargo[id]?.carrier = m.id
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = station.path(from: m.pos, to: from.cell)
+            m.path = route(m, to: from.cell)
         }
         tickRockets()
         servicePallets()

@@ -240,8 +240,25 @@ extension StationController {
                 let d = target - m.pos
                 let dist = (d.x * d.x + d.y * d.y).squareRoot()
                 let step = speed * dt
-                if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos += d / dist * step }
-                m.facing = atan2(d.x, d.y)
+                let next = dist <= step ? target : m.pos + d / dist * step
+                // Solid to each other: someone in the way is waited for a moment, then walked round.
+                let ahead = minions.values.contains { o in
+                    o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
+                        && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
+                        && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
+                }
+                if ahead {
+                    m.blockedFor += dt
+                    m.facing = atan2(d.x, d.y)
+                    if m.blockedFor > 0.8, let last = m.path.last {
+                        m.blockedFor = 0
+                        m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
+                    }
+                } else {
+                    m.blockedFor = 0
+                    if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos = next }
+                    m.facing = atan2(d.x, d.y)
+                }
             } else {
                 if m.commitDrop, let c = m.carried {
                     m.commitDrop = false
@@ -401,7 +418,7 @@ extension StationController {
                             m.qaStop += 1
                             let aisle = [Cell(x: stack.cell.x, y: stack.cell.y - 1), Cell(x: stack.cell.x, y: stack.cell.y + 1)]
                                 .first { station.deckCells.contains($0) } ?? stack.cell
-                            m.path = station.path(from: m.pos, to: aisle)
+                            m.path = route(m, to: aisle)
                             m.facing = atan2(stack.pos.x - station.offset.x - Double(aisle.x), stack.pos.z - station.offset.y - Double(aisle.y))
                         }
                         m.nextWanderAt = clock + Double.random(in: 4...7)
@@ -442,7 +459,7 @@ extension StationController {
                                 start(m, .chore(spot: spot))
                                 m.couch = nil
                                 m.place = .core
-                                m.path = station.path(from: m.pos, to: spot)
+                                m.path = route(m, to: spot)
                                 m.phaseUntil = clock + Double.random(in: 10...25)
                                 m.nextWanderAt = m.phaseUntil
                             }
@@ -493,7 +510,7 @@ extension StationController {
                         if let bath = station.rooms["kind:bath"] {
                             let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                             let cell = m.showering ? (cells.count > 1 ? cells[1] : cells.last!) : cells.first!
-                            m.path = station.path(from: m.pos, to: cell)
+                            m.path = route(m, to: cell)
                             // Then the exact spot: under the nozzle, or a step in front of the bowl, facing it.
                             let nozzle = showerNozzle(station: station, bath: bath)
                             m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
@@ -505,7 +522,7 @@ extension StationController {
                         if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
                     } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
-                        if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
+                        if let dest = choices.randomElement() { m.path = route(m, to: dest) }
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
                     }
                 case .leaving:
