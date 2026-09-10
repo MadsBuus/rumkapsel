@@ -36,6 +36,14 @@ enum Palette {
 
 func v3(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(x, y, z) }
 
+/// Nothing in the station is round: every turned shape is cut with a few flat sides.
+func faceted<G: SCNGeometry>(_ g: G, _ sides: Int = 6) -> G {
+    (g as? SCNCylinder)?.radialSegmentCount = sides
+    (g as? SCNCone)?.radialSegmentCount = sides
+    (g as? SCNTube)?.radialSegmentCount = sides
+    return g
+}
+
 func flat(_ color: NSColor) -> SCNMaterial {
     let m = SCNMaterial()
     m.diffuse.contents = color
@@ -414,18 +422,18 @@ final class Minion {
             // A torch held out front, with its cone of light drawn as a soft translucent cone.
             let pivot = SCNNode()
             pivot.position = v3(0.06, h * 0.34, d / 2 + 0.04)
-            let barrel = SCNNode(geometry: SCNCylinder(radius: 0.025, height: 0.12))
+            let barrel = SCNNode(geometry: faceted(SCNCylinder(radius: 0.025, height: 0.12), 4))
             barrel.geometry!.firstMaterial = dark
             barrel.eulerAngles.x = .pi / 2
             barrel.position = v3(0, 0, 0.06)
             pivot.addChildNode(barrel)
-            let lens = SCNNode(geometry: SCNCylinder(radius: 0.028, height: 0.01))
+            let lens = SCNNode(geometry: faceted(SCNCylinder(radius: 0.028, height: 0.01), 4))
             lens.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.7)))
             lens.eulerAngles.x = .pi / 2
             lens.position = v3(0, 0, 0.125)
             pivot.addChildNode(lens)
             let beamLength = 0.9
-            let beam = SCNNode(geometry: SCNCone(topRadius: 0.028, bottomRadius: 0.22, height: beamLength))
+            let beam = SCNNode(geometry: faceted(SCNCone(topRadius: 0.028, bottomRadius: 0.22, height: beamLength)))
             beam.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.75)))
             beam.geometry!.firstMaterial?.transparency = 0.18
             beam.geometry!.firstMaterial?.writesToDepthBuffer = false
@@ -956,7 +964,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if station.hasPad {
                 let pc = station.padCenter
-                let ring = SCNNode(geometry: SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01))
+                let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01)))
                 ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
                 ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
                 staticRoot.addChildNode(ring)
@@ -964,7 +972,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
-                let table = SCNNode(geometry: SCNCylinder(radius: 0.3, height: 0.28))
+                let table = SCNNode(geometry: faceted(SCNCylinder(radius: 0.3, height: 0.28), 4))
                 table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3)))
                 table.position = v3(station.offset.x + cx, 0.14, station.offset.y + cy)
                 table.name = "room:" + roomKey(station, lounge)
@@ -984,10 +992,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 // A potted plant in one corner and a low shelf in another: somewhere to look at.
                 let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
-                let pot = SCNNode(geometry: SCNCylinder(radius: 0.11, height: 0.16))
+                let pot = SCNNode(geometry: faceted(SCNCylinder(radius: 0.11, height: 0.16), 4))
                 pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
                 pot.position = v3(station.offset.x + Double(xs.min()!) - 0.28, 0.08, station.offset.y + Double(ys.min()!) - 0.28)
-                let leaves = SCNNode(geometry: SCNSphere(radius: 0.17))
+                let leaves = SCNNode(geometry: SCNBox(width: 2 * (0.17), height: 2 * (0.17), length: 2 * (0.17), chamferRadius: 0))
                 leaves.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.62, 0.38)))
                 leaves.position = v3(0, 0.2, 0)
                 pot.addChildNode(leaves)
@@ -1011,12 +1019,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let door = station.doorCell(of: airlock.key) ?? cells[0]
                 let far = station.airlockHatch?.inside ?? cells.max { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) } ?? cells[0]
                 let out = station.airlockHatch?.bay ?? Cell(x: far.x + (far.x - door.x), y: far.y + (far.y - door.y))
-                let hatch = SCNNode(geometry: SCNTube(innerRadius: 0.22, outerRadius: 0.32, height: 0.08))
+                let hatch = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.22, outerRadius: 0.32, height: 0.08)))
                 hatch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.62, 0.25)))
                 let dx = out.x - far.x, dy = out.y - far.y
                 hatch.eulerAngles = dx != 0 ? SCNVector3(0, 0, Double.pi / 2) : SCNVector3(Double.pi / 2, 0, 0)
                 hatch.position = v3(station.offset.x + Double(far.x) + Double(dx) * 0.42, 0.42, station.offset.y + Double(far.y) + Double(dy) * 0.42)
-                let pane = SCNNode(geometry: SCNCylinder(radius: 0.22, height: 0.04))
+                let pane = SCNNode(geometry: faceted(SCNCylinder(radius: 0.22, height: 0.04)))
                 pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
                 hatch.addChildNode(pane)
                 hatch.name = "room:" + roomKey(station, airlock)
@@ -1026,7 +1034,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // A toilet in one corner and a shower post in the other.
                 let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
                 let tc = cells.first!, sc = cells.last!
-                let bowl = SCNNode(geometry: SCNCylinder(radius: 0.13, height: 0.2))
+                let bowl = SCNNode(geometry: faceted(SCNCylinder(radius: 0.13, height: 0.2), 4))
                 bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
                 bowl.position = v3(station.offset.x + Double(tc.x) - 0.22, 0.1, station.offset.y + Double(tc.y) - 0.22)
                 let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
@@ -1035,10 +1043,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 bowl.addChildNode(tank)
                 bowl.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(bowl)
-                let post = SCNNode(geometry: SCNCylinder(radius: 0.025, height: 0.7))
+                let post = SCNNode(geometry: faceted(SCNCylinder(radius: 0.025, height: 0.7), 4))
                 post.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
                 post.position = v3(station.offset.x + Double(sc.x) + 0.3, 0.35, station.offset.y + Double(sc.y) + 0.3)
-                let head = SCNNode(geometry: SCNCylinder(radius: 0.09, height: 0.03))
+                let head = SCNNode(geometry: faceted(SCNCylinder(radius: 0.09, height: 0.03), 4))
                 head.geometry!.firstMaterial = post.geometry!.firstMaterial
                 head.position = v3(-0.12, 0.33, -0.12)
                 post.addChildNode(head)
@@ -1054,7 +1062,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
                 anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
                 for slot in station.hangarSlots {
-                    let mark = SCNNode(geometry: SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01))
+                    let mark = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
                     mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
                     mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
                     staticRoot.addChildNode(mark)
@@ -1622,7 +1630,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             })
             for (i, repo) in waiting.filter({ !withRocket.contains($0) }).enumerated() {
                 let radius = 1.62 + Double(i) * 0.12
-                let ring = SCNNode(geometry: SCNTube(innerRadius: radius, outerRadius: radius + 0.05, height: 0.008))
+                let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: radius, outerRadius: radius + 0.05, height: 0.008)))
                 ring.geometry!.firstMaterial = flat(NSColor(fleet.color(forRepo: repo)))
                 ring.opacity = 0.3
                 ring.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.6, duration: 1.6), .fadeOpacity(to: 0.25, duration: 1.6)])))
@@ -2843,7 +2851,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let puff = SCNAction.run { [weak self] _ in
             guard let self else { return }
             enqueue {
-                let p = SCNNode(geometry: SCNSphere(radius: 0.08))
+                let p = SCNNode(geometry: SCNBox(width: 2 * (0.08), height: 2 * (0.08), length: 2 * (0.08), chamferRadius: 0))
                 p.geometry!.firstMaterial = flat(NSColor(rgb: (0.85, 0.88, 0.95)))
                 p.opacity = 0.7
                 p.position = v3(Double.random(in: -0.25...0.25), 0.05, Double.random(in: -0.25...0.25))
@@ -3667,7 +3675,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     // QA on the test deck: peering down at the staged boxes, a green tick popping up now and then.
                     tilt = 0.28 + sin(t * 1.2) * 0.08; spin = sin(t * 0.6) * 0.5
                     if Int(t * 2) % 9 == 0 && Int((t - dt) * 2) % 9 != 0 {
-                        let tick = SCNNode(geometry: SCNSphere(radius: 0.07))
+                        let tick = SCNNode(geometry: SCNBox(width: 2 * (0.07), height: 2 * (0.07), length: 2 * (0.07), chamferRadius: 0))
                         tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
                         tick.position = v3(m.node.position.x, m.headHeight + 0.2, m.node.position.z)
                         propRoot.addChildNode(tick)

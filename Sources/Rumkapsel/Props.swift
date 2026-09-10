@@ -66,7 +66,7 @@ enum Props {
 
     /// A hexagonal crate in the repo colour: the order for a new office.
     static func crate(color: NSColor) -> SCNNode {
-        let geo = SCNCylinder(radius: 0.26, height: 0.18)
+        let geo = faceted(SCNCylinder(radius: 0.26, height: 0.18))
         geo.radialSegmentCount = 6
         let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
         geo.materials = [side, top, top]
@@ -85,25 +85,25 @@ enum Props {
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         // Body, a slightly wider lower stage, and a nose cone in the repo colour.
-        let lower = SCNNode(geometry: SCNCylinder(radius: r, height: h * 0.45))
+        let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
         lower.geometry!.firstMaterial = white
         lower.position = v3(0, 0.12 + h * 0.225, 0)
         n.addChildNode(lower)
-        let band = SCNNode(geometry: SCNCylinder(radius: r * 1.02, height: h * 0.08))
+        let band = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.02, height: h * 0.08)))
         band.geometry!.firstMaterial = lit(color)
         band.position = v3(0, 0.12 + h * 0.45, 0)
         n.addChildNode(band)
-        let upper = SCNNode(geometry: SCNCylinder(radius: r * 0.9, height: h * 0.4))
+        let upper = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.9, height: h * 0.4)))
         upper.geometry!.firstMaterial = white
         upper.position = v3(0, 0.12 + h * 0.49 + h * 0.2, 0)
         n.addChildNode(upper)
-        let nose = SCNNode(geometry: SCNCone(topRadius: 0, bottomRadius: r * 0.9, height: r * 2.6))
+        let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: r * 0.9, height: r * 2.6)))
         nose.geometry!.firstMaterial = lit(color)
         nose.position = v3(0, 0.12 + h * 0.89 + r * 1.3, 0)
         n.addChildNode(nose)
         // Portholes on the upper stage.
         for k in 0..<3 {
-            let port = SCNNode(geometry: SCNSphere(radius: r * 0.18))
+            let port = SCNNode(geometry: SCNBox(width: 2 * (r * 0.18), height: 2 * (r * 0.18), length: 2 * (r * 0.18), chamferRadius: 0))
             port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
             let a = Double(k) * 2 * .pi / 3
             port.position = v3(sin(a) * r * 0.86, 0.12 + h * 0.75, cos(a) * r * 0.86)
@@ -120,7 +120,7 @@ enum Props {
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
         }
-        let nozzle = SCNNode(geometry: SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14))
+        let nozzle = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14)))
         nozzle.geometry!.firstMaterial = dark
         nozzle.position = v3(0, 0.05, 0)
         n.addChildNode(nozzle)
@@ -135,7 +135,7 @@ enum Props {
             pivot.addChildNode(leg)
             n.addChildNode(pivot)
         }
-        let flame = SCNNode(geometry: SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45))
+        let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
         flame.position = v3(0, -0.2, 0)
         flame.name = "flame"

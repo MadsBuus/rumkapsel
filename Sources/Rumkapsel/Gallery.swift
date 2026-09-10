@@ -219,7 +219,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         do {
             let p = tile(i, "shuttle + crate"); i += 1
             roomFloor(at: p, color: NSColor(Colors.hangar))
-            let ring = SCNNode(geometry: SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)); ring.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18)); ring.position = v3(p.x, 0.006, p.y); scene.rootNode.addChildNode(ring)
+            let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01))); ring.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18)); ring.position = v3(p.x, 0.006, p.y); scene.rootNode.addChildNode(ring)
             let crate = Props.crate(color: teal); crate.position = v3(p.x, 0.09, p.y); crate.opacity = 0; scene.rootNode.addChildNode(crate)
             let ship = SCNNode()
             let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03)); hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9))); ship.addChildNode(hull)
@@ -261,7 +261,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         do {
             let p = tile(i, "lounge + crew minion"); i += 1
             roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))
-            let table = SCNNode(geometry: SCNCylinder(radius: 0.3, height: 0.28)); table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3))); table.position = v3(p.x, 0.14, p.y); scene.rootNode.addChildNode(table)
+            let table = SCNNode(geometry: faceted(SCNCylinder(radius: 0.3, height: 0.28), 4)); table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3))); table.position = v3(p.x, 0.14, p.y); scene.rootNode.addChildNode(table)
             let a = minion(at: SIMD2(p.x - 0.55, p.y)); a.node.eulerAngles.y = .pi / 2
             let b = minion(at: SIMD2(p.x + 0.55, p.y), crew: true); b.node.eulerAngles.y = -.pi / 2
             updaters.append { c, _ in a.tilt.eulerAngles = SCNVector3(sin(c * 2.2) * 0.06, 0, 0); b.tilt.eulerAngles = SCNVector3(sin(c * 2.2 + 1) * 0.06, 0, 0) }
