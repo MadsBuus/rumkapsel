@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var simulator: SimulatorController?
     /// A scripted run's heartbeat: see below.
     private var frameBeat: Timer?
+    /// The `--scenarios` suite, when that is what this run is.
+    private var scenarios: ScenarioRunner?
     let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel"
 
@@ -30,6 +32,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let demo = args.contains("--demo")
         let simulatorOnly = args.contains("--simulator")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
+
+        // The scripted regression suite: no window, no station of its own, one after another.
+        if let i = args.firstIndex(of: "--scenarios") {
+            let next = args.count > i + 1 ? args[i + 1] : nil
+            let filter = (next?.hasPrefix("--") ?? true) ? nil : next
+            scenarios = ScenarioRunner(filter: filter, verbose: args.contains("--scenarios-verbose"))
+            scenarios?.run()
+            return
+        }
 
         buildMenu()
         ConfigStore.shared.onChange = { [weak self] _ in self?.controller.applyConfigChange() }
@@ -325,6 +336,7 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
-    app.setActivationPolicy(.regular)
+    // A scripted suite has no window and wants no dock icon in the way.
+    app.setActivationPolicy(CommandLine.arguments.contains("--scenarios") ? .accessory : .regular)
     app.run()
 }

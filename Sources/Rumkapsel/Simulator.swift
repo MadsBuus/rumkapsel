@@ -158,6 +158,7 @@ final class SimulatorModel: ObservableObject {
         station.sim?.onCommand = { [weak self] c, who in
             self?.note("command", "\(who): \(c.words)")
         }
+        station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text) }
         // A peer that stops talking is dropped after twenty seconds, so keep saying the same thing.
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushPeer() }
@@ -748,6 +749,8 @@ final class SimulatorModel: ObservableObject {
     }
 
     var logText: String { lines.text }
+    /// The whole run, oldest first: what `--scenarios` reads its expectations off.
+    var logLines: [String] { lines.ordered }
 
     static func describe(_ e: WorldEvent) -> String {
         switch e {
@@ -792,10 +795,21 @@ final class SimLog: @unchecked Sendable {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
 
+    /// The same lines the panel shows, oldest first and uncapped: what a scripted run reads.
+    private var whole: [String] = []
+
     func add(kind: String, text: String) {
         lock.lock(); defer { lock.unlock() }
-        lines.insert("\(SimLog.stamp.string(from: Date()))  \(kind)  \(text)", at: 0)
+        let line = "\(SimLog.stamp.string(from: Date()))  \(kind)  \(text)"
+        lines.insert(line, at: 0)
         if lines.count > 400 { lines.removeLast(lines.count - 400) }
+        whole.append(line)
+        if whole.count > 20000 { whole.removeFirst(whole.count - 20000) }
+    }
+
+    var ordered: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return whole
     }
 
     var text: String {
@@ -911,6 +925,10 @@ final class SimHooks {
     var onEvent: ((WorldEvent) -> Void)?
     /// The command and who is running it: a worker's office, or "shuttle" and "rocket".
     var onCommand: ((Command, String) -> Void)?
+    /// A rule of STATION.md the floor just broke, in the words `Invariants` gives it.
+    var onViolation: ((String) -> Void)?
+    /// The rulebook, checked at the end of every simulated step.
+    let invariants = Invariants()
     /// 1, 4 or 16: how fast the tick's dt runs.
     var timeScale = 1.0
     var paused = false
@@ -941,6 +959,7 @@ extension StationController {
             budget -= step
             sim.clock += step
             tick(now: sim.clock)
+            sim.invariants.check(self)
         }
     }
 
