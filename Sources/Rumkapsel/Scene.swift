@@ -174,6 +174,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// pallet to the deck once it is loaded, false empties it back into storage.
     var palletWishes: [String: Bool] = [:]
     var lastBoxCount: [String: Int] = [:]
+    /// Where each yard crate stood at the last redraw, by its node name. A crate whose column lost the
+    /// one under it settles down to its new level over a beat instead of blinking there.
+    var crateStood: [String: SIMD3<Double>] = [:]
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
@@ -622,7 +625,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for m in minions.values {
                 guard case .deliverOffice(let r) = m.current?.kind, let station = fleet.stations[m.station] else { continue }
                 if m.carried == nil, let c = station.hangarCells.randomElement() { walk(m, to: c) }
-                else if let door = station.doorCell(of: r) { walk(m, to: door) }
+                else if let slot = officeCrateSlot(station: station, roomKey: r) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
             }
         } else {
             flushScene()

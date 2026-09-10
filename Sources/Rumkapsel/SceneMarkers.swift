@@ -179,9 +179,21 @@ extension StationController {
                 }
                 lastBoxCount[key] = count + ghosts
             }
+            // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
+            // the hands, for as long as the carry lasts.
             for area in ["storage", "deck"] where station.hasPad {
-                for slot in world.yardLayout(station: station, area: area) {
-                    if area == "deck", world.truth.isCarried(station: station.name, repo: slot.repo, number: slot.number) { continue }
+                let layout = world.yardLayout(station: station, area: area)
+                let standing = Set(layout.filter { $0.number > 0 }.map { "\(area):\(station.name)|\($0.repo)|\($0.number)" })
+                /// True when every crate that stood between here and there at the last redraw has left
+                /// the rows: only then is this a stack settling, rather than two crates changing places.
+                func vacated(_ from: SIMD3<Double>, _ to: SIMD3<Double>) -> Bool {
+                    crateStood.allSatisfy { id, was in
+                        guard abs(was.x - to.x) < 0.001, abs(was.z - to.z) < 0.001,
+                              was.y < from.y - 0.05, was.y > to.y - 0.05 else { return true }
+                        return !standing.contains(id)
+                    }
+                }
+                for slot in layout {
                     let c = NSColor(fleet.color(forRepo: slot.repo))
                     // In the yard the light is off, except green with a sticker on a tested crate.
                     let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38, approved: slot.cleared)
@@ -190,7 +202,23 @@ extension StationController {
                     pkg.name = "\(area):\(station.name)|\(slot.repo)|\(slot.number)"
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
+                    // The crate under it was taken away: this one settles down onto the free level over
+                    // a beat, rather than blinking there. Its height is the only thing that may change
+                    // this way, it only ever goes down, and only into space nothing else stands in.
+                    if slot.number > 0 {
+                        let id = pkg.name!
+                        if let was = crateStood[id],
+                           abs(was.x - slot.pos.x) < 0.001, abs(was.z - slot.pos.z) < 0.001,
+                           was.y > slot.pos.y + 0.05, vacated(was, slot.pos) {
+                            pkg.position = v3(was.x, was.y, was.z)
+                            let down = SCNAction.move(to: v3(slot.pos.x, slot.pos.y, slot.pos.z), duration: Hands.settleSeconds)
+                            down.timingMode = .easeInEaseOut
+                            pkg.runAction(down)
+                        }
+                    }
                 }
+                for id in crateStood.keys where id.hasPrefix("\(area):\(station.name)|") && !standing.contains(id) { crateStood[id] = nil }
+                for slot in layout where slot.number > 0 { crateStood["\(area):\(station.name)|\(slot.repo)|\(slot.number)"] = slot.pos }
             }
         }
         refreshObstacles()
@@ -269,6 +297,9 @@ extension StationController {
         r.command = command
         r.phase = 0
         r.since = clock
+        r.assigned = []   // a new stage orders its own cargo; what is already aboard stays aboard
+        r.pending = []
+        r.moaned = 0
         issue(command, by: "rocket", announce: true)
         beginRocketPhase(r)
     }
@@ -294,9 +325,22 @@ extension StationController {
             switch r.phaseKind {
             case .load:
                 loadCrates(r)
-                // Done when nothing of this repository is left on the rows and nothing is on someone's
-                // arms. A haul that got stuck may not ground a launch forever.
-                guard padClear(r) || clock - r.since > 90 else { continue }
+                // A rocket never launches empty. The load is over when every crate this rocket was
+                // given a carry for stands on the pad, and nothing of the repository is left on the
+                // rows or on anyone's arms. A haul that is taking its time is waited out and said
+                // out loud, never launched over. A release with no cargo at all — nothing was ever
+                // assigned — goes as soon as the rows are clear, as it always did.
+                // Unnumbered crates of a repository share one truth key, so the count aboard can
+                // read short of what is really on the pad: the carries themselves are the second,
+                // exact witness, and both have to agree before the rocket may go.
+                let short = r.assigned.count - world.truth.aboard(station: r.station, repo: r.repo)
+                guard padClear(r), r.pending.isEmpty, short <= 0 else {
+                    if clock - r.since > 90, clock - r.moaned > 30 {
+                        r.moaned = clock
+                        logEvent("\(r.repo): the rocket holds, \(max(short, 1)) crate\(max(short, 1) == 1 ? "" : "s") still to come aboard")
+                    }
+                    continue
+                }
                 advanceRocket(r)
             case .climb:
                 if clock >= r.until { r.node.removeFromParentNode(); rocketActors[r.key] = nil }
@@ -337,8 +381,11 @@ extension StationController {
         for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
             guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
                   let b = crateNode(source, crate, at: from) else { continue }
-            carry(command, node: b) { [weak self] in
+            r.assigned.insert(crate.key)   // ordered aboard: the launch waits for it
+            r.pending.insert(command.id)
+            carry(command, node: b) { [weak self, weak r] in
                 guard let self else { return }
+                r?.pending.remove(command.id)
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
                 else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
                 b.runAction(.sequence([.scale(to: 0.01, duration: 0.3), .removeFromParentNode()]))

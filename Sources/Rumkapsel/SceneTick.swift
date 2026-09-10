@@ -106,6 +106,120 @@ extension StationController {
         return SIMD2(station.offset.x + Double(sc2.x) + 0.3, station.offset.y + Double(sc2.y) - 0.18)
     }
 
+    // MARK: hands
+
+    /// Everything a crate does between two slots, in one place. Every crate that moves by hand — a
+    /// carry, an office delivery, anything later — goes through `startLift`/`lift` and
+    /// `startSetDown`/`setDown`/`release`, so there is one lift on the station and one set-down.
+    ///
+    /// The arcs are `SCNAction`s, because they ease nicely, and the phases are on the station clock.
+    /// Both are derived from the numbers below and nowhere else, so the two cannot drift: a phase is
+    /// exactly its arc plus the beat around it, whatever those durations are changed to.
+    enum Hands {
+        /// The crate's two legs off its slot: back at its own height, then up onto the arms.
+        static let liftFirst = 0.3, liftSecond = 0.35
+        /// Crouched over it before the hands take hold.
+        static let liftCrouch = 0.45
+        /// Out of the arms, over the slot, and squarely down onto it.
+        static let setDownFirst = 0.35, setDownSecond = 0.45
+        /// A beat standing over it before straightening up.
+        static let setDownSettle = 0.3
+        static var liftArc: Double { liftFirst + liftSecond }
+        static var liftSeconds: Double { liftCrouch + liftArc }
+        static var setDownArc: Double { setDownFirst + setDownSecond }
+        static var setDownSeconds: Double { setDownArc + setDownSettle }
+        /// How high one crate stands on the next.
+        static let level = 0.34
+        /// An arm's length, and the slack either side of it.
+        static let arm = 0.34, near = 0.28, far = 0.42
+        /// How long a crate takes to settle down a level when the one under it is taken away.
+        static let settleSeconds = 0.6
+    }
+
+    /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
+    func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool {
+        let to = spot - m.pos
+        let dist = (to.x * to.x + to.y * to.y).squareRoot()
+        if dist > 0.05 { m.facing = atan2(to.x, to.y) }
+        guard dist < Hands.near || dist > Hands.far, dist > 0.001 else { return true }
+        let want = spot - to / dist * Hands.arm
+        m.pos += (want - m.pos) * min(1, dt * 6)
+        return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
+    }
+
+    /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
+    func startLift(_ m: Minion, height: Double) {
+        m.handsAt = max(0, Int((height / Hands.level).rounded()))
+        m.phaseUntil = clock + Hands.liftSeconds
+    }
+
+    /// True once the crouch is over and the hands should be on the crate.
+    func liftDue(_ m: Minion) -> Bool { clock >= m.phaseUntil - Hands.liftArc }
+
+    /// The crate comes off its slot and onto the arms, and stays there until it is set down. Off the
+    /// floor it comes up past the chest; off a stack it slides back at its own height first, then up:
+    /// waist high from level one, above the head from higher up.
+    func lift(_ m: Minion, _ node: SCNNode) {
+        let at = node.worldPosition
+        node.removeAllActions()
+        node.removeFromParentNode()
+        m.node.addChildNode(node)
+        node.position = m.node.convertPosition(at, from: nil)
+        node.eulerAngles.y = CGFloat(Double(node.eulerAngles.y) - m.smoothFacing)   // keeps its own turn, now on the arms
+        let y = Double(node.position.y)
+        let via: SCNVector3
+        switch m.handsAt {
+        case 0: via = v3(0, m.headHeight * 0.45, 0.3)
+        case 1: via = v3(0, y, 0.2)
+        default: via = v3(0, max(m.headHeight + 0.2, y), 0.15)
+        }
+        let first = SCNAction.move(to: via, duration: Hands.liftFirst); first.timingMode = .easeOut
+        let onto = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: Hands.liftSecond); onto.timingMode = .easeInEaseOut
+        node.runAction(.sequence([first, onto]))
+        m.carried = node
+    }
+
+    /// Standing over the slot: the level it goes onto decides the posture, the set-down the clock.
+    func startSetDown(_ m: Minion, level: Int) {
+        m.handsAt = level
+        m.phaseUntil = clock + Hands.setDownSeconds
+    }
+
+    /// The crate leaves the arms and goes down onto its slot. Level 0 is set down carefully in front;
+    /// level 1 slides forward onto the top at waist height; level 2 goes over the head and slides in;
+    /// higher, with a hop. It is turned on the way down the way the layout will draw it.
+    func setDown(_ m: Minion, _ node: SCNNode, to pos: SIMD3<Double>, yaw: Double, level: Int) {
+        let target = m.node.convertPosition(v3(pos.x, pos.y, pos.z), from: nil)
+        let via: SCNVector3
+        switch level {
+        case 0: via = v3(0, m.headHeight * 0.45, 0.3)
+        case 1: via = v3(0, Double(target.y), 0.2)
+        default: via = v3(0, max(m.headHeight + 0.2, Double(target.y)), 0.15)
+        }
+        let first = SCNAction.move(to: via, duration: Hands.setDownFirst); first.timingMode = .easeInEaseOut
+        let second = SCNAction.move(to: target, duration: Hands.setDownSecond); second.timingMode = level == 0 ? .easeIn : .easeOut
+        let turn = SCNAction.rotateTo(x: 0, y: CGFloat(yaw - m.smoothFacing), z: 0, duration: Hands.setDownArc)
+        node.runAction(.group([.sequence([first, second]), turn]))
+    }
+
+    /// Out of the hands: it stands exactly where the layout will draw it, and nothing moves it from here.
+    func release(_ m: Minion, _ node: SCNNode, at pos: SIMD3<Double>, yaw: Double) {
+        node.removeAllActions()
+        node.removeFromParentNode()
+        node.position = v3(pos.x, pos.y, pos.z)
+        node.eulerAngles = SCNVector3(0, yaw, 0)
+        propRoot.addChildNode(node)
+        drone.thud()
+        m.carried = nil
+    }
+
+    /// Where an office's crate is set down: the far cell its own package will be drawn on, on the floor.
+    func officeCrateSlot(station: Station, roomKey: String) -> Spot? {
+        guard let room = station.rooms[roomKey], let cell = farCells(station, room).first else { return nil }
+        return Spot(area: .office, station: station.name, owner: roomKey, label: room.name, cell: cell,
+                    pos: SIMD3(station.offset.x + Double(cell.x), 0.09, station.offset.y + Double(cell.y)))
+    }
+
     func tickMinions(dt: Double) {
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
@@ -114,8 +228,9 @@ extension StationController {
             let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
             let jumping = m.activity == .waiting && waitingAge < 60 && !m.onJob
             let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
-            // Pace by the task, not by who: hauling is one pace, hurrying to work another, pacing a third.
-            let speed = m.isHauling ? 1.8 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4))
+            // Pace by the task, not by who: a loaded minion is the slowest thing on the station, below
+            // a stroll; hurrying to work is the fastest; pacing while waiting is slower still.
+            let speed = m.isHauling ? 1.1 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4))
             if m.lying, !m.path.isEmpty {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
@@ -141,8 +256,10 @@ extension StationController {
                 }
                 switch m.current?.kind {
                 case .deliverOffice(let r):
-                    // Off the shuttle and into the office: take the crate from the bay and walk it in.
+                    // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
+                    // way any crate is lifted, and set down on the office's own slot before the reveal.
                     let key = "\(m.station)|\(r)"
+                    let slot = officeCrateSlot(station: station, roomKey: r)
                     switch m.phaseKind {
                     case .walk:
                         advance(m); continue
@@ -154,30 +271,48 @@ extension StationController {
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.04 { m.pos += d * min(1, dt * 5); m.facing = atan2(d.x, d.y); continue }
                             m.fetchSpot = nil
                         }
+                        // An arm's length from the crate, facing it, then the crouch: the same as any carry.
+                        if let box = boxes[key] {
+                            let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
+                            guard atArmsLength(m, of: at, dt: dt) else { continue }
+                            startLift(m, height: Double(box.worldPosition.y))
+                        } else {
+                            startLift(m, height: 0)
+                        }
                         advance(m); continue
                     case .lift:
-                        world.truth.tookFromBay(key)
-                        if let box = boxes[key] {
-                            box.removeAllActions()
-                            let world = box.worldPosition
-                            box.removeFromParentNode()
-                            m.node.addChildNode(box)
-                            box.position = m.node.convertPosition(world, from: nil)
-                            box.eulerAngles.y = CGFloat(Double(box.eulerAngles.y) - m.smoothFacing)   // keep its turn, now on the arms
-                            let lift = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.5); lift.timingMode = .easeOut
-                            box.runAction(lift)
-                            m.carried = box
+                        guard liftDue(m) else { continue }
+                        if m.carried == nil, let box = boxes[key] {
+                            world.truth.tookFromBay(key)
+                            lift(m, box)
                         }
+                        if clock < m.phaseUntil { continue }
                         advance(m)
                         // The office went away while the crate was in the air: nothing to walk it into.
-                        if let door = station.doorCell(of: r) { walk(m, to: door) } else { reveal(key); finish(m) }
+                        if let slot { walk(m, to: slot.cell) } else { reveal(key); finish(m) }
                         continue
                     case .haul:
                         advance(m); continue
                     default:
-                        m.carried?.removeFromParentNode()
-                        m.carried = nil
-                        reveal(key)
+                        guard let slot, let box = m.carried else {
+                            m.carried?.removeFromParentNode()
+                            m.carried = nil
+                            reveal(key)
+                            finish(m)
+                            continue
+                        }
+                        let spot = SIMD2(slot.pos.x - station.offset.x, slot.pos.z - station.offset.y)
+                        if m.phaseUntil == 0 {
+                            guard atArmsLength(m, of: spot, dt: dt) else { continue }
+                            startSetDown(m, level: slot.level)
+                            setDown(m, box, to: slot.pos, yaw: slot.yaw, level: slot.level)
+                            continue
+                        }
+                        let toSpot = spot - m.pos
+                        if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                        if clock < m.phaseUntil { continue }
+                        release(m, box, at: slot.pos, yaw: slot.yaw)
+                        reveal(key)   // set down on its slot: the office fades in round it as the crate fades out
                         finish(m)
                         continue
                     }
@@ -200,44 +335,18 @@ extension StationController {
                     case .approach:
                         // Stand an arm's length from the crate, facing it, before taking hold.
                         let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
-                        let toBox = boxAt - m.pos
-                        let dist = (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot()
-                        if dist > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                        if dist < 0.28 || dist > 0.42, dist > 0.001 {   // shuffle to arm's length
-                            let want = boxAt - toBox / dist * 0.34
-                            m.pos += (want - m.pos) * min(1, dt * 6)
-                            if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
-                        }
+                        guard atArmsLength(m, of: boxAt, dt: dt) else { continue }
                         advance(m)
-                        // How high the crate stands decides the posture: a crouch, a waist-high lift, a reach.
-                        m.handsAt = max(0, Int((Double(job.node.worldPosition.y) / 0.34).rounded()))
-                        m.phaseUntil = clock + 1.1
+                        startLift(m, height: Double(job.node.worldPosition.y))
                         continue
                     case .lift:
                         // Take hold at the crate's own height, bring it up and over the head.
                         let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
                         let toBox = boxAt - m.pos
                         if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                        if clock < m.phaseUntil - 0.7 { continue }
+                        guard liftDue(m) else { continue }
                         if m.carried == nil {
-                            let world = job.node.worldPosition
-                            job.node.removeAllActions()
-                            job.node.removeFromParentNode()
-                            m.node.addChildNode(job.node)
-                            job.node.position = m.node.convertPosition(world, from: nil)
-                            let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
-                            // Off the floor it comes up past the chest; off a stack it slides back at its own height
-                            // first, then up: waist high from level one, above the head from higher up.
-                            let y = Double(job.node.position.y)
-                            let via: SCNVector3
-                            switch m.handsAt {
-                            case 0: via = v3(0, m.headHeight * 0.45, 0.3)
-                            case 1: via = v3(0, y, 0.2)
-                            default: via = v3(0, max(m.headHeight + 0.2, y), 0.15)
-                            }
-                            let first = SCNAction.move(to: via, duration: 0.3); first.timingMode = .easeOut
-                            job.node.runAction(.sequence([first, overhead]))
-                            m.carried = job.node
+                            lift(m, job.node)
                             self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
                         }
                         if clock < m.phaseUntil { continue }
@@ -248,44 +357,19 @@ extension StationController {
                         advance(m); continue
                     default:
                         // Set the crate down squarely on its slot, then a beat before straightening up.
+                        // A crate is heavy: it stays on the arms all the way there and the hands do the lowering.
                         let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
-                        let toSpot = spot - m.pos
-                        let dist = (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot()
-                        if dist > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                         if m.phaseUntil == 0 {
                             // A step back from the spot so the crate goes down in front, not underfoot.
-                            if dist < 0.28 || dist > 0.42, dist > 0.001 {
-                                let want = spot - toSpot / dist * 0.34
-                                m.pos += (want - m.pos) * min(1, dt * 6)
-                                if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
-                            }
-                            m.handsAt = to.level
-                            m.phaseUntil = clock + 1.1
-                            // A crate is heavy: it stays on the arms all the way to its slot and the hands do the
-                            // lowering. Level 0 is set down carefully in front; level 1 slides forward onto the
-                            // top at waist height; level 2 goes over the head and slides in; higher, with a hop.
-                            let target = m.node.convertPosition(v3(to.pos.x, to.pos.y, to.pos.z), from: nil)
-                            let via: SCNVector3
-                            switch to.level {
-                            case 0: via = v3(0, m.headHeight * 0.45, 0.3)
-                            case 1: via = v3(0, Double(target.y), 0.2)
-                            default: via = v3(0, max(m.headHeight + 0.2, Double(target.y)), 0.15)
-                            }
-                            let first = SCNAction.move(to: via, duration: 0.35); first.timingMode = .easeInEaseOut
-                            let second = SCNAction.move(to: target, duration: 0.45); second.timingMode = to.level == 0 ? .easeIn : .easeOut
-                            let turn = SCNAction.rotateTo(x: 0, y: CGFloat(to.yaw - m.smoothFacing), z: 0, duration: 0.8)   // turned the way it will be drawn
-                            job.node.runAction(.group([.sequence([first, second]), turn]))
+                            guard atArmsLength(m, of: spot, dt: dt) else { continue }
+                            startSetDown(m, level: to.level)
+                            setDown(m, job.node, to: to.pos, yaw: to.yaw, level: to.level)
                             continue
                         }
+                        let toSpot = spot - m.pos
+                        if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                         if clock < m.phaseUntil { continue }
-                        // Released: it stands exactly where the layout will draw it, and nothing moves it from here.
-                        job.node.removeAllActions()
-                        job.node.removeFromParentNode()
-                        job.node.position = v3(to.pos.x, to.pos.y, to.pos.z)
-                        job.node.eulerAngles = SCNVector3(0, to.yaw, 0)
-                        propRoot.addChildNode(job.node)
-                        drone.thud()
-                        m.carried = nil
+                        release(m, job.node, at: to.pos, yaw: to.yaw)
                         cargo[id] = nil
                         self.world.truth.setDown(crate, at: to)
                         job.onDone()

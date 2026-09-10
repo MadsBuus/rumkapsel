@@ -111,14 +111,25 @@ a new one replaces the old at the next interruptible phase, at most one waits, a
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
 it holds where it stands.
 
+Every crate that moves by hand goes through one lift and one set-down (`SceneTick.swift`, the `Hands`
+constants with `startLift`/`lift` and `startSetDown`/`setDown`/`release`): an arm's length away and facing
+it, a crouch whose posture comes from how high the crate stands, the crate up past the chest and onto the
+arms, and out of the arms onto its slot turned the way the layout will draw it. The office delivery uses the
+same pair, so a new office's crate is set down on the far cell its package will occupy and only then does
+the office fade in round it. The arcs are `SCNAction`s and the phase clock is the station's, but both are
+derived from the same durations, so the posture and the motion cannot drift apart. A carried crate is left
+out of `yardLayout` altogether, storage as well as the deck, so it is drawn once — in the hands.
+
 Shuttles, rockets and the crew are actors too (`Actors.swift`). A `Shuttle` flies one `.flight` command —
 `bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave, and the unload writes truth:
 the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
 go from approach to lift. A `Rocket`, one per station and repository, runs `.rocket` stages that only ever
 move forward: stand by, load, steam, launch. `World.applyReleases` reads the launch queue and the open
 releases and hands out those stages as commands — untested stands by, cleared loads, merged launches, and a
-launch loads first if it has to. The load phase issues the same `carryToPad` carries as before and ends when
-station truth says nothing of the repository is left on the rows or on anyone's arms. A teammate's reaction
+launch loads first if it has to. The load phase issues the same `carryToPad` carries as before, remembers
+every crate it ordered aboard, and ends only when station truth counts all of them on the pad and nothing of
+the repository is left on the rows or on anyone's arms. A load that is taking its time is waited out and said
+out loud; a rocket with no cargo at all still goes at once. A teammate's reaction
 to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
 runs the same machine as everyone else and says so on hover.
 

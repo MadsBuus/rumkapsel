@@ -337,7 +337,11 @@ extension StationController {
     }
 
     func reveal(_ key: String) {
-        boxes.removeValue(forKey: key)?.removeFromParentNode()
+        // The crate that was set down hands over to the office's own package: it fades out on its slot
+        // over the same beat the office fades in, rather than blinking away.
+        if let crate = boxes.removeValue(forKey: key) {
+            crate.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
+        }
         if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
         guard world.truth.officeDelivered(key) else { return }
         SCNTransaction.begin()

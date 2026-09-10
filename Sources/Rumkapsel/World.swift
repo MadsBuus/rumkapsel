@@ -681,8 +681,12 @@ final class World {
             if area == "storage" { numbers += truth.freshLanded(station: station.name, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
             // A crate on the pallet stands on the pallet: the rows are not to draw it again.
             numbers = numbers.filter { !truth.isOnPallet(station: station.name, repo: repo, number: $0) }
+            // Nor is a crate in somebody's hands. It is drawn once, on the arms, and the row is one
+            // crate shorter until it is set down again — here, on the deck or in the rocket.
+            let carried = numbers.filter { truth.isCarried(station: station.name, repo: repo, number: $0) }
+            numbers.removeAll { carried.contains($0) }
             if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
-            for k in 0..<min(n, 48) {
+            for k in 0..<min(max(0, n - carried.count), 48) {
                 let number = k < numbers.count ? numbers[k] : 0
                 var cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(number) ?? false)
                 if cleared, number != 0, number == stillUntested { cleared = false }

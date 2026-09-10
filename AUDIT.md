@@ -20,7 +20,7 @@ These are checked once here and not repeated in every table below.
 | A new order re-plans, it does not reset | partial | `Jobs.swift:70-77` keeps the crate and jumps to `.haul` when redirected; `Jobs.swift:138-152` `resettle` keeps walkers' destinations. Any `start` that bypasses `assign` resets `phase` to 0 (`Jobs.swift:72`). | Same fix: one entry point. |
 | Phases actually advance | partial | Only `carry`, `deliverOffice`, `react` and the pallet commands advance (`SceneTick.swift:142-294`, `Pallets.swift:68-151`). `goTo`, `bath`, `chore`, `qa`, `sleep`, `work`, `leave` fall into `default: break` (`SceneTick.swift:295-296`), so `truth.jobs` reports phase 0 (`.walk`) forever, even settled. | Advance `.walk` to `.settle` for these in the tick, as the pallet commands do. |
 | Minions never occupy the same spot; they wait in a narrow place | fail | `Station.obstacles` is built from markers, static furniture, cones and pallets only (`SceneMarkers.swift:8-45`). Minions are absent from it, and `tickMinions` (`SceneTick.swift:125-130`) steps along the path with no neighbour check. Two minions walk through each other. | Add live minion positions as soft obstacles, or a per-step separation push with a yield rule in doorways. |
-| Speed by task: carrying is slow | fail | `SceneTick.swift:118`: hauling 1.8, busy 2.4, pacing 0.8, stroll 1.4. Carrying is faster than a stroll. | Put carrying below the stroll (about 1.0), and keep the busy hurry as the fastest. |
+| Speed by task: carrying is slow | pass | `SceneTick.swift:233`: hauling 1.1, hurrying to work 2.4, pacing 0.8, stroll 1.4. One hauling pace for carry, `deliverOffice` and the pallet push (`Minion.swift:33-38`), below the stroll. | — |
 | Getting up from bed is slow, then quicker | partial | `SceneTick.swift:119-124` holds the minion for 1.1 s (`wakeUntil`), then it walks at full speed. There is no slow first leg. | Ramp the speed over the first second after `wakeUntil` clears. |
 | Nothing round | pass | `Scene.swift:43-48` `faceted` caps radial segments, and every cylinder/cone/tube goes through it (`Props.swift:70,202-253`, `SceneStatic.swift:123-262`, `SceneMarkers.swift:377,441`). | — |
 
@@ -28,18 +28,18 @@ These are checked once here and not repeated in every table below.
 
 | Rule | Verdict | Evidence | Fix |
 |---|---|---|---|
-| A crate moves only in hands | pass | `SceneTick.swift:222-241` reparents the node to the minion and writes `truth.pickedUp`. | — |
+| A crate moves only in hands | pass | `lift` (`SceneTick.swift:162-181`) reparents the node to the minion and `SceneTick.swift:344` writes `truth.pickedUp`. | — |
 | Never through a wall, crate, minion or furniture | partial | The walk is planned round props on the fine grid (`Station.swift:455-523`), and obstacles cover markers and furniture (`SceneMarkers.swift:19-33`). The crate on the arms has no footprint of its own, and minions are not obstacles. | Inflate the walker's clearance while carrying, and include minions in the grid. |
-| Arm's length and facing before taking hold | pass | `SceneTick.swift:200-215` shuffles to 0.34 and faces the crate before advancing. | — |
-| Lifting takes time and a posture | pass | `SceneTick.swift:213-243` sets `handsAt` from the crate's height and holds `phaseUntil` for 1.1 s; `Minion.swift:181-189` maps that to crouch/waist/reach/jump. | — |
+| Arm's length and facing before taking hold | pass | `atArmsLength` (`SceneTick.swift:140-149`) shuffles to 0.34 and faces the crate before advancing; the carry (`SceneTick.swift:336-341`), the office delivery and the set-down all use it. | — |
+| Lifting takes time and a posture | pass | `startLift`/`lift` (`SceneTick.swift:151-181`) set `handsAt` from the crate's height and hold `phaseUntil` for `Hands.liftSeconds`; `Minion.swift:181-189` maps that to crouch/waist/reach/jump. One implementation, used by every crate move. | — |
 | Setting down takes time and the right posture | partial | `SceneTick.swift:255-280` mirrors the lift, but `Minion.posture` for level 3+ is `.jump` with a hop on the way *down* (`SceneTick.swift:550-552`), and levels 1 and 2 share one lean/reach placeholder rather than the slide and the overhead slide the rulebook asks for. | Implement the four set-down postures separately; ARCHITECTURE.md already lists this as owed. |
-| The crate stays in the hands until it is on its slot | pass | `SceneTick.swift:267-286` animates the node inside the minion's space and only reparents after `phaseUntil`. | — |
-| Nothing moves it after set-down | partial | `SceneTick.swift:282-286` pins the node at `to.pos` and `to.yaw`. But every `onDone` then removes that node and calls `rebuildMarkers` (`Jobs.swift:476-478`, `SceneMarkers.swift:48-197`), which redraws the crate from the layout. Identity is not kept; it holds only because `yardLayout` is a pure function. | Keep the landed node and let `rebuildMarkers` adopt it instead of deleting and recreating it. |
+| The crate stays in the hands until it is on its slot | pass | `setDown` (`SceneTick.swift:191-204`) animates the node inside the minion's space and `release` only reparents it after `phaseUntil`. | — |
+| Nothing moves it after set-down | partial | `release` (`SceneTick.swift:206-215`) pins the node at `to.pos` and `to.yaw`. But every `onDone` then removes that node and calls `rebuildMarkers` (`Jobs.swift:476-478`, `SceneMarkers.swift:48-197`), which redraws the crate from the layout. Identity is not kept; it holds only because `yardLayout` is a pure function. | Keep the landed node and let `rebuildMarkers` adopt it instead of deleting and recreating it. |
 | Taken from the top, built from the floor | pass | `World.swift:816-817` orders storage by level, highest first; `World.swift:786-799` `grounded` drops a landing slot to the lowest free level. | — |
-| A lower crate taken: the ones above settle down one, slowly | fail | Levels are re-ranked in `yardLayout` (`World.swift:712-724`) and drawn afresh by `rebuildMarkers` (`SceneMarkers.swift:182-193`). The stack above blinks down in one frame. | Animate a crate whose level dropped, or issue a real carry for it. |
+| A lower crate taken: the ones above settle down one, slowly | pass | `rebuildMarkers` remembers where each numbered crate stood (`crateStood`, `Scene.swift:176-178`) and, when a crate comes back on the same column at a lower level with the levels between it vacated, draws it where it stood and moves it down over `Hands.settleSeconds` (0.6 s) (`SceneMarkers.swift:184-213`). Only downwards, and never through a crate that is still there. | — |
 | A crate keeps its slot until it leaves | partial | `World.swift:672-711` keeps a per-crate slot map keyed on `repo#number`. Unnumbered crates key on `i<index>` (`World.swift:690`), so they reshuffle whenever the pile's order changes. | Key unnumbered crates on something stable, or refuse to draw them until a number is known. |
 | Two never share a crate | pass | `Jobs.swift:415` `claimed` marks it; `World.swift:825`, `World.swift:880`, `World.swift:846` all skip carried crates. | — |
-| Counts follow the source through hands | partial | `Jobs.swift:472-479` and `SceneMarkers.swift:342-343` adjust `stored`/`staged` only in `onDone`. But `rebuildMarkers` skips carried crates for the deck only (`SceneMarkers.swift:184`); a storage crate on someone's arms is still drawn in the row, so it shows twice for the length of the carry. | Apply the carried filter to storage too, or filter inside `yardLayout`. |
+| Counts follow the source through hands | pass | Counts still move in `onDone` (`Jobs.swift:472-479`, `SceneMarkers.swift:363-372`), and `yardLayout` now leaves out every crate station truth says is carried, storage and deck alike, and shortens the pile by that many (`World.swift:683-690`). A crate on someone's arms is drawn once, in the hands. | — |
 | A carry nobody takes lands where it stands | partial | `Jobs.swift:496-501` drops the node and calls `onDone` on deadline. The crate is removed, not set down anywhere; the redraw puts it back on a slot. | Set it down where it stands and let the layout draw round it. |
 | A command whose target vanished sets down what it holds | pass | `SceneTick.swift:192-196` and `Jobs.swift:100-109` `dropWhereStanding`. | — |
 
@@ -49,9 +49,9 @@ These are checked once here and not repeated in every table below.
 |---|---|---|---|
 | The crate exists before it is fetched | pass | `SceneTick.swift:150` waits for `truth.isInBay(key)`, which the shuttle's unload writes (`Jobs.swift:297`). | — |
 | The shuttle leaves before anyone walks under it | partial | `SceneTick.swift:95-99` waits while `s.phase < 3`, i.e. until `.rise` *begins*. The ship is still on its slot at that instant and rises for 2.5 s (`Actors.swift:41-45`) while the carrier walks in under it. | Wait for `.leave`, or for the ship's height to clear the minion. |
-| Lift takes time and a posture | fail | `SceneTick.swift:158-174` reparents the box and runs a 0.5 s lift action, but sets no `handsAt` and no `phaseUntil`, so `Minion.posture` stays `.none` (`Minion.swift:182`) and the phase advances the same frame. | Reuse the carry's approach/lift timing for the bay crate. |
-| The crate stays in the hands until it is on its slot | fail | `SceneTick.swift:177-182`: at set-down the node is simply `removeFromParentNode()`; there is no lowering, no slot, no posture. | Give the office crate a real set-down on the office floor before the reveal. |
-| Nothing appears or disappears without a cue | partial | The disappearance is covered by `reveal` fading the office in (`Jobs.swift:339-353`), which is a cue for the office, not for the crate. | As above. |
+| Lift takes time and a posture | pass | `SceneTick.swift:270-292` stands the carrier an arm's length from the bay crate, then uses the carry's own `startLift`/`lift`: `handsAt` from the crate's height, the crouch held for `Hands.liftSeconds`, the crate up past the chest and onto the arms. | — |
+| The crate stays in the hands until it is on its slot | pass | The office crate has a slot — the far cell its package will stand on, level 0 (`officeCrateSlot`, `SceneTick.swift:217-222`) — and `SceneTick.swift:296-317` walks it there on the arms, sets it down with the shared `startSetDown`/`setDown` and releases it exactly there. | — |
+| Nothing appears or disappears without a cue | pass | The crate is set down on its slot first, and `reveal` (`Jobs.swift:339-345`) fades it out over 0.6 s while the office's own package fades in on the same cell: a cue for the crate as well as for the office. | — |
 | An office nobody can carry still shows up | partial | `Scene.swift:612-619` and `Scene.swift:739` reveal undelivered offices with no carry at all. Documented fallback, but the office appears with no cue. | Fade those in explicitly rather than flipping opacity in the rebuild. |
 | A renamed office keeps its delivery | pass | `Scene.swift:797-804` rebuilds the command with the new key and rewrites `truth.jobs`. | — |
 | The office went away mid-carry | pass | `SceneTick.swift:172-173` reveals and finishes when the door is gone; `Jobs.swift:421-428` `cancelCarries` frees the carrier. | — |
@@ -150,13 +150,13 @@ These are checked once here and not repeated in every table below.
 | Rule | Verdict | Evidence | Fix |
 |---|---|---|---|
 | Stages only move forward | pass | `SceneMarkers.swift:219` compares `stage.rank`; `Commands.swift:104-112`. | — |
-| A rocket leaves only with its cargo aboard | fail | `SceneMarkers.swift:299`: `guard padClear(r) || clock - r.since > 90`. After 90 s the climb starts whatever is still on the rows or on someone's arms. `padClear` itself (`SceneMarkers.swift:323-326`) checks that nothing is left, not that anything was loaded. | Require `truth.aboard(...) == cargo` for the climb, and hold (or stand down) instead of timing out. |
+| A rocket leaves only with its cargo aboard | pass | Every crate the reconciler orders aboard is remembered on the rocket (`SceneMarkers.swift:369-371`, `Actors.swift:107-113`), and the load ends only when `truth.aboard` counts all of them, no carry of them is outstanding, and the rows and everyone's arms are empty (`SceneMarkers.swift:318-331`). The 90 s mark now only makes the station say it is still holding. A release with no cargo at all still goes at once. | — |
 | Loading is done by hand, from the top down | pass | `SceneMarkers.swift:330-347` issues `carryToPad` commands; `World.swift:911-934` orders by level, highest first, chaining with `after`. | — |
 | Crates leave the station only with the rocket | partial | `SceneMarkers.swift:344` shrinks the node away on set-down; `truth.clearPad` (`Commands.swift:492-496`) is called at the climb. The shrink is the disappearance cue, and it happens before lift-off. | Keep the crate visible on the pad until the climb. |
 | Steam means loaded and waiting | pass | `SceneMarkers.swift:287` adds steam on the steam stage only. | — |
 | A hold ring means untested | pass | `SceneMarkers.swift:235-239` adds it, `SceneMarkers.swift:279` takes it down when cleared. | — |
 | The prop is only redrawn when standing by | pass | `SceneMarkers.swift:251-257` refuses to redraw once `rank > 0` or while actions run. | — |
-| Nothing on a timer decides anything | partial | The 90 s load timeout (`SceneMarkers.swift:299`) and the 15 s climb (`SceneMarkers.swift:284`) both decide. The climb is decoration; the timeout is not. | See the cargo fix above. |
+| Nothing on a timer decides anything | pass | The 90 s mark only logs now (`SceneMarkers.swift:322-328`); the 15 s climb (`SceneMarkers.swift:284`) is decoration over a pad truth has already cleared. | — |
 | A first answer is not news | partial | `World.swift:367-377`: `announcedReleases` starts empty, so the first GitHub answer announces an open release and, if cleared, immediately issues `.load`. The rocket starts hauling on start-up. | Seed `announcedReleases` on the first answer per repository, as `stagingSeen` does. |
 
 ## dispatch
@@ -253,7 +253,7 @@ These are checked once here and not repeated in every table below.
 | Carried, not snapped, wherever a haul can carry it | pass | `World.swift:754-758` issues `carryToDeck` before touching any count. | — |
 | Let the carriers land first | pass | `World.swift:747` returns `.waiting` while anything is in flight to the deck. | — |
 | A pallet is the hand carry for its repository | pass | `World.swift:750-751`. | — |
-| Redrawn only if nobody is holding it | partial | `World.swift:760` snaps `stored` unconditionally. A crate being carried from storage to the pad is on someone's arms and still counted, and `rebuildMarkers` draws storage crates that are carried (`SceneMarkers.swift:184` filters the deck only). | Subtract `truth.carriedCount` from the snap and filter carried crates in `yardLayout`. |
+| Redrawn only if nobody is holding it | pass | `yardLayout` drops every carried crate and shortens the pile by that many (`World.swift:683-690`), so the snap at `World.swift:766` may still count a crate that is on someone's arms without the rows drawing it twice. | — |
 | A launch is not undone by a snap | pass | `World.swift:759-761` holds `staged` while a launch is pending or a production release is open. | — |
 | The layout is a pure function of the counts | pass | `World.swift:653-727`, plus the per-crate slot map so nothing jumps. | — |
 | Storage unorganised, the deck ordered | pass | `World.swift:656,720`: jitter in storage, none on the deck. | — |
@@ -264,8 +264,9 @@ These are checked once here and not repeated in every table below.
 
 **The same rule implemented twice, differently.**
 
-- Two lift and set-down implementations: the carry's (`SceneTick.swift:200-294`, timed, posture-aware,
-  height-aware) and the office delivery's (`SceneTick.swift:146-183`, instant, no posture, no set-down).
+- ~~Two lift and set-down implementations~~: one each now, `startLift`/`lift` and
+  `startSetDown`/`setDown`/`release` (`SceneTick.swift:110-215`), used by the carry and by the office
+  delivery, with the phase durations derived from the arcs' own durations so they cannot drift.
 - Two ways a crate moves through the air: the minion's hands and the pallet's wand flight
   (`Pallets.swift:358-367`). Only the second is clock-driven; the first still uses `SCNAction`s
   (`SceneTick.swift:238-277`), which the headless run does not advance.
@@ -276,8 +277,8 @@ These are checked once here and not repeated in every table below.
   (`Jobs.swift:185-187`, `Station.swift:506-508`).
 - Two places place a minion's body: `tickMinions` (`SceneTick.swift:429`) and `placePusher`
   (`Pallets.swift:283-288`).
-- Two carried-crate filters: `rebuildMarkers` for the deck (`SceneMarkers.swift:184`) and nothing for
-  storage; `yardLayout` filters only pallet crates (`World.swift:683`).
+- ~~Two carried-crate filters~~: one, in `yardLayout` (`World.swift:679-690`), covering pallet crates and
+  carried crates for storage and the deck alike.
 
 **State outside `StationTruth` that belongs in it.**
 
@@ -303,8 +304,9 @@ These are checked once here and not repeated in every table below.
 - `hauledAt` plus 60 s (`World.swift:239`) decides when a merged office may clear.
 - The shuttle's whole path is `SCNAction`s (`Actors.swift:50-77`); its phases advance on `until`, so
   the ship's position and its phase can drift apart in a headless run.
-- The carry's lift and set-down arcs are `SCNAction`s (`SceneTick.swift:238-239,274-277`) while the
-  phase timing is on the clock: the same drift, on the thing the rulebook cares most about.
+- The carry's lift and set-down arcs are still `SCNAction`s while the phase timing is on the clock, but
+  both now come from the `Hands` constants (`SceneTick.swift:110-137`), so a phase is exactly its arc plus
+  the beat around it and the two cannot drift.
 - Decoration that decides nothing, correctly: steam (`SceneMarkers.swift:390-406`), the lift-off climb
   (`SceneMarkers.swift:200-207`), shower drops, the weld light, the archived ghost, the console blink.
 
@@ -325,17 +327,15 @@ These are checked once here and not repeated in every table below.
 
 1. **Make a change of orders visible.** The newest rule has no implementation at all, and it applies to
    every command. One `wonderUntil` beat in `start`, honoured in the tick, cut short by a prompt.
-2. **Fix the carrying speed.** `SceneTick.swift:118` makes a loaded minion faster than a stroller. One
-   line, and it is on screen constantly.
-3. **Let stacks settle instead of blinking.** A crate taken from under others jumps the rest down in one
-   frame (`SceneMarkers.swift:182-193`). Animate the level change, or carry it.
-4. **Give `deliverOffice` a real lift and set-down.** Today the office crate teleports out of the hands
-   at the door (`SceneTick.swift:158-182`); it is the most-watched carry on the station.
-5. **Stop drawing carried storage crates twice.** Filter carried crates in `yardLayout`, not only for
-   the deck in `rebuildMarkers` (`World.swift:683`, `SceneMarkers.swift:184`), and subtract them from
-   the storage snap (`World.swift:760`).
-6. **Do not launch without cargo.** Replace the 90 s timeout with a check that what was ordered is
-   aboard (`SceneMarkers.swift:299`, `Commands.swift:483-489`).
+2. ~~**Fix the carrying speed.**~~ Done: hauling is 1.1, below the 1.4 stroll (`SceneTick.swift:233`).
+3. ~~**Let stacks settle instead of blinking.**~~ Done: a crate whose level dropped is drawn where it
+   stood and moved down over 0.6 s (`SceneMarkers.swift:184-213`).
+4. ~~**Give `deliverOffice` a real lift and set-down.**~~ Done: it uses the carry's own lift and set-down
+   and puts the crate on the office's far cell before the reveal (`SceneTick.swift:262-320`).
+5. ~~**Stop drawing carried storage crates twice.**~~ Done: `yardLayout` filters them and shortens the
+   pile (`World.swift:683-690`).
+6. ~~**Do not launch without cargo.**~~ Done: the load ends when everything ordered aboard is on the pad;
+   the 90 s mark only logs (`SceneMarkers.swift:318-331`).
 7. **Let a visit last its whole time.** Drop the `|| m.busy` escape from the bath and make `bath` a job
    (`SceneTick.swift:377`, `Commands.swift:174-180`).
 8. **Reserve the shower and the bowl.** Beds and couches are reserved; the bath is not

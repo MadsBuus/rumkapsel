@@ -105,6 +105,13 @@ final class Rocket {
     var tall = true
     /// How much cargo the prop was drawn for, so it is only redrawn when that changes.
     var cargoShown = -1
+    /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
+    /// them have been set down on the pad and not one moment before: a rocket never launches empty.
+    var assigned: Set<String> = []
+    /// The carries ordered aboard that have not set their crate down yet, by command id.
+    var pending: Set<Int> = []
+    /// The last time the station said out loud that it is still waiting for cargo.
+    var moaned = 0.0
 
     init(station: String, repo: String, node: SCNNode, command: Command) {
         self.station = station; self.repo = repo; self.node = node; self.command = command
