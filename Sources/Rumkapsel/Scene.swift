@@ -1257,7 +1257,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     // One package for the whole pull request, sized by the work in it, strapped in the status colour.
                     let cell = farCells(station, room).first!
                     let size = 0.42 + min(0.28, Double(count) * 0.03)
-                    let pkg = Props.stickeredCrate(color: NSColor(room.color).lighter(0.1), sticker: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
+                    let pkg = Props.package(color: NSColor(room.color).lighter(0.1), band: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
                     pkg.opacity = undelivered.contains(key) ? 0 : 1

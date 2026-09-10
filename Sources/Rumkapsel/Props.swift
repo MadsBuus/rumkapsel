@@ -25,6 +25,8 @@ enum Props {
     }
 
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
+    /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
+    /// a square strapped crate is a pull request, a pyramid is a session input.
     static func package(color: NSColor, band: NSColor, size: Double) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
@@ -43,34 +45,6 @@ enum Props {
         let tag = SCNNode(geometry: SCNBox(width: size * 0.34, height: 0.012, length: size * 0.24, chamferRadius: 0))
         tag.geometry!.firstMaterial = flat(band)
         tag.position = v3(size * 0.22, h + 0.006, -size * 0.22)
-        n.addChildNode(tag)
-        n.addChildNode(foot(color: color.darker(0.28), size: size * 1.3))
-        return n
-    }
-
-    /// A pull request: a hexagonal crate in the repo colour with a status sticker on the lid.
-    static func stickeredCrate(color: NSColor, sticker: NSColor, size: Double) -> SCNNode {
-        let r = size * 0.55, h = size * 0.42
-        let geo = SCNCylinder(radius: r, height: h)
-        geo.radialSegmentCount = 6
-        let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
-        geo.materials = [side, top, top]
-        let n = SCNNode()
-        let body = SCNNode(geometry: geo)
-        body.eulerAngles.y = .pi / 6
-        body.position = v3(0, h / 2, 0)
-        n.addChildNode(body)
-        let band = SCNCylinder(radius: r * 1.02, height: h * 0.14)
-        band.radialSegmentCount = 6
-        band.firstMaterial = flat(color.darker(0.3))
-        let b = SCNNode(geometry: band)
-        b.eulerAngles.y = .pi / 6
-        b.position = v3(0, h / 2, 0)
-        n.addChildNode(b)
-        let tag = SCNNode(geometry: SCNBox(width: r * 0.7, height: 0.012, length: r * 0.5, chamferRadius: 0))
-        tag.geometry!.firstMaterial = flat(sticker)
-        tag.position = v3(r * 0.15, h + 0.006, -r * 0.1)
-        tag.eulerAngles.y = 0.25
         n.addChildNode(tag)
         n.addChildNode(foot(color: color.darker(0.28), size: size * 1.3))
         return n
