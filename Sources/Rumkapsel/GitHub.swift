@@ -41,7 +41,7 @@ struct ReleasePR: Equatable {
 }
 
 /// One entry from a repository's activity feed.
-struct FeedEvent: Equatable {
+struct FeedEvent: Equatable, Codable {
     let at: Date
     let actor: String
     let isBot: Bool
@@ -53,7 +53,7 @@ struct FeedEvent: Equatable {
     let detail: String      // review state, commit count, etc.
 }
 
-struct OpenPR: Equatable {
+struct OpenPR: Equatable, Codable {
     let number: Int
     let title: String
     let author: String
@@ -76,8 +76,40 @@ final class GitHubResolver {
     }
 
     /// Everyone's open pull requests, every five minutes.
+    /// Polls wait until this moment: a random hold at start-up so apps opening together on one
+    /// network don't all ask GitHub at once, and the first one to answer feeds the rest.
+    var holdUntil = Date.distantPast
+
+    /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
+    struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
+
+    func knowledge(repoRoot: String, repo: String) -> Knowledge? {
+        lock.lock(); defer { lock.unlock() }
+        let prs = openPRs[repoRoot], f = feeds[repoRoot]
+        guard prs != nil || f != nil else { return nil }
+        let recent = Date().addingTimeInterval(-24 * 3600)
+        return Knowledge(repo: repo, openPRs: prs?.0, prsAt: prs?.1, feed: f.map { Array($0.0.filter { $0.at > recent }.prefix(80)) }, feedAt: f?.1)
+    }
+
+    /// Takes a peer's fresher answer instead of asking GitHub again.
+    func adopt(_ k: Knowledge, repoRoot: String) {
+        var changed = false
+        lock.lock()
+        if let prs = k.openPRs, let at = k.prsAt, at > (openPRs[repoRoot]?.1 ?? .distantPast) {
+            changed = openPRs[repoRoot]?.0 != prs
+            openPRs[repoRoot] = (prs, at)
+        }
+        if let f = k.feed, let at = k.feedAt, at > (feeds[repoRoot]?.1 ?? .distantPast) {
+            changed = changed || feeds[repoRoot]?.0 != f
+            feeds[repoRoot] = (f, at)
+        }
+        lock.unlock()
+        if changed { DispatchQueue.main.async { self.onUpdate?() } }
+    }
+
     func refreshOpenPRs(repoRoot: String) {
         lock.lock()
+        if Date() < holdUntil { lock.unlock(); return }
         if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
@@ -155,6 +187,7 @@ final class GitHubResolver {
     /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Every two minutes.
     func refreshFeed(repoRoot: String) {
         lock.lock()
+        if Date() < holdUntil { lock.unlock(); return }
         if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < 120 { lock.unlock(); return }
         if inFlight.contains("f:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("f:" + repoRoot)

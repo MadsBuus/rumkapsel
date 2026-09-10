@@ -581,7 +581,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.delegate = self
 
-        peers.snapshotProvider = { [weak self] in self?.makeSnapshot() }
+        peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         applySharing()
         if demo {
@@ -2242,12 +2242,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func applySharing() {
         let cfg = ConfigStore.shared.current
-        if cfg.shareOnLAN { peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName) } else { peers.stop() }
+        if cfg.shareOnLAN {
+            if !peers.isRunning { github.holdUntil = Date().addingTimeInterval(Double.random(in: 3...12)) }
+            peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName)
+        } else { peers.stop() }
     }
 
     /// Our own claim for the others: offices we have checked out ourselves in repositories ticked
     /// for sharing. Nothing learned from GitHub or from another peer goes back out.
-    private func makeSnapshot() -> PeerSnapshot? {
+    private func makeSnapshot(withGitHub: Bool) -> PeerSnapshot? {
         let cfg = ConfigStore.shared.current
         guard let station = fleet.stations["work"] else { return nil }
         var offices: [PeerSnapshot.Office] = []
@@ -2261,7 +2264,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
             PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy)
         }
-        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms)
+        var knowledge: [GitHubResolver.Knowledge]?
+        if withGitHub {
+            knowledge = repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
+        }
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge)
     }
 
     /// A peer's claim lands on our work station: its offices get the same key here, adopting the
@@ -2338,6 +2345,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 peerMinions[id] = (n, target)
             }
             peerMinions[id]?.node.eulerAngles.x = m.asleep ? -.pi / 2 : 0
+        }
+        // Their GitHub answers for repositories we also watch save us a poll.
+        for k in snap.github ?? [] where cfg.shared(repo: k.repo) {
+            for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.adopt(k, repoRoot: root) }
         }
         let liveMinions = Set(snap.minions.map { "\(snap.name)/\($0.id)" })
         for (id, pm) in peerMinions where id.hasPrefix(snap.name + "/") && !liveMinions.contains(id) { pm.node.removeFromParentNode(); peerMinions[id] = nil }

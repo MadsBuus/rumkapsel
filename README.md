@@ -27,12 +27,16 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 | one-finger drag up/down | tilt |
 | W / A / S / D | pan |
 | E / Q | zoom in / out |
-| 1 / 2 / 3 / 4 | focus a station (work, private, then peers) |
+| 1 / 2 / 3 / 4 | focus a station (work, then private) |
 | 0 | focus the whole fleet |
 | R | reset view |
 | M | music (off by default) |
 | F | float on top |
 | click a box | open the pull request or issue |
+
+## Sharing on the local network
+
+With sharing on, rumkapsels on the same network merge their work stations into one. An office is identified by its branch, so a colleague's checkout, your own worktree and the pull request on GitHub all light the same room. Each app only shares what it has checked out itself, in the repositories ticked under Repositories; what it learned from GitHub or from another peer never goes back out. A branch that exists only on someone's disk shows as an outlined room, and becomes a real one once it is pushed. Offices are held for a day after the last word from whoever had them, so people coming and going does not rearrange the station. Parsed GitHub answers ride along too, so one poll serves everyone in range.
 
 ## Flags
 

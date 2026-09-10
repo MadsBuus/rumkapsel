@@ -17,6 +17,8 @@ struct PeerSnapshot: Codable {
     var since: Date              // when this app started sharing
     var offices: [Office]
     var minions: [Minion]
+    /// Parsed GitHub answers for the shared repositories, sent now and then so one poll serves the room.
+    var github: [GitHubResolver.Knowledge]?
     static let current = 2
 }
 
@@ -33,7 +35,8 @@ final class PeerHub {
     private(set) var since = Date()
     var isRunning: Bool { listener != nil }
     var peerCount: Int { queue.sync { outgoing.count } }
-    var snapshotProvider: (() -> PeerSnapshot?)?
+    var snapshotProvider: ((_ withGitHub: Bool) -> PeerSnapshot?)?
+    private var broadcasts = 0
     var onSnapshot: ((PeerSnapshot) -> Void)?
 
     func start(name: String) {
@@ -109,7 +112,8 @@ final class PeerHub {
     }
 
     private func broadcast() {
-        guard !outgoing.isEmpty, let snap = snapshotProvider?(), var data = try? JSONEncoder().encode(snap) else { return }
+        broadcasts += 1
+        guard !outgoing.isEmpty, let snap = snapshotProvider?(broadcasts % 10 == 1), var data = try? JSONEncoder().encode(snap) else { return }
         data.append(UInt8(ascii: "\n"))
         for c in outgoing.values where c.state == .ready { c.send(content: data, completion: .contentProcessed { _ in }) }
     }
