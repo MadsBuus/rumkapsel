@@ -35,6 +35,16 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 | click a box | open the pull request or issue |
 | right-click an office | kick it off the station (offices put there by peers or GitHub) |
 
+## A minion's day
+
+- **Working**: at its office, on the cone or with a tool. Every stretch of work is timed.
+- **Just done** (under a minute): hops at the office, eager for your reply.
+- **Waiting** (a minute to the quiet limit in Settings): paces its office.
+- **Quiet**: by day it reads on a lounge couch; by night it sleeps in the dorm. Night is 22 to 07, or an hour with nobody working on the station.
+- **Bath**: a shower after twenty minutes or more of work, sometimes a pee after a shorter stretch, and loungers go every half hour or so. Never while busy, carrying, on an errand or in bed; if work calls mid-visit, it leaves at once.
+- **Session over**: lounge by day, dorm by night. After twenty minutes the extras leave; two stay on standby.
+- **QA**: while untested crates sit on the deck, one free worker walks the rows.
+
 ## Sharing on the local network
 
 With sharing on, rumkapsels on the same network merge their work stations into one. An office is identified by its branch, so a colleague's checkout, your own worktree and the pull request on GitHub all light the same room. Each app only shares what it has checked out itself, in the repositories ticked under Repositories; what it learned from GitHub or from another peer never goes back out. A branch that exists only on someone's disk shows as an outlined room, and becomes a real one once it is pushed. Offices are held for a day after the last word from whoever had them, so people coming and going does not rearrange the station. Parsed GitHub answers ride along too, so one poll serves everyone in range.

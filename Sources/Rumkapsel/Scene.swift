@@ -260,6 +260,9 @@ final class Minion {
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
     var nextBathAt = 0.0
+    var bathDue = 0.0          // clock when a visit is owed, 0 when none
+    var busySince = 0.0
+    var wasBusy = false
     var bathUntil = 0.0
     var bathReturn: Place?
     var showering = false
@@ -1949,6 +1952,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Night on a station: late hours, or nobody has worked there for an hour.
+    private func isNight(_ station: Station) -> Bool {
+        let busyRecently = minions.values.contains { $0.station == station.name && $0.busy && !$0.isCrew } || (lastBusy[station.name].map { clock - $0 < 3600 } ?? false)
+        let hour = Calendar.current.component(.hour, from: Date())
+        return !busyRecently || hour >= 22 || hour < 7
+    }
+
+    /// Where a minion belongs given what it is doing and the hour.
+    private func restPlace(_ m: Minion) -> Place {
+        Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
+    }
+
     private func send(_ m: Minion, to place: Place) {
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
@@ -2435,7 +2450,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let key = newRooms[s.id], m.errand == nil, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
                 startDelivery(m, roomKey: key)
             } else if m.errand == nil {
-                let place = Place.forActivity(m.activity, home: home.key, isSubagent: m.isSubagent)
+                let place = restPlace(m)
                 if place != m.place || isNew { send(m, to: place) }
             }
             if m.state == .leaving { m.state = .arriving; send(m, to: m.place) }
@@ -2458,10 +2473,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     send(m, to: .lounge)
                 }
             }
-            let busyRecently = minions.values.contains { $0.station == station.name && $0.busy && !$0.isCrew } || (lastBusy[station.name].map { clock - $0 < 3600 } ?? false)
             if minions.values.contains(where: { $0.station == station.name && $0.busy && !$0.isCrew }) { lastBusy[station.name] = clock }
-            let hour = Calendar.current.component(.hour, from: now)
-            let night = !busyRecently || hour >= 22 || hour < 7
+            let night = isNight(station)
             let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
                 .sorted { $0.freeSince < $1.freeSince }
             for (i, m) in free.enumerated() where !m.isTester {
@@ -2641,7 +2654,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func cancelHauls(roomKey: String) {
         for h in hauls where h.roomKey == roomKey {
             h.box.removeFromParentNode()
-            if let c = h.carrier, let m = minions[c] { m.errand = nil; m.carried = nil; send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent)) }
+            if let c = h.carrier, let m = minions[c] { m.errand = nil; m.carried = nil; send(m, to: restPlace(m)) }
         }
         hauls.removeAll { $0.roomKey == roomKey }
     }
@@ -3237,7 +3250,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     m.carried = nil
                     m.errand = nil
                     reveal("\(m.station)|\(r)")
-                    send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
+                    send(m, to: restPlace(m))
                     continue
                 case .pickup(let id):
                     guard let h = hauls.first(where: { $0.id == id }) else { m.errand = nil; m.bendUntil = 0; continue }
@@ -3283,7 +3296,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     hauls.remove(at: idx)
                     h.onDone()
                     m.errand = nil
-                    send(m, to: Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
+                    send(m, to: restPlace(m))
                     continue
                 case nil:
                     break
@@ -3302,7 +3315,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                             m.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
                         }
                     }
-                    if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 90...400) }
+                    // Bath rules: a shower after a long stretch of work, maybe a pee after a short one,
+                    // and loungers go now and then. Never while busy, carrying, on an errand or in bed.
+                    if m.busy && !m.wasBusy { m.busySince = clock; m.bathDue = 0 }
+                    if !m.busy && m.wasBusy && !m.isSubagent {
+                        let stretch = clock - m.busySince
+                        if stretch > 20 * 60 { m.bathDue = clock + Double.random(in: 3...20); m.showering = true }
+                        else if stretch > 3 * 60 && Bool.random() { m.bathDue = clock + Double.random(in: 3...20); m.showering = false }
+                    }
+                    m.wasBusy = m.busy
+                    if m.bathDue == 0, m.place == .lounge, !m.isSubagent {
+                        if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 1800...3600) }
+                        if clock >= m.nextBathAt { m.bathDue = clock; m.showering = false; m.nextBathAt = 0 }
+                    } else if m.place != .lounge { m.nextBathAt = 0 }
                     let settled = m.path.isEmpty
                     if m.place == .bath {
                         if settled {
@@ -3318,21 +3343,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.1), .removeFromParentNode()]))
                             }
                         }
-                        if clock >= m.bathUntil, settled {
+                        if (clock >= m.bathUntil && settled) || m.busy {   // done, or work calls
                             m.setStatic(false, frame: 0)
-                            send(m, to: m.bathReturn ?? Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
+                            send(m, to: m.busy ? restPlace(m) : (m.bathReturn ?? restPlace(m)))
                             m.bathReturn = nil
                         }
-                    } else if clock >= m.nextBathAt, !m.busy, m.errand == nil, m.carried == nil, !m.isSubagent, m.activity != .sleeping, settled, station.rooms["kind:bath"] != nil {
+                    } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, m.errand == nil, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                         // Off to the bath for a moment, then back to wherever it was.
-                        m.nextBathAt = clock + Double.random(in: 300...900)
-                        m.bathUntil = clock + Double.random(in: 7...12)
+                        m.bathDue = 0
+                        m.bathUntil = clock + (m.showering ? 10 : 6)
                         m.bathReturn = m.place
                         send(m, to: .bath)
                         // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
                         if let bath = station.rooms["kind:bath"] {
                             let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                            m.showering = Bool.random()
                             let spot = m.showering ? cells.last! : cells.first!
                             m.path = station.path(from: m.pos, to: spot)
                             m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
@@ -3434,7 +3458,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
             if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working { m.setTool(nil) }
+            if !working && !(m.place == .lounge && resting && m.couch != nil) { m.setTool(nil) }
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
@@ -3442,6 +3466,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 m.smoothFacing = atan2(toTable.x, toTable.y)
                 tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05   // sat back on a couch, or standing at the table
                 roll = sin(t * 1.3) * 0.04
+                if m.couch != nil { m.setTool(.tablet); tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
             }
             if working && !atCone {
                 switch m.activity {
