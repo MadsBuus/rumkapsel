@@ -135,11 +135,22 @@ final class Pallet {
     let repo: String
     let number: Int
     let node: SCNNode
+    /// The dark patch on the floor under it. Its own node, because it must not bob with the slab.
+    let shadow: SCNNode
+    /// The blinking light on the corner, found once when the prop is built.
+    let beacon: SCNNode?
     /// Which minion is running the errand.
     var dispatcher: String
     /// Where it hovers, in the station's own coordinates, and the phase of its bob.
     var spot: SIMD2<Double>
     let bobPhase = Double.random(in: 0..<6.28)
+    /// The way to the deck, leg by leg: each one an axis-aligned target for the pallet's centre.
+    var route: [SIMD2<Double>] = []
+    /// The leg in hand: where it started and when the pushing began, for the ease-in.
+    var legFrom = SIMD2<Double>(0, 0)
+    var legAt = 0.0
+    /// True while hands are actually on it and it is creeping along a leg.
+    var pushing = false
     /// Crates still to lift, top of each stack first, and where each one goes.
     var toLoad: [(crate: CrateRef, node: SCNNode, slot: StationTruth.PalletSlot)] = []
     /// What stands on it now, in the order it was loaded.
@@ -167,9 +178,10 @@ final class Pallet {
     /// Where it is in its errand, mirrored into station truth.
     var state: StationTruth.Pallet.State = .arriving
 
-    init(station: String, repo: String, number: Int, node: SCNNode, dispatcher: String, spot: SIMD2<Double>) {
+    init(station: String, repo: String, number: Int, node: SCNNode, shadow: SCNNode, dispatcher: String, spot: SIMD2<Double>) {
         self.station = station; self.repo = repo; self.number = number
-        self.node = node; self.dispatcher = dispatcher; self.spot = spot
+        self.node = node; self.shadow = shadow; self.dispatcher = dispatcher; self.spot = spot
+        self.beacon = node.childNode(withName: "beacon", recursively: true)
     }
 
     var isEmpty: Bool { aboard.isEmpty && toLoad.isEmpty && flight == nil }

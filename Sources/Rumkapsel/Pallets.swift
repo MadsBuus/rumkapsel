@@ -109,16 +109,30 @@ extension StationController {
             case .walk:
                 advance(m)
             case .approach:
-                // Squarely behind it, hands on the edge, facing the way out.
-                let want = p.spot + SIMD2(0, 0.5 + Props.palletDepth / 2)
+                // Round the back of the pallet for this leg: squarely behind it, facing the way it goes.
+                guard let leg = p.route.first else { arrive(m, station: station, p); return }
+                let (want, dir) = pushSpot(p, toward: leg)
+                m.facing = atan2(dir.x, dir.y)
+                m.smoothFacing = m.facing
                 let d = want - m.pos
-                if abs(d.x) + abs(d.y) > 0.04 { m.pos += d * 0.25; m.facing = .pi; m.smoothFacing = .pi; return }
-                m.facing = .pi
+                if abs(d.x) + abs(d.y) > 0.04 { m.pos += d * 0.25; placePusher(m, station: station); return }
+                m.pos = want
+                placePusher(m, station: station)
+                m.setTool(.hands)
+                p.legFrom = p.spot
+                p.legAt = clock
+                p.pushing = true
                 advance(m)
-                walk(m, to: deckTarget(station: station, repo: repo))
             default:
-                world.truth.movePallet(station: station.name, cell: m.cell, pos: SIMD3(station.offset.x + p.spot.x, Props.palletLift, station.offset.y + p.spot.y))
-                beginUnload(m, station: station, p, back: false)
+                if p.pushing { return }
+                guard let leg = p.route.first else { arrive(m, station: station, p); return }
+                // The leg is done and the next one turns a corner: walk round to the new back side.
+                m.setTool(nil)
+                m.tilt.eulerAngles = SCNVector3(0, 0, 0)
+                m.phase = 0
+                world.truth.jobs[m.id] = (c, 0)
+                let (want, _) = pushSpot(p, toward: leg)
+                walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
             }
 
         case .unloadPallet(_, let repo, let back):
@@ -151,7 +165,7 @@ extension StationController {
             return
         }
         let cell = station.palletCell
-        let spot = SIMD2(Double(cell.x) + 0.5, Double(cell.y))
+        let spot = clampToYard(SIMD2(Double(cell.x) + 0.5, Double(cell.y)), station.storageCells)
         let pos = SIMD3(station.offset.x + spot.x, Props.palletLift, station.offset.y + spot.y)
         world.truth.startPallet(station: station.name, repo: repo, number: number, cell: cell, pos: pos)
         world.truth.setPallet(station: station.name, state: .loading)
@@ -161,8 +175,12 @@ extension StationController {
         node.opacity = 0
         node.name = "pallet:" + station.name
         propRoot.addChildNode(node)
+        let shadow = Props.palletShadow()
+        shadow.position = v3(pos.x, 0.006, pos.z)
+        shadow.opacity = 0
+        propRoot.addChildNode(shadow)
 
-        let p = Pallet(station: station.name, repo: repo, number: number, node: node, dispatcher: m.id, spot: spot)
+        let p = Pallet(station: station.name, repo: repo, number: number, node: node, shadow: shadow, dispatcher: m.id, spot: spot)
         p.state = .loading
         p.bornAt = clock
         for (i, item) in cargo.enumerated() {
@@ -180,13 +198,93 @@ extension StationController {
         logEvent("\(repo): a pallet floats out in storage")
     }
 
-    /// Behind it, hands on the edge, and out through the doorway.
+    /// Behind it, hands on the edge, and out through the doorway one leg at a time.
     private func beginPush(_ m: Minion, station: Station, _ p: Pallet) {
         p.state = .moving
         world.truth.setPallet(station: station.name, state: .moving)
+        p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
+        p.pushing = false
         m.setTool(nil)
         start(m, .pushPallet(station: station.name, repo: p.repo), announce: true)
-        walk(m, to: Cell(x: p.cellUnder.x, y: p.cellUnder.y + 1))
+        guard let leg = p.route.first else { arrive(m, station: station, p); return }
+        let (want, _) = pushSpot(p, toward: leg)
+        walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
+    }
+
+    /// The last leg is behind it: the pallet stands on the deck and the crates come off.
+    private func arrive(_ m: Minion, station: Station, _ p: Pallet) {
+        p.pushing = false
+        p.route = []
+        world.truth.movePallet(station: station.name, cell: p.cellUnder,
+                               pos: SIMD3(station.offset.x + p.spot.x, Props.palletLift, station.offset.y + p.spot.y))
+        m.setTool(nil)
+        m.tilt.eulerAngles = SCNVector3(0, 0, 0)
+        beginUnload(m, station: station, p, back: false)
+    }
+
+    /// Where the pusher stands for a leg: squarely behind the pallet on the leg's own axis, a step
+    /// back from its edge, with the direction it is heading.
+    private func pushSpot(_ p: Pallet, toward target: SIMD2<Double>) -> (spot: SIMD2<Double>, dir: SIMD2<Double>) {
+        let d = target - p.spot
+        let dir = abs(d.x) >= abs(d.y) ? SIMD2(d.x < 0 ? -1.0 : 1.0, 0.0) : SIMD2(0.0, d.y < 0 ? -1.0 : 1.0)
+        return (p.spot - dir * (palletHalf(dir) + 0.42), dir)
+    }
+
+    /// Half the pallet across the axis it is travelling along.
+    private func palletHalf(_ dir: SIMD2<Double>) -> Double { dir.x != 0 ? Props.palletWidth / 2 : Props.palletDepth / 2 }
+
+    /// Keeps the whole footprint on a block's tiles: the pallet never hangs over the floor's edge.
+    func clampToYard(_ p: SIMD2<Double>, _ cells: [Cell]) -> SIMD2<Double> {
+        guard let minX = cells.map(\.x).min(), let maxX = cells.map(\.x).max(),
+              let minY = cells.map(\.y).min(), let maxY = cells.map(\.y).max() else { return p }
+        // A tile's own edge is drawn a little inside its cell, so keep off the rim by that much too.
+        let hx = Props.palletWidth / 2 + 0.1, hy = Props.palletDepth / 2 + 0.1
+        let lo = SIMD2(Double(minX) - 0.5 + hx, Double(minY) - 0.5 + hy)
+        let hi = SIMD2(Double(maxX) + 0.5 - hx, Double(maxY) + 0.5 - hy)
+        return SIMD2(min(max(p.x, lo.x), hi.x), min(max(p.y, lo.y), hi.y))
+    }
+
+    /// The way out, as axis-aligned legs: line up on the deck doorway's two columns, out through it
+    /// onto the deck's aisle row, then along that aisle to the repository's group. Never diagonal,
+    /// never off the tiles.
+    private func palletRoute(station: Station, repo: String, from: SIMD2<Double>) -> [SIMD2<Double>] {
+        let deck = station.deckCells, storage = station.storageCells
+        guard !deck.isEmpty, !storage.isEmpty else { return [] }
+        let gates = station.yardDoorways.filter {
+            (storage.contains($0.0) && deck.contains($0.1)) || (storage.contains($0.1) && deck.contains($0.0))
+        }
+        let xs = gates.flatMap { [$0.0.x, $0.1.x] }
+        let doorX = xs.isEmpty ? from.x : (Double(xs.min()!) + Double(xs.max()!)) / 2
+        // The crate rows are every other row; the pallet travels the aisles between them.
+        let rows = Set(deck.map(\.y)).sorted()
+        let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
+        let aisles = rows.filter { !crateRows.contains($0) }
+        let mid = Double(rows.reduce(0, +)) / Double(rows.count)
+        let aisleY = Double(aisles.min { abs(Double($0) - mid) < abs(Double($1) - mid) } ?? rows.last!)
+        // Beside the repository's group on the untested row.
+        let untested = world.yardLayout(station: station, area: "deck").filter { $0.repo == repo && !$0.cleared }
+        let groupX = untested.first.map { Double($0.cell.x) } ?? doorX
+
+        var legs: [SIMD2<Double>] = []
+        var at = from
+        func leg(_ to: SIMD2<Double>) {
+            guard abs(to.x - at.x) + abs(to.y - at.y) > 0.05 else { return }
+            legs.append(to)
+            at = to
+        }
+        leg(clampToYard(SIMD2(doorX, at.y), storage))
+        leg(clampToYard(SIMD2(at.x, aisleY), deck))
+        leg(clampToYard(SIMD2(groupX, aisleY), deck))
+        return legs
+    }
+
+    /// Puts the pusher's body where its position says, with the lean it is holding. The minion tick
+    /// skips this for anyone on a pallet errand, so the push does it itself.
+    private func placePusher(_ m: Minion, station: Station, tilt: Double = 0, shove: Double = 0) {
+        m.node.position = v3(station.offset.x + m.pos.x + sin(m.facing) * shove, 0,
+                             station.offset.y + m.pos.y + cos(m.facing) * shove)
+        m.node.eulerAngles = SCNVector3(0, m.smoothFacing, 0)
+        m.tilt.eulerAngles = SCNVector3(tilt, 0, 0)
     }
 
     /// The wand out again: the crates float off, onto the deck or back into storage.
@@ -202,6 +300,7 @@ extension StationController {
     /// Empty: the pallet fades and the station may put out the next one.
     private func endPallet(_ p: Pallet, station: Station) {
         fadingProps.append((p.node, clock))
+        fadingProps.append((p.shadow, clock))
         pallets[station.name] = nil
         world.truth.endPallet(station: station.name)
         servicePallets()
@@ -219,15 +318,41 @@ extension StationController {
             guard let station = fleet.stations[name] else { continue }
             if palletErrand(of: minions[p.dispatcher]).map({ $0.repo != p.repo }) ?? true { adopt(p, station: station) }
             let m = minions[p.dispatcher]
-            // Being pushed: it stays half a step ahead of the hands.
-            if let m, case .pushPallet = m.current?.kind, m.phase >= 2 {
-                let ahead = SIMD2(sin(m.smoothFacing), cos(m.smoothFacing)) * (0.5 + Props.palletDepth / 2)
-                p.spot = m.pos + ahead
-                p.node.eulerAngles.y = m.smoothFacing
+            // Being pushed: one axis at a time, slowly, easing in, with the pusher behind it.
+            if let m, p.pushing, case .pushPallet = m.current?.kind, let leg = p.route.first {
+                let full = leg - p.legFrom
+                let total = (full.x * full.x + full.y * full.y).squareRoot()
+                let dir = total > 0.001 ? full / total : SIMD2(0.0, 0.0)
+                let t = max(0, clock - p.legAt)
+                // A loaded pallet takes a second to get going: half a cell a second once it is moving.
+                let speed = 0.45, ramp = 1.0
+                let gone = t < ramp ? speed * t * t / (2 * ramp) : speed * (t - ramp / 2)
+                p.spot = p.legFrom + dir * min(total, gone)
+                m.pos = p.spot - dir * (palletHalf(dir) + 0.42)
+                m.path = []
+                m.facing = atan2(dir.x, dir.y)
+                m.smoothFacing = m.facing
+                // Leaning into it, with the shove and give of real effort. The tick's minion loop
+                // leaves a pallet errand's body alone, so the pusher is placed here.
+                placePusher(m, station: station, tilt: 0.35, shove: sin(clock * 3.6 + p.bobPhase) * 0.02)
+                if gone >= total { p.route.removeFirst(); p.pushing = false }
             }
-            let bob = sin((clock + p.bobPhase) * 0.8) * 0.025
+            // A slow, plain sine: the slab rides its cushion of light.
+            let bob = sin(clock * (2 * .pi / 2.4) + p.bobPhase) * 0.06
             p.node.position = v3(station.offset.x + p.spot.x, Props.palletLift + bob, station.offset.y + p.spot.y)
+            p.node.eulerAngles.y = 0
             p.node.opacity = min(1, (clock - p.bornAt) / 0.9)
+            // The shadow keeps to the floor: it tightens and darkens as the slab comes down.
+            let high = bob / 0.06 * 0.5 + 0.5
+            p.shadow.position = v3(station.offset.x + p.spot.x, 0.006, station.offset.y + p.spot.y)
+            p.shadow.scale = SCNVector3(1.06 - high * 0.12, 1.06 - high * 0.12, 1)
+            p.shadow.opacity = p.node.opacity * CGFloat(1.06 - high * 0.26)
+            // The corner light: half a second on, half off, off the station's own clock.
+            if let beacon = p.beacon {
+                let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
+                beacon.geometry?.firstMaterial?.diffuse.contents = on ? Props.palletAmber : Props.palletAmberOff
+                beacon.geometry?.firstMaterial?.emission.contents = on ? Props.palletAmber : NSColor.black
+            }
             if m?.tool == .telekinesis { m?.setWand(lifting: p.flight != nil) }
             // A crate in the air: an arc on the station's own clock, so it lands whatever is drawing.
             if let f = p.flight {
@@ -286,21 +411,24 @@ extension StationController {
         guard let item = p.toLoad.first else { return }
         p.toLoad.removeFirst()
         p.nextAt = clock + 3.0
+        // The rows are redrawn every time one leaves, so take the crate standing there now, not the
+        // node this pallet was handed when it was ordered: that one is long gone from the scene.
+        let node = crateNode("storage", item.crate) ?? item.node
         world.truth.putOnPallet(item.crate, at: item.slot)
         station.stored[item.crate.repo] = max(0, (station.stored[item.crate.repo] ?? 1) - 1)
         let to = Props.palletOffset(row: item.slot.row, column: item.slot.column, level: item.slot.level)
         // Into the pallet's own space, so it rides along once it has landed.
-        let where_ = item.node.worldPosition
-        let yaw = Double(item.node.eulerAngles.y) - Double(p.node.eulerAngles.y)
-        item.node.removeAllActions()
-        item.node.removeFromParentNode()
-        p.node.addChildNode(item.node)
+        let where_ = node.worldPosition
+        let yaw = Double(node.eulerAngles.y) - Double(p.node.eulerAngles.y)
+        node.removeAllActions()
+        node.removeFromParentNode()
+        p.node.addChildNode(node)
         let local = p.node.convertPosition(where_, from: nil)
-        p.flight = Pallet.Flight(node: item.node, from: SIMD3(Double(local.x), Double(local.y), Double(local.z)), to: to,
+        p.flight = Pallet.Flight(node: node, from: SIMD3(Double(local.x), Double(local.y), Double(local.z)), to: to,
                                  fromYaw: yaw, toYaw: 0, at: clock, seconds: 2.4) { [weak self, weak p] in
-            item.node.position = v3(to.x, to.y, to.z)
-            item.node.eulerAngles = SCNVector3(0, 0, 0)
-            p?.aboard.append((item.crate, item.node))
+            node.position = v3(to.x, to.y, to.z)
+            node.eulerAngles = SCNVector3(0, 0, 0)
+            p?.aboard.append((item.crate, node))
             self?.drone.thud()
         }
         rebuildMarkers()   // the rows are one crate lighter now
@@ -364,13 +492,6 @@ extension StationController {
                                     .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
     }
 
-    /// Where the pallet's group of crates stands on the untested row, and where the pusher stops behind it.
-    private func deckTarget(station: Station, repo: String) -> Cell {
-        let untested = world.yardLayout(station: station, area: "deck").filter { $0.repo == repo && !$0.cleared }
-        let x = untested.first?.cell.x ?? station.palletCell.x
-        let back = (station.deckCells.map(\.y).max() ?? 2)
-        return Cell(x: x, y: back)
-    }
 }
 
 extension Pallet {

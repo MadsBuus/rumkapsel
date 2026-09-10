@@ -100,6 +100,41 @@ enum Props {
             strip.position = v3(0, 0.02, side * (palletDepth / 2 - 0.02))
             n.addChildNode(strip)
         }
+        // Twelve shallow fields sunk into the plate, one per crate slot, so the deck is not a blank sheet.
+        for row in 0..<3 {
+            for column in 0..<4 {
+                let field = SCNNode(geometry: SCNBox(width: 0.36, height: 0.014, length: 0.36, chamferRadius: 0))
+                field.geometry!.firstMaterial = flat(deckColor.darker(0.26))
+                let at = palletOffset(row: row, column: column, level: 0)
+                field.position = v3(at.x, 0.029, at.z)   // proud of the plate's own face, or the two fight
+                n.addChildNode(field)
+            }
+        }
+        // Rivets along the rim: tiny cubes, evenly spaced, standing proud of the plate.
+        func rivet(_ x: Double, _ z: Double) {
+            let r = SCNNode(geometry: SCNBox(width: 0.036, height: 0.036, length: 0.036, chamferRadius: 0))
+            r.geometry!.firstMaterial = lit(deckColor.lighter(0.28))
+            r.position = v3(x, 0.042, z)
+            n.addChildNode(r)
+        }
+        for i in 0..<8 {
+            let x = -palletWidth / 2 + 0.09 + Double(i) * (palletWidth - 0.18) / 7
+            rivet(x, -palletDepth / 2 + 0.05)
+            if x < palletWidth / 2 - 0.2 { rivet(x, palletDepth / 2 - 0.05) }   // room for the light on that corner
+        }
+        for i in 0..<4 {
+            let z = -palletDepth / 2 + 0.09 + Double(i) * (palletDepth - 0.18) / 3
+            rivet(-palletWidth / 2 + 0.05, z)
+            if z < palletDepth / 2 - 0.2 { rivet(palletWidth / 2 - 0.05, z) }
+        }
+        // The warning light on the near corner. The tick blinks it, so it blinks headless too.
+        let beacon = SCNNode(geometry: SCNBox(width: 0.09, height: 0.09, length: 0.09, chamferRadius: 0))
+        let lamp = flat(palletAmber)
+        lamp.emission.contents = palletAmber
+        beacon.geometry!.firstMaterial = lamp
+        beacon.position = v3(palletWidth / 2 - 0.08, 0.07, palletDepth / 2 - 0.08)
+        beacon.name = "beacon"
+        n.addChildNode(beacon)
         // The cushion of light it rides on.
         let glow = SCNNode(geometry: SCNPlane(width: palletWidth - 0.1, height: palletDepth - 0.1))
         glow.geometry!.firstMaterial = flat(color)
@@ -108,6 +143,21 @@ enum Props {
         glow.position = v3(0, -palletLift + 0.01, 0)
         n.addChildNode(glow)
         return n
+    }
+
+    /// The corner light's colour, on and off.
+    static let palletAmber = NSColor(rgb: (1.0, 0.56, 0.12))
+    static let palletAmberOff = NSColor(rgb: (0.42, 0.24, 0.08))
+
+    /// The dark patch the pallet throws on the floor. It does not bob with the slab: it tightens and
+    /// darkens as the pallet sinks, as if the light stood close overhead.
+    static func palletShadow() -> SCNNode {
+        let s = SCNNode(geometry: SCNPlane(width: palletWidth, height: palletDepth))
+        let m = flat(NSColor(rgb: (0.05, 0.05, 0.08)))
+        m.transparency = 0.34   // the darkness lives in the material, so the node's opacity is free to fade
+        s.geometry!.firstMaterial = m
+        s.eulerAngles.x = -.pi / 2
+        return s
     }
 
     /// Where crate `index` stands on a pallet: four across, three rows back, stacked past twelve.

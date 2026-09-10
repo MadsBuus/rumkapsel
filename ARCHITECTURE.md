@@ -145,14 +145,27 @@ hand carry for those crates and no `carryToDeck` is issued for them.
 Five commands run it, all on one minion, the dispatcher: `dispatch` (clipboard out, to the storage console),
 `waitPallet` (at the console with the hops and pacing of a minion waiting on you, or beside a loaded pallet
 until the release moves), `loadPallet` (the wand out, one crate at a time off the top of its stack, through
-an arc, onto its pallet slot), `pushPallet` (hands on the edge, the pallet half a step ahead of the minion
-along its own path out through the storage doorway and across to the untested row) and `unloadPallet`
+an arc, onto its pallet slot), `pushPallet` (hands on the pallet, shoving it leg by leg out through the
+storage doorway and across to the untested row) and `unloadPallet`
 (the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
 unmerged, and the empty pallet fades). The `Pallet` actor in `Actors.swift` holds the node, what is aboard
 and the crate in the air. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
-cushion of light, bobbing on a sine; and `Props.console`, the small panel on the wall by the storage doorway,
+cushion of light, bobbing on a sine, with twelve sunk fields matching the crate slots, rivets along the
+rim, an amber corner light the tick blinks, and a floor shadow of its own that stays down and tightens as
+the slab sinks; and `Props.console`, the small panel on the wall by the storage doorway,
 which blinks while an order stands unanswered. Two new tools: `.clipboard` and `.telekinesis`, a short
-faceted wand whose tip lights, with a small omni light, while a crate is in the air.
+faceted wand whose tip lights, with a small omni light, while a crate is in the air; and `.hands`, held
+out in front for the push.
+
+The push, leg by leg. The pallet is heavy and only ever moves along one axis. `palletRoute` cuts the way
+to the deck into axis-aligned legs: line up on the two doorway columns without leaving storage, out
+through the doorway onto the deck's aisle row (the crate rows are every other row; the aisles are the
+rest), then along that aisle to the repository's group on the untested row. Every leg end is clamped so
+the whole 1.8 by 1.4 footprint stays on the block's tiles. For each leg the minion walks round to the
+back side on that leg's axis — the pallet's footprint is in `station.obstacles`, so the walk goes round
+it, never through it — then leans in at a tilt of 0.35 and the pallet creeps forward at half a cell a
+second, easing in, with the pusher locked a step behind it and a small forward-and-back shove in the
+body. The minion tick skips anyone on a pallet errand, so the push places the pusher's own node.
 
 What differs from the plan above:
 
