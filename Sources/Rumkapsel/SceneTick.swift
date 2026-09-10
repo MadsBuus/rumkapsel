@@ -339,7 +339,10 @@ extension StationController {
                     } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0 {
                         if m.nextChoreAt == 0 { m.nextChoreAt = clock + Double.random(in: 60...240) }
                         if clock >= m.nextChoreAt {
-                            let spots = station.corridorCells + station.storageCells + station.deckCells + station.hangarCells
+                            // A loaded rocket on the pad draws a crowd: the idle drift to the deck's aisle beside it.
+                            let rocketReady = rocketActors.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
+                            let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
+                            let spots = rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells + station.hangarCells
                             if let spot = spots.randomElement() {
                                 start(m, .chore(spot: spot))
                                 m.couch = nil

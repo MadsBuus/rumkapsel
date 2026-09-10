@@ -28,7 +28,7 @@ enum Props {
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
     /// a square strapped crate is a pull request, a pyramid is a session input.
-    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false) -> SCNNode {
+    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false, blink: Bool = false) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
@@ -46,6 +46,7 @@ enum Props {
         let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
         plate.geometry!.firstMaterial = flat(band)
         plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
+        if blink { plate.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.5), .fadeOpacity(to: 1, duration: 0.5)]))) }
         n.addChildNode(plate)
         if approved {
             // Passed QA: a pale sticker on the lid with a green mark.

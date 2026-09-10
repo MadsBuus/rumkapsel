@@ -98,10 +98,16 @@ extension StationController {
                 if world.isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
                 if packaged {
-                    // One package for the whole pull request, sized by the work in it, strapped in the status colour.
+                    // One crate for the pull request. Its plate is a light: blinking while checks run, red when they
+                    // fail, green when all is well; a closed one is red all over.
                     let cell = farCells(station, room).first!
                     let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
-                    let pkg = Props.package(color: NSColor(room.color).lighter(0.1), band: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
+                    let closed = pr?.state == "CLOSED"
+                    let checks = pr?.checks ?? ""
+                    let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
+                        : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
+                    let pkg = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color).lighter(0.1), band: light, size: size,
+                                            blink: checks == "pending" && !closed)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
                     pkg.opacity = undelivered.contains(key) ? 0 : 1
@@ -173,12 +179,12 @@ extension StationController {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            let purple = NSColor(rgb: (0.6, 0.4, 0.9))
             for area in ["storage", "deck"] where station.hasPad {
                 for slot in world.yardLayout(station: station, area: area) {
                     if area == "deck", world.truth.isCarried(station: station.name, repo: slot.repo, number: slot.number) { continue }
                     let c = NSColor(fleet.color(forRepo: slot.repo))
-                    let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: 0.38, approved: slot.cleared)
+                    // In the yard the light is off, except green with a sticker on a tested crate.
+                    let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38, approved: slot.cleared)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = "\(area):\(station.name)|\(slot.repo)|\(slot.number)"
@@ -430,34 +436,24 @@ extension StationController {
             let mp = station.monolithPosition
             let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
             let to = SIMD3(station.offset.x + m.pos.x, m.headHeight * 0.8, station.offset.y + m.pos.y)
-            let bolt = beams[m.id] ?? {
-                let group = SCNNode()
-                for _ in 0..<5 {
-                    let n = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 1, chamferRadius: 0))
-                    n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
-                    group.addChildNode(n)
-                }
-                beamRoot.addChildNode(group)
-                beams[m.id] = group
-                return group
+            // A cone of light from the monolith down onto whoever is asking it, as the game's research went.
+            let cone = beams[m.id] ?? {
+                let n = SCNNode(geometry: faceted(SCNCone(topRadius: 0.05, bottomRadius: 0.32, height: 1)))
+                n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
+                n.geometry!.firstMaterial?.transparency = 0.22
+                n.geometry!.firstMaterial?.writesToDepthBuffer = false
+                n.geometry!.firstMaterial?.isDoubleSided = true
+                beamRoot.addChildNode(n)
+                beams[m.id] = n
+                return n
             }()
-            var points = [from]
-            for k in 1..<5 {
-                let t = Double(k) / 5
-                let jitter = 0.14
-                points.append(from + (to - from) * t + SIMD3(Double.random(in: -jitter...jitter), Double.random(in: -jitter...jitter), Double.random(in: -jitter...jitter)))
-            }
-            points.append(to)
-            for (i, seg) in bolt.childNodes.enumerated() {
-                let a = points[i], b = points[i + 1]
-                let d = b - a
-                let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
-                let mid = (a + b) / 2
-                seg.position = v3(mid.x, mid.y, mid.z)
-                seg.scale = SCNVector3(1, 1, len)
-                seg.look(at: v3(b.x, b.y, b.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, 1))
-            }
-            bolt.opacity = Double.random(in: 0.35...1.0)
+            let d = to - from
+            let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
+            let mid = (from + to) / 2
+            cone.position = v3(mid.x, mid.y, mid.z)
+            cone.scale = SCNVector3(1, len, 1)
+            cone.look(at: v3(to.x, to.y, to.z), up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, -1, 0))
+            cone.opacity = 0.8 + 0.2 * sin(clock * 3 + Double(m.bobPhase))
         }
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }

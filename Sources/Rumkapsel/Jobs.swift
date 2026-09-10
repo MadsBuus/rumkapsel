@@ -113,14 +113,12 @@ extension StationController {
         m.state = .leaving
         start(m, .leave)
         m.couch = nil; m.bed = nil
-        guard let station = fleet.stations[m.station], let airlock = station.rooms["kind:airlock"], let cell = airlock.cells.randomElement() else { return }
+        guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement() else { return }
         m.place = .airlock
-        m.path = station.path(from: m.pos, to: cell)
-        // Out onto the bay if the hatch opens there: that is where the shuttle would pick them up.
-        if let hatch = station.airlockHatch, let bay = station.hangarCells.randomElement() {
-            let inside = SIMD2(Double(hatch.inside.x), Double(hatch.inside.y))
-            m.path += [inside] + station.path(from: inside, to: bay)
-        }
+        m.path = station.path(from: m.pos, to: hatch.inside)
+        // Then out onto the bay: that is where the shuttle would pick them up.
+        let inside = SIMD2(Double(hatch.inside.x), Double(hatch.inside.y))
+        m.path += [inside] + station.path(from: inside, to: hatch.bay)
     }
 
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.

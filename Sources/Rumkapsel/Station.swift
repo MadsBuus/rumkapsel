@@ -113,14 +113,18 @@ final class Station {
     }
     var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
     /// The hangar is the 4x2 bay across the outer end of the south corridor arm, wider than it is long.
+    /// The airlock: the two cells that carry the corridor's line on past its south end, before the bay.
+    var airlockCells: [Cell] { hasHangar ? [Cell(x: 0, y: spineHalfLength + 1), Cell(x: 1, y: spineHalfLength + 1)] : [] }
+    /// The hatch: where each airlock cell opens onto the bay.
+    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
     var hangarCells: [Cell] {
         guard hasHangar else { return [] }
-        let y = spineHalfLength + 1
+        let y = spineHalfLength + 2   // past the airlock
         return (-1...2).flatMap { x in (0..<2).map { d in Cell(x: x, y: y + d) } }
     }
-    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 1.5) }
+    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 2.5) }
     /// Landing slots across the bay, in local coordinates.
-    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 1.5) } }
+    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 2.5) } }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west.
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
@@ -205,6 +209,7 @@ final class Station {
         if let w = walkableCache { return w }
         var w = Set(coreCells)
         w.formUnion(hangarCells)
+        w.formUnion(airlockCells)
         w.formUnion(padCells)
         w.formUnion(storageCells)
         w.formUnion(deckCells)
@@ -220,6 +225,7 @@ final class Station {
         switch place {
         case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
         case .room("kind:hangar"): return hangarCells
+        case .room("kind:airlock"): return airlockCells
         case .room("kind:pad"): return padCells
         case .room("kind:storage"): return storageCells
         case .room("kind:deck"): return deckCells.isEmpty ? padCells : deckCells
@@ -249,8 +255,6 @@ final class Station {
         if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4), near: beside.isEmpty ? nil : beside) }
         if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
         if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2), near: beside.isEmpty ? nil : beside) }
-        // The airlock sits by the bay: the way out for anyone leaving the station.
-        if key == "kind:airlock" { return ensureRoom(key: key, name: "airlock", repo: nil, color: RGB(r: 0.30, g: 0.34, b: 0.42), lastActive: .distantFuture, shape: Station.rect(2, 1), near: hasHangar ? hangarCells : nil) }
         return false
     }
 
@@ -286,6 +290,7 @@ final class Station {
     /// Walking between a room and the hallway is only allowed through the doorway.
     /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
     private func yardArea(_ c: Cell) -> String? {
+        if airlockCells.contains(c) { return "airlock" }
         if hangarCells.contains(c) { return "hangar" }
         if storageCells.contains(c) { return "storage" }
         if deckCells.contains(c) { return "deck" }
@@ -299,10 +304,9 @@ final class Station {
         guard hasPad else { return [] }
         let x0 = -spineHalfLength - 1
         var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
-        if hasHangar, airlockHatch == nil {   // no airlock against the bay: the bay opens straight onto the corridor's end
-            let y = spineHalfLength + 1
-            out.append((Cell(x: 0, y: y), Cell(x: 0, y: y - 1))); out.append((Cell(x: 1, y: y), Cell(x: 1, y: y - 1)))
-        }
+        // Corridor into the airlock, airlock out onto the bay: the only way to the outside.
+        for a in airlockCells { out.append((Cell(x: a.x, y: a.y - 1), a)) }
+        for h in airlockHatches { out.append((h.inside, h.bay)) }
         for x in [x0 - 1, x0 - 2] {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
             out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
@@ -310,19 +314,7 @@ final class Station {
         return out
     }
 
-    /// The pair of cells where the airlock opens onto the bay, when it stands against it.
-    var airlockHatch: (inside: Cell, bay: Cell)? {
-        guard let a = rooms["kind:airlock"] else { return nil }
-        for c in a.cells { for n in c.neighbours where hangarCells.contains(n) { return (c, n) } }
-        return nil
-    }
-
     private func canStep(from a: Cell, to b: Cell) -> Bool {
-        // The bay is outside: with an airlock against it, the only way in or out is through the hatch.
-        if let hatch = airlockHatch {
-            let ha = hangarCells.contains(a), hb = hangarCells.contains(b)
-            if ha != hb { return (a == hatch.inside && b == hatch.bay) || (a == hatch.bay && b == hatch.inside) }
-        }
         if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
             return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }
         }
@@ -368,7 +360,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || airlockCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
@@ -624,7 +616,6 @@ final class Fleet {
         s.ensureFixedRoom(.quarters)
         s.ensureFixedRoom(.lounge)
         s.ensureFixedRoom(.bath)
-        s.ensureFixedRoom(.airlock)
         stations[name] = s
         return s
     }
@@ -681,7 +672,7 @@ final class Fleet {
             station.ensureFixedRoom(.lounge)
             station.ensureFixedRoom(.bath)
             station.clusterQuarters()
-            station.ensureFixedRoom(.airlock)
+            station.removeRoom(key: "kind:airlock")   // from before the airlock had its place in the corridor's line
             stations[name] = station
         }
     }

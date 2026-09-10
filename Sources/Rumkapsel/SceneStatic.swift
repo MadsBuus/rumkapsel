@@ -6,6 +6,7 @@ import SceneKit
 extension StationController {
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if station.hangarCells.contains(c) { return "kind:hangar" }
+        if station.airlockCells.contains(c) { return "kind:airlock" }
         if station.storageCells.contains(c) { return "kind:storage" }
         if station.deckCells.contains(c) && !ConfigStore.shared.current.stagingBranch.isEmpty { return "kind:deck" }
         if station.padCells.contains(c) { return "kind:pad" }
@@ -91,7 +92,7 @@ extension StationController {
                 openEdges.insert("\(station.name):\(d.x),\(d.y)|\(o.x),\(o.y)")
                 openEdges.insert("\(station.name):\(o.x),\(o.y)|\(d.x),\(d.y)")
             }
-            for (a, b) in station.yardDoorways + (station.airlockHatch.map { [($0.inside, $0.bay)] } ?? []) {
+            for (a, b) in station.yardDoorways {
                 openEdges.insert("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
                 openEdges.insert("\(station.name):\(b.x),\(b.y)|\(a.x),\(a.y)")
             }
@@ -113,6 +114,21 @@ extension StationController {
             }
             for c in station.hangarCells {
                 addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+            }
+            for c in station.airlockCells {
+                addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
+            }
+            if station.hasHangar, let first = station.airlockCells.first {
+                // The hatch: a faceted ring standing across the airlock's far side, where it opens onto the bay.
+                let hatch = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.30, outerRadius: 0.40, height: 0.08)))
+                hatch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.62, 0.25)))
+                hatch.eulerAngles = SCNVector3(Double.pi / 2, 0, 0)
+                hatch.position = v3(station.offset.x + Double(first.x) + 0.5, 0.42, station.offset.y + Double(first.y) + 0.46)
+                let pane = SCNNode(geometry: faceted(SCNCylinder(radius: 0.30, height: 0.04)))
+                pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
+                hatch.addChildNode(pane)
+                hatch.name = "airlock:" + station.name
+                staticRoot.addChildNode(hatch)
             }
             for c in station.padCells {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
@@ -206,23 +222,6 @@ extension StationController {
                 }
                 shelf.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(shelf)
-            }
-            if let airlock = station.rooms["kind:airlock"] {
-                // A round hatch standing at the far end, ringed in a warning stripe.
-                let cells = airlock.cells
-                let door = station.doorCell(of: airlock.key) ?? cells[0]
-                let far = station.airlockHatch?.inside ?? cells.max { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) } ?? cells[0]
-                let out = station.airlockHatch?.bay ?? Cell(x: far.x + (far.x - door.x), y: far.y + (far.y - door.y))
-                let hatch = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.22, outerRadius: 0.32, height: 0.08)))
-                hatch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.62, 0.25)))
-                let dx = out.x - far.x, dy = out.y - far.y
-                hatch.eulerAngles = dx != 0 ? SCNVector3(0, 0, Double.pi / 2) : SCNVector3(Double.pi / 2, 0, 0)
-                hatch.position = v3(station.offset.x + Double(far.x) + Double(dx) * 0.42, 0.42, station.offset.y + Double(far.y) + Double(dy) * 0.42)
-                let pane = SCNNode(geometry: faceted(SCNCylinder(radius: 0.22, height: 0.04)))
-                pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
-                hatch.addChildNode(pane)
-                hatch.name = "room:" + roomKey(station, airlock)
-                staticRoot.addChildNode(hatch)
             }
             if let bath = station.rooms["kind:bath"] {
                 // A toilet in one corner and a shower post in the other.
@@ -446,9 +445,14 @@ extension StationController {
                 let hc = station.hangarCells
                 let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
                 add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                let airlockLabel = floorSign("airlock", color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
+                airlockLabel.node.position.y = 0.012
+                if let a = station.airlockCells.first {
+                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x) + 0.5, oz + Double(a.y) - 0.25))
+                }
             }
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.padCells.contains(c) || station.storageCells.contains(c)
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.airlockCells.contains(c) || station.padCells.contains(c) || station.storageCells.contains(c)
                     || station.deckCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
