@@ -875,7 +875,6 @@ struct SimulatorPanel: View {
             HStack(spacing: 6) {
                 Button(model.paused ? "Resume" : "Pause") { model.press(model.paused ? "Resume" : "Pause") }
                 Button("Step") { model.press("Step") }
-                Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org")
                 ForEach(["1x", "4x", "16x"], id: \.self) { s in
                     Button(s) { model.press(s) }
                         .buttonStyle(.borderedProminent)
@@ -883,6 +882,7 @@ struct SimulatorPanel: View {
                 }
             }
             .controlSize(.small)
+            Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org").controlSize(.small)
         }
     }
 
