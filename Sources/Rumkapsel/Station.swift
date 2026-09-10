@@ -32,6 +32,7 @@ enum Place: Hashable {
 
     static let quarters = Place.room("kind:quarters")
     static let lounge = Place.room("kind:lounge")
+    static let bath = Place.room("kind:bath")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -148,7 +149,10 @@ final class Station {
         guard let l = rooms["kind:lounge"] else { return [] }
         let xs = l.cells.map(\.x), ys = l.cells.map(\.y)
         let minX = Double(xs.min()!), maxX = Double(xs.max()!), minY = Double(ys.min()!), maxY = Double(ys.max()!)
-        return [SIMD2(minX - 0.3, minY), SIMD2(minX - 0.3, maxY), SIMD2(maxX + 0.3, minY), SIMD2(maxX + 0.3, maxY), SIMD2(minX, maxY + 0.3), SIMD2(maxX, maxY + 0.3)]
+        let door = doorCell(of: "kind:lounge")
+        let spots = [SIMD2(minX - 0.22, minY), SIMD2(minX - 0.22, maxY), SIMD2(maxX + 0.22, minY), SIMD2(maxX + 0.22, maxY), SIMD2(minX, maxY + 0.22), SIMD2(maxX, maxY + 0.22)]
+        // Nothing parked across the doorway.
+        return spots.filter { s in door.map { hypot(s.x - Double($0.x), s.y - Double($0.y)) > 0.6 } ?? true }
     }
 
     static func rect(_ w: Int, _ h: Int) -> [Cell] {
@@ -232,6 +236,7 @@ final class Station {
         guard case .room(let key) = place else { return false }
         if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4)) }
         if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
+        if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2)) }
         return false
     }
 
@@ -249,7 +254,31 @@ final class Station {
     }
 
     /// Walking between a room and the hallway is only allowed through the doorway.
+    /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
+    private func yardArea(_ c: Cell) -> String? {
+        if storageCells.contains(c) { return "storage" }
+        if deckCells.contains(c) { return "deck" }
+        if padCells.contains(c) { return "pad" }
+        if isCorridor(c) || coreCells.contains(c) { return "corridor" }
+        return nil
+    }
+
+    /// Doorways through the yard: the corridor into the deck, and the deck into storage and the pad.
+    var yardDoorways: [(Cell, Cell)] {
+        guard hasPad else { return [] }
+        let x0 = -spineHalfLength - 1
+        var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
+        for x in [x0 - 1, x0 - 2] {
+            out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
+            out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
+        }
+        return out
+    }
+
     private func canStep(from a: Cell, to b: Cell) -> Bool {
+        if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
+            return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }
+        }
         let ra = room(at: a)?.key, rb = room(at: b)?.key
         if ra == rb { return true }
         if let ra, rb == nil { return doorCell(of: ra) == a && doorOutside(of: ra) == b }
@@ -522,6 +551,7 @@ final class Fleet {
         let s = Station(name: name)
         s.ensureFixedRoom(.quarters)
         s.ensureFixedRoom(.lounge)
+        s.ensureFixedRoom(.bath)
         stations[name] = s
         return s
     }
@@ -574,6 +604,7 @@ final class Fleet {
             station.restore(s)
             station.ensureFixedRoom(.quarters)
             station.ensureFixedRoom(.lounge)
+            station.ensureFixedRoom(.bath)
             stations[name] = station
         }
     }

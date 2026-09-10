@@ -259,6 +259,36 @@ final class Minion {
     var pos: SIMD2<Double>
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
+    var nextBathAt = 0.0
+    var bathUntil = 0.0
+    var bathReturn: Place?
+    private var staticNode: SCNNode?
+    /// A few frames of grey noise: the discreet blur over whoever is in the bath.
+    private static let noise: [NSImage] = (0..<4).map { _ in
+        let n = 10
+        let img = NSImage(size: NSSize(width: n, height: n))
+        img.lockFocus()
+        for x in 0..<n { for y in 0..<n {
+            NSColor(white: CGFloat.random(in: 0.25...0.9), alpha: 1).setFill()
+            NSRect(x: x, y: y, width: 1, height: 1).fill()
+        } }
+        img.unlockFocus()
+        return img
+    }
+    func setStatic(_ on: Bool, frame: Int) {
+        if !on { staticNode?.removeFromParentNode(); staticNode = nil; return }
+        if staticNode == nil {
+            let p = SCNNode(geometry: SCNPlane(width: 0.36, height: bodyHeight + 0.12))
+            p.geometry!.firstMaterial = flat(.white)
+            p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
+            p.constraints = [SCNBillboardConstraint()]
+            p.position = v3(0, bodyHeight / 2, 0)
+            p.renderingOrder = 20
+            node.addChildNode(p)
+            staticNode = p
+        }
+        staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
+    }
     var waitingSince = 0.0
     let bobPhase = Double.random(in: 0..<6.28)
     var opacity = 0.0
@@ -875,6 +905,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 openEdges.insert("\(station.name):\(d.x),\(d.y)|\(o.x),\(o.y)")
                 openEdges.insert("\(station.name):\(o.x),\(o.y)|\(d.x),\(d.y)")
             }
+            for (a, b) in station.yardDoorways {
+                openEdges.insert("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
+                openEdges.insert("\(station.name):\(b.x),\(b.y)|\(a.x),\(a.y)")
+            }
         }
 
         for station in fleet.stations.values {
@@ -932,6 +966,55 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     couch.addChildNode(back)
                     staticRoot.addChildNode(couch)
                 }
+                // A potted plant in one corner and a low shelf in another: somewhere to look at.
+                let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
+                let pot = SCNNode(geometry: SCNCylinder(radius: 0.11, height: 0.16))
+                pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
+                pot.position = v3(station.offset.x + Double(xs.min()!) - 0.28, 0.08, station.offset.y + Double(ys.min()!) - 0.28)
+                let leaves = SCNNode(geometry: SCNSphere(radius: 0.17))
+                leaves.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.62, 0.38)))
+                leaves.position = v3(0, 0.2, 0)
+                pot.addChildNode(leaves)
+                pot.name = "room:" + roomKey(station, lounge)
+                staticRoot.addChildNode(pot)
+                let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
+                shelf.geometry!.firstMaterial = lit(NSColor(rgb: (0.5, 0.4, 0.32)))
+                shelf.position = v3(station.offset.x + Double(xs.max()!), 0.16, station.offset.y + Double(ys.min()!) - 0.32)
+                for i in 0..<4 {
+                    let book = SCNNode(geometry: SCNBox(width: 0.08, height: 0.2, length: 0.14, chamferRadius: 0))
+                    book.geometry!.firstMaterial = lit(NSColor(Colors.repos[i % Colors.repos.count]))
+                    book.position = v3(-0.22 + Double(i) * 0.13, 0.26, 0)
+                    shelf.addChildNode(book)
+                }
+                shelf.name = "room:" + roomKey(station, lounge)
+                staticRoot.addChildNode(shelf)
+            }
+            if let bath = station.rooms["kind:bath"] {
+                // A toilet in one corner and a shower post in the other.
+                let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+                let tc = cells.first!, sc = cells.last!
+                let bowl = SCNNode(geometry: SCNCylinder(radius: 0.13, height: 0.2))
+                bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
+                bowl.position = v3(station.offset.x + Double(tc.x) - 0.22, 0.1, station.offset.y + Double(tc.y) - 0.22)
+                let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
+                tank.geometry!.firstMaterial = bowl.geometry!.firstMaterial
+                tank.position = v3(0, 0.15, -0.14)
+                bowl.addChildNode(tank)
+                bowl.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(bowl)
+                let post = SCNNode(geometry: SCNCylinder(radius: 0.025, height: 0.7))
+                post.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
+                post.position = v3(station.offset.x + Double(sc.x) + 0.3, 0.35, station.offset.y + Double(sc.y) + 0.3)
+                let head = SCNNode(geometry: SCNCylinder(radius: 0.09, height: 0.03))
+                head.geometry!.firstMaterial = post.geometry!.firstMaterial
+                head.position = v3(-0.12, 0.33, -0.12)
+                post.addChildNode(head)
+                let tray = SCNNode(geometry: SCNBox(width: 0.7, height: 0.03, length: 0.7, chamferRadius: 0))
+                tray.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.76, 0.8)))
+                tray.position = v3(-0.15, -0.34, -0.15)
+                post.addChildNode(tray)
+                post.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(post)
             }
             if station.hasHangar {
                 let hc = station.hangarCenter
@@ -1067,6 +1150,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         switch room.key {
         case "kind:quarters": return "dorm"
         case "kind:lounge": return "lounge"
+        case "kind:bath": return "bath"
         default: return room.name
         }
     }
@@ -1079,7 +1163,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
     private func occupant(of key: String) -> String? {
         if let info = crewRoomInfo[key] { return crewName(info.author) }
-        return peerOffices[key]?.keys.sorted().first
+        if let peer = peerOffices[key]?.keys.sorted().first { return peer }
+        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+        if parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]], room.worktree != nil, room.key.hasPrefix("task:") {
+            return github.myLogin().map(crewName) ?? "me"
+        }
+        return nil
     }
 
     /// Lays each room's name flat beside it on the side with free floor, or cut into the tile when boxed in.
@@ -3209,6 +3298,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                             m.nextImpatience = clock + Double.random(in: 5...9)
                             m.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
                         }
+                    }
+                    if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 90...400) }
+                    let settled = m.path.isEmpty
+                    if m.place == .bath {
+                        if settled { m.setStatic(true, frame: Int(clock * 12)) }
+                        if clock >= m.bathUntil, settled {
+                            m.setStatic(false, frame: 0)
+                            send(m, to: m.bathReturn ?? Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent))
+                            m.bathReturn = nil
+                        }
+                    } else if clock >= m.nextBathAt, !m.busy, m.errand == nil, m.carried == nil, !m.isSubagent, m.activity != .sleeping, settled, station.rooms["kind:bath"] != nil {
+                        // Off to the bath for a moment, then back to wherever it was.
+                        m.nextBathAt = clock + Double.random(in: 300...900)
+                        m.bathUntil = clock + Double.random(in: 7...12)
+                        m.bathReturn = m.place
+                        send(m, to: .bath)
                     }
                     if let pc = m.pyramidCell, m.errand == nil, m.place == .room(m.home.key) {
                         if m.cell != pc { walk(m, to: pc) }
