@@ -286,7 +286,8 @@ final class Invariants {
     /// on anyone's arms when the climb starts.
     private func rockets(_ c: StationController) {
         for r in c.rocketActors.values {
-            guard case .launch = r.stage else { continue }
+            // The launch command loads first; the rule is about the moment the climb begins.
+            guard case .launch = r.stage, r.phaseKind == .climb else { continue }
             guard launched.insert(r.key).inserted else { continue }
             let prefix = "deck:\(r.station)|\(r.repo)|"
             let left = c.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix(prefix) }.count

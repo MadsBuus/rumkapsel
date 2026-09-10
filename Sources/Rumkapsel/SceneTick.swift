@@ -426,7 +426,9 @@ extension StationController {
                             // A loaded rocket on the pad draws a crowd: the idle drift to the deck's aisle beside it.
                             let rocketReady = rocketActors.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
                             let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
-                            let spots = rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells + station.hangarCells
+                            // Somewhere to stand: a cell whose centre is clear, never one buried under crates.
+                            let spots = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells + station.hangarCells)
+                                .filter { !station.obstacles.contains(Cell(x: $0.x * Station.fine, y: $0.y * Station.fine)) }
                             if let spot = spots.randomElement() {
                                 start(m, .chore(spot: spot))
                                 m.couch = nil
