@@ -208,10 +208,18 @@ extension StationController {
                             job.node.removeFromParentNode()
                             m.node.addChildNode(job.node)
                             job.node.position = m.node.convertPosition(world, from: nil)
-                            let toChest = SCNAction.move(to: v3(0, m.headHeight * 0.45, 0.3), duration: 0.3); toChest.timingMode = .easeOut
                             let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
-                            // Off the floor it comes up past the chest; taken down off a stack it goes straight overhead.
-                            job.node.runAction(Double(job.node.position.y) < m.headHeight * 0.45 ? .sequence([toChest, overhead]) : overhead)
+                            // Off the floor it comes up past the chest; off a stack it slides back at its own height
+                            // first, then up: waist high from level one, above the head from higher up.
+                            let y = Double(job.node.position.y)
+                            let via: SCNVector3
+                            switch m.handsAt {
+                            case 0: via = v3(0, m.headHeight * 0.45, 0.3)
+                            case 1: via = v3(0, y, 0.2)
+                            default: via = v3(0, max(m.headHeight + 0.2, y), 0.15)
+                            }
+                            let first = SCNAction.move(to: via, duration: 0.3); first.timingMode = .easeOut
+                            job.node.runAction(.sequence([first, overhead]))
                             m.carried = job.node
                             self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
                         }
@@ -236,24 +244,31 @@ extension StationController {
                             }
                             m.handsAt = to.level
                             m.phaseUntil = clock + 1.1
-                            let world = job.node.worldPosition
-                            let yaw = Double(job.node.eulerAngles.y) + m.smoothFacing   // keep the turn it had on the arms
-                            job.node.removeFromParentNode()
-                            job.node.position = world
-                            job.node.eulerAngles.y = CGFloat(yaw)
-                            propRoot.addChildNode(job.node)
-                            let chest = SIMD3(Double(world.x), m.headHeight * 0.45, Double(world.z)) + SIMD3(sin(m.facing) * 0.3, 0, cos(m.facing) * 0.3)
-                            let toChest = SCNAction.move(to: v3(chest.x, chest.y, chest.z), duration: 0.3); toChest.timingMode = .easeInEaseOut
-                            let down = SCNAction.move(to: v3(to.pos.x, to.pos.y, to.pos.z), duration: 0.4); down.timingMode = .easeIn
-                            // Onto the slot the layout will draw it on, turned the way it will be drawn.
-                            let turn = SCNAction.rotateTo(x: 0, y: CGFloat(to.yaw), z: 0, duration: 0.4)
-                            let land = SCNAction.group([down, turn])
-                            let onto = to.level > 0 ? land : SCNAction.sequence([toChest, land])
-                            job.node.runAction(.sequence([onto, .run { [weak self] _ in self?.drone.thud() }]))
-                            m.carried = nil
+                            // A crate is heavy: it stays on the arms all the way to its slot and the hands do the
+                            // lowering. Level 0 is set down carefully in front; level 1 slides forward onto the
+                            // top at waist height; level 2 goes over the head and slides in; higher, with a hop.
+                            let target = m.node.convertPosition(v3(to.pos.x, to.pos.y, to.pos.z), from: nil)
+                            let via: SCNVector3
+                            switch to.level {
+                            case 0: via = v3(0, m.headHeight * 0.45, 0.3)
+                            case 1: via = v3(0, Double(target.y), 0.2)
+                            default: via = v3(0, max(m.headHeight + 0.2, Double(target.y)), 0.15)
+                            }
+                            let first = SCNAction.move(to: via, duration: 0.35); first.timingMode = .easeInEaseOut
+                            let second = SCNAction.move(to: target, duration: 0.45); second.timingMode = to.level == 0 ? .easeIn : .easeOut
+                            let turn = SCNAction.rotateTo(x: 0, y: CGFloat(to.yaw - m.smoothFacing), z: 0, duration: 0.8)   // turned the way it will be drawn
+                            job.node.runAction(.group([.sequence([first, second]), turn]))
                             continue
                         }
                         if clock < m.phaseUntil { continue }
+                        // Released: it stands exactly where the layout will draw it, and nothing moves it from here.
+                        job.node.removeAllActions()
+                        job.node.removeFromParentNode()
+                        job.node.position = v3(to.pos.x, to.pos.y, to.pos.z)
+                        job.node.eulerAngles = SCNVector3(0, to.yaw, 0)
+                        propRoot.addChildNode(job.node)
+                        drone.thud()
+                        m.carried = nil
                         cargo[id] = nil
                         self.world.truth.setDown(crate, at: to)
                         job.onDone()
@@ -492,6 +507,9 @@ extension StationController {
             case .crouch: tilt = max(tilt, 0.28); roll = 0; m.tilt.position.y = -0.12   // knees bent, not a bow
             case .waist: tilt = max(tilt, 0.14); roll = 0; m.tilt.position.y = 0       // waist height: a lean, no crouch
             case .reach: tilt = min(tilt, -0.18); roll = 0; m.tilt.position.y = 0.05   // up on the toes, head back
+            case .jump:                                                               // a little hop to reach the top of a tall stack
+                let hop = m.phaseUntil > 0 ? max(0, sin((m.phaseUntil - clock) / 1.1 * .pi)) * 0.28 : 0
+                tilt = min(tilt, -0.12); roll = 0; m.tilt.position.y = hop
             }
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)

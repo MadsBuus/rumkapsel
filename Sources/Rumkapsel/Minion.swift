@@ -160,7 +160,7 @@ final class Minion {
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
     var bathing: Bool { if case .bath = current?.kind { return true }; return false }
     /// How the body is held over a crate, decided by how high the crate is.
-    enum Posture { case none, crouch, waist, reach }
+    enum Posture { case none, crouch, waist, reach, jump }
     /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
     var handsAt = 0
     var posture: Posture {
@@ -168,7 +168,8 @@ final class Minion {
         switch handsAt {
         case 0: return .crouch
         case 1: return .waist
-        default: return .reach
+        case 2: return .reach
+        default: return .jump
         }
     }
     /// What it would say if you asked.

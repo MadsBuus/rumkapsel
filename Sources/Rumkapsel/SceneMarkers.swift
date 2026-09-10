@@ -86,7 +86,7 @@ extension StationController {
                 if packaged {
                     // One package for the whole pull request, sized by the work in it, strapped in the status colour.
                     let cell = farCells(station, room).first!
-                    let size = 0.42 + min(0.28, Double(count) * 0.03)
+                    let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
                     let pkg = Props.package(color: NSColor(room.color).lighter(0.1), band: status ?? NSColor(rgb: (0.55, 0.55, 0.6)), size: size)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
