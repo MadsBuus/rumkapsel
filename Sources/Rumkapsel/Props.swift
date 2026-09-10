@@ -72,8 +72,7 @@ enum Props {
         let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
         geo.materials = [side, top, top]
         let n = SCNNode()
-        let body = SCNNode(geometry: geo)
-        body.eulerAngles.y = .pi / 6
+        let body = SCNNode(geometry: geo)   // same turn as the bay's hexagons, so it lands squarely on one
         n.addChildNode(body)
         return n
     }
@@ -198,6 +197,12 @@ enum Props {
         let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        // The loading hatch: a small dark plate at the foot on the deck side, where crates go in.
+        let hatch = SCNNode(geometry: SCNBox(width: r * 1.1, height: 0.2, length: 0.02, chamferRadius: 0))
+        hatch.geometry!.firstMaterial = dark
+        hatch.position = v3(0, 0.22, r + 0.005)
+        hatch.name = "hatch"
+        n.addChildNode(hatch)
         // Body, a slightly wider lower stage, and a nose cone in the repo colour.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
         lower.geometry!.firstMaterial = white

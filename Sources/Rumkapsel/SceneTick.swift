@@ -212,14 +212,35 @@ extension StationController {
         m.carried = nil
     }
 
-    /// Where an office's crate is set down: the far cell its own package will be drawn on, on the floor.
+    /// Where an office's crate is set down: just inside the doorway of the empty plot, by the hallway.
+    /// The office unfolds from there.
     func officeCrateSlot(station: Station, roomKey: String) -> Spot? {
-        guard let room = station.rooms[roomKey], let cell = farCells(station, room).first else { return nil }
+        guard let room = station.rooms[roomKey], let cell = station.doorCell(of: roomKey) ?? room.cells.first else { return nil }
         return Spot(area: .office, station: station.name, owner: roomKey, label: room.name, cell: cell,
                     pos: SIMD3(station.offset.x + Double(cell.x), 0.09, station.offset.y + Double(cell.y)))
     }
 
+    /// The airlock doors: a pane drops into the floor for whoever is walking up to it, and stands
+    /// again once they are through. Someone waiting inside for the cycle has both doors shut.
+    func tickAirlockDoors(dt: Double) {
+        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
+            let stationName = String(door.name!.dropFirst("airlockdoor:".count))
+            guard let st = fleet.stations[stationName], let pane = door.childNode(withName: "pane", recursively: false) else { continue }
+            let half = Double(st.airlockCells.map(\.x).max()! - st.airlockCells.map(\.x).min()! + 1) / 2
+            let dx = Double(door.position.x) - st.offset.x, dz = Double(door.position.z) - st.offset.y
+            let walker = minions.values.contains { m in
+                m.station == stationName && !m.path.isEmpty && clock >= m.wonderUntil
+                    && abs(m.pos.x - dx) < half && abs(m.pos.y - dz) < 0.5
+            }
+            let want = walker ? 0.03 : 1.0
+            let s = Double(pane.scale.y)
+            pane.scale.y = CGFloat(s + (want - s) * min(1, dt * 8))
+            pane.position.y = CGFloat(0.35 * Double(pane.scale.y))
+        }
+    }
+
     func tickMinions(dt: Double) {
+        tickAirlockDoors(dt: dt)
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
@@ -308,7 +329,8 @@ extension StationController {
                         if clock < m.phaseUntil { continue }
                         advance(m)
                         // The office went away while the crate was in the air: nothing to walk it into.
-                        if let slot { walk(m, to: slot.cell) } else { reveal(key); finish(m) }
+                        // Carried to the corridor outside the doorway and set down just inside it.
+                        if let slot { walk(m, to: station.doorOutside(of: r) ?? slot.cell) } else { reveal(key); finish(m) }
                         continue
                     case .haul:
                         advance(m); continue
@@ -453,7 +475,7 @@ extension StationController {
                             let rocketReady = rocketActors.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
                             let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
                             // Somewhere to stand: a cell whose centre is clear, never one buried under crates.
-                            let spots = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells + station.hangarCells)
+                            let spots = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
                                 .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }   // the whole cell clear
                             if let spot = spots.randomElement() {
                                 start(m, .chore(spot: spot))
@@ -526,8 +548,16 @@ extension StationController {
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
                     }
                 case .leaving:
-                    m.opacity -= dt * 1.5
-                    if m.opacity <= 0 { despawn(m); continue }
+                    // Solid all the way to the airlock. Inside, the inner door shuts and the chamber
+                    // cycles for a beat; then out through the hatch, fading onto the bay.
+                    let inChamber = station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell)
+                    if station.airlockCells.isEmpty || (inChamber && m.phaseKind != .walk) {
+                        m.opacity -= dt * 1.2
+                        if m.opacity <= 0 { despawn(m); continue }
+                    } else if inChamber, m.phaseKind == .walk, station.airlockInner.contains(m.cell) {
+                        advance(m)
+                        m.wonderUntil = clock + 1.5   // the cycle
+                    }
                 }
             }
             if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }

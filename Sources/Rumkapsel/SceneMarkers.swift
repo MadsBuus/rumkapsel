@@ -31,6 +31,16 @@ extension StationController {
             guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
             mark(st.name, n, offset: st.offset)
         }
+        // The airlock door posts stand in the walls; the way through is between them.
+        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
+            let stationName = String(door.name!.dropFirst("airlockdoor:".count))
+            guard let st = fleet.stations[stationName] else { continue }
+            for post in door.childNodes where post.name == "post" {
+                let f = Double(Station.fine)
+                let p = SIMD2(Double(door.position.x + post.position.x) - st.offset.x, Double(door.position.z + post.position.z) - st.offset.y)
+                blocked[stationName, default: []].insert(Cell(x: Int((p.x * f).rounded()), y: Int((p.y * f).rounded())))
+            }
+        }
         // A hover pallet is a heavy thing standing on the floor: walks go round it, never through it.
         for (name, p) in pallets {
             let f = Double(Station.fine)
@@ -386,9 +396,15 @@ extension StationController {
                 r?.pending.remove(command.id)
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
                 else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
-                // Into the hold: it shrinks away where it stands; the rocket is far too small for it.
+                // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
+                // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
                 let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
-                moveCrate(b, legs: [MotionLeg(to: at, seconds: 0.3, scale: 0.01)]) { b.removeFromParentNode() }
+                let hull = SIMD3(at.x, at.y + 0.22, at.z - 0.45)
+                if let hatch = r?.node.childNode(withName: "hatch", recursively: true) {
+                    hatch.runAction(.sequence([.scale(to: 0.05, duration: 0.2), .wait(duration: 0.8), .scale(to: 1, duration: 0.2)]))
+                }
+                moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z), seconds: 0.3, ease: .easeOut),
+                                    MotionLeg(to: hull, seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
                 fleet.save()
             }
         }

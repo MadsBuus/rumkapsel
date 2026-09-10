@@ -113,18 +113,21 @@ final class Station {
     }
     var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
     /// The hangar is the 4x2 bay across the outer end of the south corridor arm, wider than it is long.
-    /// The airlock: the two cells that carry the corridor's line on past its south end, before the bay.
-    var airlockCells: [Cell] { hasHangar ? [Cell(x: 0, y: spineHalfLength + 1), Cell(x: 1, y: spineHalfLength + 1)] : [] }
-    /// The hatch: where each airlock cell opens onto the bay.
-    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
+    /// The airlock: a 2x2 chamber that carries the corridor's line on past its south end, before the
+    /// bay. The inner door is on its corridor side, the hatch on its bay side.
+    var airlockCells: [Cell] { hasHangar ? (1...2).flatMap { d in (0...1).map { x in Cell(x: x, y: spineHalfLength + d) } } : [] }
+    /// The chamber's inner row, just past the inner door: where a leaver waits for the cycle.
+    var airlockInner: [Cell] { airlockCells.filter { $0.y == spineHalfLength + 1 } }
+    /// The hatch: where the chamber's outer row opens onto the bay.
+    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.filter { $0.y == spineHalfLength + 2 }.map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
     var hangarCells: [Cell] {
         guard hasHangar else { return [] }
-        let y = spineHalfLength + 2   // past the airlock
+        let y = spineHalfLength + 3   // past the airlock
         return (-1...2).flatMap { x in (0..<2).map { d in Cell(x: x, y: y + d) } }
     }
-    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 2.5) }
+    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 3.5) }
     /// Landing slots across the bay, in local coordinates.
-    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 2.5) } }
+    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 3.5) } }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west.
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
@@ -305,7 +308,7 @@ final class Station {
         let x0 = -spineHalfLength - 1
         var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
         // Corridor into the airlock, airlock out onto the bay: the only way to the outside.
-        for a in airlockCells { out.append((Cell(x: a.x, y: a.y - 1), a)) }
+        for a in airlockInner { out.append((Cell(x: a.x, y: a.y - 1), a)) }
         for h in airlockHatches { out.append((h.inside, h.bay)) }
         for x in [x0 - 1, x0 - 2] {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage

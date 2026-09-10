@@ -448,9 +448,18 @@ final class World {
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
             // The column says an office is solid; it does not make one. An issue needs a sign of work:
             // a linked pull request, a branch seen in the feed, or a room a session or peer already claims.
-            var branched: Set<String> = []   // "repo#N" with a gh-N/… branch pushed in the last two weeks
+            // "repo#N" with a gh-N/… branch pushed in the last two weeks, and not deleted or closed since:
+            // a branch that is gone is no sign of work, however recently it went.
+            var branched: Set<String> = []
             let recent = now.addingTimeInterval(-14 * 24 * 3600)
-            for (repo, e) in feed where e.at > recent { if let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) { branched.insert("\(repo)#\(m.1)") } }
+            for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > recent {
+                guard let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) else { continue }
+                switch e.kind {
+                case "push", "branch_create", "pr_open": branched.insert("\(repo)#\(m.1)")
+                case "branch_delete", "pr_close", "pr_merge": branched.remove("\(repo)#\(m.1)")
+                default: break
+                }
+            }
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
                 let key = "task:\(it.repo)#\(it.number)"
                 guard let login = it.assignees.first, login != me else { continue }
@@ -916,8 +925,9 @@ final class World {
     func carryToPad(station: Station, repo: String, from area: String, numbers: [Int]) -> [Command] {
         let cell = station.padCells.first ?? Cell(x: 0, y: 0)
         let pc = station.padCenter
+        // On the floor in front of the loading hatch, on the deck side of the hull: an ordinary set-down.
         let to = Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
-                      pos: SIMD3(station.offset.x + pc.x, 0.6, station.offset.y + pc.y))
+                      pos: SIMD3(station.offset.x + pc.x, 0, station.offset.y + pc.y + 0.5))
         let slots = yardLayout(station: station, area: area)
         let order = numbers.sorted { a, b in
             let sa = slots.first { $0.repo == repo && $0.number == a }, sb = slots.first { $0.repo == repo && $0.number == b }

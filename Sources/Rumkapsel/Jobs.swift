@@ -133,12 +133,13 @@ extension StationController {
         m.state = .leaving
         start(m, .leave)
         m.couch = nil; m.bed = nil
-        guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement() else { return }
+        guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement(),
+              let inner = station.airlockInner.first(where: { $0.x == hatch.inside.x }) else { return }
         m.place = .airlock
-        m.path = route(m, to: hatch.inside)
-        // Then out onto the bay: that is where the shuttle would pick them up.
-        let inside = SIMD2(Double(hatch.inside.x), Double(hatch.inside.y))
-        m.path += [inside] + station.path(from: inside, to: hatch.bay)
+        m.path = route(m, to: inner)
+        // Then, after the cycle, out through the hatch onto the bay: where the shuttle would pick them up.
+        let wait = SIMD2(Double(inner.x), Double(inner.y))
+        m.path += [wait] + station.path(from: wait, to: hatch.bay)
     }
 
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
@@ -348,17 +349,49 @@ extension StationController {
         outlines.removeValue(forKey: key)?.removeFromParentNode()
         boxes.removeValue(forKey: key)?.removeFromParentNode()
         if announce {
+            // The reverse of the unfold: the name goes first, then the floor rolls up toward the
+            // doorway tile by tile, into a hex that drops through the floor where the crate once stood.
+            // The room is already off the floor plan: the doorway is the tile beside the corridor
+            // (the one outside is `hall`), and the colour is the tiles' own.
+            let st = fleet.stations[station]
+            let tiles = roomTiles[key] ?? []
+            let ox = st?.offset.x ?? 0, oz = st?.offset.y ?? 0
+            func cellOf(_ t: SCNNode) -> Cell { Cell(x: Int((Double(t.position.x) - ox).rounded()), y: Int((Double(t.position.z) - oz).rounded())) }
+            let tileCells = tiles.map(cellOf)
+            var door: Cell? = tileCells.first
+            if let h = hall, let d = tileCells.first(where: { abs($0.x - h.x) + abs($0.y - h.y) == 1 }) { door = d }
+            let color = tiles.first?.geometry?.firstMaterial?.diffuse.contents as? NSColor
             let ghost = SCNNode()
-            for t in roomTiles[key] ?? [] { t.removeFromParentNode(); ghost.addChildNode(t) }
-            if let l = roomLabels[key] { l.removeFromParentNode(); ghost.addChildNode(l); roomLabels[key] = nil }
+            for t in tiles { t.removeFromParentNode(); ghost.addChildNode(t) }
+            if let l = roomLabels[key] { l.removeFromParentNode(); ghost.addChildNode(l); roomLabels[key] = nil; l.runAction(.fadeOut(duration: 0.4)) }
             for b in markerRoot.childNodes where b.name == "box:" + key {
                 b.runAction(.sequence([.scale(to: 0.01, duration: 0.5), .removeFromParentNode()]))
             }
             propRoot.addChildNode(ghost)
-            let sink = SCNAction.moveBy(x: 0, y: -4, z: 0, duration: 2.2)
-            sink.timingMode = .easeIn
-            ghost.runAction(.sequence([.wait(duration: 0.6), .group([sink, .sequence([.wait(duration: 0.8), .fadeOut(duration: 1.4)])]), .removeFromParentNode()]))
-            if let hall, let st = fleet.stations[station] {
+            func dist(_ t: SCNNode) -> Double {
+                guard let door else { return 0 }
+                let c = cellOf(t)
+                return Double(abs(c.x - door.x) + abs(c.y - door.y))
+            }
+            let furthest = tiles.map(dist).max() ?? 0
+            var last = 0.0
+            for t in tiles {
+                let at = 0.5 + (furthest - dist(t)) * 0.14
+                last = max(last, at + 0.25)
+                t.runAction(.sequence([.wait(duration: at), .fadeOut(duration: 0.25)]))
+            }
+            if let st, let color, let door {
+                let hex = Props.crate(color: color)
+                hex.position = v3(st.offset.x + Double(door.x), 0.09, st.offset.y + Double(door.y))
+                hex.scale = SCNVector3(0.01, 0.01, 0.01)
+                ghost.addChildNode(hex)
+                let grow = SCNAction.scale(to: 1, duration: 0.35); grow.timingMode = .easeOut
+                let sink = SCNAction.moveBy(x: 0, y: -3, z: 0, duration: 1.6); sink.timingMode = .easeIn
+                hex.runAction(.sequence([.wait(duration: last - 0.2), grow, .wait(duration: 0.4), sink]))
+                last += 0.35 + 0.4 + 1.6
+            }
+            ghost.runAction(.sequence([.wait(duration: last), .removeFromParentNode()]))
+            if let hall, let st {
                 for m in minions.values where m.station == station && m.place == .room(roomKey) {
                     m.path = st.path(from: m.pos, to: hall)
                     m.place = .core   // parked in the hallway until the next scan sends it on
@@ -373,17 +406,28 @@ extension StationController {
     func reveal(_ key: String) {
         // The crate that was set down hands over to the office's own package: it fades out on its slot
         // over the same beat the office fades in, rather than blinking away.
+        // The crate folds open where it stands, and the office unfolds out of it: tile by tile away
+        // from the doorway until the plot is filled, then the name fades in.
+        let parts0 = key.split(separator: "|", maxSplits: 1).map(String.init)
+        let station0 = parts0.count == 2 ? fleet.stations[parts0[0]] : nil
+        let door = station0?.doorCell(of: parts0[1])
         if let crate = boxes.removeValue(forKey: key) {
-            crate.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
+            let fold = SCNAction.scale(to: 0.01, duration: 0.35); fold.timingMode = .easeIn
+            crate.runAction(.sequence([fold, .removeFromParentNode()]))
         }
         if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
         guard world.truth.officeDelivered(key) else { return }
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.6
-        roomTiles[key]?.forEach { $0.opacity = 1 }
-        roomLabels[key]?.opacity = 1
-        markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 1 }
-        SCNTransaction.commit()
+        var furthest = 0.0
+        for t in roomTiles[key] ?? [] {
+            let cx = Double(t.position.x) - (station0?.offset.x ?? 0), cz = Double(t.position.z) - (station0?.offset.y ?? 0)
+            let d = door.map { abs(cx - Double($0.x)) + abs(cz - Double($0.y)) } ?? 0
+            furthest = max(furthest, d)
+            t.opacity = 0
+            t.runAction(.sequence([.wait(duration: 0.3 + d * 0.14), .fadeIn(duration: 0.25)]))
+        }
+        let after = 0.3 + furthest * 0.14 + 0.25
+        roomLabels[key]?.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.5)]))
+        markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.4)])) }
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         if parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] {
             logEvent("new office: \(room.name)")
