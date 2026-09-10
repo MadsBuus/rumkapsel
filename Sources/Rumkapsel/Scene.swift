@@ -51,9 +51,10 @@ func lit(_ color: NSColor) -> SCNMaterial {
 }
 
 /// Text laid flat on the floor, wrapped to a width in world units, pivoted on its centre.
-func floorText(_ text: String, color: NSColor, size: Double, maxWidth: Double, lines: Int) -> (node: SCNNode, width: Double, height: Double) {
+func floorText(_ text: String, color: NSColor, size: Double, maxWidth: Double, lines: Int, bold: Bool = false) -> (node: SCNNode, width: Double, height: Double) {
     let t = SCNText(string: text, extrusionDepth: 0)
-    t.font = NSFont(name: "HelveticaNeue-Medium", size: 1) ?? NSFont.systemFont(ofSize: 1, weight: .medium)
+    t.font = bold ? (NSFont(name: "HelveticaNeue-Bold", size: 1) ?? NSFont.boldSystemFont(ofSize: 1))
+                  : (NSFont(name: "HelveticaNeue-Medium", size: 1) ?? NSFont.systemFont(ofSize: 1, weight: .medium))
     t.flatness = 0.02
     t.isWrapped = true
     t.truncationMode = CATextLayerTruncationMode.end.rawValue
@@ -1069,7 +1070,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     /// Dark ink for anything written on a tile, whatever the tile's colour.
-    static let inkOnTile = NSColor(rgb: (0.10, 0.10, 0.14))
+    static let inkOnTile = NSColor(rgb: (0.03, 0.03, 0.05))
+    /// Floor cells under a room's writing, so boxes and cones keep off the words.
+    private var labelCells: [String: Set<Cell>] = [:]
 
     /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
     private func occupant(of key: String) -> String? {
@@ -1082,6 +1085,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         labelRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomLabels = [:]
         floorLabels = []
+        labelCells = [:]
+        func reserve(_ key: String, _ center: SIMD2<Double>, _ half: SIMD2<Double>) {
+            let lo = center - half, hi = center + half
+            for x in Int((lo.x + 0.5).rounded(.down))...Int((hi.x + 0.5).rounded(.down)) {
+                for y in Int((lo.y + 0.5).rounded(.down))...Int((hi.y + 0.5).rounded(.down)) { labelCells[key, default: []].insert(Cell(x: x, y: y)) }
+            }
+        }
         func add(_ node: SCNNode, yaw: Double, center: SIMD2<Double>) {
             node.eulerAngles.y = yaw
             let y = node.position.y > 0 ? Double(node.position.y) : 0.01
@@ -1196,7 +1206,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let fitDepth = across / (Double(lines) * 1.15)                 // stacked lines must fit too
                     size = max(0.16, min(size, fitWidth, fitDepth))
                     lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
-                    let label = floorText(text, color: StationController.inkOnTile, size: size, maxWidth: along, lines: lines)
+                    let label = floorText(text, color: StationController.inkOnTile, size: size, maxWidth: along, lines: lines, bold: true)
                     let maxYRow = room.cells.map(\.y).max()!
                     let anchor = room.cells.filter { $0.y == maxYRow }.min { $0.x < $1.x }!
                     let center = horizontal
@@ -1204,6 +1214,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         : SIMD2(ox + Double(anchor.x) - 0.35 + label.height / 2, oz + Double(anchor.y) + 0.35 - label.width / 2)
                     label.node.position.y = 0.02
                     add(label.node, yaw: horizontal ? 0 : .pi / 2, center: center)
+                    let half = horizontal ? SIMD2(label.width / 2, label.height / 2) : SIMD2(label.height / 2, label.width / 2)
+                    reserve(key, center - SIMD2(ox, oz), half)
                     node = label.node
                 }
                 if let who = occupant(of: key) {
@@ -1213,6 +1225,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     let cx = room.cells.filter { $0.y == maxYRow }.map(\.x).max()!
                     let corner = SIMD2(Double(cx) + 0.42 - sign.width / 2, Double(maxYRow) + 0.42 - sign.height / 2)
                     add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                    reserve(key, corner, SIMD2(sign.width / 2, sign.height / 2))
                     sign.node.name = "room:" + key
                 }
                 guard let node else { continue }
@@ -1250,7 +1263,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// An office's floor from the far corners in: boxes go there first, so the doorway stays clear.
     private func farCells(_ station: Station, _ room: Room) -> [Cell] {
         let door = station.doorCell(of: room.key) ?? room.cells.first!
+        let written = labelCells[roomKey(station, room)] ?? []
         return room.cells.sorted { a, b in
+            let wa = written.contains(a), wb = written.contains(b)
+            if wa != wb { return !wa }   // cells under writing come last
             let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
             return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
         }
@@ -1341,7 +1357,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
                     } else {
                         let cell = cells[(i / 3) % cells.count]
-                        pos = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.7, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.7)
+                        let room = max(0, 0.86 - size * 1.25)   // keep the box and its shadow inside the tile
+                        pos = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * room, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * room)
                     }
                     placedBoxes.append((pos, size))
                     n.position = v3(pos.x, pos.y, pos.z)
@@ -2042,7 +2059,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
               !key.hasPrefix("kind:") else { return }   // prompts only land in an office
         // Cones land on clear floor, nearest the door: the crates hold the far corners.
         let cells = station.cells(of: .room(key))
-        let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) }
+        let written = labelCells["\(m.station)|\(key)"] ?? []
+        let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) && !written.contains(c) }
         let door = station.doorCell(of: key) ?? cells.first!
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
         guard let cell = nearDoor.prefix(2).randomElement() else { return }
