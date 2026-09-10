@@ -178,7 +178,7 @@ thing, and nothing moves it afterwards, neither an action nor the redraw. Pickup
 
 ## Closed, not merged
 
-Two different closes:
+Done for issue pull requests (red crate, ten minutes, then the office clears); the pallet half waits for the pallet. Two different closes:
 
 - **An issue's pull request closed without merging.** The work goes nowhere: not storage, not the deck.
   The crate in its office turns red and sits there for ten minutes, then fades out. After that the office

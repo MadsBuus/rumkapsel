@@ -229,6 +229,13 @@ struct StationTruth {
 
     /// A crate on someone's arms is truth from the pickup: nothing else may be told to move it.
     func isCarried(_ crate: CrateRef) -> Bool { carrier(of: crate) != nil }
+    /// How many of a repository's crates are on someone's arms right now.
+    func carriedCount(station: String, repo: String) -> Int {
+        crates.filter { key, placement in
+            if case .carried = placement { return key.hasPrefix("\(station)|\(repo)|") }
+            return false
+        }.count
+    }
     func isCarried(station: String, repo: String, number: Int) -> Bool {
         isCarried(CrateRef(station: station, repo: repo, number: number))
     }

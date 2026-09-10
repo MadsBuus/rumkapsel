@@ -73,7 +73,7 @@ extension StationController {
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
                 case (nil, _, _): status = nil
                 case ("MERGED", _, _): status = NSColor(rgb: (0.6, 0.4, 0.9))
-                case ("CLOSED", _, _): status = NSColor(rgb: (0.35, 0.35, 0.4))
+                case ("CLOSED", _, _): status = NSColor(rgb: (0.92, 0.22, 0.22))   // closed, not merged: red, then it fades with the office
                 case (_, "APPROVED", _): status = NSColor(rgb: (0.45, 0.95, 0.5))
                 case (_, "CHANGES_REQUESTED", _): status = NSColor(rgb: (0.95, 0.3, 0.3))
                 case (_, _, true): status = NSColor(rgb: (0.6, 0.62, 0.68))
@@ -295,10 +295,18 @@ extension StationController {
     func loadRocket(station: Station, rocket: SCNNode, repo: String, thenLaunch: Bool = true) {
         let source = ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck"
         let boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(source):\(station.name)|\(repo)|") }
-        guard !boxes.isEmpty else { if thenLaunch { liftOff(rocket) } else { addSteam(to: rocket) }; return }
-        pendingLaunch[station.name + "|" + repo] = (rocket, boxes.count, clock)
-        pendingIgnition[station.name + "|" + repo] = thenLaunch
-        logEvent("\(repo): cleared, loading the rocket")
+        let pk = station.name + "|" + repo
+        // Crates on someone's arms count too: the rocket waits for them rather than leaving without them.
+        let carriedNow = world.truth.carriedCount(station: station.name, repo: repo)
+        guard !boxes.isEmpty || carriedNow > 0 else { if thenLaunch { liftOff(rocket) } else { addSteam(to: rocket) }; return }
+        if pendingLaunch[pk] == nil {
+            pendingLaunch[pk] = (rocket, boxes.count + carriedNow, clock)
+            pendingIgnition[pk] = thenLaunch
+            loadTotals[pk] = boxes.count + carriedNow
+            logEvent("\(repo): cleared, loading the rocket")
+        }
+        if boxes.isEmpty { loadWaiting.insert(pk); return }
+        if carriedNow > 0 { loadWaiting.insert(pk) }   // come back for the rest once they land
         let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
         for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
             guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
@@ -313,12 +321,24 @@ extension StationController {
                     pendingLaunch[pk] = p
                     if p.remaining <= 0 {
                         pendingLaunch[pk] = nil
-                        if pendingIgnition[pk] ?? true { liftOff(p.node) } else { loadedRockets[pk] = boxes.count; addSteam(to: p.node); logEvent("\(repo): loaded and steaming, waiting for the release to merge") }
-                        pendingIgnition[pk] = nil
+                        if pendingIgnition[pk] ?? true { liftOff(p.node) } else { loadedRockets[pk] = loadTotals[pk] ?? boxes.count; addSteam(to: p.node); logEvent("\(repo): loaded and steaming, waiting for the release to merge") }
+                        pendingIgnition[pk] = nil; loadTotals[pk] = nil; loadWaiting.remove(pk)
                         fleet.save()
                     }
                 }
             }
+        }
+    }
+
+    /// A launch that was waiting for crates in the air: once they have landed, load what is on the floor now.
+    func retryLoads() {
+        for pk in loadWaiting {
+            guard let p = pendingLaunch[pk] else { loadWaiting.remove(pk); continue }
+            let parts = pk.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let station = fleet.stations[parts[0]] else { loadWaiting.remove(pk); continue }
+            guard world.truth.carriedCount(station: station.name, repo: parts[1]) == 0 else { continue }
+            loadWaiting.remove(pk)
+            loadRocket(station: station, rocket: p.node, repo: parts[1], thenLaunch: pendingIgnition[pk] ?? true)
         }
     }
 

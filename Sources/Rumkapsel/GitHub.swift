@@ -286,6 +286,9 @@ final class GitHubResolver {
     }
 
     /// Release pull requests that merged since the last poll, each returned once.
+    /// A release merged that the scene has not launched yet: the deck must keep its crates for it.
+    func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
+
     func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
         lock.lock(); defer { lock.unlock() }
         let out = pendingLaunches; pendingLaunches = []; return out

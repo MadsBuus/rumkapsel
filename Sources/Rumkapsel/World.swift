@@ -219,9 +219,15 @@ final class World {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
                 let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
-                let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
+                let state = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }?.state
+                let merged = state == "MERGED"
+                // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
+                let closed = state == "CLOSED"
+                if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
+                if !closed { closedAt[key] = nil }
                 if merged, station.hasPad, hauledAt[key] == nil { events += haulMerged(station: station, room: room) }
-                let cleared = merged && (!station.hasPad || (hauledAt[key].map { now.timeIntervalSince($0) > 60 } ?? false && !haulInFlight(key)))
+                let cleared = (merged && (!station.hasPad || (hauledAt[key].map { now.timeIntervalSince($0) > 60 } ?? false && !haulInFlight(key))))
+                    || (closed && now.timeIntervalSince(closedAt[key] ?? now) > World.closedWindow)
                 // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
                 // An office a peer left behind is held for a day so their return does not move it.
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
@@ -230,7 +236,7 @@ final class World {
                 if gone || cleared || orphan {
                     if cleared { retired[key] = now }
                     events.append(drop(station: station, room: room, announce: !firstRun,
-                                       reason: gone ? "worktree gone" : cleared ? "merged and hauled" : "nobody's"))
+                                       reason: gone ? "worktree gone" : closed ? "closed, not merged" : cleared ? "merged and hauled" : "nobody's"))
                     changed = true
                 }
             }
@@ -263,13 +269,7 @@ final class World {
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
         }
-        for station in fleet.stations.values where station.hasPad {
-            for room in station.rooms.values where room.branch != nil {
-                if let pr = room.repoRoot.flatMap({ github.pull(branch: room.branch!, repoRoot: $0) }), pr.state == "MERGED" {
-                    events += haulMerged(station: station, room: room)
-                }
-            }
-        }
+        // Merged offices are hauled from the scan loop above; a second pass here would announce them twice.
         if changed { events.append(.layoutChanged) }
         return events
     }
@@ -354,13 +354,20 @@ final class World {
             guard room.worktree == nil else { crewRoomInfo[key] = nil; crewBoxes[key] = nil; continue }
             // Its crate goes to storage on someone's arms first; the office clears once that is done.
             var hauling = false
-            if hauledAt[key] == nil, station.hasPad {
+            let branch = crewRoomInfo[key]?.branch ?? ""
+            let closedUnmerged = feed.contains { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }
+            if closedUnmerged {
+                // Closed without merging: red for ten minutes, then gone. Nothing to carry.
+                if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
+                if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
+            } else if hauledAt[key] == nil, station.hasPad {
                 let merged = haulMerged(station: station, room: room)
                 hauling = !merged.isEmpty   // the scene is about to start carrying: the office waits for it
                 events += merged
                 if isReady(room.repo) { events.append(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             }
             guard !station.hasPad || !(hauling || haulInFlight(key)) else { continue }
+            closedAt[key] = nil
             crewRoomInfo[key] = nil; crewBoxes[key] = nil
             events.append(drop(station: station, room: room, announce: isReady(room.repo), reason: "pull request closed"))
             changed = true
@@ -593,7 +600,7 @@ final class World {
             let commands = carryToDeck(station: station, repo: repo, count: toDeck)
             if !commands.isEmpty { return .carryToDeck(commands) }
         }
-        let launching = rocketBusy(k) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
+        let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
         station.stored[repo] = c.storage + fresh.count
         if !(launching && c.deck < shownDeck) { station.staged[repo] = c.deck }
         return .snapped
@@ -758,6 +765,11 @@ final class World {
         let number = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } } ?? crewRoomInfo[key]?.prNumber ?? 0
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }
+
+    /// When an office's pull request was closed without merging, so its red crate can fade in time.
+    private(set) var closedAt: [String: Date] = [:]
+    static let closedWindow: TimeInterval = 10 * 60
+    func isClosed(_ roomKey: String) -> Bool { closedAt[roomKey] != nil }
 
     /// The scene has taken a merged office's package off the floor.
     func hauled(roomKey key: String) { hauledAt[key] = Date() }

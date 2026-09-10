@@ -180,6 +180,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var cargo: [Int: Cargo] = [:]
     var pendingLaunch: [String: (node: SCNNode, remaining: Int, since: Double)] = [:]
     var pendingIgnition: [String: Bool] = [:]
+    /// Launches waiting for crates still on someone's arms before the rocket can be loaded.
+    var loadWaiting: Set<String> = []
+    var loadTotals: [String: Int] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var shipsInFlight: [String: Int] = [:]
@@ -847,7 +850,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         clock += dt
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { tickCrewRest(); updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles() }
+        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles(); retryLoads() }
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
             let d = pm.target - p
