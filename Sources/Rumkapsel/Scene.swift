@@ -1404,38 +1404,43 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let rows = Set(cells.map(\.y)).sorted()
                 let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
                 let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                // The deck keeps its two rows apart: staged but untested on the first, tested on the second.
+                // The deck keeps its two rows apart: tested nearest the pad (north, the lower row number),
+                // untested on the far row. Within a row, crates group by repository in stacks of three, so a
+                // repository's lineup stands together and loads in one sweep.
                 let rowList = crateRows.sorted()
-                let untestedRow = sorted.filter { $0.y == rowList.first }, testedRow = sorted.filter { $0.y == rowList.last }
-                var i = 0, iUntested = 0, iTested = 0
+                let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
+                var nextSlot: [Int: Int] = [:]   // per row group: the first free stack
+                func place(_ pkg: SCNNode, group: Int, row: [Cell], slot: Int, level: Int) {
+                    let cap = row.count * 2
+                    let cell = row[(slot % cap) / 2], side = Double(slot % 2) * 0.5 - 0.25
+                    let y = Double(level + 3 * (slot / cap)) * 0.34
+                    let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
+                    pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, y, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
+                }
                 let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
                     github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
                 for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
                     let c = NSColor(fleet.color(forRepo: repo))
                     let numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
+                    var placedInGroup: [Int: Int] = [:]   // this repository's crates so far, per row group
+                    let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
                     for k in 0..<min(n, 48) {
                         let size = 0.38
                         let prNumber = k < numbers.count ? numbers[k] : 0
                         let cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(prNumber) ?? false)
                         if area == "deck", haulingCrates.contains("\(repo)|\(prNumber)") { continue }
                         let pkg = Props.package(color: c.lighter(0.1), band: cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : purple, size: size, approved: cleared)
-                        let cell: Cell, level: Double, side: Double
-                        if area == "deck", rowList.count > 1 {
-                            let row = cleared ? testedRow : untestedRow
-                            let j = cleared ? iTested : iUntested
-                            cell = row[(j / 2) % row.count]; level = Double(j / (row.count * 2)) * 0.34; side = Double(j % 2) * 0.5 - 0.25
-                            if cleared { iTested += 1 } else { iUntested += 1 }
-                        } else {
-                            cell = sorted[(i / 2) % sorted.count]; level = Double(i / (sorted.count * 2)) * 0.34; side = Double(i % 2) * 0.5 - 0.25
-                        }
-                        let jitter = neat ? 0.0 : (rnd() - 0.5) * 0.22
-                        pkg.position = v3(station.offset.x + Double(cell.x) + side + jitter, level, station.offset.y + Double(cell.y) + (neat ? 0 : (rnd() - 0.5) * 0.3))
+                        let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
+                        let row = area == "deck" && rowList.count > 1 ? (cleared ? testedRow : untestedRow) : sorted
+                        let j = placedInGroup[group, default: 0]
+                        place(pkg, group: group, row: row, slot: starts[group]! + j / 3, level: j % 3)
+                        placedInGroup[group] = j + 1
                         pkg.eulerAngles.y = neat ? 0 : (rnd() - 0.5) * 0.7
                         pkg.name = "\(area):\(station.name)|\(repo)|\(prNumber)"
                         pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                         markerRoot.addChildNode(pkg)
-                        i += 1
                     }
+                    for (g, count) in placedInGroup where count > 0 { nextSlot[g] = starts[g]! + (count + 2) / 3 }
                 }
             }
         }
@@ -2865,7 +2870,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
                     // Someone carries it across the aisle to the tested row; the layout redraws it there once set down.
                     let rows = Set(station.deckCells.map(\.y)).sorted()
-                    let testedY = rows.count > 2 ? rows[2] : rows.last ?? 0
+                    let testedY = rows.first ?? 0   // the row nearest the pad
                     let dest = station.deckCells.filter { $0.y == testedY }.min { $0.x < $1.x } ?? station.deckCells[0]
                     let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
                     let id = "\(item.repo)|\(item.number)"
