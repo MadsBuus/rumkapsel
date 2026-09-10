@@ -55,9 +55,11 @@ With sharing on, rumkapsels on the same network merge their work stations into o
 
 `--simulator` opens the simulator window on its own: a real station with the scanner, GitHub and the
 network switched off, driven by a panel of buttons that write made-up facts through the same entry
-points production uses. `--simulate "Open PR,PR merged"` presses those buttons in order, two seconds
-apart, and pairs with `--snapshot` for a scripted check; the whole event and command log goes to
-stderr when the snapshot is written.
+points production uses. The panel picks one target office and every button acts on it, or on its
+repository; a button that does not apply is greyed with the reason. `--simulate "Open PR,Merge PR"`
+presses those buttons in order, two seconds apart, `Target: web#455` picks the office to press on,
+and it pairs with `--snapshot` for a scripted check; the whole event and command log goes to stderr
+when the snapshot is written. The button names are listed at the top of `Simulator.swift`.
 
 ## A homage
 
