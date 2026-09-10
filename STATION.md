@@ -18,8 +18,9 @@ have aisles down the middle; crates stack against the far walls, aisles stay cle
 
 **Offices** are where work happens. One office per branch. A hexagon crate delivered by shuttle
 becomes an office: it lands squarely on the bay's hexagon, aligned with it; a minion carries it to
-the middle of the new office, steps back to the doorway, and the office ripples out from the crate,
-its colour filling the floor tile by tile from the centre, then the name fades in. Offices belong to whoever has the branch checked out; teammates' offices are darker
+the doorway of the empty plot and sets it down just inside, by the hallway. The floor is not there
+yet. The crate folds open and the office unfolds from it, tile by tile away from the doorway until
+the plot is filled, then the name fades in. Until that moment there is nothing on the plot. Offices belong to whoever has the branch checked out; teammates' offices are darker
 and carry their name on the floor, mine carry mine. The **dorm**, **lounge** and **bath** stand
 together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
 since real stations mandate both.
