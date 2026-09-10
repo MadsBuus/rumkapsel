@@ -2016,9 +2016,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func addPyramid(for m: Minion, queued: Bool = false) {
         guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false),
               !key.hasPrefix("kind:") else { return }   // prompts only land in an office
-        let cells = station.cells(of: .room(key)).sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        let boxed = lastBoxCount["\(m.station)|\(key)"].map { ($0 + 2) / 3 } ?? 0
-        guard let cell = (cells.count > boxed ? Array(cells.dropFirst(boxed)) : cells).randomElement() else { return }
+        // Cones land on clear floor, nearest the door: the crates hold the far corners.
+        let cells = station.cells(of: .room(key))
+        let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) }
+        let door = station.doorCell(of: key) ?? cells.first!
+        let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
+        guard let cell = nearDoor.prefix(2).randomElement() else { return }
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         if !queued, m.pyramids.count >= 5, let old = m.pyramids.first {
             old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))

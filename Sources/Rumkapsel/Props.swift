@@ -3,10 +3,11 @@ import SceneKit
 
 /// The things that populate a station, so the gallery and the scene draw the same props.
 enum Props {
-    /// The soft dark patch under a prop, the game's "foot".
-    static func foot(color: NSColor, size: Double) -> SCNNode {
+    /// The soft dark patch under a prop, the game's "foot": translucent, so it sits right on any floor.
+    static func foot(size: Double) -> SCNNode {
         let f = SCNNode(geometry: SCNPlane(width: size, height: size))
-        f.geometry!.firstMaterial = flat(color)
+        f.geometry!.firstMaterial = flat(NSColor(rgb: (0.05, 0.05, 0.08)))
+        f.opacity = 0.28
         f.eulerAngles.x = -.pi / 2
         f.position = v3(size * 0.06, 0.004, size * 0.06)
         return f
@@ -20,7 +21,7 @@ enum Props {
         let body = SCNNode(geometry: geo)
         body.position = v3(0, 0, 0)
         n.addChildNode(body)
-        n.addChildNode(foot(color: floor.darker(0.16), size: size * 1.15))
+        n.addChildNode(foot(size: size * 1.15))
         return n
     }
 
@@ -46,7 +47,7 @@ enum Props {
         tag.geometry!.firstMaterial = flat(band)
         tag.position = v3(size * 0.22, h + 0.006, -size * 0.22)
         n.addChildNode(tag)
-        n.addChildNode(foot(color: color.darker(0.28), size: size * 1.3))
+        n.addChildNode(foot(size: size * 1.3))
         return n
     }
 
@@ -60,7 +61,6 @@ enum Props {
         let body = SCNNode(geometry: geo)
         body.eulerAngles.y = .pi / 6
         n.addChildNode(body)
-        n.addChildNode(foot(color: color.darker(0.3), size: 0.7))
         return n
     }
 
