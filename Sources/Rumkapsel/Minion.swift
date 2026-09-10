@@ -27,6 +27,15 @@ final class Minion {
     var phaseUntil = 0.0
     var carried: SCNNode?
     var fetchSpot: SIMD2<Double>?
+    /// Which stack the QA walker is inspecting next.
+    var qaStop = 0
+    /// A carrier, deliverer or pusher walks at one pace whoever it is.
+    var isHauling: Bool {
+        switch current?.kind {
+        case .carry, .deliverOffice, .pushPallet, .loadPallet, .unloadPallet: return true
+        default: return false
+        }
+    }
     var commitDrop = false
     var weldLight: SCNNode?
     var hammerUp = false

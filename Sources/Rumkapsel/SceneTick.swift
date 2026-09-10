@@ -99,6 +99,13 @@ extension StationController {
         }
     }
 
+    /// Where the shower's water comes from, in world x/z: the nozzle over the corner across from the bowl.
+    func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
+        let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        let sc2 = cells.count > 1 ? cells[1] : cells.last!
+        return SIMD2(station.offset.x + Double(sc2.x) + 0.3, station.offset.y + Double(sc2.y) - 0.18)
+    }
+
     func tickMinions(dt: Double) {
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
@@ -107,7 +114,8 @@ extension StationController {
             let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
             let jumping = m.activity == .waiting && waitingAge < 60 && !m.onJob
             let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
-            let speed = m.busy ? 2.4 : (pacing ? 0.8 : 1.4)
+            // Pace by the task, not by who: hauling is one pace, hurrying to work another, pacing a third.
+            let speed = m.isHauling ? 1.8 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4))
             if m.lying, !m.path.isEmpty {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
@@ -292,9 +300,18 @@ extension StationController {
                     m.state = .settled
                 case .settled:
                     if m.isQA, clock >= m.nextWanderAt {
-                        let choices = station.deckCells.filter { $0 != m.cell }
-                        if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
-                        m.nextWanderAt = clock + Double.random(in: 1.5...3.5)
+                        // Stack by stack along the untested row: stand in the aisle beside it, face it, sweep it.
+                        let stacks = Dictionary(grouping: world.yardLayout(station: station, area: "deck").filter { !$0.cleared }, by: \.column)
+                            .values.compactMap { $0.first }.sorted { $0.column < $1.column }
+                        if !stacks.isEmpty {
+                            let stack = stacks[m.qaStop % stacks.count]
+                            m.qaStop += 1
+                            let aisle = [Cell(x: stack.cell.x, y: stack.cell.y - 1), Cell(x: stack.cell.x, y: stack.cell.y + 1)]
+                                .first { station.deckCells.contains($0) } ?? stack.cell
+                            m.path = station.path(from: m.pos, to: aisle)
+                            m.facing = atan2(stack.pos.x - station.offset.x - Double(aisle.x), stack.pos.z - station.offset.y - Double(aisle.y))
+                        }
+                        m.nextWanderAt = clock + Double.random(in: 4...7)
                         m.setTool(.scanner)
                         if clock >= m.nextImpatience {
                             m.nextImpatience = clock + Double.random(in: 5...9)
@@ -334,17 +351,24 @@ extension StationController {
                         }
                     }
                     if m.place == .bath {
+                        // Once in the cell, shuffle to the fixture itself: under the nozzle, or in front of the bowl.
+                        if settled, let spot = m.fetchSpot {
+                            let d = spot - m.pos
+                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
+                            m.fetchSpot = nil
+                        }
                         if settled {
                             m.setStatic(true, frame: Int(clock * 12))
-                            if m.showering, clock >= m.nextDropAt {
-                                // Pixel water from the shower head, falling past the shoulders.
-                                m.nextDropAt = clock + 0.07
+                            if m.showering, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
+                                // Pixel water from the nozzle, falling past the shoulders onto the drain.
+                                m.nextDropAt = clock + 0.05
+                                let nozzle = showerNozzle(station: station, bath: bath)
                                 let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
                                 drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-                                drop.position = v3(m.node.position.x + Double.random(in: -0.14...0.14), m.headHeight + 0.3, m.node.position.z + Double.random(in: -0.14...0.14))
+                                drop.position = v3(nozzle.x + Double.random(in: -0.05...0.05), 0.56, nozzle.y + Double.random(in: -0.05...0.05))
                                 propRoot.addChildNode(drop)
-                                let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.35); fall.timingMode = .easeIn
-                                drop.runAction(.sequence([fall, .fadeOut(duration: 0.1), .removeFromParentNode()]))
+                                let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
+                                drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
                             }
                         }
                         if (clock >= m.phaseUntil && settled) || m.busy {   // done, or work calls
@@ -363,14 +387,18 @@ extension StationController {
                         // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
                         if let bath = station.rooms["kind:bath"] {
                             let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                            let spot = m.showering ? (cells.count > 1 ? cells[1] : cells.last!) : cells.first!
-                            m.path = station.path(from: m.pos, to: spot)
+                            let cell = m.showering ? (cells.count > 1 ? cells[1] : cells.last!) : cells.first!
+                            m.path = station.path(from: m.pos, to: cell)
+                            // Then the exact spot: under the nozzle, or a step in front of the bowl, facing it.
+                            let nozzle = showerNozzle(station: station, bath: bath)
+                            m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
+                                                      : SIMD2(Double(cell.x) - 0.02, Double(cell.y) + 0.1)
                             m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
                         }
                     }
                     if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                         if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
-                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
+                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = station.path(from: m.pos, to: dest) }
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
@@ -401,7 +429,7 @@ extension StationController {
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
-            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) {
+            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
                 m.smoothFacing += delta * min(1, dt * 12)
@@ -497,8 +525,8 @@ extension StationController {
                 case .skill: tilt = 0.15; roll = sin(t * 3) * 0.05           // using a skill: heads-down on the tablet
                 case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
                 case .qa:
-                    // QA on the test deck: peering down at the staged boxes, a green tick popping up now and then.
-                    tilt = 0.28 + sin(t * 1.2) * 0.08; spin = sin(t * 0.6) * 0.5
+                    // QA on the test deck: facing a stack, the scanner sweeping it from the floor to the top, a tick now and then.
+                    tilt = 0.08 + sin(t * 1.4) * 0.22; spin = 0
                     if Int(t * 2) % 9 == 0 && Int((t - dt) * 2) % 9 != 0 {
                         let tick = SCNNode(geometry: SCNBox(width: 0.16, height: 0.02, length: 0.16, chamferRadius: 0))
                         tick.eulerAngles = SCNVector3(Double.pi / 2, 0, Double.pi / 4)
