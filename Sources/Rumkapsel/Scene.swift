@@ -267,6 +267,8 @@ final class Minion {
     var wasBusy = false
     var bathUntil = 0.0
     var bathReturn: Place?
+    var nextChoreAt = 0.0
+    var choreUntil = 0.0       // out on a chore until this clock time, 0 when not
     var showering = false
     var nextDropAt = 0.0
     private var staticNode: SCNNode?
@@ -299,6 +301,10 @@ final class Minion {
     }
     var waitingSince = 0.0
     let bobPhase = Double.random(in: 0..<6.28)
+    /// Everyone moves at their own pace, so a row of workers never nods in unison.
+    var tempo: Double { 0.82 + bobPhase / 6.28 * 0.42 }
+    /// Which tool is out at the cone right now: the rota runs on the minion's own clock and stint length.
+    func toolSlot(at clock: Double) -> Int { (toolSeed + Int((clock + bobPhase * 4) / (5.5 + Double(toolSeed) * 1.7))) % 4 }
     var opacity = 0.0
 
     init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
@@ -999,6 +1005,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 shelf.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(shelf)
             }
+            if let airlock = station.rooms["kind:airlock"] {
+                // A round hatch standing at the far end, ringed in a warning stripe.
+                let cells = airlock.cells
+                let door = station.doorCell(of: airlock.key) ?? cells[0]
+                let far = cells.max { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) } ?? cells[0]
+                let hatch = SCNNode(geometry: SCNTube(innerRadius: 0.22, outerRadius: 0.32, height: 0.08))
+                hatch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.62, 0.25)))
+                let dx = far.x - door.x, dy = far.y - door.y
+                hatch.eulerAngles = dx != 0 ? SCNVector3(0, 0, Double.pi / 2) : SCNVector3(Double.pi / 2, 0, 0)
+                hatch.position = v3(station.offset.x + Double(far.x) + Double(dx) * 0.42, 0.42, station.offset.y + Double(far.y) + Double(dy) * 0.42)
+                let pane = SCNNode(geometry: SCNCylinder(radius: 0.22, height: 0.04))
+                pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
+                hatch.addChildNode(pane)
+                hatch.name = "room:" + roomKey(station, airlock)
+                staticRoot.addChildNode(hatch)
+            }
             if let bath = station.rooms["kind:bath"] {
                 // A toilet in one corner and a shower post in the other.
                 let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
@@ -1161,6 +1183,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case "kind:quarters": return "dorm"
         case "kind:lounge": return "lounge"
         case "kind:bath": return "bath"
+        case "kind:airlock": return "airlock"
         default: return room.name
         }
     }
@@ -1933,6 +1956,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return home
     }
 
+    /// Off the station: through the airlock when there is one, and gone once inside.
+    private func dismiss(_ m: Minion) {
+        m.state = .leaving
+        m.couch = nil; m.bed = nil
+        guard let station = fleet.stations[m.station], let airlock = station.rooms["kind:airlock"], let cell = airlock.cells.randomElement() else { return }
+        m.place = .airlock
+        m.path = station.path(from: m.pos, to: cell)
+    }
+
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
     private func isNight(_ station: Station) -> Bool {
         let hour = Calendar.current.component(.hour, from: Date())
@@ -2487,9 +2519,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
-                    m.state = .leaving
+                    dismiss(m)
                     if let key = carriedRoom(of: m) { reveal(key); m.errand = nil; m.carried?.removeFromParentNode(); m.carried = nil }
-                } else if m.errand == nil && m.place != restPlace && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
+                } else if m.errand == nil && m.place != restPlace && m.place != .bath && m.choreUntil == 0 && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
                     send(m, to: restPlace)
                 }
@@ -3443,10 +3475,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     }
                     m.wasBusy = m.busy
                     if m.bathDue == 0, m.place == .lounge, !m.isSubagent {
-                        if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 1800...3600) }
+                        if m.nextBathAt == 0 { m.nextBathAt = clock + Double.random(in: 420...900) }
                         if clock >= m.nextBathAt { m.bathDue = clock; m.showering = false; m.nextBathAt = 0 }
                     } else if m.place != .lounge { m.nextBathAt = 0 }
                     let settled = m.path.isEmpty
+                    // Chores: a lounger with nothing to do wanders off to check on the yard, the bay or the
+                    // hallway, lingers a while, and comes back to the couch.
+                    if m.choreUntil > 0 {
+                        if settled, clock >= m.choreUntil { m.choreUntil = 0; m.nextChoreAt = clock + Double.random(in: 180...480); send(m, to: .lounge) }
+                    } else if m.place == .lounge, !m.busy, m.errand == nil, settled, !m.isSubagent, m.bathDue == 0 {
+                        if m.nextChoreAt == 0 { m.nextChoreAt = clock + Double.random(in: 60...240) }
+                        if clock >= m.nextChoreAt {
+                            let spots = station.corridorCells + station.storageCells + station.deckCells + station.hangarCells
+                            if let spot = spots.randomElement() {
+                                m.couch = nil
+                                m.place = .core
+                                m.path = station.path(from: m.pos, to: spot)
+                                m.choreUntil = clock + Double.random(in: 10...25)
+                                m.nextWanderAt = m.choreUntil
+                            }
+                        }
+                    }
                     if m.place == .bath {
                         if settled {
                             m.setStatic(true, frame: Int(clock * 12))
@@ -3521,7 +3570,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
             // One little routine per activity, so you can tell at a glance what a minion is up to.
             var tilt = 0.0, roll = 0.0, spin = 0.0, lean = 0.0
-            let t = clock + m.bobPhase
+            let t = (clock + m.bobPhase) * m.tempo
             let atCone = working && !m.pyramids.isEmpty && m.nearCone
             if atCone, let cone = m.pyramids.last {
                 // Stand a step back from the cone and face it.
@@ -3537,7 +3586,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if atCone {
                 // Working the cone: welding, hammering, pushing and pulling, or bent over it.
-                let tool = (m.toolSeed + Int(clock / 7)) % 4
+                let tool = m.toolSlot(at: clock)
                 let cone = m.pyramids.last
                 m.setTool([Minion.Tool.goggles, .hammer, .scanner, .flashlight][tool])
                 switch tool {
@@ -3576,7 +3625,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     m.lightPivot?.eulerAngles = SCNVector3(0.35 + sin(t * 1.3) * 0.25, sin(t * 0.9) * 0.45, 0)
                 }
             }
-            if !atCone || (m.toolSeed + Int(clock / 7)) % 4 != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
             if !working && !(m.place == .lounge && resting && m.couch != nil) { m.setTool(nil) }
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

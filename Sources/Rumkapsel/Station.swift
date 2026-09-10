@@ -33,6 +33,7 @@ enum Place: Hashable {
     static let quarters = Place.room("kind:quarters")
     static let lounge = Place.room("kind:lounge")
     static let bath = Place.room("kind:bath")
+    static let airlock = Place.room("kind:airlock")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -239,6 +240,8 @@ final class Station {
         if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4), near: beside.isEmpty ? nil : beside) }
         if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
         if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2), near: beside.isEmpty ? nil : beside) }
+        // The airlock sits by the bay: the way out for anyone leaving the station.
+        if key == "kind:airlock" { return ensureRoom(key: key, name: "airlock", repo: nil, color: RGB(r: 0.30, g: 0.34, b: 0.42), lastActive: .distantFuture, shape: Station.rect(2, 1), near: hasHangar ? hangarCells : nil) }
         return false
     }
 
@@ -593,6 +596,7 @@ final class Fleet {
         s.ensureFixedRoom(.quarters)
         s.ensureFixedRoom(.lounge)
         s.ensureFixedRoom(.bath)
+        s.ensureFixedRoom(.airlock)
         stations[name] = s
         return s
     }
@@ -647,6 +651,7 @@ final class Fleet {
             station.ensureFixedRoom(.lounge)
             station.ensureFixedRoom(.bath)
             station.clusterQuarters()
+            station.ensureFixedRoom(.airlock)
             stations[name] = station
         }
     }
