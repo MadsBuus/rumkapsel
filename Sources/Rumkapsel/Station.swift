@@ -366,9 +366,27 @@ final class Station {
     func path(from: SIMD2<Double>, to: Cell) -> [SIMD2<Double>] {
         guard walkable.contains(to) else { return [] }
         let start = Station.sub(from)
-        let centre = Cell(x: to.x * Station.fine, y: to.y * Station.fine)
-        let inCell = (-1...1).flatMap { dx in (-1...1).map { dy in Cell(x: centre.x + dx, y: centre.y + dy) } }
-        let free = inCell.filter { !obstacles.contains($0) }
+        func spots(in c: Cell) -> [Cell] {
+            let centre = Cell(x: c.x * Station.fine, y: c.y * Station.fine)
+            return (-1...1).flatMap { dx in (-1...1).map { dy in Cell(x: centre.x + dx, y: centre.y + dy) } }
+        }
+        // A cell buried under a crate is no destination: settle for the nearest cell with free floor.
+        var target = to
+        if spots(in: to).allSatisfy({ obstacles.contains($0) }) {
+            var seen: Set<Cell> = [to]; var ring = [to]
+            search: while !ring.isEmpty {
+                var next: [Cell] = []
+                for c in ring {
+                    for n in c.neighbours where walkable.contains(n) && !seen.contains(n) && canStep(from: c, to: n) {
+                        if spots(in: n).contains(where: { !obstacles.contains($0) }) { target = n; break search }
+                        seen.insert(n); next.append(n)
+                    }
+                }
+                ring = next
+            }
+        }
+        let centre = Cell(x: target.x * Station.fine, y: target.y * Station.fine)
+        let free = spots(in: target).filter { !obstacles.contains($0) }
         let goals: Set<Cell> = !obstacles.contains(centre) ? [centre] : (free.isEmpty ? [centre] : Set(free))
         if goals.contains(start) { return [] }
         var prev: [Cell: Cell] = [start: start]
