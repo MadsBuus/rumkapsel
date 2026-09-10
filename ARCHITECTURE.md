@@ -22,10 +22,14 @@ already existed. `readyRepos` tracks which repositories have answered; only chan
 rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. `Fleet` arranges
 stations and saves the layout.
 
-Each fresh answer is compared with what was known and the difference becomes a `WorldEvent`
-(`Events.swift`): a board column change, a pull request opened or closed, a peer arriving. Counts in the yard
-are reconciled, not snapped: crates the board says moved to staging are carried across by minions
-(`reconcileYard`), and only what cannot be carried is redrawn.
+`World.swift` owns that floor plan and the diffs. `applyScan`, `applyGitHub`, `applyPeer` and `dropPeer` take
+one fresh answer each, compare it with what was known, change the model, and hand back `WorldEvent`s
+(`Events.swift`): an office opened or archived, a board column change, a pull request opened or closed, a peer
+arriving. Counts in the yard are reconciled, not snapped: crates the board says moved to staging are carried
+across by minions (`reconcile`), and only what cannot be carried is redrawn.
+
+A few things the model cannot see for itself — a crate already on someone's arms, a rocket mid-load — the
+scene lends it as closures.
 
 Rules that keep the place steady:
 
@@ -40,16 +44,19 @@ Rules that keep the place steady:
 ## 3. Scene
 
 `Scene.swift` renders the model and consumes events once each in `handle(_:)`, deciding the cue: a shuttle,
-a haul, a fade, a log line. The tick moves minions along their paths and plays their poses. It never re-derives
-"what just happened" from raw data.
+a haul, a fade, a log line. It reads state through `world` and never writes the model behind its back. The
+tick moves minions along their paths and plays their poses. It never re-derives "what just happened" from raw
+data. A rebuild is not immediate: `handle` marks the floor or the props dirty and `flushScene` redraws once,
+after the caller has finished placing its workers.
 
 Shapes mean things: a hexagon is a packed office, a cube is a piece of work, a square strapped crate is a pull
 request, a pyramid is a session input. Nothing is round.
 
 ## Debts
 
-- `Scene.swift` is still one file. The next cut is moving the crew/board diff and the yard reconciliation into
-  the model layer so the scene only ever sees events and counts.
+- `Scene.swift` is still one file: nodes, minions, HUD, camera and input share it. Minions are the next thing
+  to lift out.
 - Minions have no explicit state machine; place, activity, errand and a few timers cooperate. A single owner
   of "what am I doing now" would remove the class of bug where two per-frame rules fight.
-- The session-scan cues (a new office's shuttle) still branch on `firstRun` rather than emitting an event.
+- `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
+  that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.

@@ -26,8 +26,60 @@ enum WorldEvent {
     /// A peer came into range or left.
     case peerArrived(String), peerLeft(String)
 
+    /// An office appeared on a station's floor. Offices GitHub or the board put there come with a
+    /// `.pullRequestOpened` or `.issueStarted` alongside, which carries what the log needs to say.
+    case officeOpened(station: String, key: String, source: Source, arrival: Arrival)
+    /// A session's office took a new key: the same floor under a new name.
+    case officeRenamed(station: String, from: String, to: String, name: String, session: String, promoted: Bool)
+    /// An office left the floor. The model has already dropped it, so everything the scene needs to
+    /// take its tiles down comes with the event.
+    case officeArchived(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String)
+    /// Merged: the office's package belongs in storage. The scene hauls it, then calls `landedInStorage`.
+    case officeMerged(station: String, key: String, repo: String, number: Int)
+    /// Crates the board says reached staging: carry this many from storage across to the deck.
+    case carryToDeck(station: String, repo: String, count: Int)
+    /// One crate passed QA: it crosses the aisle to the tested row.
+    case crateCleared(station: String, repo: String, number: Int)
+    /// Who is on the crew right now, and how many bot pull requests are open.
+    case crewRoster(members: [String: CrewMember], bots: Int)
+    /// Something a teammate just did, fresh enough to move their minion.
+    case crewActivity(CrewActivity)
+    /// The crew was switched off: their minions go.
+    case crewHidden
+    /// The floor plan changed: the static scene wants rebuilding.
+    case layoutChanged
+    /// Only what stands on the floor changed: crates, boxes and cones.
+    case markersChanged
+    /// The saved layout came back from disk: this is the first scan of the run.
+    case worldLoaded
+    /// A line for the station log.
+    case log(String)
+    /// Worth a chime, with a seed for its pitch.
+    case chime(Int)
+
     /// Where on the station a board column lands.
     enum Stage { case development, storage, deck, cleared, shipped, other }
+    /// Why an office exists, and who to credit: a session id, a peer name or a GitHub login.
+    enum Source { case session(String), peer(String), github(String), board(String) }
+    /// How a new office should show up.
+    enum Arrival { case shuttle, fade, appear }
+}
+
+/// A teammate with a place on the station.
+struct CrewMember { let homeKey: String; let repo: String }
+
+/// One entry from a repository's activity feed, with everything the scene needs to react to it.
+struct CrewActivity {
+    let login: String
+    let kind: String
+    let repo: String
+    let roomKey: String
+    let hasRoom: Bool
+    let label: String        // "#123", or the branch when there is no pull request
+    let detail: String
+    let branch: String?
+    let title: String?
+    let ready: Bool          // the repository has answered before: this is news, not history
 }
 
 extension AppConfig.ProjectStatuses {
