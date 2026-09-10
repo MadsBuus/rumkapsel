@@ -364,8 +364,18 @@ final class Minion {
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
     var bathing: Bool { if case .bath = current?.kind { return true }; return false }
-    /// Crouched over a crate: lifting it or setting it down.
-    var bending: Bool { (phaseKind == .lift || phaseKind == .setDown) && phaseUntil > 0 }
+    /// How the body is held over a crate, decided by how high the crate is.
+    enum Posture { case none, crouch, waist, reach }
+    /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
+    var handsAt = 0
+    var posture: Posture {
+        guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
+        switch handsAt {
+        case 0: return .crouch
+        case 1: return .waist
+        default: return .reach
+        }
+    }
     /// What it would say if you asked.
     var words: String { current?.words ?? "nothing in particular" }
 
@@ -2649,9 +2659,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// The node a crate stands on, by the name the yard gave it.
-    private func crateNode(_ area: String, _ crate: CrateRef) -> SCNNode? {
-        markerRoot.childNodes.first { $0.name == "\(area):\(crate.station)|\(crate.repo)|\(crate.number)" }
+    /// The node a crate stands on, by the name the yard gave it. Unnumbered crates of a repository
+    /// share a name, so a carry takes the one standing on the slot it names.
+    private func crateNode(_ area: String, _ crate: CrateRef, at spot: Spot? = nil) -> SCNNode? {
+        let name = "\(area):\(crate.station)|\(crate.repo)|\(crate.number)"
+        let all = markerRoot.childNodes.filter { $0.name == name }
+        guard let spot else { return all.first }
+        return all.min { a, b in
+            func d(_ n: SCNNode) -> Double {
+                let p = n.worldPosition
+                return pow(Double(p.x) - spot.pos.x, 2) + pow(Double(p.y) - spot.pos.y, 2) + pow(Double(p.z) - spot.pos.z, 2)
+            }
+            return d(a) < d(b)
+        }
     }
 
     /// Merged: the office's package is carried to the storage bay in one trip. The model has already
@@ -2677,7 +2697,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let list = commands ?? world.carryToDeck(station: station, repo: repo, count: station.stored[repo] ?? 0)
         var started = 0
         for command in list {
-            guard let crate = command.crate, let node = crateNode("storage", crate) else { continue }
+            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
+                  let node = crateNode("storage", crate, at: from) else { continue }
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
@@ -2724,7 +2745,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         logEvent("\(repo): cleared, loading the rocket")
         let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
         for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
-            guard let crate = command.crate, let b = crateNode(source, crate) else { continue }
+            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
+                  let b = crateNode(source, crate, at: from) else { continue }
             carry(command, node: b) { [weak self] in
                 guard let self else { return }
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) } else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
@@ -2749,6 +2771,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func scheduleCarries() {
         for (id, job) in cargo where job.carrier == nil {
             guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
+            // Crates stacked above this one are still on their way: wait, deadline and all.
+            guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
             let free = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
             guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
                 if let by = job.command.deadline, Date() > by {
@@ -2991,15 +3015,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// A tested crate crosses the aisle to the tested row on someone's arms.
+    /// A tested crate crosses the aisle to the tested row on someone's arms. Anything stacked on top of
+    /// it is moved aside first, one carry each, and those go first.
     private func carryAcrossDeck(station: Station, repo: String, number: Int) {
-        let ref = CrateRef(station: station.name, repo: repo, number: number)
-        guard let node = crateNode("deck", ref), let command = world.carryToTested(station: station, repo: repo, number: number) else { return }
-        carry(command, node: node) { [weak self] in
-            guard let self else { return }
-            node.removeFromParentNode()
-            drone.ping(seed: number)
-            rebuildMarkers()
+        for command in world.carryToTested(station: station, repo: repo, number: number) {
+            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
+                  let node = crateNode("deck", crate, at: from) else { continue }
+            carry(command, node: node) { [weak self] in
+                guard let self else { return }
+                node.removeFromParentNode()
+                if crate.number == number { drone.ping(seed: number) }
+                rebuildMarkers()
+            }
         }
     }
 
@@ -3264,7 +3291,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     case .walk:
                         advance(m); continue
                     case .approach:
-                        // Stand a step back from the crate, facing it, before crouching.
+                        // Stand an arm's length from the crate, facing it, before taking hold.
                         let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
                         let toBox = boxAt - m.pos
                         let dist = (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot()
@@ -3275,10 +3302,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                             if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
                         }
                         advance(m)
+                        // How high the crate stands decides the posture: a crouch, a waist-high lift, a reach.
+                        m.handsAt = max(0, Int((Double(job.node.worldPosition.y) / 0.34).rounded()))
                         m.phaseUntil = clock + 1.1
                         continue
                     case .lift:
-                        // Crouched: take hold, bring it up past the chest, then straighten.
+                        // Take hold at the crate's own height, bring it up and over the head.
                         let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
                         let toBox = boxAt - m.pos
                         if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
@@ -3291,7 +3320,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                             job.node.position = m.node.convertPosition(world, from: nil)
                             let toChest = SCNAction.move(to: v3(0, m.headHeight * 0.45, 0.3), duration: 0.3); toChest.timingMode = .easeOut
                             let overhead = SCNAction.move(to: v3(0, m.headHeight + 0.14, 0), duration: 0.35); overhead.timingMode = .easeInEaseOut
-                            job.node.runAction(.sequence([toChest, overhead]))
+                            // Off the floor it comes up past the chest; taken down off a stack it goes straight overhead.
+                            job.node.runAction(Double(job.node.position.y) < m.headHeight * 0.45 ? .sequence([toChest, overhead]) : overhead)
                             m.carried = job.node
                             self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
                         }
@@ -3302,7 +3332,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     case .haul:
                         advance(m); continue
                     default:
-                        // Bend and set the crate down squarely, then a beat before straightening up.
+                        // Set the crate down squarely on its slot, then a beat before straightening up.
                         let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                         let toSpot = spot - m.pos
                         let dist = (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot()
@@ -3314,15 +3344,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                                 m.pos += (want - m.pos) * min(1, dt * 6)
                                 if (want - m.pos).x.magnitude + (want - m.pos).y.magnitude > 0.02 { continue }
                             }
+                            m.handsAt = to.level
                             m.phaseUntil = clock + 1.1
                             let world = job.node.worldPosition
+                            let yaw = Double(job.node.eulerAngles.y) + m.smoothFacing   // keep the turn it had on the arms
                             job.node.removeFromParentNode()
                             job.node.position = world
+                            job.node.eulerAngles.y = CGFloat(yaw)
                             propRoot.addChildNode(job.node)
                             let chest = SIMD3(Double(world.x), m.headHeight * 0.45, Double(world.z)) + SIMD3(sin(m.facing) * 0.3, 0, cos(m.facing) * 0.3)
                             let toChest = SCNAction.move(to: v3(chest.x, chest.y, chest.z), duration: 0.3); toChest.timingMode = .easeInEaseOut
                             let down = SCNAction.move(to: v3(to.pos.x, to.pos.y, to.pos.z), duration: 0.4); down.timingMode = .easeIn
-                            job.node.runAction(.sequence([toChest, down, .run { [weak self] _ in self?.drone.thud() }]))
+                            // Onto the slot the layout will draw it on, turned the way it will be drawn.
+                            let turn = SCNAction.rotateTo(x: 0, y: CGFloat(to.yaw), z: 0, duration: 0.4)
+                            let land = SCNAction.group([down, turn])
+                            let onto = to.level > 0 ? land : SCNAction.sequence([toChest, land])
+                            job.node.runAction(.sequence([onto, .run { [weak self] _ in self?.drone.thud() }]))
                             m.carried = nil
                             continue
                         }
@@ -3560,8 +3597,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
-            if m.bending { tilt = max(tilt, 0.28); roll = 0 }
-            m.tilt.position.y = m.bending ? -0.12 : 0   // a crouch, knees bent, rather than a bow
+            switch m.posture {
+            case .none: m.tilt.position.y = 0
+            case .crouch: tilt = max(tilt, 0.28); roll = 0; m.tilt.position.y = -0.12   // knees bent, not a bow
+            case .waist: tilt = max(tilt, 0.14); roll = 0; m.tilt.position.y = 0       // waist height: a lean, no crouch
+            case .reach: tilt = min(tilt, -0.18); roll = 0; m.tilt.position.y = 0.05   // up on the toes, head back
+            }
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }

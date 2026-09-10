@@ -27,6 +27,10 @@ struct Spot {
     var label = ""
     var cell: Cell
     var pos: SIMD3<Double>
+    /// How high in a stack: 0 on the floor, 1 at waist height, 2 and up a reach. `pos.y` follows it.
+    var level = 0
+    /// Which way the crate stands there, so a set-down ends turned as the layout will redraw it.
+    var yaw = 0.0
 
     var words: String {
         switch area {
@@ -45,6 +49,8 @@ struct Spot {
 struct Command {
     let id: Int
     let kind: Kind
+    /// Commands that must finish first: the crates stacked above this one, moved aside.
+    let after: [Int]
     /// Must be true by: after this the reconciler stops waiting for the carry and lets the change
     /// appear where it stands.
     let deadline: Date?
@@ -130,19 +136,20 @@ struct Command {
     private static var nextId = 0
     static func nextCommandId() -> Int { nextId += 1; return nextId }
 
-    init(kind: Kind, words: String, deadline: Date? = nil) {
+    init(kind: Kind, words: String, deadline: Date? = nil, after: [Int] = []) {
         self.id = Command.nextCommandId()
         self.kind = kind
         self.words = words
         self.deadline = deadline
+        self.after = after
     }
 
     // MARK: the usual ones
 
-    static func carry(_ crate: CrateRef, from: Spot, to: Spot, within seconds: TimeInterval = 90) -> Command {
+    static func carry(_ crate: CrateRef, from: Spot, to: Spot, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
         Command(kind: .carry(crate: crate, from: from, to: to),
                 words: "carrying \(crate.words) to \(to.words)",
-                deadline: Date().addingTimeInterval(seconds))
+                deadline: Date().addingTimeInterval(seconds), after: after)
     }
 
     static func deliverOffice(key: String, name: String) -> Command {
@@ -198,7 +205,7 @@ extension Place {
 /// write here.
 struct StationTruth {
     enum Placement: Equatable {
-        case slot(area: Spot.Area, cell: Cell)
+        case slot(area: Spot.Area, cell: Cell, level: Int)
         case carried(by: String)
     }
 
@@ -238,7 +245,7 @@ struct StationTruth {
     }
 
     mutating func setDown(_ crate: CrateRef, at spot: Spot) {
-        crates[crate.key] = .slot(area: spot.area, cell: spot.cell)
+        crates[crate.key] = .slot(area: spot.area, cell: spot.cell, level: spot.level)
     }
 
     mutating func forget(_ crate: CrateRef) { crates[crate.key] = nil }
