@@ -2670,11 +2670,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
         if cfg.project != nil, let items = github.projectItems() {
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
-            // Only issues someone touched lately: the column keeps things long after work stopped.
-            let recent = Date().addingTimeInterval(-14 * 24 * 3600)
-            for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) && (it.updatedAt ?? .distantPast) > recent {
+            // The column says an office is solid; it does not make one. An issue needs a sign of work:
+            // a linked pull request, a branch seen in the feed, or a room a session or peer already claims.
+            var branched: Set<String> = []   // "repo#N" with a gh-N/… branch in the feed
+            for (repo, e) in feed { if let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) { branched.insert("\(repo)#\(m.1)") } }
+            for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
+                let key = "task:\(it.repo)#\(it.number)"
                 guard let login = it.assignees.first, login != me else { continue }
-                if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == "task:\(it.repo)#\(it.number)" }) { continue }
+                if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
+                let working = !it.prURLs.isEmpty || branched.contains("\(it.repo)#\(it.number)") || station.rooms[key] != nil
+                guard working else { continue }
                 boardOffices.append((it.repo, it, login))
             }
         }

@@ -181,8 +181,22 @@ final class GitHubResolver {
 
     // MARK: project board
 
-    private var project: ([ProjectItem], Date)?
+    private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard()
     private var projectMoves: [(item: ProjectItem, from: String?)] = []
+
+    /// The last board read is kept on disk, so the first read after a launch still knows what moved.
+    private static var boardURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
+        return dir.appendingPathComponent("board.json")
+    }
+    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date }
+    private static func loadBoard() -> ([ProjectItem], Date)? {
+        guard let data = try? Data(contentsOf: boardURL), let b = try? JSONDecoder().decode(SavedBoard.self, from: data) else { return nil }
+        return (b.items, b.at)
+    }
+    private func saveBoard(_ items: [ProjectItem], at: Date) {
+        if let data = try? JSONEncoder().encode(SavedBoard(items: items, at: at)) { try? data.write(to: GitHubResolver.boardURL) }
+    }
 
     func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
     func projectFetchedAt() -> Date? { lock.lock(); defer { lock.unlock() }; return project?.1 }
@@ -249,7 +263,7 @@ final class GitHubResolver {
         let changed = previous != items
         project = (items, at)
         lock.unlock()
-        if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest)] = []
