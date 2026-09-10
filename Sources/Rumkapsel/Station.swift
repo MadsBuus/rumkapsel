@@ -215,12 +215,12 @@ final class Station {
 
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
-    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil) -> Bool {
+    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count])
+        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count])
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         walkableCache = nil
@@ -283,6 +283,12 @@ final class Station {
             cur = cur.map { Cell(x: -$0.y, y: $0.x) }
         }
         return out
+    }
+
+    /// Whether a peer's placement can be adopted as is: free floor, against our corridor.
+    private func fits(_ cells: [Cell]) -> Bool {
+        !cells.isEmpty && cells.allSatisfy { !isReserved($0) && occupied[$0] == nil && abs($0.x) <= spineHalfLength + 4 && abs($0.y) <= spineHalfLength + 4 }
+            && cells.contains { $0.neighbours.contains(where: isCorridor) }
     }
 
     private func isReserved(_ c: Cell) -> Bool {

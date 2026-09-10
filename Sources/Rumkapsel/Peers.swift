@@ -1,13 +1,23 @@
 import Foundation
 import Network
 
-/// What one app tells the others about itself: enough to draw its stations, nothing more.
+/// What one app tells the others: its own claim on the shared work station. Only offices it has
+/// checked out itself go out, keyed by branch so every app agrees on which office is which.
 struct PeerSnapshot: Codable {
-    struct Room: Codable { var key: String; var name: String; var color: RGB; var cells: [Cell]; var boxes: Int; var dim: Bool }
-    struct Minion: Codable { var id: String; var x: Double; var y: Double; var asleep: Bool; var busy: Bool }
-    struct Station: Codable { var name: String; var spine: Int; var hasPad: Bool; var hasHangar: Bool; var rooms: [Room]; var minions: [Minion]; var stored: [String: Int]; var staged: [String: Int] }
+    struct Office: Codable {
+        var key: String; var name: String; var repo: String; var branch: String?; var color: RGB; var cells: [Cell]
+        var pushed: Bool         // the branch exists on the remote: the office is permanent
+        var startedAt: Date      // when this checkout appeared here: a fresh one earns a shuttle
+        var lastActive: Date
+        var boxes: Int; var dim: Bool
+    }
+    struct Minion: Codable { var id: String; var office: String; var asleep: Bool; var busy: Bool }
+    var version: Int
     var name: String
-    var stations: [Station]
+    var since: Date              // when this app started sharing
+    var offices: [Office]
+    var minions: [Minion]
+    static let current = 2
 }
 
 /// Bonjour on the local network: advertise, browse, and swap snapshots as newline-delimited JSON.
@@ -20,6 +30,7 @@ final class PeerHub {
     private let queue = DispatchQueue(label: "rumkapsel.peers")
     private var timer: DispatchSourceTimer?
     private(set) var name = ""
+    private(set) var since = Date()
     var isRunning: Bool { listener != nil }
     var peerCount: Int { queue.sync { outgoing.count } }
     var snapshotProvider: (() -> PeerSnapshot?)?
@@ -28,6 +39,7 @@ final class PeerHub {
     func start(name: String) {
         stop()
         self.name = name
+        since = Date()
         do {
             let l = try NWListener(using: .tcp)
             l.service = NWListener.Service(name: name, type: type)
@@ -87,7 +99,7 @@ final class PeerHub {
             while let nl = buf.firstIndex(of: UInt8(ascii: "\n")) {
                 let line = buf[buf.startIndex..<nl]
                 buf.removeSubrange(buf.startIndex...nl)
-                if let snap = try? JSONDecoder().decode(PeerSnapshot.self, from: line), snap.name != name {
+                if let snap = try? JSONDecoder().decode(PeerSnapshot.self, from: line), snap.version == PeerSnapshot.current, snap.name != name {
                     DispatchQueue.main.async { self.onSnapshot?(snap) }
                 }
             }

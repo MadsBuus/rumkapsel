@@ -439,8 +439,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     // Peers on the local network: their snapshots, the stations built from them, and their minions.
     let peers = PeerHub()
     private var peerSnapshots: [String: (snap: PeerSnapshot, at: Date)] = [:]
-    private var peerStations: [String: Station] = [:]      // "peer/station"
-    private var peerSignature = ""
+    private var peerFirstSeen: [String: Date] = [:]
+    /// Peers' claims on offices of the work station, by room key ("work|task:…") then peer name.
+    private var peerOffices: [String: [String: PeerSnapshot.Office]] = [:]
+    private var peerBoxes: [String: (count: Int, state: String, color: NSColor)] = [:]
+    private var pushedByPeer: Set<String> = []
+    private var fadeIn: Set<String> = []
+    private var roomCreated: [String: Date] = [:]
     private let peerRoot = SCNNode()
     private var peerMinions: [String: (node: SCNNode, target: SIMD3<Double>)] = [:]
     private var peerColorBook: [String: RGB] = [:]
@@ -747,7 +752,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// An office GitHub knows about that nobody here has checked out: a teammate's branch or pull request.
     private func isRemoteOnly(_ station: Station, _ room: Room) -> Bool {
-        room.worktree == nil && crewRoomInfo[roomKey(station, room)] != nil
+        let key = roomKey(station, room)
+        return room.worktree == nil && (crewRoomInfo[key] != nil || pushedByPeer.contains(key))
+    }
+
+    /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
+    private func isProvisional(_ station: Station, _ room: Room) -> Bool {
+        let key = roomKey(station, room)
+        return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key)
     }
 
     /// The office key for a teammate's branch: the same key a local checkout of it would get.
@@ -928,6 +940,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
+                let provisional = isProvisional(station, room)
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -943,6 +956,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if !powered { color = color.darker(0.2) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
+                    else if provisional { t.opacity = 0.38 }
                     tiles.append(t)
                     if failing || dusty {
                         let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
@@ -960,12 +974,28 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     }
                 }
                 roomTiles[key] = tiles
+                if provisional, !pending {
+                    // A thin frame round the floor: reserved, not built.
+                    let b = (minX: room.cells.map(\.x).min()!, maxX: room.cells.map(\.x).max()!, minY: room.cells.map(\.y).min()!, maxY: room.cells.map(\.y).max()!)
+                    let frame = SCNNode(geometry: SCNPlane(width: CGFloat(b.maxX - b.minX + 1), height: CGFloat(b.maxY - b.minY + 1)))
+                    frame.geometry!.firstMaterial = flat(full.lighter(0.2))
+                    frame.geometry!.firstMaterial?.fillMode = .lines
+                    frame.eulerAngles.x = -.pi / 2
+                    frame.position = v3(station.offset.x + Double(b.minX + b.maxX) / 2, 0.004, station.offset.y + Double(b.minY + b.maxY) / 2)
+                    frame.name = "room:" + key
+                    staticRoot.addChildNode(frame)
+                }
                 outlines.removeValue(forKey: key)?.removeFromParentNode()
             }
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
         rebuildLabels()
         rebuildMarkers()
+        for key in fadeIn {
+            for t in roomTiles[key] ?? [] { let o = t.opacity; t.opacity = 0; t.runAction(.fadeOpacity(to: o, duration: 2.5)) }
+            if let l = roomLabels[key] { let o = l.opacity; l.opacity = 0; l.runAction(.fadeOpacity(to: o, duration: 2.5)) }
+        }
+        fadeIn = []
 
         (targetFocus, targetHalf) = frame(for: Array(fleet.stations.values))
         if let f = focused { focusNow(on: f) }
@@ -1111,7 +1141,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 guard let node else { continue }
                 node.name = "room:" + key
-                if undelivered.contains(key) { node.opacity = 0 }
+                if undelivered.contains(key) { node.opacity = 0 } else if isProvisional(station, room) { node.opacity = 0.55 }
                 roomLabels[key] = node
             }
         }
@@ -1121,7 +1151,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func rebuildMarkers() {
         markerRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values {
-            for room in station.rooms.values where room.branch != nil || crewBoxes[roomKey(station, room)] != nil {
+            for room in station.rooms.values where room.branch != nil || crewBoxes[roomKey(station, room)] != nil || peerBoxes[roomKey(station, room)] != nil {
                 let key = roomKey(station, room)
                 var count: Int
                 var ghosts = 0                 // uncommitted work: unfinished, translucent boxes
@@ -1129,7 +1159,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 var packaged = false           // a pull request bundles everything into one strapped package
                 var boxOpacity = 1.0
                 if room.branch == nil {
-                    guard let cb = crewBoxes[key] else { continue }
+                    guard let cb = crewBoxes[key] ?? peerBoxes[key] else { continue }
                     count = min(16, max(1, cb.count))
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
                 } else {
@@ -1491,6 +1521,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let t = info.title { line += " · " + t }
             parts.append(line)
         }
+        if let claims = peerOffices[roomKey(station, room)], !claims.isEmpty {
+            let who = claims.keys.sorted().joined(separator: ", ")
+            parts.append((pushedByPeer.contains(roomKey(station, room)) ? "checked out by " : "local branch on ") + who)
+        } else if isProvisional(station, room) && room.worktree == nil {
+            parts.append("held for a while · nobody is working here right now")
+        }
         if room.key == "kind:bots" { parts.append("dependabot and friends") }
         if room.key == "kind:lounge" { parts.append("waiting on you for a while · they chat here before bed") }
         if let branch = room.branch, let root = room.repoRoot {
@@ -1522,7 +1558,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             shareLabel.isHidden = !sharing
             if sharing {
                 let n = peerSnapshots.count
-                shareLabel.text = "sharing as \(peers.name)" + (n > 0 ? " · \(n) station\(n == 1 ? "" : "s") in range" : "")
+                shareLabel.text = "sharing as \(peers.name)" + (n > 0 ? " · \(n) peer\(n == 1 ? "" : "s") in range" : "")
                 shareLabel.position = CGPoint(x: hud.size.width - 14, y: hud.size.height - 14)
                 shareDot.position = CGPoint(x: hud.size.width - 14 - shareLabel.frame.width - 10, y: hud.size.height - 19)
                 shareDot.alpha = 0.7 + 0.3 * sin(clock * 2)
@@ -1979,6 +2015,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
             if station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
+                roomCreated["\(stationName)|\(home.key)"] = now
                 if !firstRun {
                     undelivered.insert("\(stationName)|\(home.key)")
                     newRooms[s.id] = home.key
@@ -1999,7 +2036,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
                 let cleared = merged && (hauledAt[roomKey(station, room)].map { now.timeIntervalSince($0) > 5 * 60 } ?? !station.hasPad)
-                if gone || cleared {
+                // Held for a teammate: nobody here, nothing on GitHub, and no word from a peer for a day.
+                let orphan = room.worktree == nil && crewRoomInfo[roomKey(station, room)] == nil && now.timeIntervalSince(room.lastActive) > StationController.holdWindow
+                if gone || cleared || orphan {
                     archive(station: station, room: room, announce: !firstRun)
                     changed = true
                 }
@@ -2206,109 +2245,114 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if cfg.shareOnLAN { peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName) } else { peers.stop() }
     }
 
-    /// Our own picture for the others: only repositories ticked for sharing, never the crew station.
+    /// Our own claim for the others: offices we have checked out ourselves in repositories ticked
+    /// for sharing. Nothing learned from GitHub or from another peer goes back out.
     private func makeSnapshot() -> PeerSnapshot? {
         let cfg = ConfigStore.shared.current
-        var out: [PeerSnapshot.Station] = []
-        for station in fleet.stations.values {
-            let sharedRooms = station.rooms.values.filter { r in r.worktree != nil && (r.repo.map { cfg.shared(repo: $0) } ?? false) }
-            guard !sharedRooms.isEmpty else { continue }
-            let fixed = station.rooms.values.filter { $0.key.hasPrefix("kind:") && $0.key != "kind:bots" }
-            let rooms = (sharedRooms + fixed).map { r in
-                PeerSnapshot.Room(key: r.key, name: r.name, color: r.color, cells: r.cells,
-                                  boxes: lastBoxCount[roomKey(station, r)] ?? 0,
-                                  dim: r.key.hasPrefix("proj:") || !(roomPower[roomKey(station, r)] ?? true))
-            }
-            let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) }.map {
-                PeerSnapshot.Minion(id: $0.id.hashValue.description, x: $0.pos.x, y: $0.pos.y, asleep: $0.activity == .sleeping, busy: $0.busy)
-            }
-            let stored = station.stored.filter { cfg.shared(repo: $0.key) }
-            let staged = station.staged.filter { cfg.shared(repo: $0.key) }
-            out.append(PeerSnapshot.Station(name: station.name, spine: station.spineHalfLength, hasPad: station.hasPad, hasHangar: station.hasHangar,
-                                            rooms: rooms, minions: ms, stored: stored, staged: staged))
+        guard let station = fleet.stations["work"] else { return nil }
+        var offices: [PeerSnapshot.Office] = []
+        for r in station.rooms.values where r.worktree != nil && !r.key.hasPrefix("kind:") && (r.repo.map { cfg.shared(repo: $0) } ?? false) {
+            let key = roomKey(station, r)
+            offices.append(PeerSnapshot.Office(key: r.key, name: r.name, repo: r.repo ?? "", branch: r.branch, color: r.color, cells: r.cells,
+                                               pushed: r.branch != nil && !localState(r).local,
+                                               startedAt: roomCreated[key] ?? .distantPast, lastActive: r.lastActive,
+                                               boxes: lastBoxCount[key] ?? 0, dim: r.key.hasPrefix("proj:") || !(roomPower[key] ?? true)))
         }
-        return PeerSnapshot(name: peers.name, stations: out)
+        let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
+            PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy)
+        }
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms)
     }
 
+    /// A peer's claim lands on our work station: its offices get the same key here, adopting the
+    /// peer's floor plan when that floor is free. A whole peer arriving fades in; one new checkout
+    /// on a peer we already follow earns a shuttle, like a new session of our own.
     private func receivePeer(_ snap: PeerSnapshot) {
-        peerSnapshots[snap.name] = (snap, Date())
-        let sig = peerSnapshots.map { "\($0.key):" + $0.value.snap.stations.map { st in "\(st.name)\(st.spine)" + st.rooms.map { "\($0.key)\($0.cells.count)\($0.boxes)\($0.dim)" }.joined() }.joined() }.sorted().joined()
-        if sig != peerSignature { peerSignature = sig; rebuildPeers() }
-        for st in snap.stations {
-            guard let station = peerStations["\(snap.name)/\(st.name)"] else { continue }
-            for m in st.minions {
-                let id = "\(snap.name)/\(m.id)"
-                let target = SIMD3(station.offset.x + m.x, 0, station.offset.y + m.y)
-                if let existing = peerMinions[id] {
-                    peerMinions[id] = (existing.node, target)
-                } else {
-                    let n = SCNNode(geometry: SCNBox(width: 0.22, height: 0.5, length: 0.11, chamferRadius: 0.01))
-                    n.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.62, 0.78)))
-                    n.position = v3(target.x, 0.25, target.z)
-                    n.name = "peer:" + snap.name
-                    peerRoot.addChildNode(n)
-                    peerMinions[id] = (n, target)
-                }
-                peerMinions[id]?.node.eulerAngles.x = m.asleep ? -.pi / 2 : 0
+        let now = Date()
+        let isNewPeer = peerFirstSeen[snap.name] == nil
+        if isNewPeer { peerFirstSeen[snap.name] = now; logEvent("\(snap.name) is in range") }
+        let bulk = isNewPeer || now.timeIntervalSince(peerFirstSeen[snap.name]!) < 15
+        peerSnapshots[snap.name] = (snap, now)
+        let station = fleet.station("work")
+        let sk = station.name + "|"
+        var changed = false
+        var deliveries: [String] = []
+        let cfg = ConfigStore.shared.current
+        let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
+        var live: Set<String> = []
+        for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" {
+            let key = sk + o.key
+            live.insert(key)
+            peerOffices[key, default: [:]][snap.name] = o
+            if o.pushed { pushedByPeer.insert(key) }
+            if o.boxes > 0 { peerBoxes[key] = (o.boxes, "NONE", NSColor(o.color)) } else { peerBoxes[key] = nil }
+            if let r = station.rooms[o.key] {
+                r.lastActive = max(r.lastActive, o.lastActive, now)
+                if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
+                continue
             }
-            let live = Set(st.minions.map { "\(snap.name)/\($0.id)" })
-            for (id, pm) in peerMinions where id.hasPrefix(snap.name + "/") && !live.contains(id) { pm.node.removeFromParentNode(); peerMinions[id] = nil }
+            let color = fleet.color(forRepo: o.repo)
+            guard station.ensureRoom(key: o.key, name: o.name, repo: o.repo, color: color, lastActive: now, preferredCells: o.cells) else { continue }
+            changed = true
+            if !bulk, now.timeIntervalSince(o.startedAt) < 3 * 60 {
+                undelivered.insert(key); deliveries.append(o.key)
+                logEvent("\(snap.name) started \(o.name)")
+            } else {
+                fadeIn.insert(key)
+            }
         }
+        for key in mine where !live.contains(key) {
+            peerOffices[key]?[snap.name] = nil
+            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil }
+        }
+        if changed {
+            rebuildStatic()
+            for m in minions.values where m.errand == nil { send(m, to: m.place) }
+        } else if !snap.offices.isEmpty {
+            rebuildMarkers()
+        }
+        for roomKey in deliveries {
+            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && $0.errand == nil && $0.carried == nil && !$0.busy }
+                .min(by: { $0.freeSince > $1.freeSince })
+            if let m = free { startDelivery(m, roomKey: roomKey) } else { reveal(sk + roomKey) }
+        }
+
+        // Their minions stand in the office they claim here, wherever we happened to put it.
+        for m in snap.minions {
+            let id = "\(snap.name)/\(m.id)"
+            let cells: [Cell]
+            if m.asleep { cells = station.cells(of: .quarters) } else { cells = station.rooms[m.office]?.cells ?? [] }
+            guard !cells.isEmpty else { continue }
+            var seed = UInt64(truncatingIfNeeded: id.hashValue) | 1
+            func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
+            let cell = cells[Int(rnd() * Double(cells.count)) % cells.count]
+            let target = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.5, 0, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.5)
+            if let existing = peerMinions[id] {
+                peerMinions[id] = (existing.node, target)
+            } else {
+                let n = SCNNode(geometry: SCNBox(width: 0.22, height: 0.5, length: 0.11, chamferRadius: 0.01))
+                n.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.62, 0.78)))
+                n.position = v3(target.x, 0.25, target.z)
+                n.name = "peer:" + snap.name
+                peerRoot.addChildNode(n)
+                peerMinions[id] = (n, target)
+            }
+            peerMinions[id]?.node.eulerAngles.x = m.asleep ? -.pi / 2 : 0
+        }
+        let liveMinions = Set(snap.minions.map { "\(snap.name)/\($0.id)" })
+        for (id, pm) in peerMinions where id.hasPrefix(snap.name + "/") && !liveMinions.contains(id) { pm.node.removeFromParentNode(); peerMinions[id] = nil }
     }
 
-    /// Peers stand in a row to the right of our fleet, each station rebuilt from its snapshot.
-    private func rebuildPeers() {
-        peerRoot.childNodes.filter { $0.name?.hasPrefix("peer:") != true }.forEach { $0.removeFromParentNode() }
-        peerStations = [:]
-        var x = fleet.worldBounds.max.x + 10
-        for (peerName, entry) in peerSnapshots.sorted(by: { $0.key < $1.key }) {
-            for st in entry.snap.stations {
-                let station = Station(name: st.name)
-                station.hasPad = st.hasPad; station.hasHangar = st.hasHangar
-                let saved = Station.Saved(spine: st.spine, rooms: Dictionary(uniqueKeysWithValues: st.rooms.map {
-                    ($0.key, Station.SavedRoom(name: $0.name, repo: nil, color: $0.color, cells: $0.cells, lastActive: Date(), worktree: nil, branch: nil, repoRoot: nil))
-                }), stored: nil, storedByRepo: st.stored, stagedByRepo: st.staged)
-                station.restore(saved)
-                let b = station.bounds
-                station.offset = SIMD2(x - Double(b.min.x), 0)
-                x += Double(b.max.x - b.min.x + 1) + 4
-                peerStations["\(peerName)/\(st.name)"] = station
-                for c in station.corridorCells + station.coreCells {
-                    addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor.darker(0.08), name: "peer:" + peerName, into: peerRoot)
-                }
-                for c in station.hangarCells { addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "peer:" + peerName, into: peerRoot) }
-                for c in station.padCells { addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "peer:" + peerName, into: peerRoot) }
-                for c in station.storageCells { addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "peer:" + peerName, into: peerRoot) }
-                let core = SCNNode(geometry: SCNBox(width: 0.7, height: 2.3, length: 0.7, chamferRadius: 0))
-                core.geometry!.firstMaterial = lit(Palette.core)
-                let mp = station.monolithPosition
-                core.position = v3(station.offset.x + mp.x, 1.15, station.offset.y + mp.y)
-                core.name = "peer:" + peerName
-                peerRoot.addChildNode(core)
-                for r in st.rooms {
-                    let full = NSColor(r.color)
-                    for c in r.cells { addTile(station: station, cell: c, owner: r.key, color: r.dim ? full.darker(0.32) : full, name: "peer:" + peerName, into: peerRoot) }
-                    var seed = UInt64(truncatingIfNeeded: r.key.hashValue) | 1
-                    func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                    let cells = r.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                    for i in 0..<min(8, r.boxes) {
-                        let size = [0.18, 0.24, 0.3][min(2, Int(rnd() * 3))]
-                        let box = SCNNode(geometry: SCNBox(width: size, height: size, length: size, chamferRadius: 0))
-                        box.geometry!.firstMaterial = flat(full.lighter(0.12))
-                        let cell = cells[(i / 3) % cells.count]
-                        box.position = v3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.6, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.6)
-                        box.name = "peer:" + peerName
-                        peerRoot.addChildNode(box)
-                    }
-                }
-                let sign = floorText("\(peerName) · \(st.name)", color: Palette.text, size: 0.7, maxWidth: 12, lines: 1)
-                sign.node.position = v3(station.offset.x + Double(b.min.x) - 0.5 + sign.width / 2, 0.01, station.offset.y + Double(b.max.y) + 1.2 + sign.height / 2)
-                sign.node.name = "peer:" + peerName
-                peerRoot.addChildNode(sign.node)
-                floorLabels.append((sign.node, 0))
-            }
+    /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
+    private func dropPeer(_ name: String) {
+        peerSnapshots[name] = nil; peerFirstSeen[name] = nil
+        for (id, pm) in peerMinions where id.hasPrefix(name + "/") { pm.node.removeFromParentNode(); peerMinions[id] = nil }
+        for (key, claims) in peerOffices where claims[name] != nil {
+            peerOffices[key]?[name] = nil
+            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil }
         }
-        // Peer minions belong to rebuilt stations; their targets refresh with the next snapshot.
+        logEvent("\(name) is out of range")
+        rebuildMarkers()
     }
 
     // MARK: hauling and power
@@ -2734,11 +2778,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             _ = id
         }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
-            let stale = peerSnapshots.filter { Date().timeIntervalSince($0.value.at) > 20 }.map(\.key)
-            if !stale.isEmpty {
-                for s in stale { peerSnapshots[s] = nil; for (id, pm) in peerMinions where id.hasPrefix(s + "/") { pm.node.removeFromParentNode(); peerMinions[id] = nil } }
-                peerSignature = ""; rebuildPeers()
-            }
+            for name in peerSnapshots.filter({ Date().timeIntervalSince($0.value.at) > 20 }).map(\.key) { dropPeer(name) }
         }
         if Int(clock) % 2 == 0 && Int(clock - dt) % 2 != 0 {
             var load: [Int: Int] = [:]
@@ -3080,6 +3120,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }
 
+    /// How long an office is held for whoever last had it checked out, refreshed by their work.
+    static let holdWindow: TimeInterval = 24 * 3600
+
     private var viewPinned = false   // set from the command line: never overridden by the remembered view
     func setView(yawDegrees: Double, pitchDegrees: Double, zoom: Double) {
         viewPinned = true
@@ -3207,7 +3250,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Focuses the Nth station: your own in fleet order, then peers' as they sit in the void.
     func focus(onIndex i: Int) {
         enqueue { [self] in
-            let names = fleet.ordered.map(\.name) + peerStations.keys.sorted()
+            let names = fleet.ordered.map(\.name)
             guard names.indices.contains(i) else { return }
             focusNow(on: names[i])
         }
@@ -3215,7 +3258,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func focusNow(on stationName: String?) {
         focused = stationName
-        guard let name = stationName, let station = fleet.stations[name] ?? peerStations[name] else {
+        guard let name = stationName, let station = fleet.stations[name] else {
             userPan = .zero; userZoom = 1; userZoomChanged = true; return
         }
         let (center, half) = frame(for: [station])
@@ -3240,7 +3283,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
         let f = d.string(forKey: "view.focus") ?? ""
-        if !f.isEmpty, fleet.stations[f] != nil || peerStations[f] != nil {
+        if !f.isEmpty, fleet.stations[f] != nil {
             focusNow(on: f)
         } else {
             userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
