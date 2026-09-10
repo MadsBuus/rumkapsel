@@ -41,6 +41,12 @@ final class Minion {
     var hammerUp = false
     var lying = false
     var wakeUntil = 0.0
+    /// A change of orders is visible: standing a beat, head up, before going.
+    var wonderUntil = 0.0
+    /// Which bath fixture is held: 0 the bowl, 1 the shower.
+    var fixture: Int?
+    /// Short stretches of work so far: every other one earns a pee.
+    var shortStretches = 0
     private(set) var shadow: SCNNode!
     /// The hammer's grip end, so the swing pivots in the hand rather than at the handle's middle.
     private(set) var hammerPivot: SCNNode?

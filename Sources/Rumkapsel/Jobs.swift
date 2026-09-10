@@ -41,9 +41,20 @@ extension StationController {
 
     /// Hands a command to an actor. It replaces the one in hand at the next interruptible phase;
     /// mid-lift or setting down it waits its turn, and only one waits at a time.
-    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) {
+    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) { start(m, c, announce: announce) }
+
+    /// A command that has run its course hands over to its successor: the pallet's push to its unload.
+    /// Not a new order cutting in, so the interruptible rule does not apply.
+    func handOver(_ m: Minion, _ c: Command, announce: Bool = false) {
+        m.current = nil
+        begin(m, c, announce: announce)
+    }
+
+    /// The one way to give a minion an order. It takes over at the next interruptible phase; mid-lift or
+    /// setting down it waits its turn, and only one waits at a time.
+    func start(_ m: Minion, _ c: Command, announce: Bool = false) {
         guard m.current == nil || canInterrupt(m, with: c) else { m.pending = c; return }
-        start(m, c, announce: announce)
+        begin(m, c, announce: announce)
     }
 
     /// Walking and standing about can be cut into; a crouch cannot, and a carry only to send the
@@ -64,10 +75,14 @@ extension StationController {
         if announce { logEvent(c.words) }
     }
 
-    func start(_ m: Minion, _ c: Command, announce: Bool = false) {
+    private func begin(_ m: Minion, _ c: Command, announce: Bool = false) {
         issue(c, by: m.home.name)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
         let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
+        // A change of orders is visible: a beat standing, head up, then off. A message from you is urgent.
+        if let old = m.current, !redirected, old.kindName != c.kindName, m.state == .settled {
+            if case .work = c.kind { m.wonderUntil = clock + 0.15 } else { m.wonderUntil = clock + 0.5 }
+        }
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
@@ -92,7 +107,7 @@ extension StationController {
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
-        if let next = m.pending { m.pending = nil; start(m, next, announce: next.isJob) }
+        if let next = m.pending { m.pending = nil; begin(m, next, announce: next.isJob) }
         else { send(m, to: restPlace(m)) }
     }
 
@@ -365,7 +380,8 @@ extension StationController {
         let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) && !written.contains(c) }
         let door = station.doorCell(of: key) ?? firstCell
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
-        guard let cell = nearDoor.prefix(2).randomElement() else { return }
+        guard !nearDoor.isEmpty else { return }
+        let cell = nearDoor[min(nearDoor.count - 1, m.pyramids.count % 2)]   // alternate the two nearest the door
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         if !queued, m.pyramids.count >= 5, let old = m.pyramids.first {
             old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))
@@ -417,7 +433,7 @@ extension StationController {
         guard let crate = command.crate else { return }
         world.truth.claimed(crate)
         node.name = "haul"
-        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey)
+        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, issuedAt: clock)
     }
 
     /// Drops every carry tied to a room, freeing whoever was carrying.
@@ -496,7 +512,7 @@ extension StationController {
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
             let free = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
             guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
-                if let by = job.command.deadline, Date() > by {
+                if let patience = job.command.patience, clock - job.issuedAt > patience {
                     cargo[id] = nil
                     job.node.removeFromParentNode()
                     world.truth.forget(crate)
@@ -575,11 +591,10 @@ extension StationController {
 
     /// Hands a teammate a reaction: where to be, what to do there, and until when.
     func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) {
-        let until = Date().addingTimeInterval(minutes * 60)
         m.activity = activity
         m.busy = true
         if m.place != place || m.path.isEmpty { send(m, to: place) }
-        start(m, .react(activity, place: place, until: until, words: words))
+        start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
 
     /// A tested crate crosses the aisle to the tested row on someone's arms. Anything stacked on top of

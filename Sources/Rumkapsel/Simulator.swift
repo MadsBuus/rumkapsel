@@ -947,6 +947,21 @@ extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
     private static var simStep: Double { 1.0 / 30.0 }
 
+    /// Station time, stepped directly with no frame and no wall clock: what the scenario suite runs on.
+    func stepSimulated(seconds: Double) {
+        guard let sim else { return }
+        pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
+        for w in work { w() }
+        var budget = seconds
+        while budget > 0 {
+            let step = min(StationController.simStep, budget)
+            budget -= step
+            sim.clock += step
+            tick(now: sim.clock)
+            sim.invariants.check(self)
+        }
+    }
+
     /// The simulator's clock: real time scaled, or one step at a time while paused.
     func advanceSimulated(to time: TimeInterval) {
         guard let sim else { return }

@@ -111,8 +111,8 @@ func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, 
 /// All scene and HUD mutation happens on SceneKit's render thread, via `enqueue`, so the
 /// SpriteKit overlay is never touched while it is being drawn.
 final class StationController: NSObject, SCNSceneRendererDelegate {
-    private let pendingLock = NSLock()
-    private var pending: [() -> Void] = []
+    let pendingLock = NSLock()
+    var pending: [() -> Void] = []
 
     func enqueue(_ work: @escaping () -> Void) {
         pendingLock.lock(); pending.append(work); pendingLock.unlock()
@@ -194,7 +194,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var roomPower: [String: Bool] = [:]
     var haulingRooms: Set<String> = []
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
-    struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = "" }
+    struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""; var issuedAt = 0.0 }
     var cargo: [Int: Cargo] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600

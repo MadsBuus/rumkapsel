@@ -236,7 +236,7 @@ extension StationController {
             if m.wakeUntil > 0 {
                 if clock < m.wakeUntil { m.node.opacity = m.opacity; continue } else { m.wakeUntil = 0 }
             }
-            if let target = m.path.first {
+            if let target = m.path.first, clock >= m.wonderUntil {
                 let d = target - m.pos
                 let dist = (d.x * d.x + d.y * d.y).squareRoot()
                 let step = speed * dt
@@ -321,10 +321,10 @@ extension StationController {
                 case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
                     palletStep(m, station: station)
                     continue
-                case .react(_, _, let until):
-                    // There: work at it until the time is up, then back to the quarters.
-                    if m.phaseKind == .walk { advance(m); continue }
-                    if Date() >= until { crewRested(m) }
+                case .react(_, _, let seconds):
+                    // There: work at it for its span of station time, then back to the quarters.
+                    if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; continue }
+                    if clock >= m.phaseUntil { crewRested(m) }
                 case .carry(let crate, _, let to):
                     guard let id = m.current?.id, let job = cargo[id] else {
                         // The crate went away: put down whatever is on the arms, where it stands.
@@ -381,6 +381,13 @@ extension StationController {
                 default:
                     break
                 }
+                // There: the quiet commands move on from walking to being there, so truth says so too.
+                if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
+                    switch c.kind {
+                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave: advance(m)
+                    default: break
+                    }
+                }
                 switch m.state {
                 case .arriving:
                     m.state = .settled
@@ -410,7 +417,7 @@ extension StationController {
                     if !m.busy && m.wasBusy && !m.isSubagent {
                         let stretch = clock - m.busySince
                         if stretch > 20 * 60 { m.bathDue = clock + Double.random(in: 3...20); m.showering = true }
-                        else if stretch > 3 * 60 && Bool.random() { m.bathDue = clock + Double.random(in: 3...20); m.showering = false }
+                        else if stretch > 3 * 60 { m.shortStretches += 1; if m.shortStretches % 2 == 0 { m.bathDue = clock + Double.random(in: 3...20); m.showering = false } }
                     }
                     m.wasBusy = m.busy
                     if m.bathDue == 0, m.place == .lounge, !m.isSubagent {
@@ -430,7 +437,7 @@ extension StationController {
                             let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
                             // Somewhere to stand: a cell whose centre is clear, never one buried under crates.
                             let spots = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells + station.hangarCells)
-                                .filter { !station.obstacles.contains(Cell(x: $0.x * Station.fine, y: $0.y * Station.fine)) }
+                                .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }   // the whole cell clear
                             if let spot = spots.randomElement() {
                                 start(m, .chore(spot: spot))
                                 m.couch = nil
@@ -462,13 +469,20 @@ extension StationController {
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
                             }
                         }
-                        if (clock >= m.phaseUntil && settled) || m.busy {   // done, or work calls
+                        if clock >= m.phaseUntil && settled {   // done; work waits its turn
                             m.setStatic(false, frame: 0)
+                            m.fixture = nil
                             var back = restPlace(m)
                             if !m.busy, case .bath(_, let where_) = m.current?.kind { back = where_ }
                             send(m, to: back)
                         }
                     } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
+                        // One to a fixture: the shower or the bowl, whichever is free; both taken, wait.
+                        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
+                        let want = m.showering ? 1 : 0
+                        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { continue }
+                        m.showering = fixture == 1
+                        m.fixture = fixture
                         // Off to the bath for a moment, then back to wherever it was.
                         m.bathDue = 0
                         let back = m.place
@@ -630,6 +644,7 @@ extension StationController {
                 default: roll = sin(t * 5) * 0.07
                 }
             }
+            if clock < m.wonderUntil { tilt = -0.15; roll = 0; spin = 0 }   // a beat of wondering
             switch m.posture {
             case .none: m.tilt.position.y = 0
             case .crouch: tilt = max(tilt, 0.28); roll = 0; m.tilt.position.y = -0.12   // knees bent, not a bow

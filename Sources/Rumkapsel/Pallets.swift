@@ -75,7 +75,7 @@ extension StationController {
                 beginPallet(m, station: station, repo: repo, number: number)
             } else {
                 // A pallet already out, or someone ahead in the queue: wait here and fidget.
-                start(m, .waitPallet(station: station.name, repo: repo, words: "waiting for a pallet"))
+                handOver(m, .waitPallet(station: station.name, repo: repo, words: "waiting for a pallet"))
             }
 
         case .waitPallet(_, let repo):
@@ -101,7 +101,7 @@ extension StationController {
             world.truth.setPallet(station: station.name, state: .loaded)
             if p.wantsBack { beginUnload(m, station: station, p, back: true) }
             else if p.wantsPush { beginPush(m, station: station, p) }
-            else { start(m, .waitPallet(station: station.name, repo: repo, words: "waiting for the release to merge")) }
+            else { handOver(m, .waitPallet(station: station.name, repo: repo, words: "waiting for the release to merge")) }
 
         case .pushPallet(_, let repo):
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return }
@@ -192,7 +192,7 @@ extension StationController {
         // The release may already have gone one way or the other while the dispatcher walked.
         if let push = palletWishes.removeValue(forKey: station.name + "|" + repo) { p.wantsPush = push; p.wantsBack = !push }
         pallets[station.name] = p
-        start(m, .loadPallet(station: station.name, repo: repo), announce: true)
+        handOver(m, .loadPallet(station: station.name, repo: repo), announce: true)
         m.setTool(.telekinesis)
         m.path = []
         logEvent("\(repo): a pallet floats out in storage")
@@ -205,7 +205,7 @@ extension StationController {
         p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
         p.pushing = false
         m.setTool(nil)
-        start(m, .pushPallet(station: station.name, repo: p.repo), announce: true)
+        handOver(m, .pushPallet(station: station.name, repo: p.repo), announce: true)
         guard let leg = p.route.first else { arrive(m, station: station, p); return }
         let (want, _) = pushSpot(p, toward: leg)
         walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
@@ -293,7 +293,7 @@ extension StationController {
         p.wantsBack = back
         world.truth.setPallet(station: station.name, state: .unloading)
         p.nextAt = clock + 0.8
-        start(m, .unloadPallet(station: station.name, repo: p.repo, back: back), announce: true)
+        handOver(m, .unloadPallet(station: station.name, repo: p.repo, back: back), announce: true)
         m.setTool(.telekinesis)
     }
 
@@ -392,13 +392,13 @@ extension StationController {
         m.couch = nil; m.bed = nil
         m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
         switch p.state {
-        case .loading: start(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
-        case .loaded, .arriving: start(m, .waitPallet(station: station.name, repo: p.repo, words: "waiting for the release to merge"), announce: true)
+        case .loading: handOver(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
+        case .loaded, .arriving: handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "waiting for the release to merge"), announce: true)
         default:
             // Half way across: it goes no further, the crates come off where it stands.
             p.state = .unloading
             world.truth.setPallet(station: station.name, state: .unloading)
-            start(m, .unloadPallet(station: station.name, repo: p.repo, back: p.wantsBack), announce: true)
+            handOver(m, .unloadPallet(station: station.name, repo: p.repo, back: p.wantsBack), announce: true)
         }
         walk(m, to: p.cellUnder)
     }

@@ -202,7 +202,6 @@ final class ScenarioRunner {
     private let verbose: Bool
     private var index = -1
     private var sim: SimulatorController?
-    private var timer: Timer?
     private var step = 0
     private var nextPressAt = 0.0
     private var endAt = 0.0
@@ -217,42 +216,43 @@ final class ScenarioRunner {
 
     func run() {
         guard !scenarios.isEmpty else { say("no scenarios matched"); NSApp.terminate(nil); return }
-        say("running \(scenarios.count) scenario\(scenarios.count == 1 ? "" : "s") at 16x")
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.frame() }
-        }
+        say("running \(scenarios.count) scenario\(scenarios.count == 1 ? "" : "s"), station time stepped headless")
         begin()
+        while sim != nil { frame() }
+        finish()
     }
 
     // MARK: the run
+
+    /// Station seconds so far in this scenario; presses and the judgement are timed on it.
+    private var simTime = 0.0
 
     private func begin() {
         index += 1
         guard index < scenarios.count else { return finish() }
         // A station and an org of its own, so nothing carries over from the scenario before.
         sim = SimulatorController(frame: NSRect(x: 0, y: 0, width: 1060, height: 700))
-        sim?.model.press("16x")
         step = 0
+        simTime = 0
         startedAt = CACurrentMediaTime()
-        // A beat for the seed to settle before the first press, as `--simulate` gives it.
-        nextPressAt = startedAt + 1.0
+        // A beat for the seed to settle before the first press; waits are the old wall seconds at 16x.
+        nextPressAt = 16.0
         endAt = .greatestFiniteMagnitude
     }
 
     private func frame() {
         guard let sim else { return }
-        // Off screen nothing asks SceneKit for a frame, so the station would never tick.
-        _ = sim.station.view.snapshot()
-        let now = CACurrentMediaTime()
+        sim.station.stepSimulated(seconds: 1.0 / 30)
+        simTime += 1.0 / 30
         let s = scenarios[index]
-        if step < s.steps.count, now >= nextPressAt {
+        if step < s.steps.count, simTime >= nextPressAt {
             let it = s.steps[step]
             sim.model.press(it.press)
             step += 1
-            nextPressAt = now + it.wait
-            if step == s.steps.count { endAt = now + s.tail }
+            nextPressAt = simTime + it.wait * 16
+            if step == s.steps.count { endAt = simTime + s.tail * 16 }
         }
-        if now >= endAt { judge() }
+        if simTime >= endAt { judge() }
     }
 
     private func judge() {
@@ -301,8 +301,6 @@ final class ScenarioRunner {
     }
 
     private func finish() {
-        timer?.invalidate()
-        timer = nil
         let seconds = Date().timeIntervalSince(suiteStart)
         say(String(format: "%d of %d passed in %.0fs", scenarios.count - failed, scenarios.count, seconds))
         exit(failed == 0 ? 0 : 1)

@@ -236,7 +236,8 @@ final class World {
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if !closed { closedAt[key] = nil }
                 if merged, station.hasPad, hauledAt[key] == nil { events += haulMerged(station: station, room: room) }
-                let cleared = (merged && (!station.hasPad || (hauledAt[key].map { now.timeIntervalSince($0) > 60 } ?? false && !haulInFlight(key))))
+                // A merged office clears once its crate has been carried away, or when there was nothing to carry.
+                let cleared = (merged && (!station.hasPad || haulDone.contains(key)))
                     || (closed && now.timeIntervalSince(closedAt[key] ?? now) > World.closedWindow)
                 // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
                 // An office a peer left behind is held for a day so their return does not move it.
@@ -942,8 +943,8 @@ final class World {
     private func haulMerged(station: Station, room: Room) -> [WorldEvent] {
         let key = roomKey(station, room)
         guard station.hasPad, !haulingRoom(key) else { return [] }
-        hauledAt[key] = Date()   // even with nothing to carry, the office is now free to clear
-        guard hasPackage(key) else { return [] }
+        hauledAt[key] = Date()
+        guard hasPackage(key) else { haulDone.insert(key); return [] }   // nothing to carry: free to clear at once
         let repo = room.repo ?? "work"
         let number = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } } ?? crewRoomInfo[key]?.prNumber ?? 0
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
@@ -954,8 +955,10 @@ final class World {
     static let closedWindow: TimeInterval = 10 * 60
     func isClosed(_ roomKey: String) -> Bool { closedAt[roomKey] != nil }
 
-    /// The scene has taken a merged office's package off the floor.
-    func hauled(roomKey key: String) { hauledAt[key] = Date() }
+    /// Merged offices whose crate has been carried away, or that had nothing to carry: free to clear.
+    private var haulDone: Set<String> = []
+    /// The scene has set a merged office's crate down in storage.
+    func hauled(roomKey key: String) { hauledAt[key] = Date(); haulDone.insert(key) }
 
     /// A crate was set down in storage by hand: ours to keep until GitHub counts it.
     func landedInStorage(station: Station, repo: String, number: Int) {

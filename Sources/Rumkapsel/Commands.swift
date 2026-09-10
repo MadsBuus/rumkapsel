@@ -53,7 +53,8 @@ struct Command {
     let after: [Int]
     /// Must be true by: after this the reconciler stops waiting for the carry and lets the change
     /// appear where it stands.
-    let deadline: Date?
+    /// How long a carry may wait for a carrier, in station seconds, before it is let land where it stands.
+    let patience: Double?
     /// For the log and the speech bubble.
     let words: String
 
@@ -76,7 +77,7 @@ struct Command {
         /// A rocket on the pad, one stage at a time.
         case rocket(stage: RocketStage, station: String, repo: String)
         /// A teammate acting on something they just did, until the time runs out.
-        case react(activity: Activity, place: Place, until: Date)
+        case react(activity: Activity, place: Place, for: TimeInterval)
         /// The dispatcher's errand: clipboard in hand, to the storage console to order a pallet.
         case dispatch(station: String, repo: String, number: Int)
         /// Lifting a repository's crates off their slots and onto the pallet, one at a time.
@@ -128,6 +129,8 @@ struct Command {
         case stepOut
         /// Being there: resting, working, walking the rows.
         case settle
+        /// In the middle of something that lasts its whole time, a shower say: not now.
+        case act
         /// A shuttle coming down onto its slot: not now.
         case descend
         /// A shuttle setting its cargo out: not now.
@@ -144,7 +147,7 @@ struct Command {
         var interruptible: Bool {
             switch self {
             case .walk, .approach, .settle, .load: return true
-            case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .climb: return false
+            case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .climb, .act: return false
             }
         }
         /// Carrying can be redirected, but only to another destination for the crate on the arms.
@@ -152,6 +155,8 @@ struct Command {
     }
 
     var phases: [Phase] { Command.phases(of: kind) }
+    /// The kind without its payload: "carry", "bath", "goTo".
+    var kindName: String { String(String(describing: kind).split(separator: "(").first ?? "") }
 
     static func phases(of kind: Kind) -> [Phase] {
         switch kind {
@@ -160,6 +165,7 @@ struct Command {
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
         case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .settle]
+        case .bath: return [.walk, .act]   // a visit lasts its whole time
         case .rocket(let stage, _, _):
             switch stage {
             case .standBy, .steam: return [.settle]
@@ -195,11 +201,11 @@ struct Command {
     private static var nextId = 0
     static func nextCommandId() -> Int { nextId += 1; return nextId }
 
-    init(kind: Kind, words: String, deadline: Date? = nil, after: [Int] = []) {
+    init(kind: Kind, words: String, patience: Double? = nil, after: [Int] = []) {
         self.id = Command.nextCommandId()
         self.kind = kind
         self.words = words
-        self.deadline = deadline
+        self.patience = patience
         self.after = after
     }
 
@@ -208,7 +214,7 @@ struct Command {
     static func carry(_ crate: CrateRef, from: Spot, to: Spot, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
         Command(kind: .carry(crate: crate, from: from, to: to),
                 words: "carrying \(crate.words) to \(to.words)",
-                deadline: Date().addingTimeInterval(seconds), after: after)
+                patience: seconds, after: after)
     }
 
     static func deliverOffice(key: String, name: String) -> Command {
@@ -272,8 +278,8 @@ struct Command {
     }
 
     /// A teammate acting on what they just did: coding in their office, walking the halls, at the core.
-    static func react(_ activity: Activity, place: Place, until: Date, words: String) -> Command {
-        Command(kind: .react(activity: activity, place: place, until: until), words: words)
+    static func react(_ activity: Activity, place: Place, for seconds: TimeInterval, words: String) -> Command {
+        Command(kind: .react(activity: activity, place: place, for: seconds), words: words)
     }
 
     /// Where a minion should be when it has no job: asleep in the dorm, at work in its office, or just there.
