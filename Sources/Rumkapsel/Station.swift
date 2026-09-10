@@ -583,6 +583,8 @@ final class Station {
 final class Fleet {
     private(set) var stations: [String: Station] = [:]
     private(set) var repoColors: [String: Int] = [:]
+    /// The simulator runs on a made-up fleet: it must not read or write the saved layout.
+    var persists = true
 
     static let order = ["work", "private"]
 
@@ -653,11 +655,13 @@ final class Fleet {
     private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int] }
 
     func save() {
+        guard persists else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
         if let json = try? JSONEncoder().encode(s) { try? json.write(to: Fleet.saveURL) }
     }
 
     func load() {
+        guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors

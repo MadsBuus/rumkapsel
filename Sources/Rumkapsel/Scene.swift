@@ -512,7 +512,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         for w in work { w() }
-        tick(now: time)
+        if sim != nil { advanceSimulated(to: time) } else { tick(now: time) }
     }
 
     let view: StationView
@@ -610,6 +610,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var watcher: DirectoryWatcher?
     var viewSize = CGSize(width: 640, height: 440)
     let demo: Bool
+    /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
+    var sim: SimHooks?
     private var demoClock = 0.0
     private var demoMerged = false
     private var demoStaged = false
@@ -621,9 +623,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     static let subagentWindow: TimeInterval = 3 * 60
     static let scanWindow: TimeInterval = 14 * 24 * 3600   // how far back transcripts are read
 
-    init(frame: NSRect, demo: Bool) {
+    init(frame: NSRect, demo: Bool, simulated: Bool = false) {
         self.demo = demo
-        world = World(demo: demo)
+        if simulated { sim = SimHooks() }
+        world = World(demo: demo || simulated)
+        world.simulated = simulated
+        world.fleet.persists = !simulated
+        world.github.frozen = simulated
         view = StationView(frame: frame, options: [SCNView.Option.preferredRenderingAPI.rawValue: SCNRenderingAPI.metal.rawValue])
         hud = SKScene(size: frame.size)
         super.init()
@@ -704,10 +710,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         world.rocketBusy = { [weak self] key in (self?.pendingLaunch[key] ?? nil) != nil || (self?.loadedRockets[key] ?? nil) != nil }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
-        applySharing()
+        if !simulated { applySharing() }
         if demo {
             seedDemo()
-        } else {
+        } else if !simulated {
             rescan()
             let projects = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects").path
             watcher = DirectoryWatcher(path: projects) { [weak self] in self?.rescan() }
@@ -2009,6 +2015,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func start(_ m: Minion, _ c: Command, announce: Bool = false) {
+        sim?.onCommand?(c, m)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
         let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
         m.current = c
@@ -2068,6 +2075,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
     private func isNight(_ station: Station) -> Bool {
+        if let forced = sim?.night { return forced }
         let hour = Calendar.current.component(.hour, from: Date())
         return hour >= 22 || hour < 7
     }
@@ -2900,6 +2908,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.
     private func handle(_ event: WorldEvent) {
+        sim?.onEvent?(event)
         switch event {
         case .worldLoaded:
             break
@@ -3583,7 +3592,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         updateInfo()
         updateBubble()
-        if clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
+        if sim == nil, clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 
     /// Lightning from the monolith into each researching minion: a jagged bolt redrawn every frame.
@@ -3835,4 +3844,104 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
               let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
     }
+}
+
+// MARK: the simulator's way in
+
+/// What a simulator window plants in a live controller: the event and command taps, its own clock,
+/// and the two things no source drives. A normal window leaves `sim` nil and none of this runs.
+final class SimHooks {
+    var onEvent: ((WorldEvent) -> Void)?
+    var onCommand: ((Command, Minion) -> Void)?
+    /// 1, 4 or 16: how fast the tick's dt runs.
+    var timeScale = 1.0
+    var paused = false
+    /// Single ticks asked for while paused.
+    var steps = 0
+    /// Night forced on or off; nil leaves it to the clock.
+    var night: Bool?
+    var clock = 0.0
+    var lastReal = 0.0
+}
+
+/// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
+enum SimNudge { case bath, chore, lounge, night(Bool?) }
+
+extension StationController {
+    /// Small enough that a minion at sixteen times speed still walks rather than jumps.
+    private static var simStep: Double { 1.0 / 30.0 }
+
+    /// The simulator's clock: real time scaled, or one step at a time while paused.
+    func advanceSimulated(to time: TimeInterval) {
+        guard let sim else { return }
+        let real = sim.lastReal == 0 ? 0 : min(0.25, max(0, time - sim.lastReal))
+        sim.lastReal = time
+        var budget = sim.paused ? Double(sim.steps) * StationController.simStep : real * sim.timeScale
+        sim.steps = 0
+        while budget > 0 {
+            let step = min(StationController.simStep, budget)
+            budget -= step
+            sim.clock += step
+            tick(now: sim.clock)
+        }
+    }
+
+    /// A scan, as the transcript reader would have handed it over.
+    func simulate(scan: ScanResult) { enqueue { [self] in apply(scan) } }
+
+    /// GitHub answered: the same path a poll takes when something came back changed.
+    func simulateGitHub() { enqueue { [self] in onGitHubUpdate() } }
+
+    /// A snapshot off the network, and a peer going quiet.
+    func simulate(peer: PeerSnapshot) { enqueue { [self] in receivePeer(peer) } }
+    func simulatePeerLeft(_ name: String) { enqueue { [self] in dropPeer(name) } }
+
+    /// The right-click menu's kick, without the menu.
+    func simulateKick(roomKey key: String) {
+        enqueue { [self] in handle(world.kick(roomKey: key)); flushScene() }
+    }
+
+    func simulate(_ nudge: SimNudge) {
+        enqueue { [self] in
+            switch nudge {
+            case .bath:
+                // The bath only pulls on someone settled and not working: send them to the couch first.
+                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.busy }
+                guard let m = free.first(where: { $0.place == .lounge }) ?? free.first else {
+                    handle(.log("nobody free for the bath")); return
+                }
+                if m.place != .lounge { send(m, to: .lounge) }
+                m.bathDue = clock
+                m.showering = true
+            case .chore:
+                guard let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && !$0.isChore }) else {
+                    handle(.log("nobody free for a chore")); return
+                }
+                m.nextChoreAt = clock
+                m.bathDue = 0
+                if m.place != .lounge { send(m, to: .lounge) }
+            case .lounge:
+                for m in minions.values where !m.isCrew && !m.onJob {
+                    m.busy = false
+                    m.activity = .waiting
+                    send(m, to: .lounge)
+                }
+            case .night(let on):
+                sim?.night = on
+                for m in minions.values where !m.onJob { send(m, to: restPlace(m)) }
+                handle(.log(on == true ? "night falls" : on == false ? "morning" : "back on the clock"))
+            }
+        }
+    }
+
+    /// Every office on the floor right now, keyed "station|roomKey". Read on the scene's own turn,
+    /// because the floor plan changes there.
+    func simulatedOffices(_ done: @escaping ([String]) -> Void) {
+        enqueue { [self] in
+            let list = fleet.stations.values.flatMap { st in st.rooms.keys.map { st.name + "|" + $0 } }.sorted()
+            DispatchQueue.main.async { done(list) }
+        }
+    }
+
+    func simulateLog(_ text: String) { enqueue { [self] in logEvent(text) } }
 }

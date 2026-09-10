@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var notesWindow: NSWindow?
     var galleryWindow: NSWindow?
     var gallery: GalleryController?
+    var simulatorWindow: NSWindow?
+    var simulator: SimulatorController?
     let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel"
 
@@ -24,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         updater = SPUStandardUpdaterController(startingUpdater: inBundle && !headless, updaterDelegate: self, userDriverDelegate: nil)
         let args = CommandLine.arguments
         let demo = args.contains("--demo")
+        let simulatorOnly = args.contains("--simulator")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
         buildMenu()
@@ -44,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         window.level = floatOn ? .floating : .normal
         window.isReleasedWhenClosed = false
 
-        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo)
+        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly)
         window.contentView = controller.view
         controller.viewSize = controller.view.bounds.size
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: controller.view, queue: .main) { [weak self] _ in
@@ -58,8 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             window.setFrameOrigin(NSPoint(x: f.maxX - size.width - 24, y: f.minY + 24))
         }
         window.setFrameAutosaveName("RumkapselMain")
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(controller.view)
+        if !simulatorOnly {
+            window.makeKeyAndOrderFront(nil)
+            window.makeFirstResponder(controller.view)
+        }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.controller.refreshGitHub()
@@ -82,10 +87,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
+        if simulatorOnly { openSimulator() }
+        // A scripted run: presses the named buttons in order, two seconds apart.
+        if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
+            if !simulatorOnly { openSimulator() }
+            let names = args[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            for (k, n) in names.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4 + Double(k) * 2) { [weak self] in self?.simulator?.model.press(n) }
+            }
+        }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
             DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4)) { [self] in
-                if galleryMode { gallery?.snapshot(to: path) } else { controller.snapshot(to: path) }
+                if galleryMode { gallery?.snapshot(to: path) }
+                else if let sim = simulator {
+                    sim.snapshot(to: path)
+                    // The scripted run's whole story, so a check can read it rather than the picture.
+                    FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)
+                }
+                else { controller.snapshot(to: path) }
                 FileHandle.standardError.write("snapshot written\n".data(using: .utf8)!)
                 NSApp.terminate(nil)
             }
@@ -108,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
+        let sim = app.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
+        sim.keyEquivalentModifierMask = [.command, .shift]
         app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
         app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
@@ -150,6 +172,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         galleryWindow?.makeKeyAndOrderFront(nil)
         galleryWindow?.makeFirstResponder(gallery?.view)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// A station driven by hand: synthetic facts in, every event and command in the log.
+    @objc func openSimulator() {
+        if simulatorWindow == nil {
+            let size = NSSize(width: 1060, height: 700)
+            let sc = SimulatorController(frame: NSRect(origin: .zero, size: size))
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            w.title = "rumkapsel simulator"
+            w.contentView = sc.view
+            w.isReleasedWhenClosed = false
+            w.center()
+            simulator = sc
+            simulatorWindow = w
+        }
+        simulatorWindow?.makeKeyAndOrderFront(nil)
+        simulatorWindow?.makeFirstResponder(simulator?.station.view)
         NSApp.activate(ignoringOtherApps: true)
     }
 
