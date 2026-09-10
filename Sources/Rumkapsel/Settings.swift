@@ -59,7 +59,7 @@ struct SettingsView: View {
             .disabled(model.config.stationRule != "owner")
             .opacity(model.config.stationRule == "owner" ? 1 : 0.5)
             Divider()
-            Toggle("Show the crew station with teammates' pull requests", isOn: $model.config.showCrew)
+            Toggle("Show teammates' branches and pull requests on the work station", isOn: $model.config.showCrew)
             Text("Per-repository overrides live under Repositories.").font(.caption).foregroundStyle(.secondary)
         }
         .onChange(of: model.config) { _ in model.commit() }
@@ -81,7 +81,7 @@ struct SettingsView: View {
 
     private var repositories: some View {
         page {
-            Text("Where each repository's sessions go, whether teammates' work in it shows on the crew station, and whether it is shared on the local network. Nothing is shared unless ticked.")
+            Text("Where each repository's sessions go, whether teammates' work in it shows on the work station, and whether it is shared on the local network. Nothing is shared unless ticked.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
                 TableColumn("Repository") { Text($0.id) }

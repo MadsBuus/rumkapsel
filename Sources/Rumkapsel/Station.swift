@@ -78,7 +78,7 @@ struct Home {
 
 final class Room {
     let key: String
-    let name: String
+    var name: String
     let repo: String?
     let color: RGB
     var cells: [Cell]
@@ -407,7 +407,7 @@ final class Fleet {
     private(set) var stations: [String: Station] = [:]
     private(set) var repoColors: [String: Int] = [:]
 
-    static let order = ["work", "crew", "private"]
+    static let order = ["work", "private"]
 
     private static var saveURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -433,7 +433,6 @@ final class Fleet {
     func station(_ name: String) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
-        if name == "crew" { s.hasPad = false }
         s.ensureFixedRoom(.quarters)
         s.ensureFixedRoom(.lounge)
         stations[name] = s
@@ -442,8 +441,7 @@ final class Fleet {
 
     var ordered: [Station] { Fleet.order.compactMap { stations[$0] } }
 
-    /// Work and crew share a row with their corridors on one line (so they can be bridged);
-    /// private sits below work, keeping the whole fleet squarish rather than a long strip.
+    /// Work sits on the top row; private sits below work, keeping the whole fleet squarish rather than a long strip.
     func arrange() {
         var x = 0.0
         var rowMaxY = 0.0
@@ -460,18 +458,6 @@ final class Fleet {
             let ax = anchor.map { $0.offset.x + Double($0.bounds.min.x) } ?? 0
             p.offset = SIMD2(ax - Double(b.min.x) + 4, rowMaxY + 6 - Double(b.min.y))
         }
-    }
-
-    /// Corridor tiles bridging the work station's east arm to the crew station's west arm.
-    var bridgeCells: [SIMD2<Double>] {
-        guard let work = stations["work"], let crew = stations["crew"] else { return [] }
-        let from = work.offset.x + Double(work.spineHalfLength) + 1
-        let to = crew.offset.x - Double(crew.spineHalfLength) - 1
-        guard to >= from else { return [] }
-        var out: [SIMD2<Double>] = []
-        var x = from
-        while x <= to { out.append(SIMD2(x, 0)); out.append(SIMD2(x, 1)); x += 1 }
-        return out
     }
 
     var worldBounds: (min: SIMD2<Double>, max: SIMD2<Double>) {
@@ -496,9 +482,8 @@ final class Fleet {
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors
-        for (name, s) in saved.stations {
+        for (name, s) in saved.stations where name != "crew" {
             let station = Station(name: name)
-            if name == "crew" { station.hasPad = false }
             station.restore(s)
             station.ensureFixedRoom(.quarters)
             station.ensureFixedRoom(.lounge)

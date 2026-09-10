@@ -742,8 +742,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private func isDusty(_ room: Room) -> Bool {
-        !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") && Date().timeIntervalSince(room.lastActive) > 7 * 24 * 3600
+        !room.key.hasPrefix("kind:") && Date().timeIntervalSince(room.lastActive) > 7 * 24 * 3600
     }
+
+    /// An office GitHub knows about that nobody here has checked out: a teammate's branch or pull request.
+    private func isRemoteOnly(_ station: Station, _ room: Room) -> Bool {
+        room.worktree == nil && crewRoomInfo[roomKey(station, room)] != nil
+    }
+
+    /// The office key for a teammate's branch: the same key a local checkout of it would get.
+    private func crewKey(repo: String, branch: String) -> String { Home.from(repo: repo, branch: branch, cwd: "").key }
 
     /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
     private func localState(_ room: Room) -> (local: Bool, commits: Int) {
@@ -913,13 +921,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // commits add more, and pushing finishes it.
                 // Dark while it's just a conversation; lit as soon as a branch exists; power cut when left alone.
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
-                let powered = room.key.hasPrefix("kind:") || room.key.hasPrefix("crew:") || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
+                let powered = room.key.hasPrefix("kind:") || crewRoomInfo[key] != nil || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
                 roomPower[key] = powered
                 let failing = checksFailing(room)
                 let dusty = isDusty(room)
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
-                let full = room.key.hasPrefix("crew:") ? NSColor(room.color).darker(0.14) : NSColor(room.color)
+                let full = isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -956,16 +964,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
-        let bridge = fleet.bridgeCells
-        if let first = bridge.first, let last = bridge.last {
-            let plane = SCNPlane(width: last.x - first.x + 1, height: 2)
-            plane.firstMaterial = flat(Palette.corridor)
-            let n = SCNNode(geometry: plane)
-            n.eulerAngles.x = -.pi / 2
-            n.position = v3((first.x + last.x) / 2, 0, 0.5)
-            n.name = "bridge"
-            staticRoot.addChildNode(n)
-        }
         rebuildLabels()
         rebuildMarkers()
 
@@ -1123,14 +1121,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func rebuildMarkers() {
         markerRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values {
-            for room in station.rooms.values where room.branch != nil || room.key.hasPrefix("crew:") {
+            for room in station.rooms.values where room.branch != nil || crewBoxes[roomKey(station, room)] != nil {
                 let key = roomKey(station, room)
                 var count: Int
                 var ghosts = 0                 // uncommitted work: unfinished, translucent boxes
                 var pr: PullRequest?
                 var packaged = false           // a pull request bundles everything into one strapped package
                 var boxOpacity = 1.0
-                if room.key.hasPrefix("crew:") {
+                if room.branch == nil {
                     guard let cb = crewBoxes[key] else { continue }
                     count = min(16, max(1, cb.count))
                     pr = PullRequest(number: 0, title: "", state: cb.state, reviewDecision: "", isDraft: false, url: "")
@@ -1156,8 +1154,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 default: status = NSColor(rgb: (0.4, 0.82, 0.45))
                 }
                 var color = status.map { $0.mixed(with: base, 0.15) } ?? base
-                let failing = !room.key.hasPrefix("crew:") && checksFailing(room)
-                if !room.key.hasPrefix("crew:") && isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
+                let failing = checksFailing(room)
+                if isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
                 if packaged {
                     // One package for the whole pull request, sized by the work in it, strapped in the status colour.
@@ -1222,7 +1220,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     markerRoot.addChildNode(n)
                 }
                 // More commits than last time while the owner is in: it carries the new box in.
-                if let last = lastBoxCount[key], count > last, !room.key.hasPrefix("crew:"),
+                if let last = lastBoxCount[key], count > last, room.branch != nil,
                    let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && $0.errand == nil && $0.carried == nil }) {
                     let carry = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
                     carry.geometry!.firstMaterial = lit(color)
@@ -1978,6 +1976,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if m.place == .room(m.home.key) { m.place = .room(home.key) }
                 changed = true
             }
+            if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
             if station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
                 if !firstRun {
@@ -1996,7 +1995,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         for station in fleet.stations.values {
-            for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
+            for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let merged = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }.map { $0.state == "MERGED" || $0.state == "CLOSED" } ?? false
                 let cleared = merged && (hauledAt[roomKey(station, room)].map { now.timeIntervalSince($0) > 5 * 60 } ?? !station.hasPad)
@@ -2144,7 +2143,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for m in minions.values where !seen.contains(m.id) && m.state != .leaving && m.isSubagent {
             m.state = .leaving; m.path = []
         }
-        for station in fleet.stations.values where station.name != "crew" {
+        for station in fleet.stations.values {
             // A standing crew of two, always present, so the station is never empty.
             let workers = minions.values.filter { $0.station == station.name && !$0.isSubagent && !$0.isCrew && $0.state != .leaving }
             if workers.count < 2, !station.rooms.isEmpty {
@@ -2211,8 +2210,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func makeSnapshot() -> PeerSnapshot? {
         let cfg = ConfigStore.shared.current
         var out: [PeerSnapshot.Station] = []
-        for station in fleet.stations.values where station.name != "crew" {
-            let sharedRooms = station.rooms.values.filter { r in r.repo.map { cfg.shared(repo: $0) } ?? false }
+        for station in fleet.stations.values {
+            let sharedRooms = station.rooms.values.filter { r in r.worktree != nil && (r.repo.map { cfg.shared(repo: $0) } ?? false) }
             guard !sharedRooms.isEmpty else { continue }
             let fixed = station.rooms.values.filter { $0.key.hasPrefix("kind:") && $0.key != "kind:bots" }
             let rooms = (sharedRooms + fixed).map { r in
@@ -2444,7 +2443,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Lights flicker on when a dark office gets activity, and dim when it is left alone.
     private func updatePower() {
         for station in fleet.stations.values {
-            for room in station.rooms.values where !room.key.hasPrefix("kind:") && !room.key.hasPrefix("crew:") {
+            for room in station.rooms.values where !room.key.hasPrefix("kind:") && crewRoomInfo[roomKey(station, room)] == nil {
                 let key = roomKey(station, room)
                 let powered = Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
                     || minions.values.contains { $0.station == station.name && $0.place == .room(room.key) && $0.busy }
@@ -2476,14 +2475,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let me = github.myLogin() ?? ""
         let now = Date()
         let cfg = ConfigStore.shared.current
+        let station = fleet.station("work")
+        let sk = station.name + "|"
         guard cfg.showCrew else {
-            if fleet.stations["crew"] != nil {
-                for m in minions.values where m.isCrew { despawn(m) }
-                fleet.removeStation(named: "crew"); rebuildStatic()
-            }
+            guard !crewRoomInfo.isEmpty || minions.values.contains(where: \.isCrew) else { return }
+            for m in minions.values where m.isCrew { despawn(m) }
+            for room in Array(station.rooms.values) where isRemoteOnly(station, room) { archive(station: station, room: room, announce: false) }
+            crewRoomInfo = [:]; crewBoxes = [:]
+            rebuildStatic()
             return
         }
-        let station = fleet.station("crew")
         var changed = false
         var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
@@ -2494,32 +2495,34 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         guard !open.isEmpty || !feed.isEmpty else { return }
 
         // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
-        let liveKeys = Set(open.filter { !$0.pr.isBot }.map { "crew:\($0.repo)/\($0.pr.branch)" })
-        for room in Array(station.rooms.values) where room.key.hasPrefix("crew:") && !liveKeys.contains(room.key) {
-            let author = crewRoomInfo["crew|" + room.key]?.author ?? ""
+        let liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
+        for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
+            let author = crewRoomInfo[sk + room.key]?.author ?? ""
+            crewRoomInfo[sk + room.key] = nil; crewBoxes[sk + room.key] = nil
+            // A teammate's office that we also have checked out stays: the local scan decides its fate.
+            guard room.worktree == nil else { continue }
             archive(station: station, room: room, announce: crewLoaded)
             if crewLoaded, let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(240); send(m, to: .core) }
-            crewRoomInfo["crew|" + room.key] = nil
             changed = true
         }
         var pendingDeliveries: [(login: String, key: String)] = []
         for (repo, pr) in open where !pr.isBot {
-            let key = "crew:\(repo)/\(pr.branch)"
-            let issue = pr.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1) " } ?? ""
-            let words = pr.branch.split(separator: "/").last.map { $0.replacingOccurrences(of: "-", with: " ") } ?? pr.branch
-            let name = crewName(pr.author) + " · " + issue + String(words.prefix(22))
+            let home = Home.from(repo: repo, branch: pr.branch, cwd: "")
+            let key = home.key
+            let name = crewName(pr.author) + " · " + home.name
+            if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                if crewLoaded { undelivered.insert("crew|" + key); pendingDeliveries.append((pr.author, key)); logEvent("\(crewName(pr.author)) opened #\(pr.number) \(pr.title.prefix(40))") }
+                if crewLoaded { undelivered.insert(sk + key); pendingDeliveries.append((pr.author, key)); logEvent("\(crewName(pr.author)) opened #\(pr.number) \(pr.title.prefix(40))") }
             }
-            crewRoomInfo["crew|" + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
+            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
-            crewBoxes["crew|" + key] = (1 + pushes, "OPEN", NSColor(fleet.color(forRepo: repo)))
+            crewBoxes[sk + key] = (1 + pushes, "OPEN", NSColor(fleet.color(forRepo: repo)))
         }
         let botCount = open.filter(\.pr.isBot).count
         if botCount > 0 {
             if station.ensureRoom(key: "kind:bots", name: "bots", repo: nil, color: RGB(r: 0.36, g: 0.40, b: 0.50), lastActive: .distantFuture, shape: Station.rect(2, 2)) { changed = true }
-            crewBoxes["crew|kind:bots"] = (botCount, "NONE", NSColor(rgb: (0.55, 0.6, 0.7)))
+            crewBoxes[sk + "kind:bots"] = (botCount, "NONE", NSColor(rgb: (0.55, 0.6, 0.7)))
         }
 
         // One grey minion per teammate with an open PR or recent activity.
@@ -2527,10 +2530,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
         seenLogins.formUnion(feed.filter { !$0.e.isBot }.map(\.e.actor)); seenLogins.formUnion(logins)
         for login in logins where minions["crew:" + login] == nil {
-            let homeKey = open.first { $0.pr.author == login }.map { "crew:\($0.repo)/\($0.pr.branch)" } ?? "kind:quarters"
+            let homeKey = open.first { $0.pr.author == login }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) } ?? "kind:quarters"
             let home = Home(key: homeKey, name: login, repo: open.first { $0.pr.author == login }?.repo ?? "crew", issue: nil)
             let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
-            let m = Minion(id: "crew:" + login, station: "crew", home: home, cwd: "", toolCount: 0, isSubagent: false, start: start, crew: true)
+            let m = Minion(id: "crew:" + login, station: station.name, home: home, cwd: "", toolCount: 0, isSubagent: false, start: start, crew: true)
             m.title = crewName(login)
             m.activity = .sleeping
             minionRoot.addChildNode(m.node)
@@ -2539,14 +2542,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for m in minions.values where m.isCrew && m.id != "crew:bots" && !logins.contains(String(m.id.dropFirst(5))) { despawn(m) }
         if botCount > 0, minions["crew:bots"] == nil {
-            let m = Minion(id: "crew:bots", station: "crew", home: Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil), cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
+            let m = Minion(id: "crew:bots", station: station.name, home: Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil), cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
             m.title = "dependabot"; m.activity = .sleeping
             minionRoot.addChildNode(m.node); minions[m.id] = m
             send(m, to: .room("kind:bots"))
         }
         if changed { rebuildStatic(); for m in minions.values where m.errand == nil { send(m, to: m.place) } } else { rebuildMarkers() }
         for d in pendingDeliveries {
-            if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal("crew|" + d.key) }
+            if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal(sk + d.key) }
         }
 
         // What just happened: only fresh events move minions and make the log.
@@ -2556,7 +2559,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             crewSeen.insert(id)
             let fresh = now.timeIntervalSince(e.at) < StationController.crewRecent
             guard fresh else { continue }
-            let roomKey = e.branch.map { "crew:\(repo)/\($0)" } ?? ""
+            let roomKey = e.branch.map { crewKey(repo: repo, branch: $0) } ?? ""
             let hasRoom = station.rooms[roomKey] != nil
             guard let m = minions["crew:" + e.actor], m.errand == nil else { continue }
             let n = e.prNumber.map { "#\($0)" } ?? (e.branch ?? "")
@@ -3231,8 +3234,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func restoreView() {
         let d = UserDefaults.standard
         guard d.object(forKey: "view.zoom") != nil else { return }
-        if d.integer(forKey: "view.layout") != 20 {   // the fleet was laid out differently: forget the old pan
-            d.set(20, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
+        if d.integer(forKey: "view.layout") != 21 {   // the fleet was laid out differently: forget the old pan
+            d.set(21, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch

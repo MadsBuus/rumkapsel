@@ -27,7 +27,7 @@ Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 | one-finger drag up/down | tilt |
 | W / A / S / D | pan |
 | E / Q | zoom in / out |
-| 1 / 2 / 3 / 4 | focus a station (work, crew, private, then peers) |
+| 1 / 2 / 3 / 4 | focus a station (work, private, then peers) |
 | 0 | focus the whole fleet |
 | R | reset view |
 | M | music (off by default) |
