@@ -1373,6 +1373,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Grey boxes pile up in an office as commits land; the pull request state colours them.
     private func rebuildMarkers() {
+        // Storage and the deck follow GitHub, but through the minions: what should move is carried,
+        // and only the rest is redrawn. Decide that before the old crates are taken off the floor.
+        for station in fleet.stations.values where station.hasPad {
+            for (root, info) in repoRoots where info.station == station.name {
+                if let c = github.cargo(repoRoot: root) { reconcileYard(station: station, repo: info.repo, root: root, cargo: c) }
+            }
+        }
         markerRoot.childNodes.filter { $0.name != "haul" }.forEach { $0.removeFromParentNode() }   // a crate waiting for its carrier stays
         for station in fleet.stations.values {
             for room in station.rooms.values where room.branch != nil || crewBoxes[roomKey(station, room)] != nil || peerBoxes[roomKey(station, room)] != nil {
@@ -1487,12 +1494,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            // Storage and the test deck come from GitHub: merged pull requests not yet released, per repo.
-            if station.hasPad {
-                for (root, info) in repoRoots where info.station == station.name {
-                    if let c = github.cargo(repoRoot: root) { station.stored[info.repo] = c.storage; station.staged[info.repo] = c.deck }
-                }
-            }
             let purple = NSColor(rgb: (0.6, 0.4, 0.9))
             for area in ["storage", "deck"] where station.hasPad {
                 for slot in yardLayout(station: station, area: area) {
@@ -1525,7 +1526,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot] else { continue }
             if !launch.pr.isProduction {
-                if let st = fleet.stations[info.station] { stageCargo(station: st, repo: info.repo) }
+                if ConfigStore.shared.current.project == nil, let st = fleet.stations[info.station] { stageCargo(station: st, repo: info.repo) }
                 ringBell(seed: launch.pr.number)
                 continue
             }
@@ -2709,6 +2710,25 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return out
     }
 
+    private var stagingInFlight: [String: Int] = [:]   // "station|repo" -> crates on their way from storage to the deck
+
+    /// Brings the yard in line with GitHub. Crates the board says went to staging are carried across
+    /// from storage; counts snap only for what cannot be carried, and never for a deck that is about to
+    /// be loaded into a rocket.
+    private func reconcileYard(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) {
+        let k = station.name + "|" + repo
+        guard (stagingInFlight[k] ?? 0) == 0 else { return }   // let the carriers land first
+        let shownStorage = station.stored[repo] ?? 0, shownDeck = station.staged[repo] ?? 0
+        let toDeck = min(c.deck - shownDeck, shownStorage)
+        if toDeck > 0, station.hasPad, !station.deckCells.isEmpty, !ConfigStore.shared.current.stagingBranch.isEmpty {
+            stageCargo(station: station, repo: repo, count: toDeck)
+            return
+        }
+        let launching = pendingLaunch[k] != nil || loadedRockets[k] != nil || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
+        station.stored[repo] = c.storage
+        if !(launching && c.deck < shownDeck) { station.staged[repo] = c.deck }
+    }
+
     /// Merged: the office's package is carried to the storage bay in one trip.
     private func haulMergedBoxes(station: Station, room: Room) {
         let key = roomKey(station, room)
@@ -2745,11 +2765,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     /// A staging release merged: the repo's storage boxes are carried to the test deck.
-    private func stageCargo(station: Station, repo: String) {
-        let boxes = markerRoot.childNodes.filter { $0.name == "storage:\(station.name)|\(repo)" }
+    private func stageCargo(station: Station, repo: String, count: Int? = nil) {
+        var boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("storage:\(station.name)|\(repo)|") }
+        if let count { boxes = Array(boxes.prefix(count)) }
         guard !boxes.isEmpty else { return }
         logEvent("\(repo): deployed to staging, moving to the test deck")
         let already = station.staged[repo] ?? 0
+        let k = station.name + "|" + repo
+        stagingInFlight[k, default: 0] += boxes.count
         for (i, b) in boxes.enumerated() {
             // Its number rides in the node name; its slot is where the deck layout will put crate `already + i`.
             let number = Int(b.name?.split(separator: "|").last ?? "") ?? 0
@@ -2758,6 +2781,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             b.name = "haul"
             addHaul(station: station, box: b, from: fromCell, to: dest.cell, drop: dest.pos) { [weak self] in
                 guard let self else { return }
+                stagingInFlight[k] = max(0, (stagingInFlight[k] ?? 1) - 1)
                 station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
                 station.staged[repo, default: 0] += 1
                 b.removeFromParentNode()
@@ -3034,8 +3058,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             guard let info = repoRoots.values.first(where: { $0.repo == item.repo }), let station = fleet.stations[info.station] else { continue }
             let label = "#\(item.number) \(item.title.prefix(36))"
             switch item.status {
-            case st.deck where from == st.storage || from == nil:
-                if !staged.contains(item.repo) { staged.insert(item.repo); stageCargo(station: station, repo: item.repo) }
+            case st.deck where from == st.storage:
+                staged.insert(item.repo)
+                logEvent("\(label): on staging, to the deck")
             case st.cleared:
                 logEvent("\(label): passed QA, ready to ship")
                 if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
