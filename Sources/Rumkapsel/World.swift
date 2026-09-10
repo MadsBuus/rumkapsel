@@ -662,40 +662,73 @@ final class World {
         let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let rowList = crateRows.sorted()
         let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
+        func row(_ group: Int) -> [Cell] { area == "deck" && rowList.count > 1 ? (group == 0 ? testedRow : untestedRow) : sorted }
         let cargoByRepo = Dictionary(repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> (String, GitHubResolver.Cargo)? in
             github.cargo(repoRoot: root).map { (info.repo, $0) } }, uniquingKeysWith: { a, _ in a })
-        var nextSlot: [Int: Int] = [:]
+
+        // Every crate keeps the slot it was given until it leaves: a column of its repository's, and a rank
+        // in that column. Ranks re-settle when a crate below is taken out, so a stack never floats. New
+        // crates take the lowest free rank in the repository's columns, or the lowest free column.
+        let yardKey = "\(station.name)|\(area)"
+        var slots = yardSlots[yardKey] ?? [:]
+        var present: Set<String> = []
         var out: [YardSlot] = []
+        func owner(group: Int, column: Int) -> String? {
+            slots.first { $0.key.hasPrefix("\(group)|") && $0.value.column == column }?.key.split(separator: "|")[1].split(separator: "#").first.map(String.init)
+        }
         for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
             var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
             if area == "storage" { numbers += truth.freshLanded(station: station.name, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
             // A crate on the pallet stands on the pallet: the rows are not to draw it again.
             numbers = numbers.filter { !truth.isOnPallet(station: station.name, repo: repo, number: $0) }
             if let extra, extra.repo == repo, !numbers.contains(extra.number) { numbers.append(extra.number) }
-            var placed: [Int: Int] = [:]
-            let starts: [Int: Int] = [0: nextSlot[0] ?? 0, 1: nextSlot[1] ?? 0]
             for k in 0..<min(n, 48) {
                 let number = k < numbers.count ? numbers[k] : 0
                 var cleared = area == "deck" && (cargoByRepo[repo]?.clearedNumbers.contains(number) ?? false)
                 if cleared, number != 0, number == stillUntested { cleared = false }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
-                let row = area == "deck" && rowList.count > 1 ? (cleared ? testedRow : untestedRow) : sorted
-                let j = placed[group, default: 0]
-                let slot = starts[group]! + j / 3
-                let cap = row.count * 2
-                // One column is one square of floor; a column that has come round again stacks on top of itself.
-                let column = slot % cap, level = j % 3 + 3 * (slot / cap)
-                let cell = row[column / 2], side = Double(column % 2) * 0.5 - 0.25
-                let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: repo, number: number, index: k)
-                let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
+                let key = "\(group)|\(repo)#\(number > 0 ? "\(number)" : "i\(k)")"
+                present.insert(key)
+                if slots[key] == nil {
+                    let cap = row(group).count * 2
+                    let mine = Set(slots.filter { $0.key.hasPrefix("\(group)|\(repo)#") }.map { $0.value.column }).sorted()
+                    var chosen: (column: Int, order: Int)?
+                    for column in mine {   // the repository's own columns first, lowest free rank
+                        let filled = slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == column }.count
+                        if filled < 3 { chosen = (column, filled); break }
+                    }
+                    if chosen == nil {   // a fresh column, the lowest one nobody holds
+                        if let free = (0..<cap).first(where: { owner(group: group, column: $0) == nil }) { chosen = (free, 0) }
+                        else if let column = mine.first { chosen = (column, slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == column }.count) }
+                        else { chosen = (0, 0) }
+                    }
+                    slots[key] = (column: chosen!.column, order: chosen!.order)
+                }
                 out.append(YardSlot(repo: repo, number: number, index: k, cleared: cleared, group: group,
-                                    column: column, level: level, cell: cell, pos: pos, yaw: yaw))
-                placed[group] = j + 1
+                                    column: slots[key]!.column, level: 0, cell: row(group)[slots[key]!.column / 2], pos: .zero, yaw: 0))
             }
-            for (g, count) in placed where count > 0 { nextSlot[g] = starts[g]! + (count + 2) / 3 }
         }
-        return out
+        for key in slots.keys where !present.contains(key) { slots[key] = nil }   // gone: the slot is free again
+        // Levels: rank within the column by the order each crate was given, so a stack settles from the floor.
+        var ranked: [YardSlot] = []
+        for slot in out {
+            let key = "\(slot.group)|\(slot.repo)#\(slot.number > 0 ? "\(slot.number)" : "i\(slot.index)")"
+            let mine = slots[key]!
+            let level = slots.filter { $0.key.hasPrefix("\(slot.group)|") && $0.value.column == mine.column && $0.value.order < mine.order }.count
+            let cellsOfRow = row(slot.group)
+            let cell = cellsOfRow[mine.column / 2], side = Double(mine.column % 2) * 0.5 - 0.25
+            let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: slot.repo, number: slot.number, index: slot.index)
+            let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
+            ranked.append(YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, group: slot.group,
+                                   column: mine.column, level: level, cell: cell, pos: pos, yaw: yaw))
+        }
+        yardSlots[yardKey] = slots
+        return ranked
     }
+
+    /// Each crate's slot in a yard, by "station|area" then "group|repo#number": its column and the order
+    /// it was given, from which its level is ranked.
+    private var yardSlots: [String: [String: (column: Int, order: Int)]] = [:]
 
     /// A little disorder in storage, seeded per crate so a crate keeps its own nudge and turn wherever
     /// it lands in the rows. Unnumbered crates fall back to their place in the pile.

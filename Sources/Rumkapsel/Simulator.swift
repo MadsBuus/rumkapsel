@@ -469,7 +469,7 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Kick office", "Kick this office", office == nil ? "no office picked" : nil),
             ]),
             Group(id: "Board", note: nil, buttons: [
-                button("Board: Move", "Move \(office.map { "\($0.repo)#\($0.number)" } ?? "the issue") to the column above",
+                button("Board: Move", "Move \(office.map { "\($0.repo)#\($0.number)" } ?? "the issue") to \(column)",
                        office.flatMap(boardItem) == nil ? "the target has no issue on the board"
                         : (office.flatMap(boardItem)?.status == column ? "already in \(column)" : nil)),
             ]),

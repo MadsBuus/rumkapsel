@@ -37,7 +37,7 @@ final class Minion {
     private(set) var hammerPivot: SCNNode?
     /// The flashlight's grip, swept about to play its cone over the work.
     private(set) var lightPivot: SCNNode?
-    enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis }
+    enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis, hands }
     /// The wand's tip and the little light in it, lit only while a crate is in the air.
     private(set) var wandTip: SCNNode?
     private(set) var wandLight: SCNNode?
@@ -99,7 +99,10 @@ final class Minion {
             p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
             p.constraints = [SCNBillboardConstraint()]
             p.position = v3(0, bodyHeight * 0.3, 0)
+            // Drawn last and without depth, so the body's own faces never hide it.
             p.renderingOrder = 20
+            p.geometry!.firstMaterial?.readsFromDepthBuffer = false
+            p.geometry!.firstMaterial?.writesToDepthBuffer = false
             node.addChildNode(p)
             staticNode = p
         }
@@ -245,6 +248,14 @@ final class Minion {
             pivot.addChildNode(handle)
             n.addChildNode(pivot)
             hammerPivot = pivot
+        case .hands:
+            // Both hands out at chest height: what you put on a heavy thing to shove it.
+            for side in [-1.0, 1.0] {
+                let hand = SCNNode(geometry: SCNBox(width: 0.06, height: 0.06, length: 0.1, chamferRadius: 0))
+                hand.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.74, 0.8)))
+                hand.position = v3(side * w * 0.28, h * 0.4, d / 2 + 0.07)
+                n.addChildNode(hand)
+            }
         case .clipboard:
             // A flat board held at the side, paper clipped to it.
             let board = SCNNode(geometry: SCNBox(width: 0.15, height: 0.19, length: 0.012, chamferRadius: 0))

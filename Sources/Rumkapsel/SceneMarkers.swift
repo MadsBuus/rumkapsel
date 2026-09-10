@@ -31,6 +31,16 @@ extension StationController {
             guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
             mark(st.name, n, offset: st.offset)
         }
+        // A hover pallet is a heavy thing standing on the floor: walks go round it, never through it.
+        for (name, p) in pallets {
+            let f = Double(Station.fine)
+            let hx = Props.palletWidth / 2, hy = Props.palletDepth / 2
+            for sx in Int(((p.spot.x - hx) * f).rounded())...Int(((p.spot.x + hx) * f).rounded()) {
+                for sy in Int(((p.spot.y - hy) * f).rounded())...Int(((p.spot.y + hy) * f).rounded()) {
+                    blocked[name, default: []].insert(Cell(x: sx, y: sy))
+                }
+            }
+        }
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 
@@ -415,7 +425,7 @@ extension StationController {
     func updateBeams() {
         var live = Set<String>()
         for m in minions.values where m.place == .core && m.path.isEmpty && m.state == .settled && m.opacity > 0.5 && m.activity != .sleeping {
-            guard let station = fleet.stations[m.station] else { continue }
+            guard let station = fleet.stations[m.station], station.cells(of: .core).contains(m.cell) else { continue }   // at the monolith, not out on a chore
             live.insert(m.id)
             let mp = station.monolithPosition
             let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
