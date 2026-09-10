@@ -536,7 +536,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var localSignature = ""
     private var crewRoomInfo: [String: CrewRoomInfo] = [:]
     private var crewSeen: Set<String> = []
-    private var crewLoaded = false
+    /// Repositories GitHub has answered for at least once. A repository's first answer is taken quietly:
+    /// nothing in it is new, whatever it holds. Only changes after that are events.
+    private var readyRepos: Set<String> = []
+    private var pendingCrewDeliveries: [(login: String, key: String)] = []
+    private func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
     private var crewBusyUntil: [String: Date] = [:]
     private var hangarAnchors: [String: SCNNode] = [:]
     private var lastBusy: [String: Double] = [:]
@@ -2391,7 +2395,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
                 // An office a peer left behind is held for a day so their return does not move it.
                 let key = roomKey(station, room)
-                let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && crewLoaded
+                let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > StationController.holdWindow } ?? true)
                 if gone || cleared || orphan {
@@ -2636,7 +2640,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func receivePeer(_ snap: PeerSnapshot) {
         let now = Date()
         let isNewPeer = peerFirstSeen[snap.name] == nil
-        if isNewPeer { peerFirstSeen[snap.name] = now; logEvent("\(snap.name) is in range") }
+        if isNewPeer { peerFirstSeen[snap.name] = now; handle(.peerArrived(snap.name)) }
         let bulk = isNewPeer || now.timeIntervalSince(peerFirstSeen[snap.name]!) < 15
         peerSnapshots[snap.name] = (snap, now)
         let station = fleet.station("work")
@@ -2722,7 +2726,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             peerOffices[key]?[name] = nil
             if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil; held[key] = Date() }
         }
-        logEvent("\(name) is out of range")
+        handle(.peerLeft(name))
         rebuildMarkers()
     }
 
@@ -3028,11 +3032,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // Its crate goes to storage on someone's arms first; the office clears once that is done.
             if hauledAt[key] == nil, station.hasPad {
                 haulMergedBoxes(station: station, room: room)
-                if crewLoaded, let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(240); send(m, to: .core) }
+                if isReady(room.repo) { handle(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             }
             guard !station.hasPad || !hauls.contains(where: { $0.roomKey == key }) else { continue }
             crewRoomInfo[key] = nil; crewBoxes[key] = nil
-            archive(station: station, room: room, announce: crewLoaded, reason: "pull request closed")
+            archive(station: station, room: room, announce: isReady(room.repo), reason: "pull request closed")
             changed = true
         }
         var pendingDeliveries: [(login: String, key: String)] = []
@@ -3043,7 +3047,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                if crewLoaded { undelivered.insert(sk + key); pendingDeliveries.append((pr.author, key)); logEvent("\(crewName(pr.author)) opened #\(pr.number) \(pr.title.prefix(40))") }
+                if isReady(repo) { handle(.pullRequestOpened(repo: repo, number: pr.number, author: pr.author, roomKey: key)) }
             }
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
@@ -3055,7 +3059,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                if crewLoaded { undelivered.insert(sk + key); pendingDeliveries.append((login, key)); logEvent("\(crewName(login)) started #\(it.number) \(it.title.prefix(40))") }
+                if isReady(repo) { handle(.issueStarted(repo: repo, number: it.number, author: login, roomKey: key)) }
             }
             let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: "gh-\(it.number)", prNumber: prNumber, title: it.title, author: login, url: it.url, state: "OPEN", last: now)
@@ -3091,9 +3095,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             send(m, to: .room("kind:bots"))
         }
         if changed { rebuildStatic(); resettle(station) } else { rebuildMarkers() }
-        for d in pendingDeliveries {
+        for d in pendingCrewDeliveries {
             if let m = minions["crew:" + d.login], m.errand == nil { startDelivery(m, roomKey: d.key) } else { reveal(sk + d.key) }
         }
+        pendingCrewDeliveries = []
 
         // What just happened: only fresh events move minions and make the log.
         for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where !e.isBot {
@@ -3110,7 +3115,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "push" where hasRoom:
                 m.activity = .coding("x"); m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(20 * 60)
                 if m.place != .room(roomKey) { send(m, to: .room(roomKey)) }
-                if crewLoaded { logEvent("\(crewName(e.actor)) pushed to \(n)") }
+                if isReady(repo) { logEvent("\(crewName(e.actor)) pushed to \(n)") }
             case "review" where hasRoom:
                 m.activity = .exploring; m.busy = true; crewBusyUntil[m.id] = now.addingTimeInterval(10 * 60)
                 send(m, to: .room(roomKey))
@@ -3129,50 +3134,83 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             default: break
             }
         }
-        // Only count as loaded once every work repo has answered, so existing PRs never look new.
-        if repoRoots.filter({ $0.value.station == "work" }).allSatisfy({ github.teamOpenPRs(repoRoot: $0.key) != nil }) { crewLoaded = true }
+        // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
+        for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
     }
 
     /// Status moves on the board are the station's cues: a crate to the deck, a tick from QA, a launch.
     private func handleProjectMoves() {
         let st = ConfigStore.shared.current.statuses
-        var staged: Set<String> = []
         for (item, from) in github.takeProjectMoves() {
-            guard let info = repoRoots.values.first(where: { $0.repo == item.repo }), let station = fleet.stations[info.station] else { continue }
+            handle(.boardMoved(item: item, from: from, to: st.stage(of: item.status)))
+        }
+    }
+
+    // MARK: events
+
+    /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.
+    private func handle(_ event: WorldEvent) {
+        switch event {
+        case .boardMoved(let item, let from, let to):
+            guard let info = repoRoots.values.first(where: { $0.repo == item.repo }), let station = fleet.stations[info.station] else { return }
+            let st = ConfigStore.shared.current.statuses
             let label = "#\(item.number) \(item.title.prefix(36))"
-            switch item.status {
-            case st.deck where from == st.storage:
-                staged.insert(item.repo)
-                logEvent("\(label): on staging, to the deck")
-            case st.cleared:
+            switch to {
+            case .deck where from == st.storage:
+                logEvent("\(label): on staging, to the deck")   // the yard reconciliation carries it across
+                rebuildMarkers()
+            case .cleared:
                 logEvent("\(label): passed QA, ready to ship")
-                if let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(item.repo)|\(item.number)" }) {
-                    // Someone carries it across the aisle to the tested row; the layout redraws it there once set down.
-                    let slot = yardLayout(station: station, area: "deck").first { $0.repo == item.repo && $0.number == item.number }
-                    let dest = slot?.cell ?? station.deckCells[0]
-                    let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0, station.offset.y + Double(dest.y))
-                    let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
-                    let id = "\(item.repo)|\(item.number)"
-                    haulingCrates.insert(id)
-                    crate.name = "haul"
-                    addHaul(station: station, box: crate, from: fromCell, to: dest, drop: drop) { [weak self] in
-                        guard let self else { return }
-                        haulingCrates.remove(id)
-                        crate.removeFromParentNode()
-                        drone.ping(seed: item.number)
-                        rebuildMarkers()
-                    }
-                }
-            case st.shipped where from != nil:
+                carryAcrossDeck(station: station, repo: item.repo, number: item.number)
+            case .shipped where from != nil:
                 logEvent("\(label): shipped")
-            case st.storage where from == st.development:
+            case .storage where from == st.development:
                 logEvent("\(label): merged, ready for staging")
-            case st.development where from != nil && from != st.development:
+            case .development where from != nil && from != st.development:
                 logEvent("\(label): in development")
             default: break
             }
+        case .pullRequestOpened(let repo, let number, let author, let roomKey):
+            let key = "work|" + roomKey
+            undelivered.insert(key)
+            logEvent("\(crewName(author)) opened #\(number) \(repo)")
+            deliverCrewOffice(login: author, roomKey: roomKey)
+        case .issueStarted(let repo, let number, let author, let roomKey):
+            let key = "work|" + roomKey
+            undelivered.insert(key)
+            logEvent("\(crewName(author)) started #\(number) \(repo)")
+            deliverCrewOffice(login: author, roomKey: roomKey)
+        case .pullRequestClosed(_, let author, _):
+            if let m = minions["crew:" + author] { m.activity = .shipping; m.busy = true; crewBusyUntil[m.id] = Date().addingTimeInterval(240); send(m, to: .core) }
+        case .peerArrived(let name):
+            logEvent("\(name) is in range")
+        case .peerLeft(let name):
+            logEvent("\(name) is out of range")
         }
-        if !staged.isEmpty { rebuildMarkers() }
+    }
+
+    /// A tested crate crosses the aisle to the tested row on someone's arms.
+    private func carryAcrossDeck(station: Station, repo: String, number: Int) {
+        guard let crate = markerRoot.childNodes.first(where: { $0.name == "deck:\(station.name)|\(repo)|\(number)" }) else { return }
+        let slot = yardLayout(station: station, area: "deck").first { $0.repo == repo && $0.number == number }
+        let dest = slot?.cell ?? station.deckCells[0]
+        let drop = slot?.pos ?? SIMD3(station.offset.x + Double(dest.x), 0, station.offset.y + Double(dest.y))
+        let fromCell = Cell(x: Int((Double(crate.position.x) - station.offset.x).rounded()), y: Int((Double(crate.position.z) - station.offset.y).rounded()))
+        let id = "\(repo)|\(number)"
+        haulingCrates.insert(id)
+        crate.name = "haul"
+        addHaul(station: station, box: crate, from: fromCell, to: dest, drop: drop) { [weak self] in
+            guard let self else { return }
+            haulingCrates.remove(id)
+            crate.removeFromParentNode()
+            drone.ping(seed: number)
+            rebuildMarkers()
+        }
+    }
+
+    /// A new teammate office: their minion fetches it from the bay, or it simply appears.
+    private func deliverCrewOffice(login: String, roomKey: String) {
+        pendingCrewDeliveries.append((login, roomKey))
     }
 
     /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
@@ -3862,7 +3900,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for m in Array(minions.values) { despawn(m) }
             fleet.removeAllStations()
             repoRoots = [:]
-            crewLoaded = false
+            readyRepos = []
             didLoadLayout = false
             rebuildStatic()
             rescan()
