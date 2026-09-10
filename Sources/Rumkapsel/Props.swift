@@ -103,10 +103,11 @@ enum Props {
         n.addChildNode(nose)
         // Portholes on the upper stage.
         for k in 0..<3 {
-            let port = SCNNode(geometry: SCNBox(width: 2 * (r * 0.18), height: 2 * (r * 0.18), length: 2 * (r * 0.18), chamferRadius: 0))
+            let port = SCNNode(geometry: SCNBox(width: r * 0.36, height: r * 0.36, length: 0.02, chamferRadius: 0))   // a flat pane, not a cube
             port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
             let a = Double(k) * 2 * .pi / 3
             port.position = v3(sin(a) * r * 0.86, 0.12 + h * 0.75, cos(a) * r * 0.86)
+            port.eulerAngles.y = a
             n.addChildNode(port)
         }
         // Four swept fins and an engine nozzle.

@@ -972,9 +972,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
-                let table = SCNNode(geometry: faceted(SCNCylinder(radius: 0.3, height: 0.28), 4))
+                // A low slab on four legs: a table, not a crate.
+                let table = SCNNode(geometry: SCNBox(width: 0.7, height: 0.05, length: 0.5, chamferRadius: 0))
                 table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3)))
-                table.position = v3(station.offset.x + cx, 0.14, station.offset.y + cy)
+                table.position = v3(station.offset.x + cx, 0.3, station.offset.y + cy)
+                for (lx, lz) in [(-0.3, -0.2), (0.3, -0.2), (-0.3, 0.2), (0.3, 0.2)] {
+                    let leg = SCNNode(geometry: SCNBox(width: 0.04, height: 0.28, length: 0.04, chamferRadius: 0))
+                    leg.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.32, 0.24)))
+                    leg.position = v3(lx, -0.16, lz)
+                    table.addChildNode(leg)
+                }
                 table.name = "room:" + roomKey(station, lounge)
                 staticRoot.addChildNode(table)
                 let lxs = lounge.cells.map(\.x)
@@ -1398,6 +1405,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         for m in minions.values {
             for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
+        }
+        // Furniture and fixtures: anything standing on a room's floor that is not a tile.
+        for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
+            let key = String(n.name!.dropFirst(5))
+            guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
+            mark(st.name, n, offset: st.offset)
         }
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
@@ -3684,7 +3697,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     // QA on the test deck: peering down at the staged boxes, a green tick popping up now and then.
                     tilt = 0.28 + sin(t * 1.2) * 0.08; spin = sin(t * 0.6) * 0.5
                     if Int(t * 2) % 9 == 0 && Int((t - dt) * 2) % 9 != 0 {
-                        let tick = SCNNode(geometry: SCNBox(width: 2 * (0.07), height: 2 * (0.07), length: 2 * (0.07), chamferRadius: 0))
+                        let tick = SCNNode(geometry: SCNBox(width: 0.16, height: 0.02, length: 0.16, chamferRadius: 0))
+                        tick.eulerAngles = SCNVector3(Double.pi / 2, 0, Double.pi / 4)
                         tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
                         tick.position = v3(m.node.position.x, m.headHeight + 0.2, m.node.position.z)
                         propRoot.addChildNode(tick)
