@@ -80,8 +80,11 @@ final class StationView: SCNView {
         tracking = t
     }
 
+    /// The named thing under the point: a prop's parts are unnamed, the prop itself carries the name.
     private func node(at p: NSPoint) -> SCNNode? {
-        hitTest(p, options: [.boundingBoxOnly: true, .firstFoundOnly: true]).first?.node
+        var n = hitTest(p, options: [.boundingBoxOnly: true, .firstFoundOnly: true]).first?.node
+        while let here = n, here.name == nil, let up = here.parent { n = up }
+        return n
     }
 
     override func mouseMoved(with event: NSEvent) {
