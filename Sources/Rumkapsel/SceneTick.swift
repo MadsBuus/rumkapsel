@@ -141,10 +141,11 @@ extension StationController {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
         if dist > 0.05 { m.facing = atan2(to.x, to.y) }
-        // Far off: walked, round whatever stands in the way. Only the last step is a shuffle.
-        if dist > 0.9 {
-            if m.path.isEmpty, let st = fleet.stations[m.station] { m.path = route(m, to: standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))) }
-            return false
+        // Far off: walked to the cell beside it, round whatever stands in the way. From there the last
+        // bit is a shuffle, and a cell it already stands on is never walked to again.
+        if dist > 0.9, let st = fleet.stations[m.station] {
+            let stand = standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+            if m.path.isEmpty, m.cell != stand { m.path = route(m, to: stand); return false }
         }
         guard m.path.isEmpty else { return false }
         guard dist < Hands.near || dist > Hands.far else { return true }
@@ -160,7 +161,11 @@ extension StationController {
     /// the clearest centre. A crate row is never walked into; the aisle beside it is.
     func standCell(_ st: Station, near cell: Cell) -> Cell {
         func blocked(_ c: Cell) -> Int {
-            (-1...1).flatMap { dx in (-1...1).map { dy in st.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) ? 1 : 0 } }.reduce(0, +)
+            var n = 0
+            for dx in -1...1 {
+                for dy in -1...1 where st.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) { n += 1 }
+            }
+            return n
         }
         if blocked(cell) == 0 { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }

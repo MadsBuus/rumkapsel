@@ -280,7 +280,7 @@ final class GitHubResolver {
         if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
-    private var stateChanges: [(branch: String, pr: PullRequest)] = []
+    private var stateChanges: [(branch: String, pr: PullRequest, previous: PullRequest?)] = []
     private var feeds: [String: ([FeedEvent], Date)] = [:]
     private var me: String?
 
@@ -306,7 +306,7 @@ final class GitHubResolver {
     }
 
     /// Task pull requests whose state changed since the last poll, each returned once.
-    func takeStateChanges() -> [(branch: String, pr: PullRequest)] {
+    func takeStateChanges() -> [(branch: String, pr: PullRequest, previous: PullRequest?)] {
         lock.lock(); defer { lock.unlock() }
         let out = stateChanges; stateChanges = []; return out
     }
@@ -645,7 +645,7 @@ final class GitHubResolver {
                 return
             }
             let changed = pulls[key]?.0 != pr
-            if changed, let pr, pulls[key] != nil { stateChanges.append((branch, pr)) }
+            if changed, let pr, let old = pulls[key] { stateChanges.append((branch, pr, old.0)) }
             pulls[key] = (pr, Date())
             inFlight.remove(key)
             lock.unlock()
@@ -708,8 +708,9 @@ extension GitHubResolver {
     func inject(pull pr: PullRequest?, for branch: String, repoRoot: String, changed: Bool = true) {
         guard frozen else { return }
         lock.lock()
+        let previous = pulls[repoRoot + "@" + branch]?.0
         pulls[repoRoot + "@" + branch] = (pr, Date())
-        if changed, let pr { stateChanges.append((branch, pr)) }
+        if changed, let pr { stateChanges.append((branch, pr, previous)) }
         lock.unlock()
         notify()
     }

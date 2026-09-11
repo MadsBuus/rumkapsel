@@ -279,6 +279,14 @@ final class World {
             let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
+            // Newly open on one of my checkouts: the office's worker packs the crate for it.
+            if change.pr.state == "OPEN", change.previous?.state != "OPEN" {
+                for station in fleet.stations.values {
+                    for room in station.rooms.values where room.branch == change.branch && room.worktree != nil {
+                        events.append(.pullRequestOpened(repo: room.repo ?? "", number: change.pr.number, author: github.myLogin() ?? "", roomKey: room.key))
+                    }
+                }
+            }
         }
         // Merged offices are hauled from the scan loop above; a second pass here would announce them twice.
         if changed { events.append(.layoutChanged) }
