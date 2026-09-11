@@ -450,8 +450,14 @@ extension StationController {
               !key.hasPrefix("kind:") else { return nil }   // prompts only land in an office
         let cells = station.cells(of: .room(key))
         guard let firstCell = cells.first else { return nil }   // the office is gone
+        // Clear of crates and writing. Cones are not in the way of cones: the row is the same whatever
+        // stands in it, or it would shuffle every time it was looked at.
         let written = labelCells["\(m.station)|\(key)"] ?? []
-        let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) && !written.contains(c) }
+        let full = "\(m.station)|\(key)"
+        let crated = Set(markerRoot.childNodes.filter { $0.name == "box:" + full }.map {
+            Cell(x: Int((Double($0.position.x) - station.offset.x).rounded()), y: Int((Double($0.position.z) - station.offset.y).rounded()))
+        })
+        let clear = cells.filter { c in !crated.contains(c) && !written.contains(c) }
         let door = station.doorCell(of: key) ?? firstCell
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
         return (station, key, nearDoor)
@@ -462,7 +468,9 @@ extension StationController {
         guard let (_, _, cells) = coneCells(for: m), !cells.isEmpty else { return }
         for (i, q) in m.queuedCones.enumerated() {
             let cell = cells[min(cells.count - 1, 1 + i)]
-            let slide = SCNAction.move(to: v3(Double(cell.x), 0, Double(cell.y)), duration: 0.4); slide.timingMode = .easeInEaseOut
+            let to = v3(Double(cell.x), 0, Double(cell.y))
+            guard abs(q.position.x - to.x) > 0.01 || abs(q.position.z - to.z) > 0.01, !q.hasActions else { continue }
+            let slide = SCNAction.move(to: to, duration: 0.4); slide.timingMode = .easeInEaseOut
             q.runAction(slide)
         }
     }

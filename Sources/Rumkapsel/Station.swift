@@ -483,9 +483,10 @@ final class Station {
             let centre = Cell(x: c.x * Station.fine, y: c.y * Station.fine)
             return (-1...1).flatMap { dx in (-1...1).map { dy in Cell(x: centre.x + dx, y: centre.y + dy) } }
         }
-        // A cell buried under a crate is no destination: settle for the nearest cell with free floor.
+        // A cell with something standing on its middle (a crate, a pallet's edge) is no destination:
+        // settle for the nearest cell whose middle is free, so nobody ends up wedged against a thing.
         var target = to
-        if spots(in: to).allSatisfy({ obstacles.contains($0) }) {
+        if obstacles.contains(Cell(x: to.x * Station.fine, y: to.y * Station.fine)) {
             // Only within the same room (or the same open floor): never send someone next door instead.
             let owner = room(at: to)?.key
             var seen: Set<Cell> = [to]; var ring = [to]
@@ -493,7 +494,7 @@ final class Station {
                 var next: [Cell] = []
                 for c in ring {
                     for n in c.neighbours where walkable.contains(n) && !seen.contains(n) && canStep(from: c, to: n) && room(at: n)?.key == owner {
-                        if spots(in: n).contains(where: { !obstacles.contains($0) }) { target = n; break search }
+                        if !obstacles.contains(Cell(x: n.x * Station.fine, y: n.y * Station.fine)) { target = n; break search }
                         seen.insert(n); next.append(n)
                     }
                 }

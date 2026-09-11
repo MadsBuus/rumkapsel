@@ -115,14 +115,17 @@ extension StationController {
                 m.facing = atan2(dir.x, dir.y)
                 m.smoothFacing = m.facing
                 let d = want - m.pos
-                // Round the pallet on foot, never through it; only the last step is a shuffle.
-                if abs(d.x) + abs(d.y) > 0.6 {
-                    if m.path.isEmpty { m.path = route(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded()))) }
+                // Round the pallet on foot, never through it: one walk to the cell behind it (the walk
+                // stops short of the pallet's edge on its own), then the last bit is a shuffle.
+                if m.fetchSpot == nil {
+                    m.fetchSpot = want
+                    m.path = route(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
                     return
                 }
                 guard m.path.isEmpty else { return }
                 if abs(d.x) + abs(d.y) > 0.04 { m.pos += d * min(1, 6 * (1.0 / 60)); placePusher(m, station: station); return }
                 m.pos = want
+                m.fetchSpot = nil
                 placePusher(m, station: station)
                 m.setTool(.hands)
                 p.legFrom = p.spot

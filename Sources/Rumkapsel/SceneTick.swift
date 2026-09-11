@@ -304,7 +304,7 @@ extension StationController {
                     if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos = next }
                     m.facing = atan2(d.x, d.y)
                 }
-            } else {
+            } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
                 switch m.current?.kind {
                 case .stow:
                     // There: the cube comes off the head and goes down onto its place on the floor,
