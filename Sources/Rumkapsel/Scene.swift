@@ -464,8 +464,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
             return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0):\(checks)"
         } }.sorted().joined()
-        if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
+        // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
+        // while it still stands on the untested row, and the redraw then leaves it out as carried.
+        // The other way round drew it tested, and the carry lifted it off the tested stack and put it back.
         handle(world.applyGitHub(now: Date()))
+        if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
         refreshRockets()
         flushScene()
         flushDeliveries()
@@ -581,6 +584,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     if m.queuedCones.count == before { break }
                 }
                 while m.queuedCones.count > s.queuedCount, let q = m.queuedCones.popLast() { q.removeFromParentNode() }
+                arrangeQueuedCones(m)
             }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
@@ -767,12 +771,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// A message landed in an office: one cone per message that arrived since last time, and its
     /// worker walks over to work them. A queued cone lights up when it is picked up.
+    /// A message reached the session: the one cone that stands for the message being worked. The
+    /// queued cone at the head of the row, if any, is the one it came from.
     private func promptLanded(station: String, key: String, minionId: String, count: Int) {
-        guard let m = minions[minionId], !m.isSubagent else { return }
-        for _ in 0..<min(count, 5) {
-            if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
-            addPyramid(for: m)
-        }
+        guard let m = minions[minionId], !m.isSubagent, count > 0 else { return }
+        if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
+        addPyramid(for: m)
+        arrangeQueuedCones(m)
     }
 
     /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.

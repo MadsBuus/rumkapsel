@@ -443,28 +443,43 @@ extension StationController {
         }
     }
 
-    func addPyramid(for m: Minion, queued: Bool = false) {
+    /// Where a session's cones stand: its office's clear cells, nearest the door first. The crates hold
+    /// the far corners and the writing is left alone.
+    func coneCells(for m: Minion) -> (station: Station, key: String, cells: [Cell])? {
         guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false),
-              !key.hasPrefix("kind:") else { return }   // prompts only land in an office
-        // Nothing on the plot before the office has unfolded: the cone is owed, and lands with the reveal.
-        if undelivered.contains(m.station + "|" + key) { m.owedCones += 1; return }
-        // Cones land on clear floor, nearest the door: the crates hold the far corners.
+              !key.hasPrefix("kind:") else { return nil }   // prompts only land in an office
         let cells = station.cells(of: .room(key))
-        guard let firstCell = cells.first else { return }   // the office is gone: no cone to land
+        guard let firstCell = cells.first else { return nil }   // the office is gone
         let written = labelCells["\(m.station)|\(key)"] ?? []
         let clear = cells.filter { c in !station.obstacles.contains(Cell(x: c.x * Station.fine, y: c.y * Station.fine)) && !written.contains(c) }
         let door = station.doorCell(of: key) ?? firstCell
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
-        guard !nearDoor.isEmpty else { return }
-        let cell = nearDoor[min(nearDoor.count - 1, m.pyramids.count % 2)]   // alternate the two nearest the door
-        let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
-        if !queued, m.pyramids.count >= 5, let old = m.pyramids.first {
-            old.runAction(.sequence([.fadeOut(duration: 0.3), .removeFromParentNode()]))
-            m.pyramids.removeFirst()
+        return (station, key, nearDoor)
+    }
+
+    /// The queue moved up: each queued cone slides to its place in the row.
+    func arrangeQueuedCones(_ m: Minion) {
+        guard let (_, _, cells) = coneCells(for: m), !cells.isEmpty else { return }
+        for (i, q) in m.queuedCones.enumerated() {
+            let cell = cells[min(cells.count - 1, 1 + i)]
+            let slide = SCNAction.move(to: v3(Double(cell.x), 0, Double(cell.y)), duration: 0.4); slide.timingMode = .easeInEaseOut
+            q.runAction(slide)
         }
+    }
+
+    func addPyramid(for m: Minion, queued: Bool = false) {
+        guard let (station, key, nearDoor) = coneCells(for: m) else { return }
+        // Nothing on the plot before the office has unfolded: the cone is owed, and lands with the reveal.
+        if undelivered.contains(m.station + "|" + key) { m.owedCones += 1; return }
+        guard !nearDoor.isEmpty else { return }
+        // One cone is the message being worked, on the cell nearest the door. Queued messages stand
+        // in a row behind it, in the order they will be taken. A new message shrinks the old one away.
+        if !queued { clearPyramids(m) }
+        let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queuedCones.count : 0)]
+        let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
         let n = Props.pyramid(color: tint, size: 0.32, floor: floorColor)
-        let ox = Double.random(in: -0.25...0.25), oz = Double.random(in: -0.25...0.25)
+        let ox = 0.0, oz = 0.0
         n.position = v3(Double(cell.x) + ox, -0.35, Double(cell.y) + oz)
         let rise = SCNAction.move(to: v3(Double(cell.x) + ox, 0, Double(cell.y) + oz), duration: 0.5)
         rise.timingMode = .easeOut
@@ -487,8 +502,12 @@ extension StationController {
         walk(m, to: cell)
     }
 
+    /// Worked: the cone shrinks away where it stands.
     func clearPyramids(_ m: Minion) {
-        for p in m.pyramids { p.runAction(.sequence([.fadeOut(duration: 0.8), .removeFromParentNode()])) }
+        for p in m.pyramids {
+            let shrink = SCNAction.scale(to: 0.01, duration: 0.35); shrink.timingMode = .easeIn
+            p.runAction(.sequence([shrink, .removeFromParentNode()]))
+        }
         m.pyramids = []
         m.pyramidCell = nil
         refreshObstacles()

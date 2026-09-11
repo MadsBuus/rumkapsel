@@ -177,6 +177,9 @@ final class GitHubResolver {
     /// What waits where for a repository: from the project board when one is configured, else from git history.
     func cargo(repoRoot: String) -> Cargo? {
         lock.lock(); defer { lock.unlock() }
+        // A board is configured but this repository's name is not known yet: nothing is drawn rather
+        // than the git-history yard, which the board's answer would only redraw a moment later.
+        if ConfigStore.shared.current.project != nil, project != nil, owners[repoRoot] == nil { return nil }
         if let items = project?.0, let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
@@ -193,6 +196,9 @@ final class GitHubResolver {
     // MARK: project board
 
     private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard()
+    /// "owner/name" per checkout, learned once from `gh repo view` and kept with the board: the yard
+    /// cannot tell which board items are a repository's until it knows the repository's name.
+    private var owners: [String: String] = GitHubResolver.loadBoardFile()?.owners ?? [:]
     private var projectMoves: [(item: ProjectItem, from: String?)] = []
 
     /// The last board read is kept on disk, so the first read after a launch still knows what moved.
@@ -200,14 +206,20 @@ final class GitHubResolver {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
         return dir.appendingPathComponent("board.json")
     }
-    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date }
-    private static func loadBoard() -> ([ProjectItem], Date)? {
-        guard let data = try? Data(contentsOf: boardURL), let b = try? JSONDecoder().decode(SavedBoard.self, from: data) else { return nil }
-        return (b.items, b.at)
+    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date; var owners: [String: String]? }
+    private static func loadBoardFile() -> SavedBoard? {
+        guard let data = try? Data(contentsOf: boardURL) else { return nil }
+        return try? JSONDecoder().decode(SavedBoard.self, from: data)
     }
+    private static func loadBoard() -> ([ProjectItem], Date)? { loadBoardFile().map { ($0.items, $0.at) } }
     private func saveBoard(_ items: [ProjectItem], at: Date) {
         if frozen { return }
-        if let data = try? JSONEncoder().encode(SavedBoard(items: items, at: at)) { try? data.write(to: GitHubResolver.boardURL) }
+        if let data = try? JSONEncoder().encode(SavedBoard(items: items, at: at, owners: owners)) { try? data.write(to: GitHubResolver.boardURL) }
+    }
+    /// A repository's name just learned: written down with the board so the next launch starts knowing it.
+    private func learned(owner: String, repoRoot: String) {
+        lock.lock(); owners[repoRoot] = owner; lock.unlock()
+        if let (items, at) = project { saveBoard(items, at: at) }
     }
 
     func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
@@ -341,7 +353,7 @@ final class GitHubResolver {
             var owner = nameWithOwner(repoRoot: repoRoot)
             if owner == nil, let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
                let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let n = obj["nameWithOwner"] as? String {
-                lock.lock(); owners[repoRoot] = n; lock.unlock()
+                learned(owner: n, repoRoot: repoRoot)
                 owner = n
             }
             guard let owner else { return }
@@ -523,7 +535,6 @@ final class GitHubResolver {
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]
     private var dirty: [String: Int] = [:]
-    private var owners: [String: String] = [:]
     private var inFlight = Set<String>()
     private let lock = NSLock()
     var onUpdate: (() -> Void)?
@@ -610,7 +621,7 @@ final class GitHubResolver {
                let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
                let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
                let n = obj["nameWithOwner"] as? String {
-                lock.lock(); owners[repoRoot] = n; lock.unlock()
+                learned(owner: n, repoRoot: repoRoot)
             }
             var pr: PullRequest?
             func parse(_ o: [String: Any]) -> PullRequest {

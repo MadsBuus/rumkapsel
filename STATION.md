@@ -36,7 +36,9 @@ since real stations mandate both.
   red when they fail, green when all is well; the whole crate turns red when the PR is closed unmerged.
   In storage and on the deck the light is off; a tested crate on the deck shows green and a sticker on
   the lid. Storage looks a little unorganised, the deck ordered.
-- pyramid: something you said to a session, waiting to be worked
+- pyramid: the message a session is working on, one per session, on the cell nearest the door. Messages
+  queued behind it stand in a row inward, translucent. A new message shrinks the old cone away; a session
+  that waits for you has none.
 - pallet: a staging release being assembled
 - rocket: a production release; steam means loaded and waiting, a hold ring means untested
 - nothing is round; everything has flat sides
