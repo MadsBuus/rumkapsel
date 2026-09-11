@@ -168,7 +168,7 @@ struct Command {
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
-        case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .settle]
+        case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .act]   // a pallet errand is a job: nothing calls the operator away
         case .bath, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
         case .rocket(let stage, _, _):
             switch stage {

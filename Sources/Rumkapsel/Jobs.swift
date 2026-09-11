@@ -428,6 +428,14 @@ extension StationController {
         }
         let after = 0.3 + furthest * 0.1 + 0.5
         roomLabels[key]?.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.5)]))
+        // Cones that arrived while the plot was still empty land once the floor is there.
+        self.after(after) { [weak self] in
+            guard let self else { return }
+            for m in self.minions.values where m.station + "|" + m.home.key == key && m.owedCones > 0 {
+                for _ in 0..<m.owedCones { self.addPyramid(for: m) }
+                m.owedCones = 0
+            }
+        }
         markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.4)])) }
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         if parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] {
@@ -438,6 +446,8 @@ extension StationController {
     func addPyramid(for m: Minion, queued: Bool = false) {
         guard let station = fleet.stations[m.station], case .room(let key) = Place.forActivity(.reading, home: m.home.key, isSubagent: false),
               !key.hasPrefix("kind:") else { return }   // prompts only land in an office
+        // Nothing on the plot before the office has unfolded: the cone is owed, and lands with the reveal.
+        if undelivered.contains(m.station + "|" + key) { m.owedCones += 1; return }
         // Cones land on clear floor, nearest the door: the crates hold the far corners.
         let cells = station.cells(of: .room(key))
         guard let firstCell = cells.first else { return }   // the office is gone: no cone to land

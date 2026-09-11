@@ -21,18 +21,21 @@ struct Scenario {
     let tail: Double
     /// Regexes that must all appear in the log, in this order.
     let expects: [String]
+    /// Patterns that must not appear anywhere in the log.
+    let forbids: [String]
     /// A press the panel refuses is normally a broken script; a few scenarios mean to try one.
     var allowSkips = false
     /// What must stand on the floor when it is over, for the things the log does not say out loud.
     /// Returns the reason it failed, or nil.
     let floor: (@MainActor (SimulatorController) -> String?)?
 
-    init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [String],
+    init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [String], forbids: [String] = [],
          allowSkips: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
         self.tail = tail
         self.expects = expects
+        self.forbids = forbids
         self.allowSkips = allowSkips
         self.floor = floor
     }
@@ -185,6 +188,17 @@ enum Scenarios {
             #"command .*: off to the bath"#,
         ]),
 
+        Scenario("pallet operator stays on the errand through the night", [
+            ("Target: web#455", 0.5),
+            ("Release: Staging opens", 6.0),   // whoever is nearest the console takes the errand
+            ("Night", 6.0),                    // bedtime does not take it off the pallet
+            ("Release: Staging merges", 0.5),
+        ], tail: 30, expects: [
+            #"command .*: pushing the pallet to the deck"#,
+            #"command .*: unloading the pallet"#,
+        ], forbids: [
+            #"taking over the pallet"#,
+        ]),
         Scenario("a commit lands: the worker stows a cube", [
             ("Target: web#455", 0.5),
             ("Commit", 0.5),
@@ -276,6 +290,12 @@ final class ScenarioRunner {
         }
         if reason == nil, !s.allowSkips, let skipped = lines.first(where: { $0.contains("  skipped  ") }) {
             reason = "a press was refused · " + skipped.trimmingCharacters(in: .whitespaces)
+        }
+        if reason == nil {
+            for bad in s.forbids {
+                guard let rx = try? Regex(bad) else { reason = "bad pattern /\(bad)/"; break }
+                if let line = lines.first(where: { $0.firstRange(of: rx) != nil }) { reason = "said /\(bad)/ · " + line.trimmingCharacters(in: .whitespaces); break }
+            }
         }
         if reason == nil {
             var at = 0
