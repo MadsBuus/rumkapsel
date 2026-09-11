@@ -348,11 +348,13 @@ These are checked once here and not repeated in every table below.
     a convention (`Jobs.swift:44-78` and its six bypasses).
 12. **Advance the phases of the quiet commands.** `goTo`, `bath`, `chore`, `qa`, `sleep`, `work` and
     `leave` never leave `.walk` (`SceneTick.swift:295`), so truth misreports every settled minion.
-13. **Move the carry's arcs and the shuttle's flight onto the station clock**, as the pallet flight
-    already is (`SceneTick.swift:238-277`, `Actors.swift:50-77`).
-14. **Give the commit-box carry a command**, or remove it (`SceneMarkers.swift:169-179`).
+13. ~~**Move the carry's arcs and the shuttle's flight onto the station clock**~~ Done: the carry's arcs
+    run through `moveCrate`, and the shuttle interpolates each leg from the clock (`Actors.swift`).
+14. ~~**Give the commit-box carry a command**~~ Done: `stow`, with the newest cube hidden until it is set
+    down; `pack` does the same for a pull request just opened.
 15. **Take the reconciler out of the redraw** (`SceneMarkers.swift:51-57`), and fold the pallet actor's
     duplicated state into `StationTruth` (`Actors.swift:133-189`).
-16. **Quiet the first release answer** the way staging is quieted (`World.swift:367-377`).
+16. ~~**Quiet the first release answer**~~ Done: `releasesSeen` marks the first answer announced without
+    saying it; the rocket still stands.
 17. **Take the randomness out of the routines**: the short-stretch bath (`SceneTick.swift:327`) and the
     cone's landing cell (`Jobs.swift:365`).

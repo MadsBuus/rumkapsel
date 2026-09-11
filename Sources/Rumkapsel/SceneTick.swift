@@ -305,20 +305,33 @@ extension StationController {
                     m.facing = atan2(d.x, d.y)
                 }
             } else {
-                if m.commitDrop, let c = m.carried {
-                    m.commitDrop = false
-                    m.carried = nil
-                    let world = c.worldPosition
-                    stopCrate(c)
-                    c.removeFromParentNode()
-                    c.position = world
-                    propRoot.addChildNode(c)
-                    moveCrate(c, legs: [MotionLeg(to: SIMD3(Double(world.x), 0.12, Double(world.z)), seconds: 0.35, ease: .easeIn)]) { [weak self] in
-                        self?.drone.thud()
-                        c.runAction(.sequence([.wait(duration: 0.4), .fadeOut(duration: 0.3), .removeFromParentNode()]))   // a fade, not a move
-                    }
-                }
                 switch m.current?.kind {
+                case .stow:
+                    // There: the cube comes off the head and goes down onto its place on the floor,
+                    // and the box drawn there takes over as it lands.
+                    if m.phaseKind == .walk {
+                        advance(m)
+                        m.phaseUntil = clock + 0.7
+                        if let (cube, box) = m.stowing {
+                            let world = cube.worldPosition
+                            stopCrate(cube)
+                            cube.removeFromParentNode()
+                            cube.position = world
+                            propRoot.addChildNode(cube)
+                            let at = SIMD3(Double(box.position.x), Double(box.position.y), Double(box.position.z))
+                            moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box] in
+                                self?.drone.thud()
+                                box?.opacity = 1
+                                cube.removeFromParentNode()
+                            }
+                        }
+                        continue
+                    }
+                    if clock < m.phaseUntil { continue }
+                    m.stowing = nil
+                    finish(m)
+                    send(m, to: m.place)
+                    continue
                 case .deliverOffice(let r):
                     // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
                     // way any crate is lifted, and set down on the office's own slot before the reveal.
@@ -473,7 +486,7 @@ extension StationController {
                 // There: the quiet commands move on from walking to being there, so truth says so too.
                 if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
                     switch c.kind {
-                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave, .pack: advance(m)
+                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow: advance(m)
                     default: break
                     }
                 }

@@ -185,6 +185,12 @@ enum Scenarios {
             #"command .*: off to the bath"#,
         ]),
 
+        Scenario("a commit lands: the worker stows a cube", [
+            ("Target: web#455", 0.5),
+            ("Commit", 0.5),
+        ], tail: 8, expects: [
+            #"command\s+#455 booking flow: stowing a cube for the commit"#,
+        ]),
         Scenario("a chore", [
             ("Everyone to lounge", 3.0),
             ("Chore", 0.3),

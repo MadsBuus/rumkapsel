@@ -71,6 +71,8 @@ struct Command {
         case qa(deck: String)
         /// Packing the office's crate for a pull request just opened, cones cleared first.
         case pack(office: String)
+        /// Stowing the cube for a commit that just landed, where the office keeps its cubes.
+        case stow(office: String)
         case leave
         case sleep
         case work(office: String)
@@ -167,7 +169,7 @@ struct Command {
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
         case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .settle]
-        case .bath, .pack: return [.walk, .act]   // a visit lasts its whole time; so does packing
+        case .bath, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
         case .rocket(let stage, _, _):
             switch stage {
             case .standBy, .steam: return [.settle]
@@ -230,6 +232,10 @@ struct Command {
 
     static func chore(spot: Cell) -> Command {
         Command(kind: .chore(spot: spot), words: "having a look round the station")
+    }
+
+    static func stow(office: String) -> Command {
+        Command(kind: .stow(office: office), words: "stowing a cube for the commit")
     }
 
     static func pack(office: String) -> Command {

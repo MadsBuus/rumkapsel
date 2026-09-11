@@ -905,10 +905,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: tick
 
+    /// Things due later on the station clock, so they wait when the clock waits.
+    private var timers: [(at: Double, run: () -> Void)] = []
+    func after(_ seconds: Double, _ run: @escaping () -> Void) { timers.append((clock + seconds, run)) }
+
     func tick(now: TimeInterval) {
         let dt = min(0.1, max(0, now - lastTick))
         lastTick = now
         clock += dt
+        if !timers.isEmpty {
+            let due = timers.filter { $0.at <= clock }
+            timers.removeAll { $0.at <= clock }
+            due.forEach { $0.run() }
+        }
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
         if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles(); replanBlockedWalks() }

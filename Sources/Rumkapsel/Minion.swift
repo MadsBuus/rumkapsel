@@ -38,7 +38,8 @@ final class Minion {
         default: return false
         }
     }
-    var commitDrop = false
+    /// The cube on the head for a stow, and the box on the floor it stands in for.
+    var stowing: (cube: SCNNode, box: SCNNode)?
     var weldLight: SCNNode?
     var hammerUp = false
     var lying = false
@@ -189,7 +190,10 @@ final class Minion {
     /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
     var handsAt = 0
     var posture: Posture {
-        if case .pack = current?.kind, phaseKind == .act { return .crouch }   // on the knees over the package
+        switch current?.kind {
+        case .pack, .stow: if phaseKind == .act { return .crouch }   // on the knees over the package or the cube
+        default: break
+        }
         guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
         switch handsAt {
         case 0: return .crouch

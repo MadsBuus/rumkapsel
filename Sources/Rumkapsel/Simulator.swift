@@ -12,7 +12,7 @@ import SwiftUI
 ///
 /// The names `--simulate` takes, in order of the panel:
 ///
-///     Me:        Start session here, New branch in repo, Prompt, Busy, Quiet, Session ends,
+///     Me:        Start session here, New branch in repo, Prompt, Busy, Quiet, Commit, Session ends,
 ///                Switch branch, Open PR, Approve PR, Checks failing, Merge PR, Close PR
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR
@@ -445,6 +445,7 @@ final class SimulatorModel: ObservableObject {
                 button("Prompt", "Prompt", noSession),
                 button("Busy", "Busy", noSession),
                 button("Quiet", "Quiet", noSession),
+                button("Commit", "Commit", noSession),
                 button("Session ends", "Session ends", noSession),
                 button("Switch branch", "Switch branch", noSession),
                 button("Open PR", "Open PR", openReason),
@@ -556,6 +557,12 @@ final class SimulatorModel: ObservableObject {
             target = o.uid
             pushGitHub()
             pushScan()
+        case "Commit":
+            // One more commit ahead on the branch: the worker stows a cube for it.
+            guard let o = office, let i = index(o.uid) else { return }
+            offices[i].commits += 1
+            pushScan()
+            station.simulateGitHub()   // the commit count is GitHub's answer; a poll would have said so
         case "Prompt":
             guard var s = targetSession else { return }
             s.prompts += 1
@@ -708,8 +715,9 @@ final class SimulatorModel: ObservableObject {
             pushGitHub()
             // The board catches up after the rocket has been loaded, the way a later poll would;
             // moving the column in the same breath empties the deck before anyone can carry it.
+            // On the station clock, so a stepped or paused station waits for it too.
             let shipping = repo
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            station.after(6) { [weak self] in
                 guard let self else { return }
                 let st = self.statuses
                 move(board.filter { $0.repo == shipping && ($0.status == st.cleared || $0.status == st.deck) }, to: st.shipped)

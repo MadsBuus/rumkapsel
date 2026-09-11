@@ -137,6 +137,7 @@ extension StationController {
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 let cells = farCells(station, room)
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
+                var newest: SCNNode?
                 for i in 0..<(count + ghosts) {
                     let ghost = i >= count
                     let size = [0.18, 0.26, 0.34][min(2, Int(rnd() * 3))]
@@ -166,6 +167,7 @@ extension StationController {
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
                     n.opacity = undelivered.contains(key) ? 0 : (ghost ? 0.38 : boxOpacity)
+                    if !ghost { newest = n }
                     if failing && !ghost {
                         let shell = SCNNode(geometry: SCNBox(width: size * 1.25, height: size * 1.25, length: size * 1.25, chamferRadius: 0))
                         shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
@@ -176,16 +178,19 @@ extension StationController {
                     }
                     markerRoot.addChildNode(n)
                 }
-                // More commits than last time while the owner is in: it carries the new box in.
-                if let last = lastBoxCount[key], count > last, room.branch != nil,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && $0.carried == nil }) {
-                    let carry = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
-                    carry.geometry!.firstMaterial = lit(color)
-                    carry.position = v3(0, m.headHeight + 0.14, 0)
-                    m.node.addChildNode(carry)
-                    m.carried = carry
-                    m.commitDrop = true
-                    if let dest = room.cells.filter({ $0 != m.cell }).randomElement() { walk(m, to: dest) }
+                // More commits than last time while the owner is in: the newest cube is not on the floor
+                // yet. The worker carries it over on its head and stows it where it goes: a command.
+                if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
+                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && $0.carried == nil && $0.stowing == nil }) {
+                    box.opacity = 0
+                    let cube = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
+                    cube.geometry!.firstMaterial = lit(color)
+                    cube.position = v3(0, m.headHeight + 0.14, 0)
+                    m.node.addChildNode(cube)
+                    m.stowing = (cube, box)
+                    start(m, .stow(office: room.key), announce: true)
+                    let at = Cell(x: Int((Double(box.position.x) - station.offset.x).rounded()), y: Int((Double(box.position.z) - station.offset.y).rounded()))
+                    walk(m, to: standCell(station, near: at))
                 }
                 lastBoxCount[key] = count + ghosts
             }

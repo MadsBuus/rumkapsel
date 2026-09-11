@@ -20,6 +20,11 @@ final class Shuttle {
     var phase = 0
     var until = 0.0
     private var unloaded = false
+    /// The phase in hand: where it started, when, and where it is going. The flight is drawn from
+    /// these on the station clock, so it pauses, steps and speeds with everything else.
+    private var startedAt = 0.0
+    private var from = SIMD3<Double>(0, 0, 0), to = SIMD3<Double>(0, 0, 0)
+    private var yawFrom = 0.0, yawTo = 0.0, turning = false
 
     init(node: SCNNode, station: String, command: Command, high: SIMD3<Double>, down: SIMD3<Double>,
          exit: SIMD3<Double>, restYaw: Double?, drift: Double, unloadAt: Double, unloadFor: Double,
@@ -49,35 +54,44 @@ final class Shuttle {
     /// Starts the phase in hand.
     func begin(at clock: Double) {
         until = clock + duration
+        startedAt = clock
+        from = SIMD3(Double(node.position.x), Double(node.position.y), Double(node.position.z))
+        to = from
+        turning = false
         switch phaseKind {
-        case .approach:
-            let a = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 3.0)
-            a.timingMode = .easeOut
-            node.runAction(a)
+        case .approach: to = high
         case .descend:
-            let d = SCNAction.move(to: v3(down.x, down.y, down.z), duration: 4.5)
-            d.timingMode = .easeInEaseOut
-            guard let restYaw else { node.runAction(d); return }
-            node.eulerAngles = SCNVector3(0, restYaw, 0)
-            let turn = SCNAction.rotateTo(x: 0, y: restYaw + drift, z: 0, duration: 4.5, usesShortestUnitArc: true)
-            turn.timingMode = .easeInEaseOut
-            node.runAction(.group([d, turn]))
-        case .unload:
-            break
-        case .rise:
-            let r = SCNAction.move(to: v3(high.x, high.y, high.z), duration: 2.5)
-            r.timingMode = .easeIn
-            node.runAction(r)
+            to = down
+            if let restYaw {
+                node.eulerAngles = SCNVector3(0, restYaw, 0)
+                yawFrom = restYaw; yawTo = restYaw + drift; turning = true
+            }
+        case .unload: break
+        case .rise: to = high
         default:
             if restYaw != nil { node.look(at: v3(exit.x, exit.y, exit.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0)) }
-            let l = SCNAction.move(to: v3(exit.x, exit.y, exit.z), duration: 3.0)
-            l.timingMode = .easeIn
-            node.runAction(l)
+            to = exit
         }
+    }
+
+    /// Where the ship is along the phase: eased the way each leg wants it.
+    private func place(at clock: Double) {
+        guard duration > 0, phaseKind != .unload else { return }
+        let t = min(1, max(0, (clock - startedAt) / duration))
+        let e: Double
+        switch phaseKind {
+        case .approach: e = 1 - (1 - t) * (1 - t)                 // ease out
+        case .descend: e = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2   // ease in, ease out
+        default: e = t * t                                        // ease in
+        }
+        let p = from + (to - from) * e
+        node.position = v3(p.x, p.y, p.z)
+        if turning { node.eulerAngles.y = CGFloat(yawFrom + (yawTo - yawFrom) * e) }
     }
 
     /// One frame of the flight. Returns false once the ship is gone.
     func advance(at clock: Double) -> Bool {
+        place(at: clock)
         if phaseKind == .unload, !unloaded, clock >= until - unloadFor { unloaded = true; onUnload() }
         guard clock >= until else { return true }
         guard phase + 1 < command.phases.count else { node.removeFromParentNode(); return false }

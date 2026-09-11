@@ -317,6 +317,9 @@ final class World {
 
     /// Releases already announced, so an open one on the pad is only said once: "station|repo|number|untested".
     private var announcedReleases: Set<String> = []
+    /// Repositories whose releases have answered once. The first answer is quiet: whatever is on the
+    /// pad already existed, and the rocket simply stands there.
+    private var releasesSeen: Set<String> = []
 
     /// The staging release each repository is known to have, by "station|repo": its number and state.
     private var stagingPRs: [String: (number: Int, state: String)] = [:]
@@ -370,10 +373,14 @@ final class World {
             events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
         }
         for (root, info) in repoRoots {
-            guard let station = fleet.stations[info.station], let pr = padRelease(root: root) else { continue }
+            guard let station = fleet.stations[info.station], github.openReleases(repoRoot: root) != nil else { continue }
+            let quiet = !releasesSeen.contains(root)
+            releasesSeen.insert(root)
+            guard let pr = padRelease(root: root) else { continue }
             let key = info.station + "|" + info.repo
             guard !launched.contains(key) else { continue }
             let mark = "\(key)|\(pr.number)|\(pr.untested)"
+            if quiet { announcedReleases.insert(mark) }
             if !announcedReleases.contains(mark) {
                 announcedReleases.insert(mark)
                 events.append(.releaseOpened(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
