@@ -724,7 +724,11 @@ final class World {
                     }
                     if chosen == nil {   // a fresh column, the lowest one nobody holds
                         if let free = (0..<cap).first(where: { owner(group: group, column: $0) == nil }) { chosen = (free, 0) }
-                        else if let column = mine.first { chosen = (column, slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == column }.count) }
+                        else if !mine.isEmpty {   // over capacity: the repository's shortest column, never one tower
+                            func height(_ c: Int) -> Int { slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == c }.count }
+                            let column = mine.min { height($0) < height($1) }!
+                            chosen = (column, height(column))
+                        }
                         else { chosen = (0, 0) }
                     }
                     slots[key] = (column: chosen!.column, order: chosen!.order)
