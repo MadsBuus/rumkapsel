@@ -344,7 +344,7 @@ extension StationController {
         cancelCarries(roomKey: key)
         for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
         stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
-        haulingRooms.remove(key)
+        world.truth.forgetOffice(key)
         world.truth.officeDelivered(key)
         outlines.removeValue(forKey: key)?.removeFromParentNode()
         boxes.removeValue(forKey: key)?.removeFromParentNode()
@@ -571,14 +571,11 @@ extension StationController {
     func haulMergedBoxes(station: Station, key: String, roomName: String, repo: String, number: Int) {
         guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }),
               let room = station.rooms[key.split(separator: "|", maxSplits: 1).map(String.init).last ?? ""] else { return }
-        haulingRooms.insert(key)
-        world.hauled(roomKey: key)
         logEvent("\(roomName): merged, package to storage")
         let command = world.carryToStorage(station: station, room: room, repo: repo, number: number)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
             world.landedInStorage(station: station, repo: repo, number: number)
-            world.haulLanded(roomKey: key)
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
@@ -595,7 +592,6 @@ extension StationController {
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                world.truth.finishedToDeck(station: station.name, repo: repo)
                 station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
                 station.staged[repo, default: 0] += 1
                 node.removeFromParentNode()
@@ -605,7 +601,6 @@ extension StationController {
             }
         }
         guard started > 0 else { return }
-        world.truth.startedToDeck(station: station.name, repo: repo, count: started)
         logEvent("\(repo): deployed to staging, moving to the test deck")
     }
 

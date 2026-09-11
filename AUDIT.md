@@ -353,7 +353,9 @@ These are checked once here and not repeated in every table below.
 14. ~~**Give the commit-box carry a command**~~ Done: `stow`, with the newest cube hidden until it is set
     down; `pack` does the same for a pull request just opened.
 15. **Take the reconciler out of the redraw** (`SceneMarkers.swift:51-57`), and fold the pallet actor's
-    duplicated state into `StationTruth` (`Actors.swift:133-189`).
+    duplicated state into `StationTruth` (`Actors.swift:133-189`). Half done: the world's own haul
+    flags (hauled, haul done, hauling rooms, in flight to deck) are gone; a merged office's progress
+    is read off its crate's placement in `StationTruth` (`officeCrates`, `haulLanded`).
 16. ~~**Quiet the first release answer**~~ Done: `releasesSeen` marks the first answer announced without
     saying it; the rocket still stands.
 17. **Take the randomness out of the routines**: the short-stretch bath (`SceneTick.swift:327`) and the

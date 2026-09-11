@@ -359,7 +359,9 @@ struct StationTruth {
     /// Crates set down in storage by hand that the source has not counted yet.
     private(set) var landed: [String: (repo: String, number: Int, at: Date)] = [:]
     /// Crates on their way from storage to the deck, by "station|repo".
-    private(set) var toDeck: [String: Int] = [:]
+    /// The crate each merged office's package became, by office key ("station|roomKey"), from the
+    /// moment its haul was ordered. Whether it has left is read off the crate's placement, never a flag.
+    private(set) var officeCrates: [String: CrateRef] = [:]
     /// What each actor is doing, by minion id: its command and how far into it.
     var jobs: [String: (command: Command, phase: Int)] = [:]
     /// One pallet per station at a time, by station name.
@@ -470,14 +472,27 @@ struct StationTruth {
         return landed.filter { $0.key.hasPrefix(station + "|") && $0.value.repo == repo }.map(\.value.number).sorted()
     }
 
-    // MARK: carries in flight
+    // MARK: office hauls
 
-    mutating func startedToDeck(station: String, repo: String, count: Int) { toDeck[station + "|" + repo, default: 0] += count }
-    mutating func finishedToDeck(station: String, repo: String) {
-        let k = station + "|" + repo
-        toDeck[k] = max(0, (toDeck[k] ?? 1) - 1)
+    /// A merged office's package is to go to storage: spoken for from now on.
+    mutating func haulOrdered(office key: String, crate: CrateRef) {
+        officeCrates[key] = crate
+        claimed(crate)
     }
-    func inFlightToDeck(_ key: String) -> Int { toDeck[key] ?? 0 }
+    func haulOrdered(office key: String) -> Bool { officeCrates[key] != nil }
+    /// Ordered and not yet down anywhere in the yard: on the floor of the office still, spoken for,
+    /// or on someone's arms.
+    func haulUnderway(office key: String) -> Bool { haulOrdered(office: key) && !haulLanded(office: key) }
+    /// The package is down in the yard, or on a pallet already: the office may clear.
+    func haulLanded(office key: String) -> Bool {
+        guard let c = officeCrates[key] else { return false }
+        switch crates[c.key] {
+        case .slot(let area, _, _): return area != .office
+        case .pallet: return true
+        default: return false
+        }
+    }
+    mutating func forgetOffice(_ key: String) { officeCrates[key] = nil }
 
     // MARK: offices
 

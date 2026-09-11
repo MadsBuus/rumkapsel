@@ -194,7 +194,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerMinions: [String: (node: SCNNode, target: SIMD3<Double>)] = [:]
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
-    var haulingRooms: Set<String> = []
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
     struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""; var issuedAt = 0.0 }
     var cargo: [Int: Cargo] = [:]
@@ -338,8 +337,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.delegate = self
 
         // What the model cannot see for itself: a crate already on someone's arms, or a rocket mid-load.
-        world.haulInFlight = { [weak self] key in self?.cargo.values.contains { $0.roomKey == key } ?? false }
-        world.haulingRoom = { [weak self] key in self?.haulingRooms.contains(key) ?? false }
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
         world.rocketBusy = { [weak self] key in self?.rocketActors[key]?.isBusy ?? false }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
