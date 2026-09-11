@@ -539,8 +539,11 @@ extension StationController {
     }
 
     /// Drops every carry tied to a room, freeing whoever was carrying.
+    /// Only carries into the office are dropped with it. A haul out of it, to storage, goes on: the
+    /// crate belongs in storage whatever becomes of the office.
     private func cancelCarries(roomKey: String) {
         for (id, c) in cargo where c.roomKey == roomKey {
+            if case .carry(_, _, let to) = c.command.kind, to.area == .storage { continue }
             c.node.removeFromParentNode()
             if let crate = c.command.crate { world.truth.forget(crate) }
             cargo[id] = nil
@@ -575,6 +578,7 @@ extension StationController {
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
             world.landedInStorage(station: station, repo: repo, number: number)
+            world.haulLanded(roomKey: key)
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()

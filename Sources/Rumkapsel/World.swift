@@ -228,9 +228,12 @@ final class World {
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
-                let gone = room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false
                 let state = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }?.state
                 let merged = state == "MERGED"
+                // A checkout that went away still waits for its crate to reach storage: the office
+                // stays open until the haul lands, the way it does for any merged office.
+                let hauling = merged && station.hasPad && hauledAt[key] != nil && !haulDone.contains(key)
+                let gone = (room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false) && !hauling
                 // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED"
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
@@ -982,8 +985,11 @@ final class World {
 
     /// Merged offices whose crate has been carried away, or that had nothing to carry: free to clear.
     private var haulDone: Set<String> = []
-    /// The scene has set a merged office's crate down in storage.
-    func hauled(roomKey key: String) { hauledAt[key] = Date(); haulDone.insert(key) }
+    /// The scene has picked a merged office's crate up for storage: the office is being hauled.
+    func hauled(roomKey key: String) { hauledAt[key] = Date() }
+    /// The crate is down in storage: the office is free to clear now, and not before. A closed office
+    /// took its carry with it; the crate belongs in storage whatever becomes of the office.
+    func haulLanded(roomKey key: String) { haulDone.insert(key) }
 
     /// A crate was set down in storage by hand: ours to keep until GitHub counts it.
     func landedInStorage(station: Station, repo: String, number: Int) {
