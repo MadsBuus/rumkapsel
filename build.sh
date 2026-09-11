@@ -12,6 +12,10 @@ cp "$BIN" "$APP/Contents/MacOS/rumkapsel"
 cp -R .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework "$APP/Contents/Frameworks/"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 [ -f Resources/WhatsNew.md ] && cp Resources/WhatsNew.md "$APP/Contents/Resources/"
+# The commit this build came from, so the running app can say which one it is.
+SHA=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
+[ -n "$(git status --porcelain 2>/dev/null)" ] && SHA="$SHA+"
+SUBJ=$(git log -1 --pretty=%s 2>/dev/null | cut -c1-70 | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -24,6 +28,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.25</string>
   <key>CFBundleVersion</key><string>202609111056</string>
+  <key>RKBuild</key><string>$SHA · $SUBJ</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>SUFeedURL</key><string>https://raw.githubusercontent.com/MadsBuus/rumkapsel-releases/main/appcast.xml</string>

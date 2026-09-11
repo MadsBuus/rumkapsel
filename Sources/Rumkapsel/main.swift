@@ -153,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
             app.addItem(withTitle: "What's New in \(v)…", action: #selector(openWhatsNew), keyEquivalent: "")
         }
+        // Which commit this is, so a bug report and a fix are never about different builds.
+        if let b = Bundle.main.infoDictionary?["RKBuild"] as? String {
+            let item = NSMenuItem(title: "Build \(b)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            app.addItem(item)
+        }
         app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
@@ -298,7 +304,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     }
 
     private func openIssue(kind: String, label: String) {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        var version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        if let b = Bundle.main.infoDictionary?["RKBuild"] as? String { version += " (\(b))" }
         var c = URLComponents(string: "https://github.com/\(AppDelegate.feedbackRepo)/issues/new")!
         c.queryItems = [
             URLQueryItem(name: "labels", value: label),
