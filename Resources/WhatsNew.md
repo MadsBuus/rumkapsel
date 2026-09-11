@@ -1,56 +1,7 @@
-## What's new in 0.24
+## What's new in 0.25
 
-- Offices unfold from the hex at the doorway and roll back up on close; airlock is a 2x2 chamber with working doors; rocket loads through a hatch
-- Solid: minions solid to each other, wait then walk round; inner lanes off the walls; walks re-planned when the floor changes; spawns spread into their offices
-- STATION.md: an office closes by rolling up into a hex
-- Orders: one entry point, a visible beat on a change of orders, phases that advance, a visit that lasts, fixtures reserved, no coin tosses; station time for patience and reactions; a merged office clears when its haul is done; the suite steps station time and runs in under a minute
-- One table moves every crate's picture, on the station clock: no scene action moves a crate any more
-- The rocket check fires at the climb; chores never stand on a buried cell
-- Things are heavy: one lift, one set-down, and no empty launches
-- STATION.md: the crate shrinks into the hold
-- STATION.md: rockets are loaded at the foot; a moving pallet is solid
-- An invariant checker and a scripted scenario suite
-- STATION.md: the office unfolds from its crate at the doorway
-- STATION.md: no shared spots even at the start, lanes clear of walls, the office ripples out from its crate
-- Audit every command and cue against the rulebook
-- STATION.md: a change of orders is visible
-- The airlock stands in the corridor's line before the bay; the monolith answers with cones of light; crate plates are lights, off in the yard; the idle drift to the pad when a rocket steams
-- STATION.md: answers from the interview
-- The shower happens under the nozzle for its whole ten seconds; pace by task; QA inspects the stacks, not the floor
-- The pallet is heavy: it is shoved one axis at a time
-- STATION.md: what things are, what they may do, what may move them
-- Every crate keeps its yard slot until it leaves; the pixel patch draws on top of the body; the board button says where it moves the issue; lightning only at the monolith
-- Simulator: reset on its own line
-- Simulator: a Reset org button that starts the station over
-- Rebuild the simulator panel around one target office
-- Simulator: a new session's branch goes in the chosen office's repository
-- Simulator: issue numbers per repository, and the new-session button says which repo it uses
-- A teammate's pull request is a crate with its sticker, not cubes; the office hex keeps its turn on the arms and waits for the ship to lift; the simulator tells a new branch from a pull request
-- The staging pallet
-- Shuttles, rockets and the crew run commands too
-- Closed is not merged: a red crate that fades with the office; one merged event per merge; the rocket waits for crates still on someone's arms
-- Carry polish: one crate size, set-down by level (crouch, slide, over the head, hop), the crate stays on the arms until its slot and nothing moves it after
-- Split Scene.swift by reason to change
-- Carries know the stack: top-down pickup, height-aware postures
-- A simulator: the whole pipeline driven by hand, with every event and command in the log
-- Spec: a crate is heavy, nothing moves it after release
-- Spec: one crate size, no spin on release
-- Spec: set-down postures per stack level, still owed
-- Spec: set-down postures per stack level
-- Spec: closed, not merged
-- Pallet spec: impatient dispatcher, telekinetic loading and unloading, a bobbing pallet pushed to the deck
-- Commands as values and station truth: minions run one command at a time with interruptible phases; completions write station truth; hover pauses a minion and shows its orders
-- Architecture map: where this is going (facts, authority, commands, station truth)
-- Split the data layer out of the scene into World
-- A crate set down in storage by hand stays until the source counts it
-- Cleanup round: per-repository readiness (no shuttles for a late first answer), a WorldEvent seam between diffs and cues, ARCHITECTURE.md
-- Shower as a wall nozzle and a drain, clear of the sign; a low coffee table
-- Cubes only where they mean something: a slab table on legs, flat tick and portholes; furniture blocks the floor
-- A blocky plant: square pot, thin stem, flat leaves
-- Nothing round: every turned shape gets four or six flat sides, spheres become cubes
-- The bay is outside: with an airlock against it, everyone comes in and goes out through the hatch
-- Own tempo and tool rota per minion, chores for loungers, sooner bath visits, an airlock by the bay that departures leave through
-- No cone for an office that is gone (crash); a covered cone is worked from the cell beside it; a retarget never leaves the room
-- Couch and bed pulls leave minions on errands alone; a carrier gives up its seat; a walker with no path walks straight rather than sliding
-- The yard follows GitHub through the minions: crates the board moved to staging are carried across, counts snap only for the rest; the staging haul finds its crates again
-- Night is the clock's business alone: a quiet afternoon is spent in the lounge, not in bed
+- One cone per session: the message being worked, queued ones in a row behind it, the old one shrinks away; repository names kept with the board so the deck is drawn right from launch; the world's diff runs before the redraw so a cleared crate is carried from where it stood
+- A pallet errand is a job nothing calls the operator away from; whoever adopts one stands beside it; cones owed to an office land with its reveal; scenarios can forbid lines
+- Shuttle flies on the station clock; the simulator's board catch-up waits on it too; a commit is stowed as a cube by command; the first release answer is quiet
+- A pull request newly open on my checkout is announced from the poll's state change, so the office's worker packs it; an approach walks to the stand cell once and shuffles from there
+- Carries approach on foot and never from on top of the slot; a pull request is packed by the office's worker; a pallet with no operator gets one; the pusher walks round the pallet
