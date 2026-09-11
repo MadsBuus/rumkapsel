@@ -631,11 +631,26 @@ final class Fleet {
     func removeAllStations() { stations = [:] }
     func removeStation(named name: String) { stations[name] = nil }
 
+    /// A repository's colour comes from its name, not from the order it was first seen, so it is the
+    /// same on every launch and on every station: a hash picks the palette slot, and a name whose slot
+    /// another name already holds takes the next free one, names in alphabetical order.
     func color(forRepo repo: String) -> RGB {
-        if let i = repoColors[repo] { return Colors.repos[i % Colors.repos.count] }
-        let i = repoColors.count
-        repoColors[repo] = i
-        return Colors.repos[i % Colors.repos.count]
+        if repoColors[repo] == nil { repoColors[repo] = 0; assignColors() }
+        return Colors.repos[(repoColors[repo] ?? 0) % Colors.repos.count]
+    }
+
+    private func assignColors() {
+        let n = Colors.repos.count
+        var taken: [Int: String] = [:]
+        for name in repoColors.keys.sorted() {
+            var h: UInt64 = 14695981039346656037
+            for b in name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+            var i = Int(h % UInt64(n))
+            var tries = 0
+            while taken[i] != nil, tries < n { i = (i + 1) % n; tries += 1 }
+            taken[i] = name
+            repoColors[name] = i
+        }
     }
 
     func station(_ name: String) -> Station {
@@ -693,6 +708,7 @@ final class Fleet {
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors
+        assignColors()   // by name, whatever order an older save gave them
         for (name, s) in saved.stations where name != "crew" {
             let station = Station(name: name)
             station.restore(s)

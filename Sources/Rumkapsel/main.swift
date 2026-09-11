@@ -153,12 +153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
             app.addItem(withTitle: "What's New in \(v)…", action: #selector(openWhatsNew), keyEquivalent: "")
         }
-        // Which commit this is, so a bug report and a fix are never about different builds.
-        if let b = Bundle.main.infoDictionary?["RKBuild"] as? String {
-            let item = NSMenuItem(title: "Build \(b)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            app.addItem(item)
-        }
         app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
@@ -185,7 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     @objc func about() {
         let alert = NSAlert()
-        alert.messageText = "rumkapsel"
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let b = Bundle.main.infoDictionary?["RKBuild"] as? String ?? ""
+        alert.messageText = "rumkapsel \(v)" + (b.isEmpty ? "" : "\nbuild \(b)")
         alert.informativeText = "Your Claude sessions and Conductor workspaces as a space station: offices per branch, commits as boxes, pull requests as colours, releases as rockets, and your crew next door.\n\nA homage to rymdkapsel by Grapefrukt."
         alert.runModal()
     }
