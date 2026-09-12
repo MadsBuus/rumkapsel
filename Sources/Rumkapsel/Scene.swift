@@ -237,6 +237,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let demo: Bool
     /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
     var sim: SimHooks?
+    /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
+    /// runs at its own pace and may stall. Everything on the station that judges freshness against
+    /// "now" reads this, so a slow frame can never age a session or a landing.
+    private let simEpoch = Date()
+    var now: Date { sim.map { simEpoch.addingTimeInterval($0.clock) } ?? Date() }
     var demoClock = 0.0
     var demoMerged = false
     var demoStaged = false
@@ -465,7 +470,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
         // while it still stands on the untested row, and the redraw then leaves it out as carried.
         // The other way round drew it tested, and the carry lifted it off the tested stack and put it back.
-        handle(world.applyGitHub(now: Date()))
+        handle(world.applyGitHub(now: now))
         reconcileYards()
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
@@ -489,7 +494,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     func apply(_ result: ScanResult) {
-        let now = Date()
+        let now = self.now
         // The model works out what the floor should look like; the scene then places the workers on it.
         var homes: [String: World.MinionHome] = [:]
         for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
@@ -688,7 +693,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A peer's claim lands on our work station. The model merges it; the scene shows the result and
     /// stands their figures in whichever offices we happened to give them.
     func receivePeer(_ snap: PeerSnapshot) {
-        handle(world.applyPeer(snap, now: Date()))
+        handle(world.applyPeer(snap, now: now))
         flushScene()
         flushDeliveries()
         placePeerMinions(snap)

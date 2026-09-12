@@ -1012,8 +1012,8 @@ final class World {
 
     /// A completion: a crate is down in a yard by hand, in storage, on the deck, or aboard the rocket
     /// on the pad. The station's word on it from here until the source says something newer.
-    func landed(station: Station, repo: String, number: Int, in yard: Yard) {
-        station.ledger.landed(repo: repo, number: number, in: yard, at: Date())
+    func landed(station: Station, repo: String, number: Int, in yard: Yard, at now: Date) {
+        station.ledger.landed(repo: repo, number: number, in: yard, at: now)
         fleet.save()
     }
 

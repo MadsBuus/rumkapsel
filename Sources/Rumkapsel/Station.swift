@@ -103,6 +103,12 @@ final class Station {
     private(set) var spineHalfLength = 2
     private var occupied: [Cell: String] = [:]
     private var walkableCache: Set<Cell>?
+    /// Which yard block or the corridor each cell is in, and the doorways through the yard: read on
+    /// every step of every route, built once per floor plan.
+    private var yardAreaCache: [Cell: String]?
+    private var doorwaysCache: [(Cell, Cell)]?
+    private var doorCache: [String: Cell] = [:]
+    private func forgetFloorPlan() { walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:] }
     /// World-space offset of this station's local grid.
     var offset = SIMD2<Double>(0, 0)
 
@@ -251,7 +257,7 @@ final class Station {
         let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count], near: near)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
-        walkableCache = nil
+        forgetFloorPlan()
         return true
     }
 
@@ -284,9 +290,12 @@ final class Station {
 
     /// The room cell that touches the corridor: the doorway, and where a carried box gets set down.
     func doorCell(of key: String) -> Cell? {
+        if let d = doorCache[key] { return d }
         guard let r = rooms[key] else { return nil }
         let candidates = r.cells.filter { $0.neighbours.contains(where: isCorridor) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        return candidates.first ?? r.cells.first
+        let d = candidates.first ?? r.cells.first
+        if let d { doorCache[key] = d }
+        return d
     }
 
     /// The corridor cell just outside a room's doorway.
@@ -298,17 +307,25 @@ final class Station {
     /// Walking between a room and the hallway is only allowed through the doorway.
     /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
     private func yardArea(_ c: Cell) -> String? {
-        if airlockCells.contains(c) { return "airlock" }
-        if hangarCells.contains(c) { return "hangar" }
-        if storageCells.contains(c) { return "storage" }
-        if deckCells.contains(c) { return "deck" }
-        if padCells.contains(c) { return "pad" }
-        if isCorridor(c) || coreCells.contains(c) { return "corridor" }
-        return nil
+        if let areas = yardAreaCache { return areas[c] }
+        var areas: [Cell: String] = [:]
+        for (name, cells) in [("corridor", corridorCells + coreCells), ("pad", padCells), ("deck", deckCells),
+                              ("storage", storageCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
+            for cell in cells { areas[cell] = name }   // later names win, so the blocks outrank the corridor
+        }
+        yardAreaCache = areas
+        return areas[c]
     }
 
     /// Doorways through the yard: the corridor into the deck, and the deck into storage and the pad.
     var yardDoorways: [(Cell, Cell)] {
+        if let d = doorwaysCache { return d }
+        let d = computeYardDoorways()
+        doorwaysCache = d
+        return d
+    }
+
+    private func computeYardDoorways() -> [(Cell, Cell)] {
         guard hasPad else { return [] }
         let x0 = -spineHalfLength - 1
         var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
@@ -346,7 +363,7 @@ final class Station {
     func removeRoom(key: String) {
         guard let r = rooms.removeValue(forKey: key) else { return }
         for c in r.cells { occupied[c] = nil }
-        walkableCache = nil
+        forgetFloorPlan()
     }
 
     private func rotations(of shape: [Cell]) -> [[Cell]] {
@@ -417,7 +434,7 @@ final class Station {
                 }
             }
             spineHalfLength += 2
-            walkableCache = nil
+            forgetFloorPlan()
         }
         // Give up gracefully: park the room in a free spot far out along the east arm.
         let far = Cell(x: spineHalfLength + 2, y: 2)
@@ -610,7 +627,7 @@ final class Station {
             rooms[key] = room
             for c in r.cells { occupied[c] = key }
         }
-        walkableCache = nil
+        forgetFloorPlan()
     }
 }
 

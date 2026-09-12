@@ -204,12 +204,12 @@ final class SimulatorModel: ObservableObject {
                              owner: .teammate, who: teammate)
         leo.prOpen = true
         leo.pushed = true
-        leo.startedAt = Date().addingTimeInterval(-7200)
+        leo.startedAt = station.now.addingTimeInterval(-7200)
         offices.append(leo)
         var kim = makeOffice(repo: "web", number: 460, branch: "gh-460/artist-tags", title: "artist tags", owner: .peer, who: peerName)
         kim.pushed = true
         kim.commits = 2
-        kim.startedAt = Date().addingTimeInterval(-3600)
+        kim.startedAt = station.now.addingTimeInterval(-3600)
         offices.append(kim)
 
         github.inject(project: board, quiet: true)
@@ -225,7 +225,7 @@ final class SimulatorModel: ObservableObject {
 
     private func item(_ repo: String, _ number: Int, _ title: String, _ status: String, _ who: String) -> ProjectItem {
         ProjectItem(repo: repo, number: number, title: title, status: status, assignees: [who],
-                    prURLs: [], url: "https://example.invalid/\(repo)/\(number)", updatedAt: Date())
+                    prURLs: [], url: "https://example.invalid/\(repo)/\(number)", updatedAt: station.now)
     }
 
     private func makeOffice(repo: String, number: Int, branch: String, title: String, owner: SimOwner, who: String) -> SimOffice {
@@ -249,7 +249,7 @@ final class SimulatorModel: ObservableObject {
 
     private func startSession(in uid: String, activity: Activity) {
         nextSession += 1
-        sessions[uid] = SimSession(id: "sim-\(nextSession)", office: uid, activity: activity, last: Date())
+        sessions[uid] = SimSession(id: "sim-\(nextSession)", office: uid, activity: activity, last: station.now)
     }
 
     // MARK: pushing facts in
@@ -291,16 +291,16 @@ final class SimulatorModel: ObservableObject {
         let mine = offices.filter { $0.owner == .peer }.map { o in
             PeerSnapshot.Office(key: o.home.key, name: o.home.name, repo: o.repo, branch: o.branch,
                                 color: station.world.fleet.color(forRepo: o.repo), cells: [], pushed: o.pushed,
-                                startedAt: o.startedAt, lastActive: Date(), boxes: o.commits, dim: false)
+                                startedAt: o.startedAt, lastActive: station.now, boxes: o.commits, dim: false)
         }
         let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: $0.key, asleep: false, busy: true) }
-        let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: Date().addingTimeInterval(-600),
+        let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: station.now.addingTimeInterval(-600),
                                 offices: mine, minions: Array(ms), github: nil, project: nil)
         station.simulate(peer: snap)
     }
 
     private func feedEvent(_ kind: String, repo: String, branch: String?, pr: Int?, title: String?, detail: String = "") {
-        let e = FeedEvent(at: Date(), actor: teammate, isBot: false, kind: kind, branch: branch, prNumber: pr,
+        let e = FeedEvent(at: station.now, actor: teammate, isBot: false, kind: kind, branch: branch, prNumber: pr,
                           title: title, url: "https://example.invalid/\(repo)", detail: detail)
         feeds[repo, default: []].insert(e, at: 0)
         feeds[repo] = Array(feeds[repo]!.prefix(40))
@@ -318,7 +318,7 @@ final class SimulatorModel: ObservableObject {
         for it in items {
             guard let i = board.firstIndex(where: { $0.repo == it.repo && $0.number == it.number }) else { continue }
             board[i] = ProjectItem(repo: it.repo, number: it.number, title: it.title, status: status,
-                                   assignees: it.assignees, prURLs: it.prURLs, url: it.url, updatedAt: Date())
+                                   assignees: it.assignees, prURLs: it.prURLs, url: it.url, updatedAt: station.now)
         }
         pushGitHub()
     }
@@ -574,17 +574,17 @@ final class SimulatorModel: ObservableObject {
             guard var s = targetSession else { return }
             s.prompts += 1
             s.markers[.prompt] = UUID().uuidString
-            s.last = Date()
+            s.last = station.now
             sessions[s.office] = s
             pushScan()
         case "Busy":
             guard var s = targetSession else { return }
-            s.activity = .coding("src"); s.last = Date()
+            s.activity = .coding("src"); s.last = station.now
             sessions[s.office] = s
             pushScan()
         case "Quiet":
             guard var s = targetSession else { return }
-            s.activity = .waiting; s.last = Date().addingTimeInterval(-600)
+            s.activity = .waiting; s.last = station.now.addingTimeInterval(-600)
             sessions[s.office] = s
             pushScan()
         case "Session ends":
@@ -599,7 +599,7 @@ final class SimulatorModel: ObservableObject {
             offices[i].title = "switched \(n)"
             offices[i].pull = nil
             board.append(item(offices[i].repo, n, "switched \(n)", statuses.development, "me"))
-            sessions[target]?.last = Date()
+            sessions[target]?.last = station.now
             pushGitHub()
             pushScan()
         case "Open PR", "Approve PR", "Checks failing", "Merge PR", "Close PR":
@@ -686,7 +686,7 @@ final class SimulatorModel: ObservableObject {
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
-                                           url: pr.url, labels: pr.labels, mergedAt: Date())
+                                           url: pr.url, labels: pr.labels, mergedAt: station.now)
             // With a board, the merge is a bell; the crates move because the columns move.
             if ConfigStore.shared.current.project != nil { launches.append((repo, releases[repo]![i])) }
             pushGitHub()
@@ -720,7 +720,7 @@ final class SimulatorModel: ObservableObject {
             guard let i = openRelease(repo, production: true) else { return }
             let pr = releases[repo]![i]
             let merged = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
-                                   url: pr.url, labels: pr.labels.filter { $0 != "untested" }, mergedAt: Date())
+                                   url: pr.url, labels: pr.labels.filter { $0 != "untested" }, mergedAt: station.now)
             releases[repo]![i] = merged
             launches.append((repo, merged))
             pushGitHub()
@@ -752,7 +752,7 @@ final class SimulatorModel: ObservableObject {
                            owner: .peer, who: peerName)
         o.pushed = aged
         o.commits = aged ? 2 : 0
-        o.startedAt = aged ? Date().addingTimeInterval(-3600) : Date()
+        o.startedAt = aged ? station.now.addingTimeInterval(-3600) : station.now
         offices.append(o)
     }
 

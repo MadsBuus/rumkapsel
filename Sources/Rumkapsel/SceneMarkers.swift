@@ -447,7 +447,7 @@ extension StationController {
                 guard let self else { return }
                 r?.pending.remove(command.id)
                 // Aboard by hand: the rows may not draw it again until the board says it has shipped.
-                world.landed(station: station, repo: repo, number: crate.number, in: .pad)
+                world.landed(station: station, repo: repo, number: crate.number, in: .pad, at: now)
                 // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
                 // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
                 let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))

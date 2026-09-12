@@ -463,7 +463,7 @@ extension StationController {
             guard let self else { return }
             world.truth.setDown(item.crate, at: to)
             // Down by hand: the station's word on where it stands, until the board has caught up.
-            world.landed(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? .storage : .deck)
+            world.landed(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? .storage : .deck, at: now)
             item.node.removeFromParentNode()
             drone.thud()
             rebuildMarkers()

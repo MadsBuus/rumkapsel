@@ -176,6 +176,13 @@ still owed. `--ledger-tests` feeds a ledger facts in every order, board before r
 board, stale after fresh, A then B then A, and holds it to: every crate in one yard at most, a hand
 outranking any older word, wanted equal to placed once the source has said something newer.
 
+Station time is one value, `StationController.now`: the wall clock in the app, the simulated clock in a
+simulator. Everything on the station that judges freshness against "now", a session's idleness, a peer's
+snapshot, a landing's time in the ledger, reads it, and the simulator stamps its facts with it. A frame
+that takes long, a route that searches the whole floor say, can therefore never age a session or make a
+landing look older than a board move. The route search itself reads the yard blocks, the doorways and the
+room doors from caches built once per floor plan; it used to rebuild them on every step.
+
 ## The staging pallet
 
 Done. A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`

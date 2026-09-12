@@ -578,7 +578,7 @@ extension StationController {
         let command = world.carryToStorage(station: station, room: room, repo: repo, number: number)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
-            world.landed(station: station, repo: repo, number: number, in: .storage)
+            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
@@ -599,7 +599,7 @@ extension StationController {
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                world.landed(station: station, repo: repo, number: crate.number, in: Yard(area: to.area) ?? .deck)
+                world.landed(station: station, repo: repo, number: crate.number, in: Yard(area: to.area) ?? .deck, at: now)
                 node.removeFromParentNode()
                 rebuildMarkers()
                 refreshRockets()
