@@ -40,8 +40,9 @@ struct Ledger: Codable {
         var cleared = false
         /// The station's word: the yard it stands in, or belongs to while on someone's arms or the pallet.
         var placed: Yard?
-        /// When the station last set it down by hand; nil once the source has agreed with that.
-        var handAt: Date?
+        /// When the station last moved it, a minion, the pallet or the hatch setting it down; cleared once
+        /// the source has said something newer. While set, the station's word stands over the source's.
+        var movedAt: Date?
         /// Where a carry under way is taking it: its slot there is spoken for from the order.
         var heading: Yard?
 
@@ -49,8 +50,8 @@ struct Ledger: Codable {
         /// Where the rows draw it or hold a slot for it: the yard it belongs to, or the one it is bound for.
         func belongs(to yard: Yard) -> Bool { placed == yard || heading == yard }
         /// The source and the station disagree, nothing is carrying it, and the source's word is the
-        /// newer one: a hand landing the source has not caught up with is the station's to keep.
-        var disagrees: Bool { wanted != placed && heading == nil && handAt == nil }
+        /// newer one: a move the source has not caught up with is the station's to keep.
+        var disagrees: Bool { wanted != placed && heading == nil && movedAt == nil }
     }
 
     private(set) var crates: [String: Crate] = [:]
@@ -103,26 +104,26 @@ struct Ledger: Codable {
             c.cleared = word.cleared.contains(number)
             let at = word.updated[number]
             var news: Bool
-            if let hand = c.handAt {
-                // Against a hand landing, the source's word counts only if it is newer; with no time to
-                // go by, only if it agrees. A crate aboard the rocket that the source counts nowhere any
-                // more has shipped: that is agreement too.
-                if let at { news = at > hand } else { news = yard == c.placed || (c.placed == .pad && yard == nil) }
+            if let moved = c.movedAt {
+                // The station moved this crate since the source last spoke: the source's word counts only
+                // if its time is later than that move; with no time to go by, only if it agrees. A crate
+                // aboard the rocket that the source counts nowhere any more has shipped: agreement too.
+                if let at { news = at > moved } else { news = yard == c.placed || (c.placed == .pad && yard == nil) }
             } else {
                 news = true
             }
             // An older word than the one already held, a peer's lagging copy of the board say, is not news either.
             if news, let at, let held = c.wantedAt, at < held { news = false }
             if news {
-                // A newer word from the source outranks the station's hand, agreeing or not.
+                // A newer word from the source outranks the station's move, agreeing or not.
                 c.wanted = yard
                 c.wantedAt = at
-                c.handAt = nil
+                c.movedAt = nil
             }
             if c.placed == nil, c.heading == nil {
                 // Never touched here: the source's word is the station's word.
                 c.placed = c.wanted
-                c.handAt = nil
+                c.movedAt = nil
             }
             if c.placed == .pad, c.wanted == nil, c.heading == nil {
                 // Aboard, and the source no longer counts it anywhere: it lifted off with the rocket.
@@ -158,7 +159,7 @@ struct Ledger: Codable {
         var c = crates[k] ?? Crate(repo: repo, number: number)
         c.placed = yard
         c.heading = nil
-        c.handAt = c.wanted == yard ? nil : at
+        c.movedAt = c.wanted == yard ? nil : at
         crates[k] = c
     }
 
@@ -166,7 +167,7 @@ struct Ledger: Codable {
     mutating func snap(repo: String, number: Int) {
         guard var c = crates[Ledger.key(repo, number)], c.heading == nil else { return }
         c.placed = c.wanted
-        c.handAt = nil
+        c.movedAt = nil
         if c.placed == nil { crates[c.key] = nil } else { crates[c.key] = c }
     }
 

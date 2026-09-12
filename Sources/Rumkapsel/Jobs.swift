@@ -65,6 +65,9 @@ extension StationController {
     /// crate on the arms somewhere else.
     private func canInterrupt(_ m: Minion, with c: Command) -> Bool {
         guard m.wakeUntil == 0 else { return false }   // still stepping out of the shuttle
+        // A job holds something and is not simply dropped: only another job may cut in on it. A rest
+        // or a message waits its turn, and begins the moment the job is done.
+        if m.onJob, !c.isJob { return false }
         let phase = m.phaseKind
         if phase.takesNewDestination {
             guard let held = m.current?.crate, let want = c.crate else { return false }
@@ -80,6 +83,12 @@ extension StationController {
     }
 
     private func begin(_ m: Minion, _ c: Command, announce: Bool = false) {
+        // A carry is one minion's from the moment it begins, however it began: from the scheduler or
+        // from the pending slot after a pack. Somebody else already on it means this one stands down.
+        if case .carry = c.kind, let job = cargo[c.id] {
+            if let who = job.carrier, who != m.id { m.pending = nil; if m.current == nil { send(m, to: restPlace(m)) }; return }
+            if job.carrier == nil { cargo[c.id]?.carrier = m.id; cargo[c.id]?.issuedAt = clock }
+        }
         issue(c, by: m.home.name)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
         let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
@@ -173,6 +182,8 @@ extension StationController {
     }
 
     func send(_ m: Minion, to place: Place) {
+        // A minion on a job goes where the job takes it; rest waits until the job is done.
+        if m.onJob { return }
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
         var place = place
@@ -599,7 +610,9 @@ extension StationController {
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                world.landed(station: station, repo: repo, number: crate.number, in: Yard(area: to.area) ?? .deck, at: now)
+                // Where it actually went down: the order may have been re-aimed, or sent back, on the way.
+                let landedIn = world.truth.area(of: crate).flatMap(Yard.init(area:)) ?? Yard(area: to.area) ?? .deck
+                world.landed(station: station, repo: repo, number: crate.number, in: landedIn, at: now)
                 node.removeFromParentNode()
                 rebuildMarkers()
                 refreshRockets()
@@ -618,23 +631,79 @@ extension StationController {
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
             let free = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
             guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
-                if let patience = job.command.patience, clock - job.issuedAt > patience {
-                    cargo[id] = nil
-                    job.node.removeFromParentNode()
-                    world.truth.forget(crate)
-                    job.onDone()
-                }
+                if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
                 continue
             }
             assign(m, job.command, announce: true)
             guard m.current?.id == job.command.id else { continue }
             cargo[id]?.carrier = m.id
+            cargo[id]?.issuedAt = clock   // a new leg: the walk to the crate and the carry get their own patience
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
             m.path = route(m, to: standCell(station, near: from.cell))
         }
+        // Truth before the picture: a carry that has not landed within its patience, whoever has it,
+        // is set down where its order says and the station catches up in one move.
+        for (id, job) in cargo where job.carrier != nil {
+            if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
+        }
+        // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
+        for (id, job) in cargo where job.carrier != nil && !job.hurry {
+            guard let crate = job.command.crate, case .carry(_, _, let to) = job.command.kind, let m = job.carrier.flatMap({ minions[$0] }) else { continue }
+            let queued = cargo.values.filter { $0.carrier == nil && $0.command.crate?.station == crate.station && $0.command.crate?.repo == crate.repo }.count
+            guard queued > 0 else { continue }
+            cargo[id]?.hurry = true
+            let words = "hurrying \(crate.words) to \(to.words), \(queued) more waiting"
+            if m.current?.id == id { m.current = m.current?.reworded(words); world.truth.jobs[m.id] = (m.current!, m.phase) }
+            handle(.log("\(m.home.name): \(words)"))
+        }
         tickRockets()
         servicePallets()
+    }
+
+    /// The carry's patience ran out: the crate is down where the order says, whoever was carrying it
+    /// lets go, and the log says the station caught up. The picture takes the snap; the ledger is right.
+    private func setDownLate(_ id: Int, _ job: Cargo) {
+        guard case .carry(let crate, _, let to) = job.command.kind else { return }
+        cargo[id] = nil
+        let m = job.carrier.flatMap { minions[$0] }
+        if let m, m.carried === job.node { m.carried = nil }
+        world.truth.setDown(crate, at: to)
+        handle(.log("\(crate.words) set down late in \(to.words): the station caught up"))
+        job.onDone()
+        if let m, m.current?.id == id { finish(m) }
+    }
+
+    /// The board put a crate back where it stands while a carry was under way: the order is off. On
+    /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
+    func cancelCarry(_ id: Int, backTo from: Spot) {
+        guard let job = cargo[id], let crate = job.command.crate else { return }
+        if let who = job.carrier, let m = minions[who], m.carried === job.node {
+            let back = job.command.aimed(at: from)
+            cargo[id]?.command = back
+            world.unorder(crate)
+            start(m, back)
+            handle(.log("\(crate.words): back where it was, the board changed its mind"))
+            return
+        }
+        if let who = job.carrier, let m = minions[who], m.current?.id == id { finish(m) }
+        job.node.removeFromParentNode()
+        world.truth.forget(crate)
+        world.unorder(crate)
+        cargo[id] = nil
+        markersDirty = true
+        handle(.log("\(crate.words): stays put, the board changed its mind"))
+    }
+
+    /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
+    /// was when the order went out. The order keeps its id; only its destination moves.
+    func reaim(_ id: Int, for m: Minion) {
+        guard let job = cargo[id], case .carry(let crate, _, let to) = job.command.kind,
+              let fresh = world.slotNow(for: crate, toward: to), fresh.pos != to.pos else { return }
+        let c = job.command.aimed(at: fresh)
+        cargo[id]?.command = c
+        m.current = c
+        world.truth.jobs[m.id] = (c, m.phase)
     }
 
     // MARK: crew

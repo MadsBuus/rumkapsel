@@ -31,6 +31,8 @@ final class Minion {
     var qaStop = 0
     /// Until then the walk is a stroll, whatever the state: the way out of a closed office is not a hurry.
     var strollUntil = 0.0
+    /// The simulator's wedge: not another step, whatever the command. For proving the station catches up.
+    var wedged = false
     /// Prompts that came in before the office had unfolded: their cones land with the reveal.
     var owedCones = 0
     /// A carrier, deliverer or pusher walks at one pace whoever it is.

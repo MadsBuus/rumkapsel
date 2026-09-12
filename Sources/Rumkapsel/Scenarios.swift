@@ -386,6 +386,41 @@ enum Scenarios {
         ], tail: 8, expects: [
             .stow(by: "#455 booking flow"),
         ]),
+        Scenario("a stacked deck goes aboard: the carrier hurries", [
+            ("Target: web#455", 0.3),
+            ("Release: Staging opens", 5.0),
+            ("Release: Staging merges (board lags)", 10.0),   // three web crates on the deck, one column
+            ("Board: Catch up", 0.5),
+            ("Release: Production opens", 3.0),
+            ("Release: Mark tested", 6.0),                    // the rocket loads all three: a chain, top down
+            ("Release: Production merges", 0.3),
+        ], tail: 10, expects: [
+            .rocket(.load(3), "web"),
+            .carry(to: .pad),
+            .log("more waiting"),   // the carrier with carries queued behind it says so
+            .rocket(.launch, "web"),
+        ], floor: { sim in
+            let loads = Scenario.count(sim, .carry(to: .pad))
+            if loads != 3 { return "\(loads) carries into the rocket for three crates" }
+            let deck = Scenario.crates(sim, "deck", "web")
+            return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
+        }),
+        Scenario("a wedged carrier: the station catches up", [
+            ("Target: ios#298", 0.3),
+            ("Open PR", 2.0),
+            ("Merge PR", 0.6),        // the package is ordered to storage and a carrier takes it
+            ("Wedge carrier", 0.3),   // and stops dead on the way
+        ], tail: 9, expects: [        // the carry's patience is ninety station seconds: under six real
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .press("Wedge carrier"),
+            .log("set down late"),
+        ], floor: { sim in
+            // Truth before the picture: the crate is in storage and the ledger says so, carrier or no carrier.
+            guard Scenario.crates(sim, "storage", "ios") > 0 else { return "no ios crate stands in storage" }
+            let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
+            return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
+        }),
         Scenario("a chore", [
             ("Everyone to lounge", 3.0),
             ("Chore", 0.3),

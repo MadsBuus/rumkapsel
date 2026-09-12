@@ -34,7 +34,7 @@ enum LedgerTests {
             l.order(repo: "web", number: 1, to: .deck)
             expect(l.disagreements(repo: "web").isEmpty, "a crate on its way is not a disagreement")
             l.landed(repo: "web", number: 1, in: .deck, at: at(20))
-            expect(l["web", 1]?.placed == .deck && l["web", 1]?.handAt == nil, "down where the source wanted it: agreed")
+            expect(l["web", 1]?.placed == .deck && l["web", 1]?.movedAt == nil, "down where the source wanted it: agreed")
             l.adopt(word(deck: [1], updated: [1: at(10)]), repo: "web")
             expect(l.disagreements(repo: "web").isEmpty, "the same answer again changes nothing")
         }
@@ -49,7 +49,7 @@ enum LedgerTests {
             expect(l["web", 1]?.placed == .deck && l["web", 2]?.placed == .deck, "a stale answer takes nothing back")
             expect(l.disagreements(repo: "web").isEmpty, "and asks for no carry")
             l.adopt(word(deck: [1, 2], updated: [1: at(40), 2: at(40)]), repo: "web")   // the board catches up
-            expect(l.disagreements(repo: "web").isEmpty && l["web", 1]?.handAt == nil, "wanted equals placed, the hand is history")
+            expect(l.disagreements(repo: "web").isEmpty && l["web", 1]?.movedAt == nil, "wanted equals placed, the hand is history")
         }
 
         test("stale after fresh: a fresh word, then an older one for the same crate, changes nothing") {
@@ -81,7 +81,7 @@ enum LedgerTests {
             l.adopt(word(storage: [1]), repo: "web")
             expect(l["web", 1]?.placed == .deck && l.disagreements(repo: "web").isEmpty, "the station's word stands")
             l.adopt(word(deck: [1]), repo: "web")
-            expect(l["web", 1]?.handAt == nil && l.disagreements(repo: "web").isEmpty, "agreed the moment it says the same")
+            expect(l["web", 1]?.movedAt == nil && l.disagreements(repo: "web").isEmpty, "agreed the moment it says the same")
         }
 
         test("aboard the rocket: not drawn on the deck again, gone when the source stops counting it") {
@@ -104,7 +104,7 @@ enum LedgerTests {
             l.landed(repo: "web", number: 9, in: .storage, at: at(5))
             expect(l.counts(in: .storage)["web"] == 1, "down: counted")
             l.adopt(word(storage: [9], updated: [9: at(8)]), repo: "web")
-            expect(l.disagreements(repo: "web").isEmpty && l["web", 9]?.handAt == nil, "the source caught up")
+            expect(l.disagreements(repo: "web").isEmpty && l["web", 9]?.movedAt == nil, "the source caught up")
         }
 
         test("every crate is in one yard at most, whatever the order of facts") {

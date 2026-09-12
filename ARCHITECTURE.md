@@ -150,10 +150,10 @@ to while on someone's arms or the pallet. Sources write `wanted`, only through `
 The counts the HUD, the rockets and the rings read (`Station.stored`, `staged`) are read off `placed`
 and kept nowhere; `yardLayout` draws from the same rows.
 
-A word from the source is news for a crate only if it is newer than the station's own hand on it. A
-board item carries when it last moved, so an answer older than a landing is stale for that crate
-however fresh the poll, and a word older than the one already held (a peer's lagging copy) is not news
-either. A source with no times of its own, git history, is believed again the moment it agrees with what
+A word from the source is news for a crate only if it is newer than the station's own move of it
+(`movedAt`). A board item carries when it last moved, so an answer older than a landing is stale for
+that crate however fresh the poll, and a word older than the one already held (a peer's lagging copy)
+is not news either. A source with no times of its own, git history, is believed again the moment it agrees with what
 the station did. That is what lets the pallet's crates stay on the deck while the board still says
 storage, and a crate in the rocket's hold stay there until the board says shipped; nothing decides by
 the clock any more.
@@ -170,11 +170,28 @@ a redraw only when it brought a difference.
 
 A yard holds a slot for a crate on its way in from the moment the carry is ordered (`heading`), so two
 carries never land on one slot; a crate that has left the rows, on the arms or the pallet, holds nothing,
-the stack it was in settles, and it asks for a slot again when it comes back. That is the first half of
-step 5's late binding; the second, a carry that names only the yard and takes its slot at set-down, is
-still owed. `--ledger-tests` feeds a ledger facts in every order, board before release, release before
-board, stale after fresh, A then B then A, and holds it to: every crate in one yard at most, a hand
-outranking any older word, wanted equal to placed once the source has said something newer.
+the stack it was in settles, and it asks for a slot again when it comes back. With the crate up on the
+arms the slot is asked for once more (`reaim`, `World.slotNow`): the same yard the order named, the stack
+as it stands that moment, and the order keeps its id with only its destination moved. That is step 5's
+late binding as far as a command that carries a `Spot` allows; a command that names only the yard is the
+rest of it. The reconciler works per crate: one under way is left to its carrier and the rest are dealt
+with, so one slow carry no longer holds its repository. Only the pallet holds a whole repository, being
+one errand for all of its crates. A storage-to-deck carry whose crate the board has since put back in
+storage is cancelled (`cancelCarry`): not lifted yet, the crate simply stays; on the arms, it goes back to
+the slot it came from, by the same redirect a new destination uses.
+
+Truth before the picture. A carry's patience, ninety station seconds, covers the whole order now, not
+only the wait for a carrier: a carry that has not landed by then is set down where its order says
+(`setDownLate`), whoever was carrying it lets go, the completion runs, and the log says the station
+caught up. So the ledger is never more than one patience behind the source, and a wedged carrier, a
+route that cannot be replanned, or a chain of carries waiting on each other costs one visible snap and
+never a wrong count. The simulator's "Wedge carrier" stops a carrier dead to prove it. A carrier with
+carries of its repository queued behind it hurries: a quicker gait, the same lift and set-down, and the
+words say so on hover and in the log.
+
+`--ledger-tests` feeds a ledger facts in every order, board before release, release before board, stale
+after fresh, A then B then A, and holds it to: every crate in one yard at most, a move outranking any
+older word from the source, wanted equal to placed once the source has said something newer.
 
 Station time is one value, `StationController.now`: the wall clock in the app, the simulated clock in a
 simulator. Everything on the station that judges freshness against "now", a session's idleness, a peer's

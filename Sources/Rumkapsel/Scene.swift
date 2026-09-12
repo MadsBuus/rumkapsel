@@ -196,7 +196,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
-    struct Cargo { let command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""; var issuedAt = 0.0 }
+    struct Cargo {
+        var command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""
+        /// When the current leg began: the order, then the assignment, then the pickup. Patience runs per leg.
+        var issuedAt = 0.0
+        /// Carries queued behind this one: the carrier picks up the pace.
+        var hurry = false
+    }
     var cargo: [Int: Cargo] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600

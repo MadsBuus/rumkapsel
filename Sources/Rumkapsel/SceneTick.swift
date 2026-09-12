@@ -274,7 +274,9 @@ extension StationController {
             let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
             // Pace by the task, not by who: a loaded minion is the slowest thing on the station, below
             // a stroll; hurrying to work is the fastest; pacing while waiting is slower still.
-            let speed = m.isHauling ? 1.1 : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
+            // A hurried haul is quicker on its feet, still below a busy walk: the crate is heavy all the same.
+            let hurried = m.current.flatMap { cargo[$0.id]?.hurry } ?? false
+            let speed = m.wedged ? 0 : m.isHauling ? (hurried ? 1.7 : 1.1) : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
             if m.lying, !m.path.isEmpty {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
@@ -427,7 +429,9 @@ extension StationController {
                     // There: work at it for its span of station time, then back to the quarters.
                     if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; continue }
                     if clock >= m.phaseUntil { crewRested(m) }
-                case .carry(let crate, _, let to):
+                case .carry(let crate, _, let aimed):
+                    // The destination as it is now: a re-aim or a reversal may have moved it since the order.
+                    let to: Spot = { if case .carry(_, _, let t) = cargo[m.current?.id ?? -1]?.command.kind { return t }; return aimed }()
                     guard let id = m.current?.id, let job = cargo[id] else {
                         // The crate went away: put down whatever is on the arms, where it stands.
                         dropWhereStanding(m)
@@ -452,10 +456,14 @@ extension StationController {
                         if m.carried == nil {
                             lift(m, job.node)
                             self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
+                            cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
                         }
                         if clock < m.phaseUntil { continue }
                         advance(m)
-                        walk(m, to: standCell(station, near: to.cell))
+                        // Up on the arms: now the slot is asked for, against the stack as it stands this moment.
+                        reaim(id, for: m)
+                        if case .carry(_, _, let dest) = m.current?.kind { walk(m, to: standCell(station, near: dest.cell)) }
+                        else { walk(m, to: standCell(station, near: to.cell)) }
                         continue
                     case .haul:
                         advance(m); continue

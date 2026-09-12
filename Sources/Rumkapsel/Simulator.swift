@@ -497,7 +497,7 @@ final class SimulatorModel: ObservableObject {
                        openRelease(repo, production: true) == nil ? "no open production release on \(repo)" : nil),
             ]),
             Group(id: "Station", note: nil, buttons: [
-                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"),
+                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Wedge carrier"),
             ]),
         ]
     }
@@ -740,6 +740,7 @@ final class SimulatorModel: ObservableObject {
         case "Everyone to lounge": station.simulate(.lounge)
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
+        case "Wedge carrier": station.simulate(.wedge)
 
         default:
             note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
@@ -995,7 +996,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, night(Bool?) }
+enum SimNudge { case bath, chore, lounge, night(Bool?), wedge }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1059,6 +1060,13 @@ extension StationController {
                 if m.place != .lounge { send(m, to: .lounge) }
                 m.bathDue = clock
                 m.showering = true
+            case .wedge:
+                // Whoever is carrying a crate stops dead: the station has to catch up without them.
+                guard let m = minions.values.first(where: { !$0.wedged && { if case .carry = $0.current?.kind { return true }; return false }($0) }) else {
+                    handle(.log("nobody is carrying anything to wedge")); return
+                }
+                m.wedged = true
+                handle(.log("\(m.home.name) is wedged: not another step"))
             case .chore:
                 guard let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && !$0.isChore }) else {
                     handle(.log("nobody free for a chore")); return

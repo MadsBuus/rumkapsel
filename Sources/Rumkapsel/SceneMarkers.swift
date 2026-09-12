@@ -66,6 +66,13 @@ extension StationController {
                 }
             }
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
+            // A storage-to-deck carry whose crate the board has since put back in storage is off.
+            for (id, job) in cargo {
+                guard case .carry(let crate, let from, _) = job.command.kind, crate.station == station.name,
+                      let row = station.ledger[crate.repo, crate.number],
+                      row.heading == .deck, row.placed == .storage, row.wanted == .storage, row.movedAt == nil else { continue }
+                cancelCarry(id, backTo: from)
+            }
         }
     }
 

@@ -213,6 +213,22 @@ struct Command {
         self.after = after
     }
 
+    private init(id: Int, kind: Kind, words: String, patience: Double?, after: [Int]) {
+        self.id = id; self.kind = kind; self.words = words; self.patience = patience; self.after = after
+    }
+
+    /// The same carry, the same order, aimed at another slot: what a carrier is handed when the slot
+    /// is asked for again with the crate on the arms, or when the board changes its mind.
+    func aimed(at to: Spot) -> Command {
+        guard case .carry(let crate, let from, _) = kind else { return self }
+        return Command(id: id, kind: .carry(crate: crate, from: from, to: to), words: "carrying \(crate.words) to \(to.words)", patience: patience, after: after)
+    }
+
+    /// The same command said differently: for hover and the log when its pace changes.
+    func reworded(_ words: String) -> Command {
+        Command(id: id, kind: kind, words: words, patience: patience, after: after)
+    }
+
     // MARK: the usual ones
 
     static func carry(_ crate: CrateRef, from: Spot, to: Spot, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
@@ -450,6 +466,12 @@ struct StationTruth {
     }
 
     mutating func forget(_ crate: CrateRef) { crates[crate.key] = nil }
+
+    /// The area a crate stands in, once set down; nil on the arms, on the pallet, or unknown.
+    func area(of crate: CrateRef) -> Spot.Area? {
+        if case .slot(let area, _, _) = crates[crate.key] { return area }
+        return nil
+    }
 
     /// Whatever this minion was holding is no longer on anyone's arms.
     mutating func dropped(by minion: String) {

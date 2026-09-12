@@ -54,6 +54,8 @@ since real stations mandate both.
 - Lifting and setting down take time and a posture: crouch on the floor, a slide at waist height,
   over the head for the third level, a hop above that. The crate stays in the hands until it is on
   its slot.
+- A carrier with carries queued behind it hurries: quicker on its feet, the same lift and the same
+  set-down, and it says so.
 - A pallet is pushed, from behind, along one axis at a time, slowly, and only where a pallet fits.
 - A shuttle lands only in the bay and leaves before anyone walks under it. A rocket leaves only
   with its cargo aboard.
@@ -98,6 +100,9 @@ since real stations mandate both.
   minutes before it goes. Offices are held for those who left before they clear.
 - Counts follow the source through the minions' hands. What cannot be carried is redrawn, once,
   and only if nobody is holding it.
+- Truth before the picture. A carry that has not landed within its patience is set down where its
+  order says, whoever was carrying it, and the log says the station caught up. The ledger is never
+  more than one patience behind the source; the picture is right whenever the floor can manage it.
 
 ## Names
 

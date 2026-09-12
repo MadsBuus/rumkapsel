@@ -778,14 +778,15 @@ final class World {
 
     /// Brings the yard in line with the source, one crate at a time. The source's answer is taken into
     /// the ledger first; then every crate the two sides disagree about is either handed to a carrier,
-    /// storage across to the deck, or, where no carry exists, redrawn where the source says. Never
-    /// while somebody is carrying one of the repository's crates or a pallet has them, and never a
-    /// crate off a deck that is about to be loaded into a rocket.
+    /// storage across to the deck, or, where no carry exists, redrawn where the source says. A crate
+    /// already under way is left to its carrier; a pallet holds its whole repository; and a deck a
+    /// rocket is about to load from keeps its crates.
     @discardableResult
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) -> YardChange {
         let k = station.name + "|" + repo
         station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: c.clearedNumbers, updated: c.updated), repo: repo)
-        guard truth.carriedCount(station: station.name, repo: repo) == 0 else { return .waiting }   // let the carriers land first
+        // Per crate: one under way is skipped, the rest are dealt with. Only the pallet holds the whole
+        // repository, since it is one errand for all of a repository's crates at once.
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.
         guard truth.pallets[station.name]?.repo != repo,
@@ -1015,6 +1016,17 @@ final class World {
     func landed(station: Station, repo: String, number: Int, in yard: Yard, at now: Date) {
         station.ledger.landed(repo: repo, number: number, in: yard, at: now)
         fleet.save()
+    }
+
+    /// The slot a crate under way should land on, asked for now that it is on the arms: the yard the
+    /// order named, the stack as it stands this moment. Nil where the slot is not the yard's to give.
+    func slotNow(for crate: CrateRef, toward to: Spot) -> Spot? {
+        guard let station = fleet.stations[crate.station] else { return nil }
+        switch to.area {
+        case .storage: return storageSlot(station: station, repo: crate.repo, number: crate.number)
+        case .deck, .tested: return deckSlot(station: station, repo: crate.repo, number: crate.number)
+        default: return nil
+        }
     }
 
     /// A carry that will not happen after all: the crate stays where it is and its slot ahead is free.
