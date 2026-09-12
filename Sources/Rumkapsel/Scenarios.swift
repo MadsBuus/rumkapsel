@@ -291,7 +291,10 @@ enum Scenarios {
             let nameless = sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("deck:work|web|0") }.count
             if nameless > 0 { return "\(nameless) web crates on the deck without a number" }
             let storage = Scenario.crates(sim, "storage", "web")
-            return storage == 0 ? nil : "\(storage) web crates back in storage"
+            if storage > 0 { return "\(storage) web crates back in storage" }
+            // The board has caught up: the ledger's two sides agree on every crate of web.
+            let open = sim.station.world.fleet.stations["work"]!.ledger.disagreements(repo: "web")
+            return open.isEmpty ? nil : "the ledger still disagrees about \(open.map { "#\($0.number)" }.joined(separator: ", "))"
         }),
 
         Scenario("PR closed unmerged: red, nothing carried", [

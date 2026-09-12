@@ -534,6 +534,9 @@ extension StationController {
     func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
         guard let crate = command.crate else { return }
         world.truth.claimed(crate)
+        if case .carry(_, _, let to) = command.kind, let yard = Yard(area: to.area), let station = fleet.stations[crate.station] {
+            station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
+        }
         node.name = "haul"
         cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, issuedAt: clock)
     }
@@ -545,7 +548,7 @@ extension StationController {
         for (id, c) in cargo where c.roomKey == roomKey {
             if case .carry(_, _, let to) = c.command.kind, to.area == .storage { continue }
             c.node.removeFromParentNode()
-            if let crate = c.command.crate { world.truth.forget(crate) }
+            if let crate = c.command.crate { world.truth.forget(crate); world.unorder(crate) }
             cargo[id] = nil
             if let who = c.carrier, let m = minions[who] { m.carried = nil; world.truth.dropped(by: m.id); finish(m) }
         }
@@ -575,25 +578,28 @@ extension StationController {
         let command = world.carryToStorage(station: station, room: room, repo: repo, number: number)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
-            world.landedInStorage(station: station, repo: repo, number: number)
+            world.landed(station: station, repo: repo, number: number, in: .storage)
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
         }
     }
 
-    /// A staging release merged: the repo's storage crates are carried to the test deck.
+    /// A staging release merged: the repo's storage crates are carried to the test deck. Without
+    /// commands from the reconciler, every crate of the repository belonging to storage goes.
     func stageCargo(station: Station, repo: String, commands: [Command]? = nil) {
-        let list = commands ?? world.carryToDeck(station: station, repo: repo, count: station.stored[repo] ?? 0)
+        let list = commands ?? world.carryToDeck(station: station, repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
         var started = 0
         for command in list {
-            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
-                  let node = crateNode("storage", crate, at: from) else { continue }
+            guard let crate = command.crate, case .carry(_, let from, let to) = command.kind,
+                  let node = crateNode(from.area == .storage ? "storage" : "deck", crate, at: from) else {
+                if let crate = command.crate { world.unorder(crate) }   // nothing on the floor to carry: the order is off
+                continue
+            }
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
-                world.landedByHand(station: station, repo: repo, number: crate.number, in: "deck")
+                world.landed(station: station, repo: repo, number: crate.number, in: Yard(area: to.area) ?? .deck)
                 node.removeFromParentNode()
                 rebuildMarkers()
                 refreshRockets()

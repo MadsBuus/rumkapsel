@@ -152,9 +152,14 @@ final class Station {
         (Cell(x: -spineHalfLength - 1, y: storageNearRow), SIMD2(0, -1))
     }
 
-    var stored: [String: Int] = [:]          // merged boxes waiting in storage, per repo
+    /// Every crate this station knows: the source's word and the station's, per crate. The counts
+    /// below are read off it and kept nowhere.
+    var ledger = Ledger()
+    /// Merged crates belonging to storage, per repository: standing there, or out of it on a pallet or on someone's arms.
+    var stored: [String: Int] { ledger.counts(in: .storage) }
     var storedBoxes: Int { stored.values.reduce(0, +) }
-    var staged: [String: Int] = [:]          // boxes on the test deck, per repo
+    /// Crates belonging to the deck, per repository.
+    var staged: [String: Int] { ledger.counts(in: .deck) }
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Eight flat beds, one per dorm tile.
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
@@ -582,21 +587,22 @@ final class Station {
         var spine: Int
         var rooms: [String: SavedRoom]
         var stored: Int?
+        /// From before the ledger: counts kept on the station. Read by nothing now.
         var storedByRepo: [String: Int]?
         var stagedByRepo: [String: Int]?
+        var ledger: Ledger?
     }
     struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
 
     var saved: Saved {
         Saved(spine: spineHalfLength, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
-        }, stored: storedBoxes, storedByRepo: stored, stagedByRepo: staged)
+        }, stored: storedBoxes, ledger: ledger)
     }
 
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
-        stored = s.storedByRepo ?? [:]
-        staged = s.stagedByRepo ?? [:]
+        ledger = s.ledger ?? Ledger()
         for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)

@@ -356,10 +356,6 @@ struct StationTruth {
     private(set) var pendingOffices: Set<String> = []
     /// Office crates a shuttle has set down in the bay, waiting to be fetched, by "station|roomKey".
     private(set) var bayCrates: Set<String> = []
-    /// Crates set down by hand — in storage, on the deck or aboard the rocket — that the source may
-    /// not have counted there yet, by `CrateRef.key`. The station is the truth of such a crate's place
-    /// until the source agrees with it, or for a quarter of an hour, whichever comes first.
-    private(set) var landed: [String: (repo: String, number: Int, yard: String, at: Date)] = [:]
     /// The crate each merged office's package became, by office key ("station|roomKey"), from the
     /// moment its haul was ordered. Whether it has left is read off the crate's placement, never a flag.
     private(set) var officeCrates: [String: CrateRef] = [:]
@@ -458,45 +454,6 @@ struct StationTruth {
     /// Whatever this minion was holding is no longer on anyone's arms.
     mutating func dropped(by minion: String) {
         for (k, p) in crates where p == .carried(by: minion) { crates[k] = nil }
-    }
-
-    // MARK: what landed by hand
-
-    /// How long the station's word on a hand-landed crate outlasts a source that never agrees.
-    static let landingWindow: TimeInterval = 15 * 60
-
-    /// A crate was set down by hand in a yard: "storage", "deck" or "pad". From here the rows draw it
-    /// there and nowhere else, until the source has counted it there.
-    mutating func landedByHand(_ crate: CrateRef, in yard: String, at: Date = Date()) {
-        landed[crate.key] = (crate.repo, crate.number, yard, at)
-    }
-
-    /// Forgets the landings the source has caught up with: a crate counted in the yard it landed in,
-    /// or one aboard the rocket that the source no longer counts in any yard. Stale ones go too, and
-    /// the source has its way again.
-    mutating func settleLandings(station: String, repo: String, storage: [Int], deck: [Int], now: Date = Date()) {
-        for (k, l) in landed where k.hasPrefix(station + "|") && l.repo == repo {
-            let agreed: Bool
-            switch l.yard {
-            case "storage": agreed = storage.contains(l.number)
-            case "deck": agreed = deck.contains(l.number)
-            default: agreed = !storage.contains(l.number) && !deck.contains(l.number)
-            }
-            if agreed || now.timeIntervalSince(l.at) > StationTruth.landingWindow { landed[k] = nil }
-        }
-    }
-
-    /// Numbers of crates that landed by hand in a yard and the source still lacks there.
-    func freshLanded(station: String, repo: String, yard: String) -> [Int] {
-        landed.filter { $0.key.hasPrefix(station + "|") && $0.value.repo == repo && $0.value.yard == yard }
-            .map(\.value.number).sorted()
-    }
-
-    /// Numbers the source counts in a yard that the station has since carried off by hand to another:
-    /// the rows of this yard are not to draw them, and the count is that much shorter.
-    func movedByHand(station: String, repo: String, from yard: String, counted: [Int]) -> [Int] {
-        landed.filter { $0.key.hasPrefix(station + "|") && $0.value.repo == repo && $0.value.yard != yard && counted.contains($0.value.number) }
-            .map(\.value.number).sorted()
     }
 
     // MARK: office hauls

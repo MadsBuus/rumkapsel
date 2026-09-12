@@ -424,7 +424,6 @@ extension StationController {
         // node this pallet was handed when it was ordered: that one is long gone from the scene.
         let node = crateNode("storage", item.crate) ?? item.node
         world.truth.putOnPallet(item.crate, at: item.slot)
-        station.stored[item.crate.repo] = max(0, (station.stored[item.crate.repo] ?? 1) - 1)
         let to = Props.palletOffset(row: item.slot.row, column: item.slot.column, level: item.slot.level)
         // Into the pallet's own space, so it rides along once it has landed.
         let where_ = node.worldPosition
@@ -449,8 +448,10 @@ extension StationController {
         p.aboard.removeFirst()
         p.nextAt = clock + 3.0
         let repo = item.crate.repo
+        // Bound for a yard from here: that yard holds a slot for it, asked for now that it is coming down.
+        station.ledger.order(repo: repo, number: item.crate.number, to: p.wantsBack ? .storage : .deck)
         let to = p.wantsBack ? world.storageSlot(station: station, repo: repo, number: item.crate.number)
-                             : world.deckSlot(station: station, repo: repo, index: station.staged[repo] ?? 0, number: item.crate.number)
+                             : world.deckSlot(station: station, repo: repo, number: item.crate.number)
         world.truth.takeOffPallet(item.crate)
         let where_ = item.node.worldPosition
         let yaw = Double(p.node.eulerAngles.y) + Double(item.node.eulerAngles.y)
@@ -462,7 +463,7 @@ extension StationController {
             guard let self else { return }
             world.truth.setDown(item.crate, at: to)
             // Down by hand: the station's word on where it stands, until the board has caught up.
-            world.landedByHand(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? "storage" : "deck")
+            world.landed(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? .storage : .deck)
             item.node.removeFromParentNode()
             drone.thud()
             rebuildMarkers()

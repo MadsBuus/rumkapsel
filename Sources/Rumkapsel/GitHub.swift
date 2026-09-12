@@ -171,7 +171,12 @@ final class GitHubResolver {
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
     /// Packages waiting per repo: merged into trunk but not yet on staging, and on staging but not yet in production.
-    struct Cargo: Equatable { var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = [] }
+    /// What a source counts where for a repository. `updated` is the source's own time per number,
+    /// when it has one: a board item carries when it last moved; git history carries nothing.
+    struct Cargo: Equatable {
+        var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
+        var updated: [Int: Date] = [:]
+    }
     private var cargo: [String: Cargo] = [:]
 
     /// What waits where for a repository: from the project board when one is configured, else from git history.
@@ -188,7 +193,8 @@ final class GitHubResolver {
             let storage = mine.filter { $0.status == st.storage }.map(\.number).sorted()
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
-            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared)
+            let updated = Dictionary(mine.compactMap { it in it.updatedAt.map { (it.number, $0) } }, uniquingKeysWith: { a, _ in a })
+            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated)
         }
         return cargo[repoRoot]
     }

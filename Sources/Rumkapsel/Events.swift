@@ -34,7 +34,7 @@ enum WorldEvent {
     /// An office left the floor. The model has already dropped it, so everything the scene needs to
     /// take its tiles down comes with the event.
     case officeArchived(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String)
-    /// Merged: the office's package belongs in storage. The scene hauls it, then calls `landedInStorage`.
+    /// Merged: the office's package belongs in storage. The scene hauls it, and the landing is written to the ledger.
     case officeMerged(station: String, key: String, repo: String, number: Int)
     /// Crates the board says reached staging: one carry command each, storage across to the deck.
     case carryToDeck(station: String, repo: String, commands: [Command])

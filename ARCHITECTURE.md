@@ -142,22 +142,39 @@ in the log when the command is issued.
 
 ## Station truth against a source that runs behind
 
-Done, the first inch of steps 4 to 7 above. Every crate a minion, a pallet or the rocket's hatch sets
-down is written to `StationTruth.landed` with the yard it landed in: storage, the deck, or the pad.
-`World.yardHolds` is the one rule for what a yard holds of a repository: the source's numbers, plus what
-landed here by hand that the source has not counted yet, minus what the station has since carried off by
-hand to another yard. `reconcile` sets the counts from it and `yardLayout` draws from it, so the two
-cannot disagree, and a source answer that is older than the minions' work can neither take a crate back
-nor draw it twice. A landing is forgotten the moment the source agrees with it (counts it in that yard,
-or, for the pad, stops counting it anywhere), or after a quarter of an hour if it never does.
+Steps 4, 5 and 7 above, for crates. Every crate a station knows is a row in one ledger (`Ledger.swift`,
+kept on the `Station` and saved with it): `wanted`, the source's word on which yard it belongs to, with
+the source's own time for that word; and `placed`, the station's word, which yard it stands in or belongs
+to while on someone's arms or the pallet. Sources write `wanted`, only through `adopt`; completions write
+`placed`, only through `landed`, whenever a minion, the pallet or the rocket's hatch sets a crate down.
+The counts the HUD, the rockets and the rings read (`Station.stored`, `staged`) are read off `placed`
+and kept nowhere; `yardLayout` draws from the same rows.
 
-The reconciler runs from `flushScene` and the half-second tick (`reconcileYards`), never from the
-drawing. `rebuildMarkers` adopts what stands: an office's boxes are left alone while everything that
-shapes them reads the same, a numbered yard crate keeps its node and is moved only if its slot changed,
-and only what is new is built and what is gone taken away. A peer's heartbeat asks for a redraw only when
-it brought a difference. Still owed from the list above: a ledger the counts are derived from rather than
-kept on the station, carries that name a yard and bind their slot late, and per-entity source times in
-place of the quarter-hour.
+A word from the source is news for a crate only if it is newer than the station's own hand on it. A
+board item carries when it last moved, so an answer older than a landing is stale for that crate
+however fresh the poll, and a word older than the one already held (a peer's lagging copy) is not news
+either. A source with no times of its own, git history, is believed again the moment it agrees with what
+the station did. That is what lets the pallet's crates stay on the deck while the board still says
+storage, and a crate in the rocket's hold stay there until the board says shipped; nothing decides by
+the clock any more.
+
+Disagreement is a queue, not an event. `reconcile` takes the source's answer into the ledger, then walks
+the crates the two sides disagree about: storage to deck is one carry per crate, by number, blockers
+moved aside first and never a crate pulled from under another; anything else is redrawn where the source
+says, once, and never a deck crate while a rocket is loading from it. It runs from `flushScene` and the
+half-second tick, never from the drawing, and never while somebody is carrying one of the repository's
+crates or a pallet has them. `rebuildMarkers` adopts what stands: an office's boxes are left alone while
+everything that shapes them reads the same, a numbered yard crate keeps its node and is moved only if
+its slot changed, and only what is new is built and what is gone taken away. A peer's heartbeat asks for
+a redraw only when it brought a difference.
+
+A yard holds a slot for a crate on its way in from the moment the carry is ordered (`heading`), so two
+carries never land on one slot; a crate that has left the rows, on the arms or the pallet, holds nothing,
+the stack it was in settles, and it asks for a slot again when it comes back. That is the first half of
+step 5's late binding; the second, a carry that names only the yard and takes its slot at set-down, is
+still owed. `--ledger-tests` feeds a ledger facts in every order, board before release, release before
+board, stale after fresh, A then B then A, and holds it to: every crate in one yard at most, a hand
+outranking any older word, wanted equal to placed once the source has said something newer.
 
 ## The staging pallet
 

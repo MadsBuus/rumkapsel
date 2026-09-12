@@ -33,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let simulatorOnly = args.contains("--simulator")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
+        // The crate ledger on its own: facts in every order, no station.
+        if args.contains("--ledger-tests") { LedgerTests.run() }
         // The scripted regression suite: no window, no station of its own, one after another.
         if let i = args.firstIndex(of: "--scenarios") {
             let next = args.count > i + 1 ? args[i + 1] : nil

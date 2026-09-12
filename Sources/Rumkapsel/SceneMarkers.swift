@@ -225,7 +225,7 @@ extension StationController {
             // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
             // the hands, for as long as the carry lasts.
             for area in ["storage", "deck"] where station.hasPad {
-                let layout = world.yardLayout(station: station, area: area)
+                let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
@@ -446,10 +446,8 @@ extension StationController {
             carry(command, node: b) { [weak self, weak r] in
                 guard let self else { return }
                 r?.pending.remove(command.id)
-                if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
-                else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
                 // Aboard by hand: the rows may not draw it again until the board says it has shipped.
-                world.landedByHand(station: station, repo: repo, number: crate.number, in: "pad")
+                world.landed(station: station, repo: repo, number: crate.number, in: .pad)
                 // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
                 // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
                 let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
