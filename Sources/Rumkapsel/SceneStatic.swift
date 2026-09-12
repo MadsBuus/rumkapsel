@@ -272,6 +272,75 @@ extension StationController {
                 drain.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(drain)
             }
+            if let gym = station.rooms["kind:gym"] {
+                // Four fixtures on the four corner tiles: a treadmill, a bench with a barbell over it, a
+                // bag on an arm, and a mat. The middle tiles stay clear to walk through.
+                let spots = gymSpots(station: station, gym: gym)
+                let dark = lit(NSColor(rgb: (0.22, 0.23, 0.28)))
+                let steel = lit(NSColor(rgb: (0.66, 0.68, 0.74)))
+                // Fixtures are stood on, lain on and stepped round: not obstacles, so they are not "room:" props.
+                func place(_ n: SCNNode) { n.name = "gym:" + roomKey(station, gym); staticRoot.addChildNode(n) }
+                // Treadmill: a low slab with a rail at its head.
+                let tread = SCNNode(geometry: SCNBox(width: 0.42, height: 0.06, length: 0.72, chamferRadius: 0.01))
+                tread.geometry!.firstMaterial = dark
+                tread.position = v3(spots[0].x, 0.03, spots[0].y)
+                let rail = SCNNode(geometry: SCNBox(width: 0.42, height: 0.04, length: 0.04, chamferRadius: 0))
+                rail.geometry!.firstMaterial = steel
+                rail.position = v3(0, 0.42, 0.34)
+                let post = SCNNode(geometry: SCNBox(width: 0.04, height: 0.4, length: 0.04, chamferRadius: 0))
+                post.geometry!.firstMaterial = steel
+                post.position = v3(0, 0.2, 0.34)
+                tread.addChildNode(rail); tread.addChildNode(post)
+                place(tread)
+                // Bench and barbell: the bar rests on two uprights and rises for the presses.
+                let bench = SCNNode(geometry: SCNBox(width: 0.28, height: 0.2, length: 0.7, chamferRadius: 0.01))
+                bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
+                bench.position = v3(spots[1].x, 0.1, spots[1].y)
+                place(bench)
+                for side in [-1.0, 1.0] {
+                    let up = SCNNode(geometry: SCNBox(width: 0.04, height: 0.6, length: 0.04, chamferRadius: 0))
+                    up.geometry!.firstMaterial = steel
+                    up.position = v3(spots[1].x + side * 0.36, 0.3, spots[1].y - 0.18)
+                    place(up)
+                }
+                let bar = SCNNode(geometry: SCNBox(width: 0.9, height: 0.035, length: 0.035, chamferRadius: 0))
+                bar.geometry!.firstMaterial = steel
+                bar.position = v3(spots[1].x, 0.62, spots[1].y - 0.18)
+                for side in [-1.0, 1.0] {
+                    let disc = SCNNode(geometry: SCNBox(width: 0.05, height: 0.2, length: 0.2, chamferRadius: 0.01))
+                    disc.geometry!.firstMaterial = dark
+                    disc.position = v3(side * 0.4, 0, 0)
+                    bar.addChildNode(disc)
+                }
+                place(bar)
+                // The bag: a post in the corner with an arm out, and the bag hanging from it.
+                let out = gymOutward(station: station, gym: gym, at: spots[2])
+                let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
+                bagPost.geometry!.firstMaterial = steel
+                bagPost.position = v3(spots[2].x + out.x * 0.3, 0.55, spots[2].y + out.y * 0.3)
+                let bagArm = SCNNode(geometry: SCNBox(width: 0.34, height: 0.04, length: 0.04, chamferRadius: 0))
+                bagArm.geometry!.firstMaterial = steel
+                bagArm.position = v3(-out.x * 0.15, 0.53, -out.y * 0.15)
+                bagArm.eulerAngles.y = atan2(-out.x, -out.y) + .pi / 2
+                bagPost.addChildNode(bagArm)
+                place(bagPost)
+                let bag = SCNNode()   // pivot at the arm's end: the bag hangs from it and swings about it
+                bag.position = v3(spots[2].x, 1.08, spots[2].y)
+                let sack = SCNNode(geometry: SCNBox(width: 0.2, height: 0.42, length: 0.2, chamferRadius: 0.02))
+                sack.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.28, 0.26)))
+                sack.position = v3(0, -0.36, 0)
+                let chain = SCNNode(geometry: SCNBox(width: 0.02, height: 0.16, length: 0.02, chamferRadius: 0))
+                chain.geometry!.firstMaterial = steel
+                chain.position = v3(0, -0.08, 0)
+                bag.addChildNode(sack); bag.addChildNode(chain)
+                place(bag)
+                // The mat: a dark square on the floor.
+                let mat = SCNNode(geometry: SCNBox(width: 0.7, height: 0.012, length: 0.7, chamferRadius: 0))
+                mat.geometry!.firstMaterial = flat(NSColor(rgb: (0.26, 0.4, 0.34)))
+                mat.position = v3(spots[3].x, 0.006, spots[3].y)
+                place(mat)
+                gymProps[station.name] = (bar, bag)
+            }
             if station.hasHangar {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()

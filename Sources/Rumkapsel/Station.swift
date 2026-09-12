@@ -33,6 +33,7 @@ enum Place: Hashable {
     static let quarters = Place.room("kind:quarters")
     static let lounge = Place.room("kind:lounge")
     static let bath = Place.room("kind:bath")
+    static let gym = Place.room("kind:gym")
     static let airlock = Place.room("kind:airlock")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
@@ -265,7 +266,8 @@ final class Station {
     func ensureFixedRoom(_ place: Place) -> Bool {
         guard case .room(let key) = place else { return false }
         // The living quarters cluster: the lounge first, then the dorm and the bath beside it.
-        let beside = (rooms["kind:lounge"]?.cells ?? []) + (rooms["kind:quarters"]?.cells ?? [])
+        let beside = (rooms["kind:lounge"]?.cells ?? []) + (rooms["kind:quarters"]?.cells ?? []) + (rooms["kind:bath"]?.cells ?? [])
+        if key == "kind:gym" { return ensureRoom(key: key, name: "gym", repo: nil, color: RGB(r: 0.38, g: 0.52, b: 0.42), lastActive: .distantFuture, shape: Station.rect(3, 2), near: beside.isEmpty ? nil : beside) }
         if key == "kind:quarters" { return ensureRoom(key: key, name: "sleeping", repo: nil, color: Colors.quarters, lastActive: .distantFuture, shape: Station.rect(2, 4), near: beside.isEmpty ? nil : beside) }
         if key == "kind:lounge" { return ensureRoom(key: key, name: "lounge", repo: nil, color: RGB(r: 0.40, g: 0.36, b: 0.30), lastActive: .distantFuture, shape: Station.rect(3, 3)) }
         if key == "kind:bath" { return ensureRoom(key: key, name: "bath", repo: nil, color: RGB(r: 0.52, g: 0.66, b: 0.70), lastActive: .distantFuture, shape: Station.rect(2, 2), near: beside.isEmpty ? nil : beside) }
@@ -285,6 +287,10 @@ final class Station {
         if !touching("kind:quarters", "kind:lounge") || !(touching("kind:bath", "kind:lounge") || touching("kind:bath", "kind:quarters")) {
             removeRoom(key: "kind:quarters"); removeRoom(key: "kind:bath")
             ensureFixedRoom(.quarters); ensureFixedRoom(.bath)
+        }
+        // The gym is part of the cluster too: against the lounge, the dorm or the bath.
+        if rooms["kind:gym"] != nil, !["kind:lounge", "kind:quarters", "kind:bath"].contains(where: { touching("kind:gym", $0) }) {
+            removeRoom(key: "kind:gym"); ensureFixedRoom(.gym)
         }
     }
 
@@ -680,6 +686,7 @@ final class Fleet {
         s.ensureFixedRoom(.quarters)
         s.ensureFixedRoom(.lounge)
         s.ensureFixedRoom(.bath)
+        s.ensureFixedRoom(.gym)
         stations[name] = s
         return s
     }
@@ -736,6 +743,7 @@ final class Fleet {
             station.ensureFixedRoom(.quarters)
             station.ensureFixedRoom(.lounge)
             station.ensureFixedRoom(.bath)
+            station.ensureFixedRoom(.gym)
             station.clusterQuarters()
             station.removeRoom(key: "kind:airlock")   // from before the airlock had its place in the corridor's line
             stations[name] = station

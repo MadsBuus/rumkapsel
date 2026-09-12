@@ -185,6 +185,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
+    /// The gym's two things that move: the barbell over the bench and the bag on its arm, per station.
+    var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     private var lastBusy: [String: Double] = [:]
     var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
     var knownSpine: [String: Int] = [:]

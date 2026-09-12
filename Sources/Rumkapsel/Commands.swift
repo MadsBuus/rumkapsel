@@ -67,6 +67,8 @@ struct Command {
         /// Somewhere to be: the lounge, the dorm, the hallway.
         case goTo(place: Place)
         case bath(kind: Bath, back: Place)
+        /// A turn in the gym on one of its four fixtures, then back to where the minion was.
+        case exercise(kind: Workout, back: Place)
         case chore(spot: Cell)
         case qa(deck: String)
         /// Packing the office's crate for a pull request just opened, cones cleared first.
@@ -95,6 +97,19 @@ struct Command {
     }
 
     enum Bath { case shower, quick }
+
+    /// What there is to do in the gym: one minion to a fixture.
+    enum Workout: Int, CaseIterable {
+        case treadmill, bench, bag, mat
+        var words: String {
+            switch self {
+            case .treadmill: return "a run on the treadmill"
+            case .bench: return "a few presses on the bench"
+            case .bag: return "a round on the bag"
+            case .mat: return "jumping jacks on the mat"
+            }
+        }
+    }
 
     /// What a shuttle is carrying in.
     enum Flight: Equatable {
@@ -169,7 +184,7 @@ struct Command {
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
         case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .act]   // a pallet errand is a job: nothing calls the operator away
-        case .bath, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
+        case .bath, .exercise, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
         case .rocket(let stage, _, _):
             switch stage {
             case .standBy, .steam: return [.settle]
@@ -244,6 +259,10 @@ struct Command {
     static func bath(_ kind: Bath, back: Place) -> Command {
         Command(kind: .bath(kind: kind, back: back),
                 words: "off to the bath, back to \(back.words) after")
+    }
+
+    static func exercise(_ kind: Workout, back: Place) -> Command {
+        Command(kind: .exercise(kind: kind, back: back), words: "off to the gym for \(kind.words), back to \(back.words) after")
     }
 
     static func chore(spot: Cell) -> Command {
@@ -330,6 +349,7 @@ extension Place {
             case "kind:quarters": return "the dorm"
             case "kind:lounge": return "the couch"
             case "kind:bath": return "the bath"
+            case "kind:gym": return "the gym"
             case "kind:airlock": return "the airlock"
             case "kind:hangar": return "the bay"
             case "kind:deck": return "the deck"

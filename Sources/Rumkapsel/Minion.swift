@@ -95,6 +95,9 @@ final class Minion {
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
     var nextBathAt = 0.0
+    /// When the next turn in the gym is due, on the station clock; 0 until the lounge gets dull.
+    var nextWorkoutAt = 0.0
+    private(set) var onBench = false
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false
@@ -189,6 +192,8 @@ final class Minion {
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
     var bathing: Bool { if case .bath = current?.kind { return true }; return false }
+    var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
+    var workout: Command.Workout? { if case .exercise(let k, _) = current?.kind { return k }; return nil }
     /// How the body is held over a crate, decided by how high the crate is.
     enum Posture { case none, crouch, waist, reach, jump }
     /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
@@ -377,6 +382,18 @@ final class Minion {
     /// Blink the scanner tip, if held.
     func blinkScanner(_ on: Bool) {
         toolNode?.childNodes.first?.childNode(withName: "tip", recursively: false)?.opacity = on ? 1 : 0.25
+    }
+
+    /// Flat on the back on the bench, arms up, or off it again.
+    func setBench(_ on: Bool) {
+        guard on != onBench else { return }
+        onBench = on
+        body.removeAllActions()
+        if on {
+            body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true), .move(to: v3(0, 0.2 + bodyDepth / 2, 0), duration: 0.5)]))
+        } else {
+            body.runAction(.group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true), .move(to: v3(0, bodyHeight / 2, 0), duration: 0.4)]))
+        }
     }
 
     /// Tip over onto the back in the dorm, or stand back up.

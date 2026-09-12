@@ -134,6 +134,7 @@ struct Expect {
     }
     static let sleep = command("sleep") { if case .sleep = $0 { return true }; return false }
     static let bath = command("bath") { if case .bath = $0 { return true }; return false }
+    static let workout = command("exercise") { if case .exercise = $0 { return true }; return false }
     static let chore = command("chore") { if case .chore = $0 { return true }; return false }
     static func goTo(_ place: Place) -> Expect {
         command("goTo \(place.words)") { if case .goTo(let p) = $0 { return p == place }; return false }
@@ -439,6 +440,13 @@ enum Scenarios {
             let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
             return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
         }),
+        Scenario("a turn in the gym lasts its whole time", [
+            ("Everyone to lounge", 3.0),
+            ("Workout", 0.3),
+        ], tail: 14, expects: [
+            .workout,
+            .goTo(.lounge),   // and back to the couch after
+        ]),
         Scenario("a chore", [
             ("Everyone to lounge", 3.0),
             ("Chore", 0.3),

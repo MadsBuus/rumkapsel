@@ -506,7 +506,7 @@ final class SimulatorModel: ObservableObject {
                        openRelease(repo, production: true) == nil ? "no open production release on \(repo)" : nil),
             ]),
             Group(id: "Station", note: nil, buttons: [
-                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Wedge carrier"),
+                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Workout"), button("Wedge carrier"),
             ]),
         ]
     }
@@ -764,6 +764,7 @@ final class SimulatorModel: ObservableObject {
         case "Everyone to lounge": station.simulate(.lounge)
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
+        case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
 
         default:
@@ -1023,7 +1024,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, night(Bool?), wedge }
+enum SimNudge { case bath, chore, lounge, night(Bool?), wedge, workout }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1087,6 +1088,15 @@ extension StationController {
                 if m.place != .lounge { send(m, to: .lounge) }
                 m.bathDue = clock
                 m.showering = true
+            case .workout:
+                // Somebody settled in the lounge and not working: the gym is due for them now.
+                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.busy }
+                guard let m = free.first(where: { $0.place == .lounge }) ?? free.first else {
+                    handle(.log("nobody free for the gym")); return
+                }
+                if m.place != .lounge { send(m, to: .lounge) }
+                m.bathDue = 0
+                m.nextWorkoutAt = clock
             case .wedge:
                 // Whoever is carrying a crate stops dead: the station has to catch up without them.
                 guard let m = minions.values.first(where: { !$0.wedged && { if case .carry = $0.current?.kind { return true }; return false }($0) }) else {

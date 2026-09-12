@@ -106,6 +106,39 @@ extension StationController {
         return SIMD2(station.offset.x + Double(sc2.x) + 0.3, station.offset.y + Double(sc2.y) - 0.18)
     }
 
+    /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
+    /// tiles that are neither the doorway nor the far corner the room's name is cut into.
+    func gymSpots(station: Station, gym: Room) -> [SIMD2<Double>] {
+        let door = station.doorCell(of: gym.key)
+        let maxY = gym.cells.map(\.y).max()!
+        let sign = Cell(x: gym.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
+        var tiles = gym.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        while tiles.count < 4, let more = gym.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
+        return tiles.prefix(4).map { SIMD2(station.offset.x + Double($0.x), station.offset.y + Double($0.y)) }
+    }
+
+    /// Which way is out from a gym tile: toward the nearest outer wall, for a post to stand against.
+    func gymOutward(station: Station, gym: Room, at spot: SIMD2<Double>) -> SIMD2<Double> {
+        let cx = station.offset.x + Double(gym.cells.map(\.x).reduce(0, +)) / Double(gym.cells.count)
+        let cy = station.offset.y + Double(gym.cells.map(\.y).reduce(0, +)) / Double(gym.cells.count)
+        return SIMD2(spot.x >= cx ? 1 : -1, spot.y >= cy ? 1 : -1)
+    }
+
+    /// The tile a workout stands on, and the exact spot and facing for it.
+    func gymStand(station: Station, gym: Room, _ kind: Command.Workout) -> (cell: Cell, spot: SIMD2<Double>, facing: Double) {
+        let world = gymSpots(station: station, gym: gym)[kind.rawValue]
+        let local = SIMD2(world.x - station.offset.x, world.y - station.offset.y)
+        let cell = Cell(x: Int(local.x.rounded()), y: Int(local.y.rounded()))
+        switch kind {
+        case .treadmill: return (cell, local + SIMD2(0, -0.05), 0)               // on the slab, facing the rail
+        case .bench: return (cell, local + SIMD2(0, -0.18), 0)                   // lying under the bar
+        case .bag:                                                               // a step in from the post, squared up to the bag
+            let out = gymOutward(station: station, gym: gym, at: world)
+            return (cell, local - out * 0.2, atan2(out.x, out.y))
+        case .mat: return (cell, local, .pi / 4)                                  // the middle of the mat
+        }
+    }
+
     // MARK: hands
 
     /// Everything a crate does between two slots, in one place. Every crate that moves by hand — a
@@ -492,7 +525,7 @@ extension StationController {
                 // There: the quiet commands move on from walking to being there, so truth says so too.
                 if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
                     switch c.kind {
-                    case .goTo, .bath, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow: advance(m)
+                    case .goTo, .bath, .exercise, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow: advance(m)
                     default: break
                     }
                 }
@@ -609,9 +642,45 @@ extension StationController {
                             m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
                         }
                     }
+                    if m.place == .gym, m.exercising {
+                        // Once on the tile, shuffle onto the fixture itself and square up to it.
+                        if settled, let spot = m.fetchSpot {
+                            let d = spot - m.pos
+                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
+                            m.fetchSpot = nil
+                            if m.workout == .bench { m.setBench(true) }
+                        }
+                        if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
+                            m.setBench(false)
+                            var back = restPlace(m)
+                            if !m.busy, case .exercise(_, let where_) = m.current?.kind { back = where_ }
+                            finish(m)   // the turn is over: the way back is a rest, which a turn in hand would not let in
+                            send(m, to: back)
+                        }
+                    } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, !m.isCrew, m.bathDue == 0, m.carried == nil,
+                              !isNight(station), let gym = station.rooms["kind:gym"] {
+                        // The lounge gets dull by day: a turn in the gym, one to a fixture, whichever is free.
+                        if m.nextWorkoutAt == 0 { m.nextWorkoutAt = clock + Double.random(in: 240...600) }
+                        if clock >= m.nextWorkoutAt {
+                            let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
+                            let pick = Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
+                            m.nextWorkoutAt = 0
+                            if let kind = pick {
+                                let back = m.place
+                                m.couch = nil
+                                send(m, to: .gym)
+                                start(m, .exercise(kind, back: back), announce: true)
+                                m.phaseUntil = clock + Double.random(in: 18...30)
+                                let stand = gymStand(station: station, gym: gym, kind)
+                                m.path = route(m, to: stand.cell)
+                                m.fetchSpot = stand.spot
+                                m.facing = stand.facing
+                            }
+                        }
+                    } else if m.place != .lounge { m.nextWorkoutAt = 0 }
                     if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                         if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
-                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
+                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
                         let choices = station.cells(of: m.place).filter { $0 != m.cell }
                         if let dest = choices.randomElement() { m.path = route(m, to: dest) }
                         m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
@@ -715,6 +784,7 @@ extension StationController {
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
             if !working && !(m.place == .lounge && resting && m.couch != nil) && palletErrand(of: m) == nil { m.setTool(nil) }
+            var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
@@ -723,6 +793,47 @@ extension StationController {
                 tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05   // sat back on a couch, or standing at the table
                 roll = sin(t * 1.3) * 0.04
                 if m.couch != nil { m.setTool(.tablet); tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
+                // Two standing near each other talk: they turn to each other and nod in turn.
+                let other = minions.values.first { $0.id != m.id && $0.station == m.station && $0.place == .lounge && $0.couch == nil && $0.isResting && !$0.busy && $0.path.isEmpty && length($0.pos - m.pos) < 1.4 }
+                if m.couch == nil, let other {
+                    let toThem = other.pos - m.pos
+                    m.smoothFacing = atan2(toThem.x, toThem.y)
+                    let myTurn = (Int(clock / 1.6) + (m.id < other.id ? 0 : 1)) % 2 == 0
+                    tilt = myTurn ? 0.06 + max(0, sin(t * 4)) * 0.12 : -0.04   // the one talking nods; the other listens, head up
+                    roll = myTurn ? 0 : sin(t * 0.9) * 0.05
+                } else {
+                    // Now and then a stretch, a look round, a shuffle or a yawn: a beat of it every nine seconds or so.
+                    let cycle = clock / 9 + m.bobPhase
+                    let within = (cycle - floor(cycle)) * 9
+                    if within < 1.8 {
+                        let f = sin(within / 1.8 * .pi)
+                        switch Int(floor(cycle)) % 4 {
+                        case 0: tilt = -0.32 * f; lift = 0.03 * f                 // a stretch: back, up on the toes
+                        case 1: spin = 0.75 * sin(within / 1.8 * .pi * 2)           // a look round, one way then the other
+                        case 2: roll = 0.12 * sin(within * 7)                      // a shuffle of the feet
+                        default: tilt = -0.2 * f; roll = 0.06 * f                  // a yawn
+                        }
+                    }
+                }
+            }
+            if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
+                let props = gymProps[station.name]
+                switch kind {
+                case .treadmill:   // running on the spot, leaning into the rail
+                    tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
+                case .bench:       // on the back, and the bar goes up and down over the chest
+                    tilt = 0; roll = 0
+                    props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
+                case .bag:         // jabs: a lean into each, and the bag swings off it
+                    let jab = max(0, sin(t * 5.5))
+                    lean = jab * 0.09; tilt = 0.1 + jab * 0.12; roll = sin(t * 5.5) * 0.05
+                    if let bag = props?.bag {
+                        let swing = max(0, sin(t * 5.5 - 0.7)) * 0.28
+                        bag.eulerAngles = SCNVector3(-swing * cos(m.smoothFacing + .pi), 0, swing * sin(m.smoothFacing + .pi))
+                    }
+                case .mat:         // jumping jacks
+                    lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
+                }
             }
             if working && !atCone {
                 switch m.activity {
@@ -770,6 +881,7 @@ extension StationController {
                 let hop = m.phaseUntil > 0 ? max(0, sin((m.phaseUntil - clock) / 1.1 * .pi)) * 0.28 : 0
                 tilt = min(tilt, -0.12); roll = 0; m.tilt.position.y = hop
             }
+            if let lift { m.tilt.position.y = lift }
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }

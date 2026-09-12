@@ -88,7 +88,11 @@ since real stations mandate both.
 - When a rocket stands loaded and steaming, the idle drift toward the pad to watch.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
-  chores when bored; leave through the airlock when there is nothing left to do.
+  chores when bored, a turn in the gym when the lounge gets dull; leave through the airlock when
+  there is nothing left to do.
+- The gym is one room off the living cluster with four fixtures, a treadmill, a bench with a barbell,
+  a bag and a mat, one minion to each, a turn lasting its whole time. Loungers who stand near each
+  other talk; the rest stretch, look round, shuffle and yawn now and then.
 
 ## The world and the station
 
