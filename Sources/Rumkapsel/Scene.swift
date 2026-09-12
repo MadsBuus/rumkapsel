@@ -176,9 +176,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// pallet to the deck once it is loaded, false empties it back into storage.
     var palletWishes: [String: Bool] = [:]
     var lastBoxCount: [String: Int] = [:]
-    /// Where each yard crate stood at the last redraw, by its node name. A crate whose column lost the
-    /// one under it settles down to its new level over a beat instead of blinking there.
-    var crateStood: [String: SIMD3<Double>] = [:]
+    /// What each marker was last drawn as, by node name: an office's boxes by everything that shapes
+    /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
+    /// come out the same, so drawing the floor twice costs nothing and moves nothing.
+    var markerSignatures: [String: String] = [:]
     /// Crates under way, by node: the one table that moves a crate's picture.
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
     private var localSignature = ""
@@ -465,7 +466,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // while it still stands on the untested row, and the redraw then leaves it out as carried.
         // The other way round drew it tested, and the carry lifted it off the tested stack and put it back.
         handle(world.applyGitHub(now: Date()))
-        if sig != localSignature { localSignature = sig; rebuildStatic() } else { rebuildMarkers() }
+        reconcileYards()
+        if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
         flushScene()
         flushDeliveries()
@@ -738,6 +740,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerDeliveries: [String] = []
 
     func flushScene(firstRun: Bool = false) {
+        // The world's word first, then the picture: the reconciler may hand out carries or move a count,
+        // and the redraw that follows draws what it decided. The drawing itself decides nothing.
+        reconcileYards()
         if layoutDirty {
             layoutDirty = false; markersDirty = false
             rebuildStatic()
@@ -867,7 +872,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             switch to {
             case .deck where from == st.storage:
                 logEvent("\(label): on staging, to the deck")   // the yard reconciliation carries it across
-                rebuildMarkers()
+                markersDirty = true
             case .cleared:
                 logEvent("\(label): passed QA, ready to ship")
                 handle(.crateCleared(station: station.name, repo: item.repo, number: item.number))
@@ -922,7 +927,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if demo { tickDemo(dt: dt) }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
-        if clock - lastHaulSchedule > 0.5 { lastHaulSchedule = clock; scheduleCarries(); refreshObstacles(); replanBlockedWalks() }
+        if clock - lastHaulSchedule > 0.5 {
+            lastHaulSchedule = clock
+            scheduleCarries()
+            flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
+            refreshObstacles()
+            replanBlockedWalks()
+        }
         tickShuttles()
         tickPallets()
         tickCrateMotions()

@@ -461,8 +461,8 @@ extension StationController {
                                  to: to.pos, fromYaw: yaw, toYaw: to.yaw, at: clock, seconds: 2.4) { [weak self] in
             guard let self else { return }
             world.truth.setDown(item.crate, at: to)
-            if p.wantsBack { world.landedInStorage(station: station, repo: repo, number: item.crate.number) }
-            else { station.staged[repo, default: 0] += 1; fleet.save() }
+            // Down by hand: the station's word on where it stands, until the board has caught up.
+            world.landedByHand(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? "storage" : "deck")
             item.node.removeFromParentNode()
             drone.thud()
             rebuildMarkers()

@@ -54,18 +54,31 @@ extension StationController {
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 
-    /// Grey boxes pile up in an office as commits land; the pull request state colours them.
-    func rebuildMarkers() {
-        // Storage and the deck follow GitHub, but through the minions: what should move is carried,
-        // and only the rest is redrawn. Decide that before the old crates are taken off the floor.
+    /// The yard reconciliation: the source's word against what stands on the floor, per repository.
+    /// What can be carried is handed to carriers; counts are snapped only for the rest. It runs from
+    /// the tick and before every redraw, never from the drawing itself: drawing decides nothing.
+    func reconcileYards() {
         for station in fleet.stations.values where station.hasPad {
+            let before = (station.stored, station.staged)
             for (root, info) in world.repoRoots where info.station == station.name {
                 if let c = github.cargo(repoRoot: root), case .carryToDeck(let commands) = world.reconcile(station: station, repo: info.repo, root: root, cargo: c) {
                     handle(.carryToDeck(station: station.name, repo: info.repo, commands: commands))
                 }
             }
+            if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }
-        markerRoot.childNodes.filter { $0.name != "haul" }.forEach { $0.removeFromParentNode() }   // a crate waiting for its carrier stays
+    }
+
+    /// Grey boxes pile up in an office as commits land; the pull request state colours them.
+    ///
+    /// A redraw adopts what already stands. An office whose boxes would come out the same is left
+    /// alone; a numbered yard crate keeps its node and is moved only if its slot changed, downwards as
+    /// a settle, otherwise put where the layout says; only what is new is built, and only what is gone
+    /// is taken away. So a redraw in the middle of a carry disturbs nothing, and drawing the same
+    /// floor twice costs nothing.
+    func rebuildMarkers() {
+        var keep: Set<ObjectIdentifier> = []
+        var signatures: [String: String] = [:]
         for station in fleet.stations.values {
             for room in station.rooms.values where room.branch != nil || world.crewBoxes[roomKey(station, room)] != nil || world.peerBoxes[roomKey(station, room)] != nil {
                 let key = roomKey(station, room)
@@ -107,10 +120,24 @@ extension StationController {
                 let failing = world.checksFailing(room)
                 if world.isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
+                let cells = farCells(station, room)
+                // Everything that shapes this office's boxes. The same signature as last time means the
+                // same boxes: they stay as they are, cubes, package, shells and all.
+                let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + [
+                    "\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
+                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(world.isDusty(room))",
+                ]).joined(separator: "|")
+                let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
+                signatures[key] = signature
+                if markerSignatures[key] == signature, !drawn.isEmpty {
+                    drawn.forEach { keep.insert(ObjectIdentifier($0)) }
+                    continue
+                }
+                drawn.forEach { $0.removeFromParentNode() }
                 if packaged {
                     // One crate for the pull request. Its plate is a light: blinking while checks run, red when they
                     // fail, green when all is well; a closed one is red all over.
-                    let cell = farCells(station, room).first!
+                    let cell = cells.first!
                     let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
                     let closed = pr?.state == "CLOSED"
                     let checks = pr?.checks ?? ""
@@ -129,13 +156,13 @@ extension StationController {
                         pkg.addChildNode(shell)
                     }
                     markerRoot.addChildNode(pkg)
+                    keep.insert(ObjectIdentifier(pkg))
                     lastBoxCount[key] = 1
                     continue
                 }
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                let cells = farCells(station, room)
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 var newest: SCNNode?
                 for i in 0..<(count + ghosts) {
@@ -177,6 +204,7 @@ extension StationController {
                         n.addChildNode(shell)
                     }
                     markerRoot.addChildNode(n)
+                    keep.insert(ObjectIdentifier(n))
                 }
                 // More commits than last time while the owner is in: the newest cube is not on the floor
                 // yet. The worker carries it over on its head and stows it where it goes: a command.
@@ -198,42 +226,61 @@ extension StationController {
             // the hands, for as long as the carry lasts.
             for area in ["storage", "deck"] where station.hasPad {
                 let layout = world.yardLayout(station: station, area: area)
-                let standing = Set(layout.filter { $0.number > 0 }.map { "\(area):\(station.name)|\($0.repo)|\($0.number)" })
-                /// True when every crate that stood between here and there at the last redraw has left
-                /// the rows: only then is this a stack settling, rather than two crates changing places.
+                let prefix = "\(area):\(station.name)|"
+                var standing: [String: [SCNNode]] = [:]
+                for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
+                let wanted = Set(layout.filter { $0.number > 0 }.map { prefix + "\($0.repo)|\($0.number)" })
+                /// True when nothing that still belongs in the rows stands between here and there in this
+                /// column: only then is a drop a stack settling, rather than two crates changing places.
                 func vacated(_ from: SIMD3<Double>, _ to: SIMD3<Double>) -> Bool {
-                    crateStood.allSatisfy { id, was in
-                        guard abs(was.x - to.x) < 0.001, abs(was.z - to.z) < 0.001,
-                              was.y < from.y - 0.05, was.y > to.y - 0.05 else { return true }
-                        return !standing.contains(id)
+                    standing.allSatisfy { name, nodes in
+                        !wanted.contains(name) || nodes.allSatisfy { n in
+                            let p = n.position
+                            return !(abs(Double(p.x) - to.x) < 0.001 && abs(Double(p.z) - to.z) < 0.001
+                                     && Double(p.y) < from.y - 0.05 && Double(p.y) > to.y - 0.05)
+                        }
                     }
                 }
                 for slot in layout {
+                    let name = prefix + "\(slot.repo)|\(slot.number)"
+                    let spec = slot.cleared ? "tested" : "untested"
+                    // A numbered crate already standing here keeps its node. It moves only if its slot
+                    // did: down onto a freed level it settles over a beat; anywhere else it is put where
+                    // the layout says, as a fresh node would have been.
+                    if slot.number > 0, markerSignatures[name] == spec, let n = standing[name]?.first, !keep.contains(ObjectIdentifier(n)) {
+                        keep.insert(ObjectIdentifier(n))
+                        signatures[name] = spec
+                        let at = SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z))
+                        let heading = crateMotions[ObjectIdentifier(n)]?.legs.last?.to ?? at
+                        if abs(heading.x - slot.pos.x) > 0.001 || abs(heading.y - slot.pos.y) > 0.001 || abs(heading.z - slot.pos.z) > 0.001
+                            || abs(Double(n.eulerAngles.y) - slot.yaw) > 0.001 {
+                            stopCrate(n)
+                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, vacated(at, slot.pos) {
+                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
+                            } else {
+                                n.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
+                                n.eulerAngles.y = slot.yaw
+                            }
+                        }
+                        continue
+                    }
                     let c = NSColor(fleet.color(forRepo: slot.repo))
                     // In the yard the light is off, except green with a sticker on a tested crate.
                     let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38, approved: slot.cleared)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
-                    pkg.name = "\(area):\(station.name)|\(slot.repo)|\(slot.number)"
+                    pkg.name = name
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
-                    // The crate under it was taken away: this one settles down onto the free level over
-                    // a beat, rather than blinking there. Its height is the only thing that may change
-                    // this way, it only ever goes down, and only into space nothing else stands in.
-                    if slot.number > 0 {
-                        let id = pkg.name!
-                        if let was = crateStood[id],
-                           abs(was.x - slot.pos.x) < 0.001, abs(was.z - slot.pos.z) < 0.001,
-                           was.y > slot.pos.y + 0.05, vacated(was, slot.pos) {
-                            pkg.position = v3(was.x, was.y, was.z)
-                            moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
-                        }
-                    }
+                    keep.insert(ObjectIdentifier(pkg))
+                    if slot.number > 0 { signatures[name] = spec }
                 }
-                for id in crateStood.keys where id.hasPrefix("\(area):\(station.name)|") && !standing.contains(id) { crateStood[id] = nil }
-                for slot in layout where slot.number > 0 { crateStood["\(area):\(station.name)|\(slot.repo)|\(slot.number)"] = slot.pos }
             }
         }
+        // Whatever the floor no longer calls for goes. A crate waiting for its carrier stays: it is
+        // spoken for, and the layout has already left its slot alone.
+        for n in markerRoot.childNodes where !keep.contains(ObjectIdentifier(n)) && n.name != "haul" { n.removeFromParentNode() }
+        markerSignatures = signatures
         refreshObstacles()
     }
 
@@ -401,6 +448,8 @@ extension StationController {
                 r?.pending.remove(command.id)
                 if source == "deck" { station.staged[repo] = max(0, (station.staged[repo] ?? 1) - 1) }
                 else { station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1) }
+                // Aboard by hand: the rows may not draw it again until the board says it has shipped.
+                world.landedByHand(station: station, repo: repo, number: crate.number, in: "pad")
                 // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
                 // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
                 let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))

@@ -34,7 +34,7 @@ These are checked once here and not repeated in every table below.
 | Lifting takes time and a posture | pass | `startLift`/`lift` (`SceneTick.swift:151-181`) set `handsAt` from the crate's height and hold `phaseUntil` for `Hands.liftSeconds`; `Minion.swift:181-189` maps that to crouch/waist/reach/jump. One implementation, used by every crate move. | — |
 | Setting down takes time and the right posture | partial | `SceneTick.swift:255-280` mirrors the lift, but `Minion.posture` for level 3+ is `.jump` with a hop on the way *down* (`SceneTick.swift:550-552`), and levels 1 and 2 share one lean/reach placeholder rather than the slide and the overhead slide the rulebook asks for. | Implement the four set-down postures separately; ARCHITECTURE.md already lists this as owed. |
 | The crate stays in the hands until it is on its slot | pass | `setDown` (`SceneTick.swift:191-204`) animates the node inside the minion's space and `release` only reparents it after `phaseUntil`. | — |
-| Nothing moves it after set-down | partial | `release` (`SceneTick.swift:206-215`) pins the node at `to.pos` and `to.yaw`. But every `onDone` then removes that node and calls `rebuildMarkers` (`Jobs.swift:476-478`, `SceneMarkers.swift:48-197`), which redraws the crate from the layout. Identity is not kept; it holds only because `yardLayout` is a pure function. | Keep the landed node and let `rebuildMarkers` adopt it instead of deleting and recreating it. |
+| Nothing moves it after set-down | partial | `release` (`SceneTick.swift:206-215`) pins the node at `to.pos` and `to.yaw`. The `onDone` still removes that node and the next redraw draws it again from the layout at the same slot; every other crate on the rows now keeps its node across a redraw (`rebuildMarkers` adopts by name). | Hand the landed node back to the marker layer instead of removing it. |
 | Taken from the top, built from the floor | pass | `World.swift:816-817` orders storage by level, highest first; `World.swift:786-799` `grounded` drops a landing slot to the lowest free level. | — |
 | A lower crate taken: the ones above settle down one, slowly | pass | `rebuildMarkers` remembers where each numbered crate stood (`crateStood`, `Scene.swift:176-178`) and, when a crate comes back on the same column at a lower level with the levels between it vacated, draws it where it stood and moves it down over `Hands.settleSeconds` (0.6 s) (`SceneMarkers.swift:184-213`). Only downwards, and never through a crate that is still there. | — |
 | A crate keeps its slot until it leaves | partial | `World.swift:672-711` keeps a per-crate slot map keyed on `repo#number`. Unnumbered crates key on `i<index>` (`World.swift:690`), so they reshuffle whenever the pile's order changes. | Key unnumbered crates on something stable, or refuse to draw them until a number is known. |
@@ -352,10 +352,11 @@ These are checked once here and not repeated in every table below.
     run through `moveCrate`, and the shuttle interpolates each leg from the clock (`Actors.swift`).
 14. ~~**Give the commit-box carry a command**~~ Done: `stow`, with the newest cube hidden until it is set
     down; `pack` does the same for a pull request just opened.
-15. **Take the reconciler out of the redraw** (`SceneMarkers.swift:51-57`), and fold the pallet actor's
-    duplicated state into `StationTruth` (`Actors.swift:133-189`). Half done: the world's own haul
-    flags (hauled, haul done, hauling rooms, in flight to deck) are gone; a merged office's progress
-    is read off its crate's placement in `StationTruth` (`officeCrates`, `haulLanded`).
+15. ~~**Take the reconciler out of the redraw**~~ Done: `reconcileYards` runs from `flushScene` and the
+    half-second tick, and `rebuildMarkers` decides nothing; it adopts the nodes that stand and only
+    builds what is new. The world's own haul flags are gone too; a merged office's progress is read off
+    its crate's placement in `StationTruth` (`officeCrates`, `haulLanded`). Still owed: fold the pallet
+    actor's duplicated state into `StationTruth` (`Actors.swift:133-189`).
 16. ~~**Quiet the first release answer**~~ Done: `releasesSeen` marks the first answer announced without
     saying it; the rocket still stands.
 17. **Take the randomness out of the routines**: the short-stretch bath (`SceneTick.swift:327`) and the

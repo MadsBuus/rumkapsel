@@ -124,7 +124,38 @@ enum Scenarios {
             #"command\s+rocket: web loaded and steaming"#,
             #"releaseMerged web#\d+ .* production"#,
             #"command\s+rocket: web lifting off"#,
-        ]),
+        ], floor: { sim in
+            // One crate of web was on the deck; it goes aboard once. A board still saying "ready to ship"
+            // after the crate is in the hold must not put it back on the deck to be carried again.
+            let loads = sim.model.logLines.filter { $0.contains("  command  ") && $0.contains("carrying #") && $0.hasSuffix("to the rocket") }.count
+            if loads != 1 { return "\(loads) carries into the rocket for one crate" }
+            let deck = Scenario.crates(sim, "deck", "web")
+            return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
+        }),
+
+        Scenario("staging merges before the board: the deck keeps the pallet's crates", [
+            ("Target: web#455", 0.3),
+            ("Release: Staging opens", 5.0),
+            ("Release: Staging merges (board lags)", 10.0),   // the pallet crosses and empties while the board still says storage
+            ("Commit", 1.0),                                  // any redraw meanwhile: the source must not take them back
+            ("Board: Catch up", 0.3),                         // the board's poll arrives: nothing left to carry
+        ], tail: 6, expects: [
+            #"stagingOpened web#\d+"#,
+            #"stagingMerged web#\d+"#,
+            #"command .*: pushing the pallet to the deck"#,
+            #"command .*: unloading the pallet"#,
+            #"boardMoved web#\d+ .* -> deck"#,
+        ], forbids: [
+            #"carrying #\d+ to the deck$"#,   // the pallet did the carrying; nothing redoes it by hand
+        ], floor: { sim in
+            // Two web crates rode the pallet over to join the one already there, each drawn by its own number.
+            let deck = Scenario.crates(sim, "deck", "web")
+            if deck != 3 { return "\(deck) web crates on the deck, not 3" }
+            let nameless = sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("deck:work|web|0") }.count
+            if nameless > 0 { return "\(nameless) web crates on the deck without a number" }
+            let storage = Scenario.crates(sim, "storage", "web")
+            return storage == 0 ? nil : "\(storage) web crates back in storage"
+        }),
 
         Scenario("PR closed unmerged: red, nothing carried", [
             ("Target: web#455", 0.3),

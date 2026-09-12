@@ -593,11 +593,10 @@ extension StationController {
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 station.stored[repo] = max(0, (station.stored[repo] ?? 1) - 1)
-                station.staged[repo, default: 0] += 1
+                world.landedByHand(station: station, repo: repo, number: crate.number, in: "deck")
                 node.removeFromParentNode()
                 rebuildMarkers()
                 refreshRockets()
-                fleet.save()
             }
         }
         guard started > 0 else { return }

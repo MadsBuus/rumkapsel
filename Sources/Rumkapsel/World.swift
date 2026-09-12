@@ -591,6 +591,7 @@ final class World {
         let station = fleet.station("work")
         let sk = station.name + "|"
         var changed = false
+        var markers = false   // a peer says the same thing every few seconds: only a difference is worth a redraw
         let cfg = ConfigStore.shared.current
         let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
         var live: Set<String> = []
@@ -598,8 +599,10 @@ final class World {
             let key = sk + o.key
             live.insert(key)
             peerOffices[key, default: [:]][snap.name] = o
-            if o.pushed { pushedByPeer.insert(key) }
+            if o.pushed, pushedByPeer.insert(key).inserted { changed = true }   // an outline becomes a room
+            let boxesBefore = peerBoxes[key]?.count
             if o.boxes > 0 { peerBoxes[key] = (o.boxes, "NONE", o.color) } else { peerBoxes[key] = nil }
+            if peerBoxes[key]?.count != boxesBefore { markers = true }
             if let r = station.rooms[o.key] {
                 r.lastActive = max(r.lastActive, o.lastActive, now)
                 if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
@@ -617,10 +620,10 @@ final class World {
         }
         for key in mine where !live.contains(key) {
             peerOffices[key]?[snap.name] = nil
-            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil }
+            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; if peerBoxes.removeValue(forKey: key) != nil { markers = true } }
         }
         if changed { events.append(.layoutChanged) }
-        else if !snap.offices.isEmpty { events.append(.markersChanged) }
+        else if markers { events.append(.markersChanged) }
 
         // Their GitHub answers for repositories we also watch save us a poll; same for the board.
         if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number {
@@ -698,8 +701,7 @@ final class World {
             slots.first { $0.key.hasPrefix("\(group)|") && $0.value.column == column }?.key.split(separator: "|")[1].split(separator: "#").first.map(String.init)
         }
         for (repo, n) in piles.sorted(by: { $0.key < $1.key }) where n > 0 {
-            var numbers = area == "deck" ? (cargoByRepo[repo]?.deckNumbers ?? []) : (cargoByRepo[repo]?.storageNumbers ?? [])
-            if area == "storage" { numbers += truth.freshLanded(station: station.name, repo: repo, counted: numbers).filter { !numbers.contains($0) } }
+            var numbers = yardHolds(station: station, repo: repo, area: area, cargo: cargoByRepo[repo]).numbers
             // A crate on the pallet stands on the pallet: the rows are not to draw it again.
             numbers = numbers.filter { !truth.isOnPallet(station: station.name, repo: repo, number: $0) }
             // Nor is a crate in somebody's hands. It is drawn once, on the arms, and the row is one
@@ -767,6 +769,21 @@ final class World {
         return ((rnd() - 0.5) * 0.22, (rnd() - 0.5) * 0.3, (rnd() - 0.5) * 0.7)
     }
 
+    /// What a yard holds of a repository once station truth has had its say: the source's numbers,
+    /// plus what landed here by hand that the source has not counted yet, minus what the station has
+    /// since carried off by hand to another yard. The rows and the reconciler both read this and
+    /// nothing else, so a source running behind the minions can neither take a crate back nor draw it
+    /// twice: the pallet's crates stay on the deck until the board says deck, and a crate loaded into
+    /// the rocket stays aboard until the board says shipped.
+    func yardHolds(station: Station, repo: String, area: String, cargo: GitHubResolver.Cargo?) -> (count: Int, numbers: [Int]) {
+        let source = area == "deck" ? (cargo?.deckNumbers ?? []) : (cargo?.storageNumbers ?? [])
+        let base = area == "deck" ? (cargo?.deck ?? 0) : (cargo?.storage ?? 0)
+        truth.settleLandings(station: station.name, repo: repo, storage: cargo?.storageNumbers ?? [], deck: cargo?.deckNumbers ?? [])
+        let fresh = truth.freshLanded(station: station.name, repo: repo, yard: area).filter { !source.contains($0) }
+        let moved = truth.movedByHand(station: station.name, repo: repo, from: area, counted: source)
+        return (max(0, base - moved.count) + fresh.count, source.filter { !moved.contains($0) } + fresh)
+    }
+
     /// Brings the yard in line with GitHub. Crates the board says went to staging are carried across
     /// from storage; counts snap only for what cannot be carried, and never for a deck that is about to
     /// be loaded into a rocket.
@@ -779,15 +796,16 @@ final class World {
         guard truth.pallets[station.name]?.repo != repo,
               truth.palletQueue[station.name]?.contains(where: { $0.repo == repo }) != true else { return .waiting }
         let shownStorage = station.stored[repo] ?? 0, shownDeck = station.staged[repo] ?? 0
-        let fresh = truth.freshLanded(station: station.name, repo: repo, counted: c.storageNumbers)
-        let toDeck = min(c.deck - shownDeck, shownStorage)
+        let storage = yardHolds(station: station, repo: repo, area: "storage", cargo: c)
+        let deck = yardHolds(station: station, repo: repo, area: "deck", cargo: c)
+        let toDeck = min(deck.count - shownDeck, shownStorage)
         if toDeck > 0, station.hasPad, !station.deckCells.isEmpty, !ConfigStore.shared.current.stagingBranch.isEmpty {
             let commands = carryToDeck(station: station, repo: repo, count: toDeck)
             if !commands.isEmpty { return .carryToDeck(commands) }
         }
         let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
-        station.stored[repo] = c.storage + fresh.count
-        if !(launching && c.deck < shownDeck) { station.staged[repo] = c.deck }
+        station.stored[repo] = storage.count
+        if !(launching && deck.count < shownDeck) { station.staged[repo] = deck.count }
         return .snapped
     }
 
@@ -983,10 +1001,22 @@ final class World {
     /// Merged offices that had no package on the floor to carry: free to clear at once.
     private var nothingToHaul: Set<String> = []
 
+    /// A crate was set down by hand where the source may not have counted it yet: in storage, on the
+    /// deck, or aboard the rocket on the pad. Ours to keep there until the source catches up. The count
+    /// of the yard it landed in follows the hands here; the yard it left was counted down by the carry
+    /// that emptied the slot.
+    func landedByHand(station: Station, repo: String, number: Int, in yard: String) {
+        truth.landedByHand(CrateRef(station: station.name, repo: repo, number: number), in: yard)
+        switch yard {
+        case "storage": station.stored[repo, default: 0] += 1
+        case "deck": station.staged[repo, default: 0] += 1
+        default: break
+        }
+        fleet.save()
+    }
+
     /// A crate was set down in storage by hand: ours to keep until GitHub counts it.
     func landedInStorage(station: Station, repo: String, number: Int) {
-        truth.landedByHand(CrateRef(station: station.name, repo: repo, number: number))
-        station.stored[repo, default: 0] += 1
-        fleet.save()
+        landedByHand(station: station, repo: repo, number: number, in: "storage")
     }
 }

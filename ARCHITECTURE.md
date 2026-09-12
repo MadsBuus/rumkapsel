@@ -140,6 +140,25 @@ position, which means the scene's geometry leaks a little into the model side.
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.
 
+## Station truth against a source that runs behind
+
+Done, the first inch of steps 4 to 7 above. Every crate a minion, a pallet or the rocket's hatch sets
+down is written to `StationTruth.landed` with the yard it landed in: storage, the deck, or the pad.
+`World.yardHolds` is the one rule for what a yard holds of a repository: the source's numbers, plus what
+landed here by hand that the source has not counted yet, minus what the station has since carried off by
+hand to another yard. `reconcile` sets the counts from it and `yardLayout` draws from it, so the two
+cannot disagree, and a source answer that is older than the minions' work can neither take a crate back
+nor draw it twice. A landing is forgotten the moment the source agrees with it (counts it in that yard,
+or, for the pad, stops counting it anywhere), or after a quarter of an hour if it never does.
+
+The reconciler runs from `flushScene` and the half-second tick (`reconcileYards`), never from the
+drawing. `rebuildMarkers` adopts what stands: an office's boxes are left alone while everything that
+shapes them reads the same, a numbered yard crate keeps its node and is moved only if its slot changed,
+and only what is new is built and what is gone taken away. A peer's heartbeat asks for a redraw only when
+it brought a difference. Still owed from the list above: a ledger the counts are derived from rather than
+kept on the station, carries that name a yard and bind their slot late, and per-entity source times in
+place of the quarter-hour.
+
 ## The staging pallet
 
 Done. A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`

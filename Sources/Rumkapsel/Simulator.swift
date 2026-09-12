@@ -17,9 +17,10 @@ import SwiftUI
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR
 ///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office
-///     Board:     Board: Move
-///     Release:   Release: Staging opens, Release: Staging merges, Release: Staging closes,
-///                Release: Production opens, Release: Mark tested, Release: Production merges
+///     Board:     Board: Move, Board: Catch up
+///     Release:   Release: Staging opens, Release: Staging merges, Release: Staging merges (board lags),
+///                Release: Staging closes, Release: Production opens, Release: Mark tested,
+///                Release: Production merges
 ///     Station:   Night, Day, Everyone to lounge, Bath, Chore
 ///     Time:      Pause, Resume, Step, 1x, 4x, 16x
 ///
@@ -474,11 +475,17 @@ final class SimulatorModel: ObservableObject {
                 button("Board: Move", "Move \(office.map { "\($0.repo)#\($0.number)" } ?? "the issue") to \(column)",
                        office.flatMap(boardItem) == nil ? "the target has no issue on the board"
                         : (office.flatMap(boardItem)?.status == column ? "already in \(column)" : nil)),
+                // The board's own poll arriving late: everything of the repository still in storage moves to the deck.
+                button("Board: Catch up", "Catch up: \(repo) storage → deck",
+                       board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil : "nothing of \(repo) in storage on the board"),
             ]),
             Group(id: "Release (\(repo))", note: nil, buttons: [
                 button("Release: Staging opens", "Staging opens",
                        openRelease(repo, production: false) != nil ? "a staging release is already open on \(repo)" : nil),
                 button("Release: Staging merges", "Staging merges",
+                       openRelease(repo, production: false) == nil ? "no open staging release on \(repo)" : nil),
+                // The merge is seen but the board is not: its poll comes later, by "Board: Catch up".
+                button("Release: Staging merges (board lags)", "Staging merges (board lags)",
                        openRelease(repo, production: false) == nil ? "no open staging release on \(repo)" : nil),
                 button("Release: Staging closes", "Staging closes (not merged)",
                        openRelease(repo, production: false) == nil ? "no open staging release on \(repo)" : nil),
@@ -664,6 +671,8 @@ final class SimulatorModel: ObservableObject {
         case "Board: Move":
             guard let it = office.flatMap(boardItem) else { return }
             move([it], to: column)
+        case "Board: Catch up":
+            move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
 
         // Releases, on the target's repository
         case "Release: Staging opens":
@@ -673,7 +682,7 @@ final class SimulatorModel: ObservableObject {
                                                          head: cfg.trunkBranch, state: "OPEN",
                                                          url: "https://example.invalid/\(repo)/\(nextRelease)", labels: [], mergedAt: nil))
             pushGitHub()
-        case "Release: Staging merges":
+        case "Release: Staging merges", "Release: Staging merges (board lags)":
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
@@ -681,7 +690,9 @@ final class SimulatorModel: ObservableObject {
             // With a board, the merge is a bell; the crates move because the columns move.
             if ConfigStore.shared.current.project != nil { launches.append((repo, releases[repo]![i])) }
             pushGitHub()
-            move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
+            // The board is its own poll: in life it answers minutes after the release did. The lagging
+            // press leaves it where it is, for "Board: Catch up" to move later.
+            if !name.hasSuffix("(board lags)") { move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck) }
         case "Release: Staging closes":
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]
