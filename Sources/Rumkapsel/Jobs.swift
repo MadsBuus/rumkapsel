@@ -26,8 +26,7 @@ extension StationController {
         // A crate on its arms goes down where it stands, and the carry waits for someone else.
         if m.current?.crate != nil { dropWhereStanding(m) }
         for (id, c) in cargo where c.carrier == m.id { cargo[id]?.carrier = nil }
-        world.truth.dropped(by: m.id)
-        world.truth.jobs[m.id] = nil
+        world.dropped(by: m.id)
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
         m.queuedCones.forEach { $0.removeFromParentNode() }
@@ -100,7 +99,6 @@ extension StationController {
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
         m.pending = nil
-        world.truth.jobs[m.id] = (c, m.phase)
         if announce { logEvent(c.words) }
         if redirected, case .carry(_, _, let to) = c.kind { walk(m, to: to.cell) }
     }
@@ -110,12 +108,10 @@ extension StationController {
         guard let c = m.current else { return }
         m.phaseUntil = 0
         if m.phase + 1 < c.phases.count { m.phase += 1 }
-        world.truth.jobs[m.id] = (c, m.phase)
     }
 
     /// Done, or given up: whatever was queued starts now, else the minion goes back to resting.
     func finish(_ m: Minion) {
-        world.truth.jobs[m.id] = nil
         m.current = nil
         m.phase = 0
         m.phaseUntil = 0
@@ -134,7 +130,7 @@ extension StationController {
         propRoot.addChildNode(held)
         moveCrate(held, legs: [MotionLeg(to: SIMD3(Double(at.x), 0.12, Double(at.z)), seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
-        world.truth.dropped(by: m.id)
+        world.dropped(by: m.id)
     }
 
     /// Off the station: through the airlock when there is one, and gone once inside.
@@ -355,7 +351,7 @@ extension StationController {
         cancelCarries(roomKey: key)
         for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
         stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
-        world.truth.forgetOffice(key)
+        world.forgetOffice(key)
         world.truth.officeDelivered(key)
         outlines.removeValue(forKey: key)?.removeFromParentNode()
         boxes.removeValue(forKey: key)?.removeFromParentNode()
@@ -544,7 +540,7 @@ extension StationController {
     /// else is told to move it and the yard layout leaves its spot alone.
     func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
         guard let crate = command.crate else { return }
-        world.truth.claimed(crate)
+        world.claim(crate)
         if case .carry(_, _, let to) = command.kind, let yard = Yard(area: to.area), let station = fleet.stations[crate.station] {
             station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         }
@@ -559,9 +555,9 @@ extension StationController {
         for (id, c) in cargo where c.roomKey == roomKey {
             if case .carry(_, _, let to) = c.command.kind, to.area == .storage { continue }
             c.node.removeFromParentNode()
-            if let crate = c.command.crate { world.truth.forget(crate); world.unorder(crate) }
+            if let crate = c.command.crate { world.forgetPlacement(crate); world.unorder(crate) }
             cargo[id] = nil
-            if let who = c.carrier, let m = minions[who] { m.carried = nil; world.truth.dropped(by: m.id); finish(m) }
+            if let who = c.carrier, let m = minions[who] { m.carried = nil; world.dropped(by: m.id); finish(m) }
         }
     }
 
@@ -611,7 +607,7 @@ extension StationController {
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 // Where it actually went down: the order may have been re-aimed, or sent back, on the way.
-                let landedIn = world.truth.area(of: crate).flatMap(Yard.init(area:)) ?? Yard(area: to.area) ?? .deck
+                let landedIn = world.area(of: crate).flatMap(Yard.init(area:)) ?? Yard(area: to.area) ?? .deck
                 world.landed(station: station, repo: repo, number: crate.number, in: landedIn, at: now)
                 node.removeFromParentNode()
                 rebuildMarkers()
@@ -654,7 +650,7 @@ extension StationController {
             guard queued > 0 else { continue }
             cargo[id]?.hurry = true
             let words = "hurrying \(crate.words) to \(to.words), \(queued) more waiting"
-            if m.current?.id == id { m.current = m.current?.reworded(words); world.truth.jobs[m.id] = (m.current!, m.phase) }
+            if m.current?.id == id { m.current = m.current?.reworded(words) }
             handle(.log("\(m.home.name): \(words)"))
         }
         tickRockets()
@@ -668,7 +664,7 @@ extension StationController {
         cargo[id] = nil
         let m = job.carrier.flatMap { minions[$0] }
         if let m, m.carried === job.node { m.carried = nil }
-        world.truth.setDown(crate, at: to)
+        world.setDown(crate, at: to)
         handle(.log("\(crate.words) set down late in \(to.words): the station caught up"))
         job.onDone()
         if let m, m.current?.id == id { finish(m) }
@@ -688,7 +684,7 @@ extension StationController {
         }
         if let who = job.carrier, let m = minions[who], m.current?.id == id { finish(m) }
         job.node.removeFromParentNode()
-        world.truth.forget(crate)
+        world.forgetPlacement(crate)
         world.unorder(crate)
         cargo[id] = nil
         markersDirty = true
@@ -703,7 +699,6 @@ extension StationController {
         let c = job.command.aimed(at: fresh)
         cargo[id]?.command = c
         m.current = c
-        world.truth.jobs[m.id] = (c, m.phase)
     }
 
     // MARK: crew

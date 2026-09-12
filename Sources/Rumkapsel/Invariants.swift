@@ -102,7 +102,7 @@ final class Invariants {
             live.insert(s.name)
             let crate = CrateRef(station: s.station, repo: s.repo, number: s.number)
             // On someone's arms, on the pallet or in the air: it is allowed to move.
-            if c.world.truth.isCarried(crate) || c.world.truth.isOnPallet(crate) { resting[s.name] = nil; continue }
+            if c.world.crate(crate)?.inTransit == true { resting[s.name] = nil; continue }
             if c.pallets[s.station]?.flight != nil { continue }
             if let was = resting[s.name] {
                 let d = ((was.x - s.pos.x) * (was.x - s.pos.x) + (was.y - s.pos.y) * (was.y - s.pos.y)
@@ -291,7 +291,7 @@ final class Invariants {
             guard launched.insert(r.key).inserted else { continue }
             let prefix = "deck:\(r.station)|\(r.repo)|"
             let left = c.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix(prefix) }.count
-            let arms = c.world.truth.carriedCount(station: r.station, repo: r.repo)
+            let arms = c.world.carriedCount(station: r.station, repo: r.repo)
             if left > 0 || arms > 0 {
                 flag("a rocket leaves only with its cargo aboard", r.key,
                      "\(left) crate(s) still on the deck, \(arms) on someone's arms")

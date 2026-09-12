@@ -139,7 +139,6 @@ extension StationController {
                 m.setTool(nil)
                 m.tilt.eulerAngles = SCNVector3(0, 0, 0)
                 m.phase = 0
-                world.truth.jobs[m.id] = (c, 0)
                 let (want, _) = pushSpot(p, toward: leg)
                 walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
             }
@@ -423,7 +422,7 @@ extension StationController {
         // The rows are redrawn every time one leaves, so take the crate standing there now, not the
         // node this pallet was handed when it was ordered: that one is long gone from the scene.
         let node = crateNode("storage", item.crate) ?? item.node
-        world.truth.putOnPallet(item.crate, at: item.slot)
+        world.putOnPallet(item.crate, at: item.slot)
         let to = Props.palletOffset(row: item.slot.row, column: item.slot.column, level: item.slot.level)
         // Into the pallet's own space, so it rides along once it has landed.
         let where_ = node.worldPosition
@@ -452,7 +451,7 @@ extension StationController {
         station.ledger.order(repo: repo, number: item.crate.number, to: p.wantsBack ? .storage : .deck)
         let to = p.wantsBack ? world.storageSlot(station: station, repo: repo, number: item.crate.number)
                              : world.deckSlot(station: station, repo: repo, number: item.crate.number)
-        world.truth.takeOffPallet(item.crate)
+        world.truth.takeOffPallet(item.crate)   // off the pallet's slot; its row still says pallet until it is down
         let where_ = item.node.worldPosition
         let yaw = Double(p.node.eulerAngles.y) + Double(item.node.eulerAngles.y)
         item.node.removeAllActions()
@@ -461,7 +460,7 @@ extension StationController {
         p.flight = Pallet.Flight(node: item.node, from: SIMD3(Double(where_.x), Double(where_.y), Double(where_.z)),
                                  to: to.pos, fromYaw: yaw, toYaw: to.yaw, at: clock, seconds: 2.4) { [weak self] in
             guard let self else { return }
-            world.truth.setDown(item.crate, at: to)
+            world.setDown(item.crate, at: to)
             // Down by hand: the station's word on where it stands, until the board has caught up.
             world.landed(station: station, repo: repo, number: item.crate.number, in: p.wantsBack ? .storage : .deck, at: now)
             item.node.removeFromParentNode()

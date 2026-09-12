@@ -620,6 +620,7 @@ final class Station {
     func restore(_ s: Saved) {
         spineHalfLength = s.spine
         ledger = s.ledger ?? Ledger()
+        ledger.forgetTransit()   // nobody was carrying anything when this launched
         for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)

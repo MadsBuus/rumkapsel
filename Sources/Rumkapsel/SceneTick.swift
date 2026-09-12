@@ -455,7 +455,7 @@ extension StationController {
                         guard liftDue(m) else { continue }
                         if m.carried == nil {
                             lift(m, job.node)
-                            self.world.truth.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
+                            self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
                             cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
                         }
                         if clock < m.phaseUntil { continue }
@@ -483,7 +483,7 @@ extension StationController {
                         if clock < m.phaseUntil { continue }
                         release(m, job.node, at: to.pos, yaw: to.yaw)
                         cargo[id] = nil
-                        self.world.truth.setDown(crate, at: to)
+                        self.world.setDown(crate, at: to)
                         job.onDone()
                         finish(m)
                         continue

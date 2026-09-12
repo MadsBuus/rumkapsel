@@ -105,7 +105,7 @@ extension StationController {
                 } else {
                     let local = world.localState(room)
                     let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
-                    if (local.commits == 0 && dirtyFiles == 0) || world.truth.haulOrdered(office: key) { continue }   // nothing to show, or on its way to storage
+                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) { continue }   // nothing to show, or on its way to storage
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                     count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
                     ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
@@ -377,7 +377,7 @@ extension StationController {
             r.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()   // cleared: the tape comes down
             loadCrates(r)
         case .climb:
-            world.truth.clearPad(station: r.station, repo: r.repo)
+            world.clearPad(station: r.station, repo: r.repo)
             liftOff(r.node)
             r.until = clock + 15
             fleet.save()
@@ -400,7 +400,7 @@ extension StationController {
                 // Unnumbered crates of a repository share one truth key, so the count aboard can
                 // read short of what is really on the pad: the carries themselves are the second,
                 // exact witness, and both have to agree before the rocket may go.
-                let short = r.assigned.count - world.truth.aboard(station: r.station, repo: r.repo)
+                let short = r.assigned.count - world.aboard(station: r.station, repo: r.repo)
                 guard padClear(r), r.pending.isEmpty, short <= 0 else {
                     if clock - r.since > 90, clock - r.moaned > 30 {
                         r.moaned = clock
@@ -433,7 +433,7 @@ extension StationController {
     /// Nothing of this repository left standing on its row, and nothing on anyone's arms.
     private func padClear(_ r: Rocket) -> Bool {
         let onFloor = markerRoot.childNodes.contains { ($0.name ?? "").hasPrefix("\(loadSource):\(r.station)|\(r.repo)|") }
-        return !onFloor && world.truth.carriedCount(station: r.station, repo: r.repo) == 0
+        return !onFloor && world.carriedCount(station: r.station, repo: r.repo) == 0
     }
 
     /// Hands out a carry for every crate of the repository still standing on its row. A crate already

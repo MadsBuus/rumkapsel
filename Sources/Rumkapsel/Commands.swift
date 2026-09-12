@@ -18,7 +18,7 @@ struct CrateRef: Hashable {
 
 /// Somewhere on the floor a crate can stand, and enough to walk there.
 struct Spot {
-    enum Area: String { case office, bay, storage, deck, tested, pad, floor }
+    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, floor }
     var area: Area
     var station: String
     /// The room key of an office, the repository of a yard row; empty elsewhere.
@@ -340,16 +340,9 @@ extension Place {
     }
 }
 
-/// What is actually on the floor right now, as opposed to what the world wants. Only completions
-/// write here.
+/// What the station's props and plots are doing: the pallet out and what rides on it, the offices
+/// ordered and the crates waiting in the bay. Where a crate itself is lives on its ledger row.
 struct StationTruth {
-    enum Placement: Equatable {
-        case slot(area: Spot.Area, cell: Cell, level: Int)
-        case carried(by: String)
-        /// On the pallet: three rows of four, stacked when there are more than twelve.
-        case pallet(row: Int, column: Int, level: Int)
-    }
-
     /// A crate's place on the pallet: three rows of four, counted from the floor of the pallet up.
     struct PalletSlot: Equatable { var row: Int; var column: Int; var level: Int }
 
@@ -366,17 +359,10 @@ struct StationTruth {
         var crates: [String: PalletSlot] = [:]
     }
 
-    /// Where every crate the station has moved by hand stands, by `CrateRef.key`.
-    private(set) var crates: [String: Placement] = [:]
     /// Offices on the floor whose crate has not been walked in yet, by "station|roomKey".
     private(set) var pendingOffices: Set<String> = []
     /// Office crates a shuttle has set down in the bay, waiting to be fetched, by "station|roomKey".
     private(set) var bayCrates: Set<String> = []
-    /// The crate each merged office's package became, by office key ("station|roomKey"), from the
-    /// moment its haul was ordered. Whether it has left is read off the crate's placement, never a flag.
-    private(set) var officeCrates: [String: CrateRef] = [:]
-    /// What each actor is doing, by minion id: its command and how far into it.
-    var jobs: [String: (command: Command, phase: Int)] = [:]
     /// One pallet per station at a time, by station name.
     private(set) var pallets: [String: Pallet] = [:]
     /// Pallets asked for while one is out, in the order they were asked for.
@@ -406,99 +392,14 @@ struct StationTruth {
     mutating func movePallet(station: String, cell: Cell, pos: SIMD3<Double>) {
         pallets[station]?.cell = cell; pallets[station]?.pos = pos
     }
-
-    mutating func putOnPallet(_ crate: CrateRef, at slot: PalletSlot) {
-        pallets[crate.station]?.crates[crate.key] = slot
-        crates[crate.key] = .pallet(row: slot.row, column: slot.column, level: slot.level)
-    }
-
+    mutating func putOnPallet(_ crate: CrateRef, at slot: PalletSlot) { pallets[crate.station]?.crates[crate.key] = slot }
     mutating func takeOffPallet(_ crate: CrateRef) { pallets[crate.station]?.crates[crate.key] = nil }
-
     /// The pallet is gone: it took nothing with it, everything on it has been set down by now.
     mutating func endPallet(station: String) { pallets[station] = nil }
-
-    func isOnPallet(_ crate: CrateRef) -> Bool {
-        if case .pallet = crates[crate.key] { return true }
-        return false
-    }
-    func isOnPallet(station: String, repo: String, number: Int) -> Bool {
-        isOnPallet(CrateRef(station: station, repo: repo, number: number))
-    }
     /// How many of a repository's crates the pallet holds right now.
     func palletCount(station: String, repo: String) -> Int {
         pallets[station].map { p in p.crates.keys.filter { $0.hasPrefix("\(station)|\(repo)|") }.count } ?? 0
     }
-
-    // MARK: crates
-
-    func carrier(of crate: CrateRef) -> String? {
-        if case .carried(let who) = crates[crate.key] { return who }
-        return nil
-    }
-
-    /// A crate on someone's arms is truth from the pickup: nothing else may be told to move it.
-    func isCarried(_ crate: CrateRef) -> Bool { carrier(of: crate) != nil }
-    /// How many of a repository's crates are on someone's arms right now.
-    func carriedCount(station: String, repo: String) -> Int {
-        crates.filter { key, placement in
-            if case .carried = placement { return key.hasPrefix("\(station)|\(repo)|") }
-            return false
-        }.count
-    }
-    func isCarried(station: String, repo: String, number: Int) -> Bool {
-        isCarried(CrateRef(station: station, repo: repo, number: number))
-    }
-
-    /// Spoken for by a command that has not found a carrier yet: already off the layout, so the crate
-    /// is not drawn twice while it waits.
-    mutating func claimed(_ crate: CrateRef) {
-        if case .carried = crates[crate.key] { return }
-        crates[crate.key] = .carried(by: "")
-    }
-
-    mutating func pickedUp(_ crate: CrateRef, by minion: String) {
-        crates[crate.key] = .carried(by: minion)
-    }
-
-    mutating func setDown(_ crate: CrateRef, at spot: Spot) {
-        takeOffPallet(crate)
-        crates[crate.key] = .slot(area: spot.area, cell: spot.cell, level: spot.level)
-    }
-
-    mutating func forget(_ crate: CrateRef) { crates[crate.key] = nil }
-
-    /// The area a crate stands in, once set down; nil on the arms, on the pallet, or unknown.
-    func area(of crate: CrateRef) -> Spot.Area? {
-        if case .slot(let area, _, _) = crates[crate.key] { return area }
-        return nil
-    }
-
-    /// Whatever this minion was holding is no longer on anyone's arms.
-    mutating func dropped(by minion: String) {
-        for (k, p) in crates where p == .carried(by: minion) { crates[k] = nil }
-    }
-
-    // MARK: office hauls
-
-    /// A merged office's package is to go to storage: spoken for from now on.
-    mutating func haulOrdered(office key: String, crate: CrateRef) {
-        officeCrates[key] = crate
-        claimed(crate)
-    }
-    func haulOrdered(office key: String) -> Bool { officeCrates[key] != nil }
-    /// Ordered and not yet down anywhere in the yard: on the floor of the office still, spoken for,
-    /// or on someone's arms.
-    func haulUnderway(office key: String) -> Bool { haulOrdered(office: key) && !haulLanded(office: key) }
-    /// The package is down in the yard, or on a pallet already: the office may clear.
-    func haulLanded(office key: String) -> Bool {
-        guard let c = officeCrates[key] else { return false }
-        switch crates[c.key] {
-        case .slot(let area, _, _): return area != .office
-        case .pallet: return true
-        default: return false
-        }
-    }
-    mutating func forgetOffice(_ key: String) { officeCrates[key] = nil }
 
     // MARK: offices
 
@@ -516,21 +417,5 @@ struct StationTruth {
     func isInBay(_ key: String) -> Bool { bayCrates.contains(key) }
     mutating func tookFromBay(_ key: String) { bayCrates.remove(key) }
 
-    // MARK: the pad
 
-    /// Crates of a repository already set down on the rocket.
-    func aboard(station: String, repo: String) -> Int {
-        crates.filter { key, placement in
-            guard key.hasPrefix("\(station)|\(repo)|") else { return false }
-            if case .slot(let area, _, _) = placement { return area == .pad }
-            return false
-        }.count
-    }
-
-    /// The rocket left: what it carried is off the station.
-    mutating func clearPad(station: String, repo: String) {
-        for (key, placement) in crates where key.hasPrefix("\(station)|\(repo)|") {
-            if case .slot(let area, _, _) = placement, area == .pad { crates[key] = nil }
-        }
-    }
 }

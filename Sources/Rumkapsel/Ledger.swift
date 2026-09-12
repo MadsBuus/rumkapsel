@@ -29,6 +29,15 @@ enum Yard: String, Codable {
 /// that crate, however fresh the poll. A source with no times of its own (git history) is believed
 /// again the moment it agrees with what the station did.
 struct Ledger: Codable {
+    /// Where the station physically has a crate: on a slot, on someone's arms, or on the pallet.
+    enum Placement: Codable, Equatable {
+        case slot(area: Spot.Area, cell: Cell, level: Int)
+        /// On the arms, or spoken for by a carry that has not found its carrier yet (an empty name).
+        case carried(by: String)
+        /// On the pallet: three rows of four, stacked when there are more than twelve.
+        case pallet(row: Int, column: Int, level: Int)
+    }
+
     struct Crate: Codable {
         let repo: String
         let number: Int
@@ -45,8 +54,25 @@ struct Ledger: Codable {
         var movedAt: Date?
         /// Where a carry under way is taking it: its slot there is spoken for from the order.
         var heading: Yard?
+        /// Where the station physically has it. Nil while the source alone has placed it: standing
+        /// wherever the rows draw it.
+        var at: Placement?
 
         var key: String { "\(repo)|\(number)" }
+        /// On someone's arms, spoken for, or on the pallet: not standing on its row.
+        var inTransit: Bool {
+            switch at {
+            case .carried, .pallet: return true
+            default: return false
+            }
+        }
+        var isCarried: Bool { if case .carried = at { return true }; return false }
+        var isOnPallet: Bool { if case .pallet = at { return true }; return false }
+        var carrier: String? { if case .carried(let who) = at { return who }; return nil }
+        /// The area it was last set down in, by hand.
+        var area: Spot.Area? { if case .slot(let area, _, _) = at { return area }; return nil }
+        /// A row with nothing left to say is dropped.
+        var isEmpty: Bool { placed == nil && wanted == nil && heading == nil && at == nil }
         /// Where the rows draw it or hold a slot for it: the yard it belongs to, or the one it is bound for.
         func belongs(to yard: Yard) -> Bool { placed == yard || heading == yard }
         /// The source and the station disagree, nothing is carrying it, and the source's word is the
@@ -130,7 +156,7 @@ struct Ledger: Codable {
                 crates[k] = nil
                 continue
             }
-            if c.placed == nil, c.wanted == nil, c.heading == nil { crates[k] = nil; continue }
+            if c.isEmpty { crates[k] = nil; continue }
             crates[k] = c
         }
     }
@@ -149,8 +175,46 @@ struct Ledger: Codable {
     mutating func unorder(repo: String, number: Int) {
         guard var c = crates[Ledger.key(repo, number)] else { return }
         c.heading = nil
-        if c.placed == nil, c.wanted == nil { crates[c.key] = nil } else { crates[c.key] = c }
+        crates[c.key] = c.isEmpty ? nil : c
     }
+
+    // MARK: the physical side, written by the floor
+
+    private mutating func place(_ repo: String, _ number: Int, _ at: Placement?) {
+        var c = crates[Ledger.key(repo, number)] ?? Crate(repo: repo, number: number)
+        c.at = at
+        crates[c.key] = c.isEmpty ? nil : c
+    }
+
+    /// Spoken for by a carry that has not found a carrier yet: off the rows already, so it is not
+    /// drawn twice while it waits.
+    mutating func claim(repo: String, number: Int) {
+        if self[repo, number]?.isCarried == true { return }
+        place(repo, number, .carried(by: ""))
+    }
+    mutating func pickedUp(repo: String, number: Int, by minion: String) { place(repo, number, .carried(by: minion)) }
+    mutating func setDown(repo: String, number: Int, at spot: Spot) { place(repo, number, .slot(area: spot.area, cell: spot.cell, level: spot.level)) }
+    mutating func onPallet(repo: String, number: Int, row: Int, column: Int, level: Int) { place(repo, number, .pallet(row: row, column: column, level: level)) }
+    /// Nowhere in particular any more: the rows draw it where the ledger says it belongs.
+    mutating func forgetPlacement(repo: String, number: Int) { place(repo, number, nil) }
+    /// Whatever this minion was holding is no longer on anyone's arms.
+    mutating func dropped(by minion: String) {
+        for c in crates.values where c.carrier == minion { place(c.repo, c.number, nil) }
+    }
+    /// The rocket left: what it carried is off the station's floor. The row stays, placed on the pad,
+    /// until the source stops counting the crate; only then is it gone from the ledger too.
+    mutating func clearPad(repo: String) {
+        for c in crates.values where c.repo == repo && c.area == .pad { place(c.repo, c.number, nil) }
+    }
+    /// After a relaunch nothing is on anyone's arms or on a pallet: what was is standing somewhere.
+    mutating func forgetTransit() {
+        for c in crates.values where c.inTransit { place(c.repo, c.number, nil) }
+    }
+
+    /// How many of a repository's crates are on someone's arms right now.
+    func carriedCount(repo: String) -> Int { crates.values.filter { $0.repo == repo && $0.isCarried }.count }
+    /// Crates of a repository already set down on the rocket.
+    func aboard(repo: String) -> Int { crates.values.filter { $0.repo == repo && $0.area == .pad }.count }
 
     /// A completion: the crate is down in a yard, by hand. The station's word from here until the
     /// source catches up.

@@ -834,7 +834,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 // The office kept its floor under a new name: the delivery follows it.
                 if case .deliverOffice = m.current?.kind, let old = m.current {
                     m.current = Command(kind: .deliverOffice(key: to), words: old.words)
-                    world.truth.jobs[m.id] = (m.current!, m.phase)
                 }
                 if m.place == .room(from) { m.place = .room(to) }
             }

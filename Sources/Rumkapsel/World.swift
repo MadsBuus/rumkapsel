@@ -47,9 +47,54 @@ final class World {
     private var retired: [String: Date] = [:]     // merged offices cleared away while their session lingers
     private(set) var roomCreated: [String: Date] = [:]
 
-    /// What is actually on the floor: crates by slot or on someone's arms, offices delivered or
-    /// pending, who is doing what. Completions write here; the sources never do.
+    /// What the props and plots are doing: the pallet, the offices ordered, the crates in the bay.
+    /// Where each crate is lives on its ledger row, on the station.
     var truth = StationTruth()
+    /// The crate each merged office's package became, by office key ("station|roomKey"), from the
+    /// moment its haul was ordered. Whether it has left is read off the crate's row, never a flag.
+    private(set) var officeCrates: [String: CrateRef] = [:]
+
+    // MARK: a crate's row, from the floor's side
+
+    func crate(_ c: CrateRef) -> Ledger.Crate? { fleet.stations[c.station]?.ledger[c.repo, c.number] }
+    func isCarried(_ c: CrateRef) -> Bool { crate(c)?.isCarried ?? false }
+    func isOnPallet(_ c: CrateRef) -> Bool { crate(c)?.isOnPallet ?? false }
+    func area(of c: CrateRef) -> Spot.Area? { crate(c)?.area }
+    func carriedCount(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.carriedCount(repo: repo) ?? 0 }
+    func aboard(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.aboard(repo: repo) ?? 0 }
+
+    /// Spoken for by a carry: off the rows from here, drawn once, on the arms once picked up.
+    func claim(_ c: CrateRef) { fleet.stations[c.station]?.ledger.claim(repo: c.repo, number: c.number) }
+    func pickedUp(_ c: CrateRef, by minion: String) { fleet.stations[c.station]?.ledger.pickedUp(repo: c.repo, number: c.number, by: minion) }
+    func setDown(_ c: CrateRef, at spot: Spot) {
+        truth.takeOffPallet(c)
+        fleet.stations[c.station]?.ledger.setDown(repo: c.repo, number: c.number, at: spot)
+    }
+    func putOnPallet(_ c: CrateRef, at slot: StationTruth.PalletSlot) {
+        truth.putOnPallet(c, at: slot)
+        fleet.stations[c.station]?.ledger.onPallet(repo: c.repo, number: c.number, row: slot.row, column: slot.column, level: slot.level)
+    }
+    /// Nowhere in particular any more: the rows draw it where its row says it belongs.
+    func forgetPlacement(_ c: CrateRef) { fleet.stations[c.station]?.ledger.forgetPlacement(repo: c.repo, number: c.number) }
+    /// Whatever this minion was holding is no longer on anyone's arms.
+    func dropped(by minion: String) { for st in fleet.stations.values { st.ledger.dropped(by: minion) } }
+    /// The rocket left: what it carried is off the station.
+    func clearPad(station: String, repo: String) { fleet.stations[station]?.ledger.clearPad(repo: repo) }
+
+    // MARK: office hauls
+
+    /// A merged office's package is to go to storage: spoken for from now on.
+    func haulOrdered(office key: String, crate: CrateRef) { officeCrates[key] = crate; claim(crate) }
+    func haulOrdered(office key: String) -> Bool { officeCrates[key] != nil }
+    /// The package is down in the yard, or on a pallet already: the office may clear.
+    func haulLanded(office key: String) -> Bool {
+        guard let c = officeCrates[key], let row = crate(c) else { return false }
+        if let area = row.area { return area != .office }
+        return row.isOnPallet
+    }
+    /// Ordered and not yet down anywhere in the yard: on the office floor still, or on someone's arms.
+    func haulUnderway(office key: String) -> Bool { haulOrdered(office: key) && !haulLanded(office: key) }
+    func forgetOffice(_ key: String) { officeCrates[key] = nil }
 
     /// Repositories GitHub has answered for at least once. A repository's first answer is taken quietly:
     /// nothing in it is new, whatever it holds. Only changes after that are events.
@@ -226,14 +271,14 @@ final class World {
                 let merged = state == "MERGED"
                 // A checkout that went away still waits for its crate to reach storage: the office
                 // stays open until the haul lands, the way it does for any merged office.
-                let gone = (room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false) && !truth.haulUnderway(office: key)
+                let gone = (room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false) && !haulUnderway(office: key)
                 // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED"
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if !closed { closedAt[key] = nil }
-                if merged, station.hasPad, !truth.haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
+                if merged, station.hasPad, !haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
                 // A merged office clears once its crate is down in the yard, or when there was nothing to carry.
-                let cleared = (merged && (!station.hasPad || truth.haulLanded(office: key) || nothingToHaul.contains(key)))
+                let cleared = (merged && (!station.hasPad || haulLanded(office: key) || nothingToHaul.contains(key)))
                     || (closed && now.timeIntervalSince(closedAt[key] ?? now) > World.closedWindow)
                 // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
                 // An office a peer left behind is held for a day so their return does not move it.
@@ -498,13 +543,13 @@ final class World {
                 // Closed without merging: red for ten minutes, then gone. Nothing to carry.
                 if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
-            } else if !truth.haulOrdered(office: key), station.hasPad {
+            } else if !haulOrdered(office: key), station.hasPad {
                 let merged = haulMerged(station: station, room: room)
                 hauling = !merged.isEmpty   // the scene is about to start carrying: the office waits for it
                 events += merged
                 if isReady(room.repo) { events.append(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             }
-            guard !station.hasPad || !(hauling || truth.haulUnderway(office: key)) else { continue }
+            guard !station.hasPad || !(hauling || haulUnderway(office: key)) else { continue }
             closedAt[key] = nil
             crewRoomInfo[key] = nil; crewBoxes[key] = nil
             events.append(drop(station: station, room: room, announce: isReady(room.repo), reason: "pull request closed"))
@@ -710,14 +755,12 @@ final class World {
         }
         for repo in Set(station.ledger.crates.values.map(\.repo)).sorted() {
             let mine = station.ledger.holds(yard, repo: repo).filter { c in
-                let standing = c.placed == yard && !truth.isCarried(station: station.name, repo: repo, number: c.number)
-                    && !truth.isOnPallet(station: station.name, repo: repo, number: c.number)
+                let standing = c.placed == yard && !c.inTransit
                 return (standing || c.heading == yard) && !leaving.contains("\(repo)#\(c.number)")
             }.prefix(48)
             for (k, c) in mine.enumerated() {
                 let number = c.number
-                let carried = c.placed != yard || truth.isCarried(station: station.name, repo: repo, number: number)
-                    || truth.isOnPallet(station: station.name, repo: repo, number: number)
+                let carried = c.placed != yard || c.inTransit
                 var cleared = area == "deck" && c.cleared
                 if cleared, number != 0, number == stillUntested { cleared = false }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
@@ -934,7 +977,7 @@ final class World {
     /// top of it moves aside first, each to the slot the redraw will give it.
     func carryToTested(station: Station, repo: String, number: Int) -> [Command] {
         let crate = CrateRef(station: station.name, repo: repo, number: number)
-        guard !truth.isCarried(crate) else { return [] }
+        guard !isCarried(crate) else { return [] }
         let standing = yardLayout(station: station, area: "deck", stillUntested: number)
         let settled = yardLayout(station: station, area: "deck")
         guard let here = standing.first(where: { $0.repo == repo && $0.number == number && !$0.carried }) else {
@@ -995,11 +1038,11 @@ final class World {
     /// whether or not there is anything on the floor to carry.
     private func haulMerged(station: Station, room: Room) -> [WorldEvent] {
         let key = roomKey(station, room)
-        guard station.hasPad, !truth.haulOrdered(office: key) else { return [] }
+        guard station.hasPad, !haulOrdered(office: key) else { return [] }
         guard hasPackage(key) else { nothingToHaul.insert(key); return [] }   // nothing to carry: free to clear at once
         let repo = room.repo ?? "work"
         let number = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } } ?? crewRoomInfo[key]?.prNumber ?? 0
-        truth.haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
+        haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }
 
