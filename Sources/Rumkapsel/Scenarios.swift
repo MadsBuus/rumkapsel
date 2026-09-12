@@ -99,7 +99,7 @@ struct Expect {
 
     /// A crate carried to a yard: any crate, or one by number.
     static func carry(_ number: Int? = nil, to yard: Yard) -> Expect {
-        command("carry \(number.map { "#\($0)" } ?? "a crate") to \(yard)") {
+        command("carry \(number.map { "#\($0)" } ?? "any crate") to \(yard)") {
             if case .carry(let crate, _, let to) = $0 { return to == yard && (number == nil || crate.number == number) }; return false
         }
     }

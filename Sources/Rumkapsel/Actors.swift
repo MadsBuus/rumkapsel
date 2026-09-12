@@ -197,7 +197,6 @@ final class Pallet {
     var wantsPush = false
     var wantsBack = false
     /// Where it is in its errand, mirrored into station truth.
-    var state: StationTruth.Pallet.State = .arriving
 
     init(station: String, repo: String, number: Int, node: SCNNode, shadow: SCNNode, dispatcher: String, spot: SIMD2<Double>) {
         self.station = station; self.repo = repo; self.number = number

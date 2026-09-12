@@ -13,7 +13,7 @@ struct CrateRef: Hashable {
     var number: Int
 
     var key: String { "\(station)|\(repo)|\(number)" }
-    var words: String { number > 0 ? "#\(number)" : "a crate" }
+    var words: String { "#\(number)" }
 }
 
 /// Somewhere on the floor a crate can stand, and enough to walk there.

@@ -64,7 +64,7 @@ extension StationController {
                     b.name = "box:" + key
                     markerRoot.addChildNode(b)
                 }
-                haulMergedBoxes(station: st, key: key, roomName: room.name, repo: room.repo ?? "work", number: 0)
+                haulMergedBoxes(station: st, key: key, roomName: room.name, repo: room.repo ?? "work", number: 450)
             }
             if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 { demoStaged = true; stageCargo(station: st, repo: "tattoodo-web") }
             if clock > 30, let r = rocketActors["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {

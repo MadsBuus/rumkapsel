@@ -236,7 +236,7 @@ extension StationController {
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
-                let wanted = Set(layout.filter { $0.number > 0 }.map { prefix + "\($0.repo)|\($0.number)" })
+                let wanted = Set(layout.map { prefix + "\($0.repo)|\($0.number)" })
                 /// True when nothing that still belongs in the rows stands between here and there in this
                 /// column: only then is a drop a stack settling, rather than two crates changing places.
                 func vacated(_ from: SIMD3<Double>, _ to: SIMD3<Double>) -> Bool {
@@ -251,10 +251,10 @@ extension StationController {
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
                     let spec = slot.cleared ? "tested" : "untested"
-                    // A numbered crate already standing here keeps its node. It moves only if its slot
-                    // did: down onto a freed level it settles over a beat; anywhere else it is put where
-                    // the layout says, as a fresh node would have been.
-                    if slot.number > 0, markerSignatures[name] == spec, let n = standing[name]?.first, !keep.contains(ObjectIdentifier(n)) {
+                    // A crate already standing here keeps its node. It moves only if its slot did: down
+                    // onto a freed level it settles over a beat; anywhere else it is put where the
+                    // layout says, as a fresh node would have been.
+                    if markerSignatures[name] == spec, let n = standing[name]?.first, !keep.contains(ObjectIdentifier(n)) {
                         keep.insert(ObjectIdentifier(n))
                         signatures[name] = spec
                         let at = SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z))
@@ -280,7 +280,7 @@ extension StationController {
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
                     keep.insert(ObjectIdentifier(pkg))
-                    if slot.number > 0 { signatures[name] = spec }
+                    signatures[name] = spec
                 }
             }
         }

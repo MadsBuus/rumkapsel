@@ -37,7 +37,7 @@ These are checked once here and not repeated in every table below.
 | Nothing moves it after set-down | pass | `release` pins the node at the aim, `setDown` writes the row, and the redraw adopts the node by name. A crate moves again only on someone's arms, on the pallet, or by the truth-first rule: a carry past its patience is set down where its order says, said in the log. | — |
 | Taken from the top, built from the floor | pass | `World.swift:816-817` orders storage by level, highest first; `World.swift:786-799` `grounded` drops a landing slot to the lowest free level. | — |
 | A lower crate taken: the ones above settle down one, slowly | pass | Levels are ranked by the order each crate was given in its column (`Ledger.Slot.order`), so a crate below leaving drops the rank of the ones above; `rebuildMarkers` keeps the node and moves it down over `Hands.settleSeconds`, only downwards and only through vacated air. | — |
-| A crate keeps its slot until it leaves | pass | The place is on the ledger row (`slot`), given at set-down or first draw and saved with the station; a crate bound for a yard holds its place ahead (`bound`). A crate that left the rows holds nothing and asks again when it comes back. Unnumbered crates (number 0) are the one degenerate key left. | — |
+| A crate keeps its slot until it leaves | pass | The place is on the ledger row (`slot`), given at set-down or first draw and saved with the station; a crate bound for a yard holds its place ahead (`bound`). A crate that left the rows holds nothing and asks again when it comes back. Every crate is its pull request's number; an office whose number is unknown has nothing for the yard to hold. | — |
 | Two never share a crate | pass | `Jobs.swift:415` `claimed` marks it; `World.swift:825`, `World.swift:880`, `World.swift:846` all skip carried crates. | — |
 | Counts follow the source through hands | pass | Counts still move in `onDone` (`Jobs.swift:472-479`, `SceneMarkers.swift:363-372`), and `yardLayout` now leaves out every crate station truth says is carried, storage and deck alike, and shortens the pile by that many (`World.swift:683-690`). A crate on someone's arms is drawn once, in the hands. | — |
 | A carry nobody takes lands where it stands | partial | `Jobs.swift:496-501` drops the node and calls `onDone` on deadline. The crate is removed, not set down anywhere; the redraw puts it back on a slot. | Set it down where it stands and let the layout draw round it. |
@@ -356,8 +356,8 @@ These are checked once here and not repeated in every table below.
 15. ~~**Take the reconciler out of the redraw**~~ Done: `reconcileYards` runs from `flushScene` and the
     half-second tick, and `rebuildMarkers` decides nothing. One ledger per station holds every crate:
     the source's word, the station's, where the crate physically is and the place it holds; the counts
-    are read off it. `StationTruth` is the pallet and the offices now. Still owed: fold the pallet
-    actor's duplicated state into it (`Actors.swift`).
+    are read off it. `StationTruth` is the pallet and the offices now, and the pallet actor reads its
+    state there rather than keeping a copy.
 16. ~~**Quiet the first release answer**~~ Done: `releasesSeen` marks the first answer announced without
     saying it; the rocket still stands.
 17. **Take the randomness out of the routines**: the short-stretch bath (`SceneTick.swift:327`) and the

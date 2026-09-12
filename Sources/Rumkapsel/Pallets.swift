@@ -97,7 +97,6 @@ extension StationController {
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return }
             m.setTool(.telekinesis)
             guard p.isSettled else { return }
-            p.state = .loaded
             world.truth.setPallet(station: station.name, state: .loaded)
             if p.wantsBack { beginUnload(m, station: station, p, back: true) }
             else if p.wantsPush { beginPush(m, station: station, p) }
@@ -189,7 +188,6 @@ extension StationController {
         propRoot.addChildNode(shadow)
 
         let p = Pallet(station: station.name, repo: repo, number: number, node: node, shadow: shadow, dispatcher: m.id, spot: spot)
-        p.state = .loading
         p.bornAt = clock
         for (i, item) in cargo.enumerated() {
             guard let n = crateNode(item.crate) else { continue }
@@ -208,7 +206,6 @@ extension StationController {
 
     /// Behind it, hands on the edge, and out through the doorway one leg at a time.
     private func beginPush(_ m: Minion, station: Station, _ p: Pallet) {
-        p.state = .moving
         world.truth.setPallet(station: station.name, state: .moving)
         p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
         p.pushing = false
@@ -297,7 +294,6 @@ extension StationController {
 
     /// The wand out again: the crates float off, onto the deck or back into storage.
     private func beginUnload(_ m: Minion, station: Station, _ p: Pallet, back: Bool) {
-        p.state = .unloading
         p.wantsBack = back
         world.truth.setPallet(station: station.name, state: .unloading)
         p.nextAt = clock + 0.8
@@ -375,7 +371,7 @@ extension StationController {
                 continue
             }
             guard clock >= p.nextAt else { continue }
-            switch p.state {
+            switch world.truth.pallets[p.station]?.state ?? .arriving {
             case .loading: loadOne(p, station: station)
             case .unloading: unloadOne(p, station: station)
             default: break
@@ -399,12 +395,11 @@ extension StationController {
         p.dispatcher = m.id
         m.couch = nil; m.bed = nil
         m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
-        switch p.state {
+        switch world.truth.pallets[p.station]?.state ?? .arriving {
         case .loading: handOver(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
         case .loaded, .arriving: handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "taking over the pallet, waiting for the release to merge"), announce: true)
         default:
             // Half way across: it goes no further, the crates come off where it stands.
-            p.state = .unloading
             world.truth.setPallet(station: station.name, state: .unloading)
             handOver(m, .unloadPallet(station: station.name, repo: p.repo, back: p.wantsBack), announce: true)
         }

@@ -28,15 +28,15 @@ one fresh answer each, compare it with what was known, change the model, and han
 arriving. Counts in the yard are reconciled, not snapped: crates the board says moved to staging are carried
 across by minions (`reconcile`), and only what cannot be carried is redrawn.
 
-A few things the model cannot see for itself — a crate already on someone's arms, a rocket mid-load — the
-scene lends it as closures.
+Two things the model cannot see for itself, whether an office has a package on its floor and whether a
+rocket is mid-load, the scene lends it as closures (`hasPackage`, `rocketBusy`).
 
 Rules that keep the place steady:
 
 - An update re-plans, it never resets. After the floor changes, `resettle` leaves settled minions alone and
   lets walkers keep their destination.
-- The yard layout is a pure function of the counts (`yardLayout`), so a carrier is sent to the slot its crate
-  will occupy and nothing jumps when the layout redraws.
+- The yard layout is drawn from the ledger's rows (`yardLayout`): every crate keeps the place its row records,
+  so a carrier is sent to the place its crate will occupy and nothing jumps when the layout redraws.
 - Offices exist because of a checkout, a pushed branch, or a pull request. The board column only says how
   solid an office is. Unclaimed offices clear once their repository has answered; a peer's are held a day.
 - A merged office that clears while its session lingers is retired for the day; the minion waits in the lounge.
@@ -101,12 +101,12 @@ Agreed direction, in the order things flow. Not all of it exists yet.
 7. **Completions** write station truth only, never facts: "5210 landed", "office X connected". That is
    what keeps a source snap from undoing what a minion just did.
 
-Steps 5, 6 and 7 exist as of this commit. `Commands.swift` holds `Command` (a kind, a phase list with each
-phase marked interruptible or not, a "must be true by" deadline, and words for humans) and `StationTruth`
-(crates by slot or on someone's arms, offices delivered or pending, per-minion command and phase, crates
-landed by hand the source has not counted yet, carries in flight to the deck). `World` owns the truth and
+Steps 4 to 7 exist for crates, described in the next section. `Commands.swift` holds `Command` (a kind, a
+phase list with each phase marked interruptible or not, a patience, and words for humans) and
+`StationTruth` (the pallet out and what rides on it, offices ordered and crates waiting in the bay). Where
+each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. `World`
 issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — and the scene
-binds each command to the crate's node and hands it to a minion. Minions execute one command at a time:
+binds each command to the crate's node, by key, and hands it to a minion. Minions execute one command at a time:
 a new one replaces the old at the next interruptible phase, at most one waits, a carry can only be redirected
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
 it holds where it stands.
@@ -117,8 +117,9 @@ it, a crouch whose posture comes from how high the crate stands, the crate up pa
 arms, and out of the arms onto its slot turned the way the layout will draw it. The office delivery uses the
 same pair, so a new office's crate is set down on the far cell its package will occupy and only then does
 the office fade in round it. The arcs are `SCNAction`s and the phase clock is the station's, but both are
-derived from the same durations, so the posture and the motion cannot drift apart. A carried crate is left
-out of `yardLayout` altogether, storage as well as the deck, so it is drawn once — in the hands.
+derived from the same durations, so the posture and the motion cannot drift apart. A crate on the arms is
+drawn once, in the hands: the yard it left leaves it out, and the yard it is bound for holds its place
+without drawing it.
 
 Shuttles, rockets and the crew are actors too (`Actors.swift`). A `Shuttle` flies one `.flight` command —
 `bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave, and the unload writes truth:
@@ -133,9 +134,10 @@ out loud; a rocket with no cargo at all still goes at once. A teammate's reactio
 to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
 runs the same machine as everyone else and says so on hover.
 
-What still does not: the crate a merged office sends to storage is still found by node name in the scene, so
-the command's `from` spot is the office door rather than the exact package position; `Spot` carries a world
-position, which means the scene's geometry leaks a little into the model side.
+What still does not: a carry's `from` for a merged office's package is the office door rather than the
+exact package position; and `Spot` carries a world position, so the scene's geometry leaks a little into
+the model side. Both are small, and left alone on purpose: the second would touch every consumer of a spot
+for no change in behaviour.
 
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.
@@ -207,7 +209,7 @@ an arc, onto its pallet slot), `pushPallet` (hands on the pallet, shoving it leg
 storage doorway and across to the untested row) and `unloadPallet`
 (the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
 unmerged, and the empty pallet fades). The `Pallet` actor in `Actors.swift` holds the node, what is aboard
-and the crate in the air. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
+and the crate in the air; its state is the truth's, read there and written there. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
 cushion of light, bobbing on a sine, with twelve sunk fields matching the crate slots, rivets along the
 rim, an amber corner light the tick blinks, and a floor shadow of its own that stays down and tightens as
 the slab sinks; and `Props.console`, the small panel on the wall by the storage doorway,
@@ -253,12 +255,12 @@ Done. `yardLayout` hands out slots with a `column` — one square of floor, half
 position. Storage jitter is seeded per crate rather than per place in the pile, so a crate keeps its
 own nudge and turn wherever it lands.
 
-- A crate is picked from the top of its stack. Where crates are interchangeable (storage to the deck)
-  `carryToDeck` orders them by level, highest first. Where a named crate must move — a tested crate
-  crossing to the tested row — `carryToTested` issues one carry per crate stacked above it, each to
-  the slot the redraw will give it, and the wanted crate's carry waits on them: a command lists the
-  commands that must finish before it (`after`), and the scheduler holds it back until they are gone.
-  `carryToPad` empties stacks from the top down the same way.
+- A crate is picked from the top of its stack, and every carry names its crate by number. Where a
+  crate lower in a stack must move, storage to the deck or the untested row to the tested one, whatever
+  stands on it and is staying is moved aside first, one carry each to a fresh column of its
+  repository's in the same yard (`aside`), and the wanted crate's carry waits on them: a command lists
+  the commands that must finish before it (`after`), and the scheduler holds it back until they are
+  gone. `carryToPad` empties stacks from the top down the same way.
 - Pickup and set-down are height-aware. The minion stands an arm's length away, facing the stack, and
   the posture follows the height: level 0 a crouch, level 1 a lean at waist height, level 2 and up a
   reach with the head back. A crate off the floor comes up past the chest; one taken off a stack goes
@@ -287,4 +289,4 @@ Done. Two different closes:
   clears the way a merged one does: a teammate's archives, one's own retires while the session lingers.
 - **A staging release closed without merging.** Those crates are still merged work waiting for a release:
   the loaded pallet unloads back into storage the same slow way it was loaded. `.stagingClosed` sets the
-  pallet's wish, and `unloadPallet(back: true)` floats each crate onto the slot `storageSlot` gives it.
+  pallet's wish, and `unloadPallet(back: true)` floats each crate onto the place `slotNow` gives it.

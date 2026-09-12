@@ -743,7 +743,7 @@ final class World {
             for (k, c) in mine.enumerated() {
                 let carried = !c.stands(in: yard)
                 var cleared = area == "deck" && c.cleared
-                if cleared, c.number != 0, c.number == stillUntested { cleared = false }
+                if cleared, c.number == stillUntested { cleared = false }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
                 var slot = carried ? c.bound : c.slot
                 if let s = slot, s.yard != yard || s.group != group { slot = nil }   // from another yard or row: asked for again
@@ -769,7 +769,7 @@ final class World {
             let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
-            let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number, index: e.index)
+            let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
             let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
             out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, group: s.group,
                                 column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
@@ -778,9 +778,9 @@ final class World {
     }
 
     /// A little disorder in storage, seeded per crate so a crate keeps its own nudge and turn wherever
-    /// it lands in the rows. Unnumbered crates fall back to their place in the pile.
-    private static func jitter(repo: String, number: Int, index: Int) -> (Double, Double, Double) {
-        var seed = UInt64(truncatingIfNeeded: (number > 0 ? "\(repo)#\(number)" : "\(repo)#i\(index)").hashValue) | 1
+    /// it lands in the rows.
+    private static func jitter(repo: String, number: Int) -> (Double, Double, Double) {
+        var seed = UInt64(truncatingIfNeeded: "\(repo)#\(number)".hashValue) | 1
         func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
         return ((rnd() - 0.5) * 0.22, (rnd() - 0.5) * 0.3, (rnd() - 0.5) * 0.7)
     }
@@ -986,7 +986,9 @@ final class World {
         guard station.hasPad, !haulOrdered(office: key) else { return [] }
         guard hasPackage(key) else { nothingToHaul.insert(key); return [] }   // nothing to carry: free to clear at once
         let repo = room.repo ?? "work"
-        let number = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } } ?? crewRoomInfo[key]?.prNumber ?? 0
+        // A crate is its pull request's number: with none known there is nothing the yard could hold.
+        guard let number = room.branch.flatMap({ b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } }) ?? crewRoomInfo[key]?.prNumber, number > 0
+        else { nothingToHaul.insert(key); return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }
