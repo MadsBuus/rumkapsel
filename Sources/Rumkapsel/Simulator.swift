@@ -160,6 +160,7 @@ final class SimulatorModel: ObservableObject {
             self?.note("command", "\(who): \(c.words)", .command(c, by: who))
         }
         station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text, .violation(text)) }
+        station.sim?.pullState = { [weak self] repo, number in self?.pullFates["\(repo)#\(number)"] }
         // A peer that stops talking is dropped after twenty seconds, so keep saying the same thing.
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushPeer() }
@@ -306,9 +307,13 @@ final class SimulatorModel: ObservableObject {
         feeds[repo] = Array(feeds[repo]!.prefix(40))
     }
 
+    /// Every pull request's fate as the simulated GitHub knows it, by "repo#number".
+    private var pullFates: [String: String] = [:]
+
     private func setPull(_ pr: PullRequest?, on uid: String) {
         guard let i = index(uid) else { return }
         offices[i].pull = pr
+        if let pr { pullFates["\(offices[i].repo)#\(pr.number)"] = pr.state }
         github.inject(pull: pr, for: offices[i].branch, repoRoot: root(offices[i].repo))
         pushGitHub()
         pushScan()
@@ -463,6 +468,10 @@ final class SimulatorModel: ObservableObject {
                 button("Teammate: Merge PR", "Merge PR", leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
                 button("Teammate: Close PR", "Close PR (not merged)",
                        leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
+                // The close is seen on the open list and answered when the pull request is asked, but the
+                // activity feed has not caught up: the ordering that once carried a closed crate to storage.
+                button("Teammate: Close PR (feed lags)", "Close PR (feed lags)",
+                       leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
             ]),
             Group(id: "Peer (\(peerName))", note: "on the target office when it is \(peerName)'s, else on her newest office", buttons: [
                 button("Peer: Arrive", "Arrive with an office in \(repo)", peerHere ? "\(peerName) is already here" : nil),
@@ -511,6 +520,14 @@ final class SimulatorModel: ObservableObject {
         note("press", name, .press(name))
         if name.hasPrefix("Target: ") {
             pick(String(name.dropFirst(8)))
+        } else if name.hasPrefix("Board: Move "), let to = name.range(of: " to ") {
+            // Scripted: "Board: Move api#5161 to Backlog", any item, any column, the picker untouched.
+            let id = String(name[name.index(name.startIndex, offsetBy: 12)..<to.lowerBound])
+            let column = String(name[to.upperBound...])
+            guard let it = board.first(where: { "\($0.repo)#\($0.number)" == id }) else {
+                return note("skipped", "no board item \(id)", .skipped("no board item \(id)"))
+            }
+            move([it], to: column)
         } else if timeNames.contains(name) {
             time(name)
         } else if let b = groups.flatMap(\.buttons).first(where: { $0.name == name }) {
@@ -639,11 +656,18 @@ final class SimulatorModel: ObservableObject {
             feedEvent("push", repo: o.repo, branch: o.branch, pr: o.prOpen ? o.number : nil, title: o.title,
                       detail: "\(offices[i].commits)")
             pushGitHub()
-        case "Teammate: Merge PR", "Teammate: Close PR":
+        case "Teammate: Merge PR", "Teammate: Close PR", "Teammate: Close PR (feed lags)":
             guard let o = leoOpenPR else { return }
             offices.removeAll { $0.uid == o.uid }
-            feedEvent(name.hasSuffix("Merge PR") ? "pr_merge" : "pr_close", repo: o.repo, branch: o.branch,
-                      pr: o.number, title: o.title)
+            let fate = name.contains("Merge PR") ? "MERGED" : "CLOSED"
+            pullFates["\(o.repo)#\(o.number)"] = fate
+            // Asked by number or by branch, GitHub answers the pull request's state; the feed may or may not have it yet.
+            let answer = PullRequest(number: o.number, title: o.title, state: fate, reviewDecision: "", isDraft: false, url: "https://example.invalid/\(o.repo)/\(o.number)")
+            github.inject(pull: answer, for: o.branch, repoRoot: root(o.repo))
+            github.inject(pull: answer, number: o.number, repoRoot: root(o.repo))
+            if !name.hasSuffix("(feed lags)") {
+                feedEvent(fate == "MERGED" ? "pr_merge" : "pr_close", repo: o.repo, branch: o.branch, pr: o.number, title: o.title)
+            }
             pushGitHub()
 
         // The peer, over the network
@@ -978,6 +1002,9 @@ struct SimulatorPanel: View {
 /// and the two things no source drives. A normal window leaves `sim` nil and none of this runs.
 final class SimHooks {
     var onEvent: ((WorldEvent) -> Void)?
+    /// What the simulated GitHub says a pull request's fate is, by repository and number: OPEN, MERGED
+    /// or CLOSED, or nil for one it never spoke about. The rulebook's meaning checks read it.
+    var pullState: ((String, Int) -> String?)?
     /// The command and who is running it: a worker's office, or "shuttle" and "rocket".
     var onCommand: ((Command, String) -> Void)?
     /// A rule of STATION.md the floor just broke, in the words `Invariants` gives it.

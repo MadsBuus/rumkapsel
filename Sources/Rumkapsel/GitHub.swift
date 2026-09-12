@@ -558,6 +558,48 @@ final class GitHubResolver {
         return pulls[repoRoot + "@" + branch] != nil
     }
 
+    // MARK: a pull request by number
+
+    /// Pull requests asked for by number, by "root#number": the authority on whether one merged or
+    /// closed once it has left the open list, when the branch it came from is not known for sure.
+    private var pullsByNumber: [String: (PullRequest?, Date)] = [:]
+
+    func pull(number: Int, repoRoot: String) -> PullRequest? {
+        lock.lock(); defer { lock.unlock() }
+        return pullsByNumber[repoRoot + "#\(number)"]?.0
+    }
+    func pullAnswered(number: Int, repoRoot: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return pullsByNumber[repoRoot + "#\(number)"] != nil
+    }
+
+    /// Asks GitHub for one pull request by number. A failed call keeps what was known.
+    func refresh(pull number: Int, repoRoot: String) {
+        if frozen { return }
+        let key = repoRoot + "#\(number)"
+        lock.lock()
+        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if inFlight.contains(key) { lock.unlock(); return }
+        inFlight.insert(key)
+        lock.unlock()
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove(key); lock.unlock() }
+            guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url"], cwd: repoRoot),
+                  let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
+            let pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
+                                 state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
+                                 isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
+            lock.lock(); pullsByNumber[key] = (pr, Date()); lock.unlock()
+            DispatchQueue.main.async { self.onUpdate?() }
+        }
+    }
+
+    /// The simulator's answer for a pull request asked by number.
+    func inject(pull pr: PullRequest, number: Int, repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); pullsByNumber[repoRoot + "#\(number)"] = (pr, Date()); lock.unlock()
+    }
+
     /// Commits on the worktree's branch that are not on the default branch, or nil if unknown yet.
     func commitsAhead(worktree: String) -> Int? {
         lock.lock(); defer { lock.unlock() }

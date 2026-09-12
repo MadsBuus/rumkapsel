@@ -544,7 +544,11 @@ final class World {
             var state: String?
             if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }) { state = "CLOSED" }
             else if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_merge" && $0.e.branch == branch }) { state = "MERGED" }
-            else if let root {
+            else if let root, let number = crewRoomInfo[key]?.prNumber {
+                // By number: the office may have lived on as a board office, whose branch is only a guess.
+                github.refresh(pull: number, repoRoot: root)
+                if github.pullAnswered(number: number, repoRoot: root) { state = github.pull(number: number, repoRoot: root)?.state }
+            } else if let root {
                 github.refresh(branch: branch, repoRoot: root)
                 if github.pullAnswered(branch: branch, repoRoot: root) { state = github.pull(branch: branch, repoRoot: root)?.state ?? "CLOSED" }
             } else { state = "MERGED" }   // no checkout of the repository here: nothing to ask, and nothing on the floor to carry
@@ -595,7 +599,10 @@ final class World {
                 }
             }
             let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
-            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: "gh-\(it.number)", prNumber: prNumber, title: it.title, author: login, url: it.url, state: "OPEN", last: now)
+            // What the pull request told us earlier, its branch and number, outlives the board's guess.
+            let known = crewRoomInfo[sk + key]
+            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? "gh-\(it.number)", prNumber: prNumber ?? known?.prNumber,
+                                                  title: it.title, author: login, url: it.url, state: "OPEN", last: now)
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
         let botCount = open.filter(\.pr.isBot).count

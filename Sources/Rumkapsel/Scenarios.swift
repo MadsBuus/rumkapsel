@@ -297,11 +297,12 @@ enum Scenarios {
             return open.isEmpty ? nil : "the ledger still disagrees about \(open.map { "#\($0.number)" }.joined(separator: ", "))"
         }),
 
-        Scenario("teammate PR closed unmerged: red, nothing carried, no crate", [
+        Scenario("teammate PR closed unmerged, feed behind: red, nothing carried, no crate", [
             ("Target: api#5158", 0.3),
             ("Teammate: New branch", 3.0),
             ("Teammate: Open PR", 1.0),
-            ("Teammate: Close PR", 0.3),
+            ("Teammate: Close PR (feed lags)", 0.5),   // gone from the open list, no close in the feed
+            ("Board: Move api#5161 to Backlog", 0.3),  // and off the board's development column: now the office must decide
         ], tail: 8, expects: [
             .crewActivity("leo", "pr_open"),
             .log("pull request closed, not merged"),

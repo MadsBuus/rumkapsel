@@ -88,9 +88,23 @@ final class Invariants {
         return out
     }
 
+    /// A crate is a merged pull request: storage holds merged work waiting for a release, the deck work
+    /// on staging. A pull request that closed without merging is not work and never becomes a crate.
+    private func merged(_ c: StationController) {
+        guard let fate = c.sim?.pullState else { return }
+        for station in c.fleet.stations.values {
+            for row in station.ledger.crates.values where row.placed != nil || row.at != nil {
+                if fate(row.repo, row.number) == "CLOSED" {
+                    flag("a crate is a merged pull request", "\(station.name)|\(row.repo)#\(row.number)", "its pull request closed without merging")
+                }
+            }
+        }
+    }
+
     /// A crate that has been set down does not move; and it never stands in a wall, in another
     /// crate, in a minion or in a piece of furniture; and a stack is built from the floor.
     private func crates(_ c: StationController) {
+        merged(c)
         let all = standing(c)
         // Names are unique per crate except for unnumbered ones, which share a name: those are
         // interchangeable and no rule here can tell one from another.
