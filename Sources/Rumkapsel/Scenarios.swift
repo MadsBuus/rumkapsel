@@ -1,9 +1,11 @@
 // A scripted regression suite: `.build/debug/Rumkapsel --scenarios`.
 //
-// Each scenario is a name, a list of simulator buttons with a pause after each, and what the log
-// must say when it is over. Every scenario gets its own station and its own made-up org, runs
-// headless at sixteen times speed off the same frame heartbeat `--snapshot` uses, and passes only
-// if every expectation matched, in order, and the invariant checker found nothing.
+// Each scenario is a name, a list of simulator buttons with a pause after each, and what the run
+// must have recorded when it is over: presses, events, commands and who ran them, as the values
+// they were. Nothing here reads the log's prose. Every scenario gets its own station and its own
+// made-up org, runs headless at sixteen times speed off the same frame heartbeat `--snapshot` uses,
+// and passes only if every expectation was met, in order, nothing forbidden was recorded, the floor
+// check agrees, and the invariant checker found nothing.
 //
 //     --scenarios              every scenario
 //     --scenarios pallet       only the ones whose name contains "pallet"
@@ -13,23 +15,148 @@
 
 import AppKit
 
+/// One thing the run must, or must not, have recorded. `matches` is the judge; `words` only names
+/// the expectation in a failure line.
+struct Expect {
+    let words: String
+    let matches: (SimRecord) -> Bool
+
+    static func press(_ name: String) -> Expect {
+        Expect(words: "press \(name)") { if case .press(let n) = $0 { return n == name }; return false }
+    }
+    static func event(_ words: String, _ test: @escaping (WorldEvent) -> Bool) -> Expect {
+        Expect(words: words) { if case .event(let e) = $0 { return test(e) }; return false }
+    }
+    /// A command by anyone, or by one actor: an office's name, "shuttle", "rocket".
+    static func command(_ words: String, by who: String? = nil, _ test: @escaping (Command.Kind) -> Bool) -> Expect {
+        Expect(words: who.map { "\(words) by \($0)" } ?? words) {
+            if case .command(let c, let by) = $0, who == nil || who == by { return test(c.kind) }
+            return false
+        }
+    }
+
+    // MARK: events
+
+    /// A line for the station log. The one expectation that is about words, because the line is the thing.
+    static func log(_ text: String) -> Expect {
+        event("log \"\(text)\"") { if case .log(let t) = $0 { return t.contains(text) }; return false }
+    }
+    static func stagingOpened(_ repo: String) -> Expect {
+        event("stagingOpened \(repo)") { if case .stagingOpened(_, let r, _) = $0 { return r == repo }; return false }
+    }
+    static func stagingMerged(_ repo: String) -> Expect {
+        event("stagingMerged \(repo)") { if case .stagingMerged(_, let r, _) = $0 { return r == repo }; return false }
+    }
+    static func stagingClosed(_ repo: String) -> Expect {
+        event("stagingClosed \(repo)") { if case .stagingClosed(_, let r, _) = $0 { return r == repo }; return false }
+    }
+    static func releaseOpened(_ repo: String, untested: Bool) -> Expect {
+        event("releaseOpened \(repo)\(untested ? " untested" : "")") {
+            if case .releaseOpened(_, let r, _, _, let u, _) = $0 { return r == repo && u == untested }; return false
+        }
+    }
+    static func releaseMerged(_ repo: String, production: Bool) -> Expect {
+        event("releaseMerged \(repo)\(production ? " production" : "")") {
+            if case .releaseMerged(_, let r, _, _, _, let p) = $0 { return r == repo && p == production }; return false
+        }
+    }
+    static func crateCleared(_ repo: String) -> Expect {
+        event("crateCleared \(repo)") { if case .crateCleared(_, let r, _) = $0 { return r == repo }; return false }
+    }
+    static func boardMoved(_ repo: String, to stage: WorldEvent.Stage) -> Expect {
+        event("boardMoved \(repo) -> \(stage)") { if case .boardMoved(let it, _, let to) = $0 { return it.repo == repo && to == stage }; return false }
+    }
+    static func officeMerged(_ key: String) -> Expect {
+        event("officeMerged \(key)") { if case .officeMerged(_, let k, _, _) = $0 { return k == key }; return false }
+    }
+    /// An office with this key, or one whose key starts like it when the number is not known ahead.
+    static func officeOpened(_ keyPrefix: String, _ arrival: WorldEvent.Arrival, board: String? = nil, peer: String? = nil) -> Expect {
+        event("officeOpened \(keyPrefix)… \(arrival)\(board.map { " board(\($0))" } ?? "")\(peer.map { " peer(\($0))" } ?? "")") {
+            guard case .officeOpened(_, let key, let source, let how) = $0, key.hasPrefix(keyPrefix), how == arrival else { return false }
+            switch source {
+            case .board(let who): return board == nil || board == who
+            case .peer(let who): return peer == nil || peer == who
+            default: return board == nil && peer == nil
+            }
+        }
+    }
+    static func officeArchived(_ key: String, reason: String) -> Expect {
+        event("officeArchived \(key) (\(reason))") {
+            if case .officeArchived(_, let k, _, _, _, _, let why) = $0 { return k == key && why == reason }; return false
+        }
+    }
+    static func crewActivity(_ login: String, _ kind: String) -> Expect {
+        event("crewActivity \(login) \(kind)") { if case .crewActivity(let a) = $0 { return a.login == login && a.kind == kind }; return false }
+    }
+    static func peerArrived(_ name: String) -> Expect {
+        event("peerArrived \(name)") { if case .peerArrived(let n) = $0 { return n == name }; return false }
+    }
+    static func peerLeft(_ name: String) -> Expect {
+        event("peerLeft \(name)") { if case .peerLeft(let n) = $0 { return n == name }; return false }
+    }
+
+    // MARK: commands
+
+    /// A crate carried to a yard: any crate, or one by number.
+    static func carry(_ number: Int? = nil, to area: Spot.Area) -> Expect {
+        command("carry \(number.map { "#\($0)" } ?? "a crate") to \(area)") {
+            if case .carry(let crate, _, let to) = $0 { return to.area == area && (number == nil || crate.number == number) }; return false
+        }
+    }
+    static func deliverOffice(by who: String) -> Expect {
+        command("deliverOffice", by: who) { if case .deliverOffice = $0 { return true }; return false }
+    }
+    static let flight = command("flight", by: "shuttle") { if case .flight = $0 { return true }; return false }
+    static func rocket(_ stage: Command.RocketStage, _ repo: String) -> Expect {
+        command("rocket \(stage) \(repo)", by: "rocket") {
+            if case .rocket(let s, _, let r) = $0 { return s.rank == stage.rank && r == repo }; return false
+        }
+    }
+    static func dispatch(_ repo: String) -> Expect {
+        command("dispatch \(repo)") { if case .dispatch(_, let r, _) = $0 { return r == repo }; return false }
+    }
+    static func loadPallet(_ repo: String) -> Expect {
+        command("loadPallet \(repo)") { if case .loadPallet(_, let r) = $0 { return r == repo }; return false }
+    }
+    static func waitPallet(_ repo: String) -> Expect {
+        command("waitPallet \(repo)") { if case .waitPallet(_, let r) = $0 { return r == repo }; return false }
+    }
+    static func pushPallet(_ repo: String) -> Expect {
+        command("pushPallet \(repo)") { if case .pushPallet(_, let r) = $0 { return r == repo }; return false }
+    }
+    static func unloadPallet(_ repo: String, back: Bool) -> Expect {
+        command("unloadPallet \(repo)\(back ? " back" : "")") {
+            if case .unloadPallet(_, let r, let b) = $0 { return r == repo && b == back }; return false
+        }
+    }
+    static func stow(by who: String) -> Expect {
+        command("stow", by: who) { if case .stow = $0 { return true }; return false }
+    }
+    static let sleep = command("sleep") { if case .sleep = $0 { return true }; return false }
+    static let bath = command("bath") { if case .bath = $0 { return true }; return false }
+    static let chore = command("chore") { if case .chore = $0 { return true }; return false }
+    static func goTo(_ place: Place) -> Expect {
+        command("goTo \(place.words)") { if case .goTo(let p) = $0 { return p == place }; return false }
+    }
+}
+
 struct Scenario {
     let name: String
     /// A button and the real seconds to wait after pressing it.
     let steps: [(press: String, wait: Double)]
     /// Real seconds to keep the station running after the last press.
     let tail: Double
-    /// Regexes that must all appear in the log, in this order.
-    let expects: [String]
-    /// Patterns that must not appear anywhere in the log.
-    let forbids: [String]
+    /// What must have been recorded, in this order.
+    let expects: [Expect]
+    /// What must not have been recorded at all.
+    let forbids: [Expect]
     /// A press the panel refuses is normally a broken script; a few scenarios mean to try one.
     var allowSkips = false
-    /// What must stand on the floor when it is over, for the things the log does not say out loud.
-    /// Returns the reason it failed, or nil.
+    /// What must stand on the floor when it is over, for the things the run does not record as it
+    /// goes. Returns the reason it failed, or nil.
     let floor: (@MainActor (SimulatorController) -> String?)?
 
-    init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [String], forbids: [String] = [],
+    init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [Expect], forbids: [Expect] = [],
          allowSkips: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
@@ -44,6 +171,16 @@ struct Scenario {
     @MainActor static func crates(_ sim: SimulatorController, _ area: String, _ repo: String) -> Int {
         sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(area):work|\(repo)|") }.count
     }
+
+    /// Every command the run issued, with who ran it, oldest first.
+    @MainActor static func commands(_ sim: SimulatorController) -> [(command: Command, by: String)] {
+        sim.model.records.compactMap { if case .command(let c, let who) = $0 { return (c, who) }; return nil }
+    }
+
+    /// How many times the run recorded something.
+    @MainActor static func count(_ sim: SimulatorController, _ e: Expect) -> Int {
+        sim.model.records.filter(e.matches).count
+    }
 }
 
 enum Scenarios {
@@ -55,9 +192,9 @@ enum Scenarios {
             ("Open PR", 2.0),
             ("Merge PR", 0.3),
         ], tail: 12, expects: [
-            #"log: #298: PR #298 open"#,
-            #"officeMerged task:ios#298"#,
-            #"command .*: carrying #298 to storage"#,
+            .log("PR #298 open"),
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
         ], floor: { sim in
             Scenario.crates(sim, "storage", "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
@@ -67,13 +204,13 @@ enum Scenarios {
             ("Teammate: New branch", 3.0),
             ("Teammate: Open PR", 0.3),
         ], tail: 12, expects: [
-            #"officeOpened work\|task:api#\d+ board\("leo"\) shuttle"#,
-            #"crewActivity leo branch_create"#,
-            #"command\s+shuttle: shuttle inbound with the office for"#,
-            #"command\s+leo: fetching .* from the bay"#,
-            #"crewActivity leo pr_open"#,
+            .officeOpened("task:api#", .shuttle, board: "leo"),
+            .crewActivity("leo", "branch_create"),
+            .flight,
+            .deliverOffice(by: "leo"),
+            .crewActivity("leo", "pr_open"),
         ], floor: { sim in
-            let flights = sim.model.logLines.filter { $0.contains("shuttle inbound") }.count
+            let flights = Scenario.count(sim, .flight)
             return flights == 1 ? nil : "\(flights) shuttles flew, not one"
         }),
 
@@ -82,13 +219,13 @@ enum Scenarios {
             ("Release: Staging opens", 5.0),
             ("Release: Staging merges", 0.3),
         ], tail: 10, expects: [
-            #"stagingOpened web#\d+"#,
-            #"command .*: off to the storage console with the clipboard"#,
-            #"command .*: loading the pallet for web"#,
-            #"command .*: waiting for the release to merge"#,
-            #"stagingMerged web#\d+"#,
-            #"command .*: pushing the pallet to the deck"#,
-            #"command .*: unloading the pallet"#,
+            .stagingOpened("web"),
+            .dispatch("web"),
+            .loadPallet("web"),
+            .waitPallet("web"),
+            .stagingMerged("web"),
+            .pushPallet("web"),
+            .unloadPallet("web", back: false),
         ], floor: { sim in
             Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
@@ -98,10 +235,10 @@ enum Scenarios {
             ("Release: Staging opens", 5.0),
             ("Release: Staging closes", 0.3),
         ], tail: 10, expects: [
-            #"stagingOpened web#\d+"#,
-            #"command .*: loading the pallet for web"#,
-            #"stagingClosed web#\d+"#,
-            #"command .*: unloading the pallet back into storage"#,
+            .stagingOpened("web"),
+            .loadPallet("web"),
+            .stagingClosed("web"),
+            .unloadPallet("web", back: true),
         ], floor: { sim in
             // One web crate stood on the deck from the start; nothing new may have joined it.
             let deck = Scenario.crates(sim, "deck", "web")
@@ -116,18 +253,18 @@ enum Scenarios {
             ("Release: Mark tested", 6.0),
             ("Release: Production merges", 0.3),
         ], tail: 12, expects: [
-            #"releaseOpened web#\d+ -> \S+ untested"#,
-            #"command\s+rocket: web standing by on the pad"#,
-            #"command\s+rocket: loading .* into the rocket"#,
-            #"crateCleared web#\d+"#,
-            #"command .*: carrying #\d+ to the rocket"#,
-            #"command\s+rocket: web loaded and steaming"#,
-            #"releaseMerged web#\d+ .* production"#,
-            #"command\s+rocket: web lifting off"#,
+            .releaseOpened("web", untested: true),
+            .rocket(.standBy, "web"),
+            .rocket(.load(1), "web"),
+            .crateCleared("web"),
+            .carry(to: .pad),
+            .rocket(.steam, "web"),
+            .releaseMerged("web", production: true),
+            .rocket(.launch, "web"),
         ], floor: { sim in
             // One crate of web was on the deck; it goes aboard once. A board still saying "ready to ship"
             // after the crate is in the hold must not put it back on the deck to be carried again.
-            let loads = sim.model.logLines.filter { $0.contains("  command  ") && $0.contains(": carrying ") && $0.hasSuffix("to the rocket") }.count
+            let loads = Scenario.count(sim, .carry(to: .pad))
             if loads != 1 { return "\(loads) carries into the rocket for one crate" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
@@ -140,13 +277,13 @@ enum Scenarios {
             ("Commit", 1.0),                                  // any redraw meanwhile: the source must not take them back
             ("Board: Catch up", 0.3),                         // the board's poll arrives: nothing left to carry
         ], tail: 6, expects: [
-            #"stagingOpened web#\d+"#,
-            #"stagingMerged web#\d+"#,
-            #"command .*: pushing the pallet to the deck"#,
-            #"command .*: unloading the pallet"#,
-            #"boardMoved web#\d+ .* -> deck"#,
+            .stagingOpened("web"),
+            .stagingMerged("web"),
+            .pushPallet("web"),
+            .unloadPallet("web", back: false),
+            .boardMoved("web", to: .deck),
         ], forbids: [
-            #"carrying (#\d+|a crate) to the deck$"#,   // the pallet did the carrying; nothing redoes it by hand
+            .carry(to: .deck),   // the pallet did the carrying; nothing redoes it by hand
         ], floor: { sim in
             // Two web crates rode the pallet over to join the one already there, each drawn by its own number.
             let deck = Scenario.crates(sim, "deck", "web")
@@ -162,8 +299,10 @@ enum Scenarios {
             ("Open PR", 2.0),
             ("Close PR", 0.3),
         ], tail: 9, expects: [
-            #"log: #455: PR #455 open"#,
-            #"log: #455 booking flow: pull request closed, not merged"#,
+            .log("PR #455 open"),
+            .log("#455 booking flow: pull request closed, not merged"),
+        ], forbids: [
+            .carry(455, to: .storage),
         ]),
 
         Scenario("peer arrives and leaves: fade in, office held", [
@@ -171,10 +310,10 @@ enum Scenarios {
             ("Peer: Arrive", 6.0),
             ("Peer: Leave", 0.3),
         ], tail: 6, expects: [
-            #"officeOpened work\|task:web#460 peer\("kim"\) fade"#,
-            #"peerLeft kim"#,
-            #"peerArrived kim"#,
-            #"peerLeft kim"#,
+            .officeOpened("task:web#460", .fade, peer: "kim"),
+            .peerLeft("kim"),
+            .peerArrived("kim"),
+            .peerLeft("kim"),
         ], floor: { sim in
             // Offices are held for those who left before they clear.
             sim.station.world.fleet.stations["work"]?.rooms["task:web#460"] != nil
@@ -185,15 +324,15 @@ enum Scenarios {
             ("Target: web#460", 0.3),
             ("Peer: Kick office", 0.3),
         ], tail: 8, expects: [
-            #"officeArchived work\|task:web#460 \(kicked\)"#,
-            #"kicked #460 artist tags off the station"#,
+            .officeArchived("work|task:web#460", reason: "kicked"),
+            .log("kicked #460 artist tags off the station"),
         ]),
 
         Scenario("session ends: the office stays", [
             ("Target: api#5158", 0.3),
             ("Session ends", 0.3),
         ], tail: 10, expects: [
-            #"press  Session ends"#,
+            .press("Session ends"),
         ], floor: { sim in
             // Nothing disappears without a cue: an office outlives the session that opened it.
             sim.station.world.fleet.stations["work"]?.rooms["task:api#5158"] != nil
@@ -204,19 +343,19 @@ enum Scenarios {
             ("Night", 6.0),
             ("Day", 0.3),
         ], tail: 8, expects: [
-            #"press  Night"#,
-            #"command .*: asleep in the dorm"#,
-            #"night falls"#,
-            #"press  Day"#,
-            #"command .*: heading for the couch"#,
-            #"morning"#,
+            .press("Night"),
+            .sleep,
+            .log("night falls"),
+            .press("Day"),
+            .goTo(.lounge),
+            .log("morning"),
         ]),
 
         Scenario("a bath lasts its whole time", [
             ("Everyone to lounge", 3.0),
             ("Bath", 0.3),
         ], tail: 14, expects: [
-            #"command .*: off to the bath"#,
+            .bath,
         ]),
 
         Scenario("pallet operator stays on the errand through the night", [
@@ -225,22 +364,30 @@ enum Scenarios {
             ("Night", 6.0),                    // bedtime does not take it off the pallet
             ("Release: Staging merges", 0.5),
         ], tail: 30, expects: [
-            #"command .*: pushing the pallet to the deck"#,
-            #"command .*: unloading the pallet"#,
-        ], forbids: [
-            #"taking over the pallet"#,
-        ]),
+            .pushPallet("web"),
+            .unloadPallet("web", back: false),
+        ], floor: { sim in
+            // One pair of hands from the clipboard to the last crate off: nobody took the pallet over.
+            var operators: [String] = []
+            for (c, who) in Scenario.commands(sim) {
+                switch c.kind {
+                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet: if !operators.contains(who) { operators.append(who) }
+                default: break
+                }
+            }
+            return operators.count == 1 ? nil : "the pallet passed through \(operators.count) pairs of hands: \(operators.joined(separator: ", "))"
+        }),
         Scenario("a commit lands: the worker stows a cube", [
             ("Target: web#455", 0.5),
             ("Commit", 0.5),
         ], tail: 8, expects: [
-            #"command\s+#455 booking flow: stowing a cube for the commit"#,
+            .stow(by: "#455 booking flow"),
         ]),
         Scenario("a chore", [
             ("Everyone to lounge", 3.0),
             ("Chore", 0.3),
         ], tail: 12, expects: [
-            #"command .*: having a look round the station"#,
+            .chore,
         ]),
     ]
 }
@@ -309,36 +456,33 @@ final class ScenarioRunner {
     private func judge() {
         guard let sim else { return }
         let s = scenarios[index]
-        let lines = sim.model.logLines
+        let records = sim.model.records
         let seconds = CACurrentMediaTime() - startedAt
         if verbose {
             say("--- \(s.name) ---")
-            for l in lines { say("    " + l) }
+            for l in sim.model.logLines { say("    " + l) }
         }
         var reason: String?
-        if let v = lines.first(where: { $0.contains("VIOLATION:") }) {
-            reason = v.trimmingCharacters(in: .whitespaces)
-        }
-        if reason == nil, !s.allowSkips, let skipped = lines.first(where: { $0.contains("  skipped  ") }) {
-            reason = "a press was refused · " + skipped.trimmingCharacters(in: .whitespaces)
+        let violations = records.compactMap { if case .violation(let t) = $0 { return t }; return nil }
+        if let v = violations.first { reason = v }
+        if reason == nil, !s.allowSkips, let skipped = records.lazy.compactMap({ if case .skipped(let why) = $0 { return why }; return nil }).first {
+            reason = "a press was refused · " + skipped
         }
         if reason == nil {
             for bad in s.forbids {
-                guard let rx = try? Regex(bad) else { reason = "bad pattern /\(bad)/"; break }
-                if let line = lines.first(where: { $0.firstRange(of: rx) != nil }) { reason = "said /\(bad)/ · " + line.trimmingCharacters(in: .whitespaces); break }
+                if let hit = records.first(where: bad.matches) { reason = "saw \(bad.words) · \(hit.words)"; break }
             }
         }
         if reason == nil {
             var at = 0
             for want in s.expects {
-                guard let rx = try? Regex(want) else { reason = "bad expectation /\(want)/"; break }
                 var hit = false
-                while at < lines.count {
-                    let line = lines[at]
+                while at < records.count {
+                    let r = records[at]
                     at += 1
-                    if line.firstRange(of: rx) != nil { hit = true; break }
+                    if want.matches(r) { hit = true; break }
                 }
-                if !hit { reason = "never said /\(want)/"; break }
+                if !hit { reason = "never saw \(want.words)"; break }
             }
         }
         if reason == nil, let floor = s.floor { reason = floor(sim) }
@@ -349,10 +493,7 @@ final class ScenarioRunner {
             say(String(format: "PASS  %-52@  (%.1fs)", s.name as NSString, seconds))
         }
         // Every violation of the run, not only the first, so one pass says everything it found.
-        let violations = lines.filter { $0.contains("VIOLATION:") }
-        if violations.count > 1 {
-            for v in violations.dropFirst() { say("      " + v.trimmingCharacters(in: .whitespaces)) }
-        }
+        for v in violations.dropFirst() { say("      " + v) }
         self.sim = nil
         begin()
     }

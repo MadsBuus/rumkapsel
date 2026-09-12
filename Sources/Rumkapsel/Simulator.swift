@@ -154,12 +154,12 @@ final class SimulatorModel: ObservableObject {
     init(station: StationController) {
         self.station = station
         station.sim?.onEvent = { [weak self] e in
-            self?.note("event", SimulatorModel.describe(e))
+            self?.note("event", SimulatorModel.describe(e), .event(e))
         }
         station.sim?.onCommand = { [weak self] c, who in
-            self?.note("command", "\(who): \(c.words)")
+            self?.note("command", "\(who): \(c.words)", .command(c, by: who))
         }
-        station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text) }
+        station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text, .violation(text)) }
         // A peer that stops talking is dropped after twenty seconds, so keep saying the same thing.
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushPeer() }
@@ -508,15 +508,15 @@ final class SimulatorModel: ObservableObject {
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
 
     func press(_ name: String) {
-        note("press", name)
+        note("press", name, .press(name))
         if name.hasPrefix("Target: ") {
             pick(String(name.dropFirst(8)))
         } else if timeNames.contains(name) {
             time(name)
         } else if let b = groups.flatMap(\.buttons).first(where: { $0.name == name }) {
-            if let why = b.blocked { note("skipped", why) } else { run(name) }
+            if let why = b.blocked { note("skipped", why, .skipped(why)) } else { run(name) }
         } else {
-            note("skipped", "no such button: \(name)")
+            note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
     }
@@ -524,7 +524,7 @@ final class SimulatorModel: ObservableObject {
     /// The picker, from a script: "Target: web#455".
     private func pick(_ id: String) {
         guard let o = offices.first(where: { "\($0.repo)#\($0.number)" == id }) else {
-            return note("skipped", "no office \(id)")
+            return note("skipped", "no office \(id)", .skipped("no office \(id)"))
         }
         target = o.uid
         note("sim", "target: " + o.label)
@@ -742,7 +742,7 @@ final class SimulatorModel: ObservableObject {
         case "Chore": station.simulate(.chore)
 
         default:
-            note("skipped", "no such button: \(name)")
+            note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
         }
     }
 
@@ -762,16 +762,19 @@ final class SimulatorModel: ObservableObject {
     /// lock and the panel only asks it for text.
     private let lines = SimLog()
 
-    nonisolated func note(_ kind: String, _ text: String) {
-        lines.add(kind: kind, text: text)
+    /// A line for the panel, and, when it is one of the things a scenario judges, the typed record of it.
+    nonisolated func note(_ kind: String, _ text: String, _ record: SimRecord? = nil) {
+        lines.add(kind: kind, text: text, record: record)
         DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
     var logText: String { lines.text }
-    /// The whole run, oldest first: what `--scenarios` reads its expectations off.
+    /// The whole run as text, oldest first: what `--scenarios-verbose` prints.
     var logLines: [String] { lines.ordered }
+    /// The whole run as it happened, typed: what `--scenarios` judges. Never the text.
+    var records: [SimRecord] { lines.records }
 
-    static func describe(_ e: WorldEvent) -> String {
+    nonisolated static func describe(_ e: WorldEvent) -> String {
         switch e {
         case .boardMoved(let it, let from, let to): return "boardMoved \(it.repo)#\(it.number) \(from ?? "—") -> \(to)"
         case .pullRequestOpened(let repo, let n, let who, _): return "pullRequestOpened \(repo)#\(n) by \(who)"
@@ -806,10 +809,35 @@ final class SimulatorModel: ObservableObject {
     }
 }
 
+/// One thing a simulated run did, as the value it was: what a scenario's expectations match on.
+/// The text in the log is for reading; nothing judges it.
+enum SimRecord {
+    case press(String)
+    /// A press the panel refused, and why.
+    case skipped(String)
+    case event(WorldEvent)
+    /// A command and who ran it: a worker's office, or "shuttle" and "rocket".
+    case command(Command, by: String)
+    /// A rule of STATION.md broken, in the words `Invariants` gives it.
+    case violation(String)
+
+    var words: String {
+        switch self {
+        case .press(let n): return "press \(n)"
+        case .skipped(let why): return "skipped: \(why)"
+        case .event(let e): return "event \(SimulatorModel.describe(e))"
+        case .command(let c, let who): return "command \(who): \(c.words)"
+        case .violation(let t): return t
+        }
+    }
+}
+
 /// The simulator's log, written from any thread and read by the panel.
 final class SimLog: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
+    /// The typed side of `whole`, kept only for the things a scenario can judge.
+    private var typed: [SimRecord] = []
     private static let stamp: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
@@ -817,13 +845,20 @@ final class SimLog: @unchecked Sendable {
     /// The same lines the panel shows, oldest first and uncapped: what a scripted run reads.
     private var whole: [String] = []
 
-    func add(kind: String, text: String) {
+    func add(kind: String, text: String, record: SimRecord?) {
         lock.lock(); defer { lock.unlock() }
         let line = "\(SimLog.stamp.string(from: Date()))  \(kind)  \(text)"
         lines.insert(line, at: 0)
         if lines.count > 400 { lines.removeLast(lines.count - 400) }
         whole.append(line)
         if whole.count > 20000 { whole.removeFirst(whole.count - 20000) }
+        if let record { typed.append(record) }
+        if typed.count > 20000 { typed.removeFirst(typed.count - 20000) }
+    }
+
+    var records: [SimRecord] {
+        lock.lock(); defer { lock.unlock() }
+        return typed
     }
 
     var ordered: [String] {
