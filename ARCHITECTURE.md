@@ -189,6 +189,32 @@ that takes long, a route that searches the whole floor say, can therefore never 
 landing look older than a board move. The route search itself reads the yard blocks, the doorways and the
 room doors from caches built once per floor plan; it used to rebuild them on every step.
 
+## Faster feedback from GitHub
+
+Step 1 above, the first part of it. Three things make the station notice sooner, and one keeps it
+honest. The **board delta**: every twenty seconds one small search asks for the board's items updated
+since the newest change it knows of, less a minute for the index, and merges them into the board it
+holds (`refreshProjectDelta`). A board grows, Shipped most of all, and reading all of it was four pages
+of a hundred; the delta is a handful of items, and the whole read is the backstop on the five-minute
+cadence. The **feed as doorbell**: each repository's activity feed is asked once a minute, the pace
+GitHub asks for, on a conditional request with the ETag it gave last time, so a quiet repository
+answers 304 and costs nothing against the budget; what the feed has that it did not have last time
+names what to ask about next. **Expecting a change** (`GitHubResolver.expect`): a key is asked every
+few seconds instead of on its cadence for a while when something says it is about to change: a
+pull request seen opened, merged or closed in the feed, its number and branch; a push, whose checks
+will run; a merge, the releases; a board item that moved, its linked pull requests; a local signal
+in a transcript, `gh pr create` or `gh pr merge` or `git push`, which re-asks the authority at once
+and never moves anything itself; an open pull request with checks pending or an approval standing.
+The setting "Ask GitHub every N minutes" still governs the slow cadence of the heavy asks.
+
+`--github-diag [seconds]` runs the poller alone against the real settings and checkouts and prints
+every ask and every answer that changed, which is how this was checked: the whole board once, the
+delta every twenty seconds, feeds once a minute answering 304, the rest on the backstop. The
+environment variable `RUMKAPSEL_SUPPORT` points a second copy of the app at its own save folder.
+Not done from step 1: conditional requests for the pull request lists, one GraphQL for a repository's
+open pull requests and releases together, and the events an org-level feed would carry, which this
+token does not see.
+
 ## The staging pallet
 
 Done. A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`

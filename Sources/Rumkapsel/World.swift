@@ -310,7 +310,7 @@ final class World {
             }
         }
         github.intervalMinutes = cfg.githubMinutes
-        if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
+        if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }

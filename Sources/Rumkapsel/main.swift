@@ -35,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
         // The crate ledger on its own: facts in every order, no station.
         if args.contains("--ledger-tests") { LedgerTests.run() }
+        // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
+        if let i = args.firstIndex(of: "--github-diag") {
+            let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
+            GitHubDiag.run(seconds: seconds)
+        }
         // The scripted regression suite: no window, no station of its own, one after another.
         if let i = args.firstIndex(of: "--scenarios") {
             let next = args.count > i + 1 ? args[i + 1] : nil

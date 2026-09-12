@@ -139,16 +139,17 @@ final class GitHubResolver {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
         lock.unlock()
+        trace("ask openPRs \(repoRoot)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("o:" + repoRoot); lock.unlock() }
             let iso = ISO8601DateFormatter()
             var found: [OpenPR] = []
             // A failed call must not count as "no open PRs", or everything looks new on the next success.
-            guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else { return }
+            guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else { trace("openPRs \(repoRoot) failed"); return }
             if let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 let stale = Date().addingTimeInterval(-14 * 24 * 3600)
                 for o in arr {
@@ -209,7 +210,7 @@ final class GitHubResolver {
 
     /// The last board read is kept on disk, so the first read after a launch still knows what moved.
     private static var boardURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
+        let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
         return dir.appendingPathComponent("board.json")
     }
     private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date; var owners: [String: String]? }
@@ -241,13 +242,13 @@ final class GitHubResolver {
     func refreshProject(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
-        if Date() < holdUntil { lock.unlock(); return }
-        // The board is one query and the station's main cue: once a minute, whatever the setting says
-        // for the heavier per-repository asks.
-        if let (_, at) = project, Date().timeIntervalSince(at) < min(interval, 60) { lock.unlock(); return }
+        if Date() < holdUntil { trace("project held until \(holdUntil)"); lock.unlock(); return }
+        // The whole board on the slow cadence, as the backstop; `refreshProjectDelta` is the pace.
+        if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("project") { lock.unlock(); return }
         inFlight.insert("project")
         lock.unlock()
+        trace("ask project (whole board)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("project"); lock.unlock() }
             // GraphQL rather than `gh project item-list`: it carries when each item last moved.
@@ -266,7 +267,7 @@ final class GitHubResolver {
                 guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
                       let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
                       let itemsObj = ((obj["data"] as? [String: Any])?["organization"] as? [String: Any]).flatMap({ $0["projectV2"] as? [String: Any] })?["items"] as? [String: Any],
-                      let nodes = itemsObj["nodes"] as? [[String: Any]] else { return }
+                      let nodes = itemsObj["nodes"] as? [[String: Any]] else { trace("project read failed at page \(cursor)"); return }
                 for o in nodes {
                     guard let content = o["content"] as? [String: Any], let n = content["number"] as? Int,
                           let repo = (content["repository"] as? [String: Any])?["name"] as? String else { continue }
@@ -282,6 +283,74 @@ final class GitHubResolver {
                 cursor = "\"\(end)\""
             }
             adoptProject(items, at: Date())
+        }
+    }
+
+    /// When the delta was last asked, and the newest item time it has seen: the next ask starts there.
+    private var deltaAt = Date.distantPast
+    private var deltaSince: Date?
+
+    /// The board's changes only: items updated since the last look, by search, every twenty seconds. A
+    /// board grows, Shipped most of all, and the whole of it is read only as a backstop; what moved
+    /// in the last while is a handful of items and one small query. Each moved item's linked pull
+    /// requests are then expected to change, and asked.
+    func refreshProjectDelta(owner: String, number: Int) {
+        if frozen { return }
+        lock.lock()
+        guard let (items, at) = project else { lock.unlock(); return }   // nothing to add to yet: the whole read comes first
+        if Date() < holdUntil { lock.unlock(); return }
+        if Date().timeIntervalSince(deltaAt) < gate("projectDelta", base: 20) { lock.unlock(); return }
+        if inFlight.contains("projectDelta") { lock.unlock(); return }
+        inFlight.insert("projectDelta")
+        deltaAt = Date()
+        // From the newest change we know of, less a minute for the search index to catch up.
+        let since = (deltaSince ?? items.compactMap(\.updatedAt).max() ?? at).addingTimeInterval(-60)
+        lock.unlock()
+        let iso = ISO8601DateFormatter()
+        trace("ask project delta since \(iso.string(from: since))")
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove("projectDelta"); lock.unlock() }
+            let query = """
+            { search(query: "project:\(owner)/\(number) updated:>=\(iso.string(from: since))", type: ISSUE, first: 50) { nodes { ... on Issue {
+              number title url repository { name } assignees(first: 5) { nodes { login } }
+              closedByPullRequestsReferences(first: 5) { nodes { url state } }
+              projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
+            """
+            guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
+                  let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
+                  let nodes = ((obj["data"] as? [String: Any])?["search"] as? [String: Any])?["nodes"] as? [[String: Any]] else { return }
+            var fresh: [ProjectItem] = []
+            for content in nodes {
+                guard let n = content["number"] as? Int, let repo = (content["repository"] as? [String: Any])?["name"] as? String,
+                      let pis = (content["projectItems"] as? [String: Any])?["nodes"] as? [[String: Any]],
+                      let mine = pis.first(where: { ($0["project"] as? [String: Any])?["number"] as? Int == number }) else { continue }
+                let status = (mine["fieldValueByName"] as? [String: Any])?["name"] as? String ?? ""
+                let assignees = ((content["assignees"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
+                let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
+                    .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
+                fresh.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
+                                         prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (mine["updatedAt"] as? String).flatMap(iso.date(from:))))
+            }
+            lock.lock()
+            guard let (current, _) = project else { lock.unlock(); return }
+            var merged = current
+            var moved: [(ProjectItem, String?)] = []
+            for f in fresh {
+                if let i = merged.firstIndex(where: { $0.repo == f.repo && $0.number == f.number }) {
+                    if merged[i] != f { if merged[i].status != f.status { moved.append((f, merged[i].status)) }; merged[i] = f }
+                } else { merged.append(f); moved.append((f, nil)) }
+            }
+            if let newest = fresh.compactMap(\.updatedAt).max() { deltaSince = max(deltaSince ?? .distantPast, newest) }
+            let changed = merged != current
+            if changed { project = (merged, Date()); projectMoves += moved }
+            lock.unlock()
+            trace("project delta: \(fresh.count) item(s), \(moved.count) moved")
+            if changed {
+                saveBoard(merged, at: Date())
+                // Each moved item's pull requests are what change next: ask them soon.
+                for (it, _) in moved { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { expect("pull#:\(it.repo)#\(n)", for: 120, every: 15) } } }
+                DispatchQueue.main.async { self.onUpdate?() }
+            }
         }
     }
 
@@ -343,15 +412,22 @@ final class GitHubResolver {
         return feeds[repoRoot]?.0
     }
 
-    /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Every two minutes.
+    /// The feed's ETag per repository: an unchanged feed answers 304, which costs nothing.
+    private var feedETags: [String: String] = [:]
+
+    /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Once a
+    /// minute, the pace GitHub asks for, on a conditional request so a quiet repository costs nothing.
+    /// It is also the doorbell: a pull request opened, merged or closed in it, or a push, has the
+    /// pull request itself asked right away and for a while after.
     func refreshFeed(repoRoot: String) {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < 120 { lock.unlock(); return }
+        if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < gate("feed:" + repoRoot, base: 60) { lock.unlock(); return }
         if inFlight.contains("f:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("f:" + repoRoot)
         lock.unlock()
+        trace("ask feed \(repoRoot)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("f:" + repoRoot); lock.unlock() }
             if me == nil, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
@@ -367,9 +443,28 @@ final class GitHubResolver {
             guard let owner else { return }
             let iso = ISO8601DateFormatter()
             var events: [FeedEvent] = []
+            lock.lock(); let etag = feedETags[repoRoot]; lock.unlock()
             for page in 1...2 {
-                guard let out = run(["gh", "api", "repos/\(owner)/events?per_page=100&page=\(page)"], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { break }
+                let arr: [[String: Any]]
+                if page == 1 {
+                    // The first page carries the ETag: nothing new means a 304 and the answer stands.
+                    var args = ["gh", "api", "-i", "repos/\(owner)/events?per_page=100&page=1"]
+                    if let etag { args += ["-H", "If-None-Match: \(etag)"] }
+                    // A failed call is not an empty feed: what was known stands until the next ask.
+                    guard let (_, raw) = runRaw(args, cwd: repoRoot), let (status, headers, body) = GitHubResolver.split(raw) else { return }
+                    if status == 304 {
+                        trace("feed \(repoRoot) unchanged (304)")
+                        lock.lock(); if let old = feeds[repoRoot] { feeds[repoRoot] = (old.0, Date()) }; lock.unlock()
+                        return
+                    }
+                    guard status == 200, let parsed = try? JSONSerialization.jsonObject(with: body) as? [[String: Any]] else { return }
+                    if let tag = headers["etag"] { lock.lock(); feedETags[repoRoot] = tag; lock.unlock() }
+                    arr = parsed
+                } else {
+                    guard let out = run(["gh", "api", "repos/\(owner)/events?per_page=100&page=\(page)"], cwd: repoRoot),
+                          let parsed = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { break }
+                    arr = parsed
+                }
                 for e in arr {
                     guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
                     let actorObj = e["actor"] as? [String: Any]
@@ -418,11 +513,44 @@ final class GitHubResolver {
                 if arr.count < 100 { break }
             }
             lock.lock()
-            let changed = feeds[repoRoot]?.0 != events
+            let known = feeds[repoRoot]?.0
+            let changed = known != events
             feeds[repoRoot] = (events, Date())
             lock.unlock()
+            // The doorbell: what the feed has that it did not have last time names what to ask about.
+            if let known {
+                let newest = known.map(\.at).max() ?? .distantPast
+                for e in events where e.at > newest {
+                    switch e.kind {
+                    case "pr_open", "pr_merge", "pr_close":
+                        expect("openPRs:" + repoRoot, for: 120, every: 15)
+                        if let n = e.prNumber { expect("pull#:" + repoRoot + "#\(n)", for: 120, every: 15) }
+                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 120, every: 15) }
+                        if e.kind == "pr_merge" { expect("releases:" + repoRoot, for: 300, every: 30); expect("projectDelta", for: 120, every: 10) }
+                    case "push":
+                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 180, every: 30) }   // checks will run
+                    case "release":
+                        expect("releases:" + repoRoot, for: 120, every: 15)
+                    default: break
+                    }
+                }
+            }
             if changed { DispatchQueue.main.async { self.onUpdate?() } }
         }
+    }
+
+    /// `gh api -i` output split into the status, the headers (lower-cased names) and the body.
+    private static func split(_ raw: Data) -> (Int, [String: String], Data)? {
+        guard let sep = raw.range(of: Data("\r\n\r\n".utf8)) ?? raw.range(of: Data("\n\n".utf8)) else { return nil }
+        guard let head = String(data: raw[..<sep.lowerBound], encoding: .utf8) else { return nil }
+        let lines = head.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }).map(String.init)
+        guard let first = lines.first, let status = Int(first.split(separator: " ").dropFirst().first ?? "") else { return nil }
+        var headers: [String: String] = [:]
+        for l in lines.dropFirst() {
+            guard let c = l.firstIndex(of: ":") else { continue }
+            headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
+        }
+        return (status, headers, raw[sep.upperBound...])
     }
 
     /// Forgets cache ages for one repository so its next refresh hits GitHub again.
@@ -445,10 +573,11 @@ final class GitHubResolver {
     func refreshReleases(repoRoot: String) {
         if frozen { return }
         lock.lock()
-        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < gate("releases:" + repoRoot, base: interval) { lock.unlock(); return }
         if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("r:" + repoRoot)
         lock.unlock()
+        trace("ask releases \(repoRoot)")
         queue.async { [self] in
             var found: [ReleasePR] = []
             let cfg = ConfigStore.shared.current
@@ -539,6 +668,38 @@ final class GitHubResolver {
     }
 
     private let queue = DispatchQueue(label: "rumkapsel.github", qos: .utility, attributes: .concurrent)
+
+    // MARK: expecting a change
+
+    /// Something is expected to change soon at one key: a pull request just opened here, a push whose
+    /// checks will run, an issue the board just moved, a merge seen in the feed. For a while that key
+    /// is asked every few seconds instead of on the slow cadence. Keys: "openPRs:<root>",
+    /// "pull:<root>@<branch>", "pull#:<root>#<n>", "releases:<root>", "feed:<root>", "projectDelta".
+    private var expected: [String: (until: Date, every: TimeInterval)] = [:]
+
+    func expect(_ key: String, for seconds: TimeInterval = 120, every: TimeInterval = 15) {
+        lock.lock(); defer { lock.unlock() }
+        let until = Date().addingTimeInterval(seconds)
+        if let e = expected[key], e.until > until, e.every <= every { return }
+        expected[key] = (until, every)
+        trace("expect \(key) every \(Int(every))s for \(Int(seconds))s")
+    }
+
+    /// How long an answer at this key stays fresh: the burst's pace while one is expected, else the base.
+    private func gate(_ key: String, base: TimeInterval) -> TimeInterval {
+        if let e = expected[key] {
+            if Date() < e.until { return e.every }
+            expected[key] = nil
+        }
+        return base
+    }
+
+    /// What the poller is doing, on stderr, when GITHUB_DIAG is set or `--github-diag` runs.
+    static var diag = ProcessInfo.processInfo.environment["GITHUB_DIAG"] != nil
+    private func trace(_ text: String) {
+        guard GitHubResolver.diag else { return }
+        FileHandle.standardError.write("GH \(ISO8601DateFormatter().string(from: Date())) \(text)\n".data(using: .utf8)!)
+    }
     private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]
@@ -578,10 +739,11 @@ final class GitHubResolver {
         if frozen { return }
         let key = repoRoot + "#\(number)"
         lock.lock()
-        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < gate("pull#:" + key, base: interval) { lock.unlock(); return }
         if inFlight.contains(key) { lock.unlock(); return }
         inFlight.insert(key)
         lock.unlock()
+        trace("ask pull \(key)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove(key); lock.unlock() }
             guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url"], cwd: repoRoot),
@@ -667,10 +829,11 @@ final class GitHubResolver {
         if frozen { return }
         let key = repoRoot + "@" + branch
         lock.lock()
-        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < gate("pull:" + key, base: interval) { lock.unlock(); return }
         if inFlight.contains(key) { lock.unlock(); return }
         inFlight.insert(key)
         lock.unlock()
+        trace("ask pull \(key)")
 
         queue.async { [self] in
             if nameWithOwner(repoRoot: repoRoot) == nil,
@@ -714,6 +877,10 @@ final class GitHubResolver {
             let changed = pulls[key]?.0 != pr
             if changed, let pr, let old = pulls[key] { stateChanges.append((branch, pr, old.0)) }
             pulls[key] = (pr, Date())
+            // Checks still running, or approved and open: this one is about to change; keep asking.
+            if let pr, pr.state == "OPEN", pr.checks == "pending" || pr.reviewDecision == "APPROVED" {
+                expected["pull:" + key] = (Date().addingTimeInterval(180), 30)
+            }
             inFlight.remove(key)
             lock.unlock()
             if changed { DispatchQueue.main.async { self.onUpdate?() } }
@@ -721,6 +888,13 @@ final class GitHubResolver {
     }
 
     private func run(_ args: [String], cwd: String) -> Data? {
+        guard let (status, data) = runRaw(args, cwd: cwd), status == 0 else { return nil }
+        return data
+    }
+
+    /// The command's exit status and output, whatever the status: `gh api -i` exits non-zero on a 304
+    /// and still prints the headers, which is the answer.
+    private func runRaw(_ args: [String], cwd: String) -> (Int32, Data)? {
         guard FileManager.default.fileExists(atPath: cwd) else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -735,7 +909,7 @@ final class GitHubResolver {
         do { try p.run() } catch { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return p.terminationStatus == 0 ? data : nil
+        return (p.terminationStatus, data)
     }
 }
 

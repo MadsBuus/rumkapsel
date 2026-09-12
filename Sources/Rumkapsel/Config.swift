@@ -1,5 +1,14 @@
 import Foundation
 
+/// Where the app keeps its files: Application Support, or the folder RUMKAPSEL_SUPPORT names, so a
+/// second copy can run beside the real one without touching its layout, board and settings.
+enum AppSupport {
+    static var root: URL {
+        if let dir = ProcessInfo.processInfo.environment["RUMKAPSEL_SUPPORT"] { return URL(fileURLWithPath: dir, isDirectory: true) }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
+}
+
 /// Everything the user can tune, persisted as JSON in Application Support.
 struct AppConfig: Codable, Equatable {
     struct RepoOverride: Codable, Equatable {
@@ -40,7 +49,7 @@ struct AppConfig: Codable, Equatable {
     var statuses: ProjectStatuses { projectStatuses ?? ProjectStatuses() }
 
     static var url: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Rumkapsel", isDirectory: true)
+        let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("config.json")
     }

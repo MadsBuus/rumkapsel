@@ -573,10 +573,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let who = home.issue.map { "#\($0)" } ?? URL(fileURLWithPath: s.cwd).lastPathComponent
             if !isNew {
                 for (event, marker) in s.eventMarkers where m.markers[event] != marker {
+                    // A local signal never moves anything; it re-asks the authority now and for a while.
+                    let root = s.repoRoot
                     switch event {
-                    case .prOpened: logEvent("\(who) opened a pull request")
-                    case .merged: logEvent("\(who) merged")
-                    case .pushed: logEvent("\(who) pushed")
+                    case .prOpened:
+                        logEvent("\(who) opened a pull request")
+                        if let root { github.expect("openPRs:" + root); if let b = s.branch { github.expect("pull:" + root + "@" + b) }; github.expect("projectDelta", every: 10) }
+                    case .merged:
+                        logEvent("\(who) merged")
+                        if let root { github.expect("openPRs:" + root); if let b = s.branch { github.expect("pull:" + root + "@" + b) }; github.expect("releases:" + root, for: 300, every: 30); github.expect("projectDelta", every: 10) }
+                    case .pushed:
+                        logEvent("\(who) pushed")
+                        if let root { if let b = s.branch { github.expect("pull:" + root + "@" + b, for: 180, every: 30) }; github.expect("feed:" + root, every: 20) }
                     case .committed: logEvent("\(who) committed")
                     case .skill: if case .skill(let name) = s.activity { logEvent("\(who) used /\(name)") }
                     case .prompt: break   // the model says so, as a .prompt event: the cones went up already
