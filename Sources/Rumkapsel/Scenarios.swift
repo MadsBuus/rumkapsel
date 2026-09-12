@@ -127,7 +127,7 @@ enum Scenarios {
         ], floor: { sim in
             // One crate of web was on the deck; it goes aboard once. A board still saying "ready to ship"
             // after the crate is in the hold must not put it back on the deck to be carried again.
-            let loads = sim.model.logLines.filter { $0.contains("  command  ") && $0.contains("carrying #") && $0.hasSuffix("to the rocket") }.count
+            let loads = sim.model.logLines.filter { $0.contains("  command  ") && $0.contains(": carrying ") && $0.hasSuffix("to the rocket") }.count
             if loads != 1 { return "\(loads) carries into the rocket for one crate" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
@@ -146,7 +146,7 @@ enum Scenarios {
             #"command .*: unloading the pallet"#,
             #"boardMoved web#\d+ .* -> deck"#,
         ], forbids: [
-            #"carrying #\d+ to the deck$"#,   // the pallet did the carrying; nothing redoes it by hand
+            #"carrying (#\d+|a crate) to the deck$"#,   // the pallet did the carrying; nothing redoes it by hand
         ], floor: { sim in
             // Two web crates rode the pallet over to join the one already there, each drawn by its own number.
             let deck = Scenario.crates(sim, "deck", "web")
