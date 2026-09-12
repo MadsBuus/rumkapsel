@@ -142,52 +142,39 @@ in the log when the command is issued.
 
 ## Station truth against a source that runs behind
 
-Steps 4, 5 and 7 above, for crates. Every crate a station knows is a row in one ledger (`Ledger.swift`,
-kept on the `Station` and saved with it): `wanted`, the source's word on which yard it belongs to, with
-the source's own time for that word; and `placed`, the station's word, which yard it stands in or belongs
-to while on someone's arms or the pallet. Sources write `wanted`, only through `adopt`; completions write
-`placed`, only through `landed`, whenever a minion, the pallet or the rocket's hatch sets a crate down.
-The counts the HUD, the rockets and the rings read (`Station.stored`, `staged`) are read off `placed`
-and kept nowhere; `yardLayout` draws from the same rows.
+Steps 4, 5 and 7 above, for crates. Every crate a station knows is one row in one ledger (`Ledger.swift`,
+kept on the `Station` and saved with it). The row has the source's side, `wanted`, the yard the board or
+git history says it belongs to, with the source's own time for that word; and the station's side, `placed`,
+the yard the station has it in, `at`, where it physically is (a slot, someone's arms, the pallet), `slot`,
+the place it holds in its yard, and `bound`, the place spoken for ahead of it while a carry is under way.
+Sources write only through `adopt`; completions write only through `landed` and the set-down. The counts
+the HUD, the rockets and the rings read are read off `placed` and kept nowhere; `yardLayout` draws from
+the rows and gives a place to any crate that has none. `StationTruth` is what is left besides: the pallet
+out and what rides on it, the offices ordered, the crates waiting in the bay.
 
 A word from the source is news for a crate only if it is newer than the station's own move of it
 (`movedAt`). A board item carries when it last moved, so an answer older than a landing is stale for
 that crate however fresh the poll, and a word older than the one already held (a peer's lagging copy)
-is not news either. A source with no times of its own, git history, is believed again the moment it agrees with what
-the station did. That is what lets the pallet's crates stay on the deck while the board still says
-storage, and a crate in the rocket's hold stay there until the board says shipped; nothing decides by
-the clock any more.
+is not news either. A source with no times of its own, git history, is believed again the moment it
+agrees with what the station did. Nothing decides by the clock.
 
 Disagreement is a queue, not an event. `reconcile` takes the source's answer into the ledger, then walks
-the crates the two sides disagree about: storage to deck is one carry per crate, by number, blockers
-moved aside first and never a crate pulled from under another; anything else is redrawn where the source
-says, once, and never a deck crate while a rocket is loading from it. It runs from `flushScene` and the
-half-second tick, never from the drawing, and never while somebody is carrying one of the repository's
-crates or a pallet has them. `rebuildMarkers` adopts what stands: an office's boxes are left alone while
-everything that shapes them reads the same, a numbered yard crate keeps its node and is moved only if
-its slot changed, and only what is new is built and what is gone taken away. A peer's heartbeat asks for
-a redraw only when it brought a difference.
+the crates the two sides disagree about, one at a time: storage to deck is one carry per crate, by the
+number the source named, with whatever stands on it and is staying moved aside first; anything else is
+redrawn where the source says, once, and never a deck crate while a rocket is loading from it. A crate
+already under way is left to its carrier; only the pallet holds a whole repository. A storage-to-deck
+carry whose crate the board has since put back is cancelled: not lifted yet, the crate stays; on the
+arms, it walks back. It runs from `flushScene` and the half-second tick, never from the drawing, and
+`rebuildMarkers` adopts what stands: only what is new is built and what is gone taken away.
 
-A yard holds a slot for a crate on its way in from the moment the carry is ordered (`heading`), so two
-carries never land on one slot; a crate that has left the rows, on the arms or the pallet, holds nothing,
-the stack it was in settles, and it asks for a slot again when it comes back. With the crate up on the
-arms the slot is asked for once more (`reaim`, `World.slotNow`): the same yard the order named, the stack
-as it stands that moment, and the order keeps its id with only its destination moved. That is step 5's
-late binding as far as a command that carries a `Spot` allows; a command that names only the yard is the
-rest of it. The reconciler works per crate: one under way is left to its carrier and the rest are dealt
-with, so one slow carry no longer holds its repository. Only the pallet holds a whole repository, being
-one errand for all of its crates. A storage-to-deck carry whose crate the board has since put back in
-storage is cancelled (`cancelCarry`): not lifted yet, the crate simply stays; on the arms, it goes back to
-the slot it came from, by the same redirect a new destination uses.
-
-Truth before the picture. A carry's patience, ninety station seconds, covers the whole order now, not
-only the wait for a carrier: a carry that has not landed by then is set down where its order says
-(`setDownLate`), whoever was carrying it lets go, the completion runs, and the log says the station
-caught up. So the ledger is never more than one patience behind the source, and a wedged carrier, a
-route that cannot be replanned, or a chain of carries waiting on each other costs one visible snap and
-never a wrong count. The simulator's "Wedge carrier" stops a carrier dead to prove it. A carrier with
-carries of its repository queued behind it hurries: a quicker gait, the same lift and set-down, and the
-words say so on hover and in the log.
+A carry names a yard, nothing more (`Command.carry(crate:from:to: Yard)`). The job holds the aim: a
+place asked for when the order is taken, which the yard then holds for the crate (`bound`); asked for
+again with the crate up on the arms, against the stack as it stands that moment; grounded at set-down,
+when `bound` becomes `slot`. One aside routine serves every planner. Truth before the picture: a carry's
+patience, ninety station seconds per leg, covers the wait for a carrier, the walk to the crate and the
+carry itself; a carry that has not landed by then is set down where its order says, whoever was carrying
+it lets go, and the log says the station caught up. So the ledger is never more than one patience behind
+the source. A carrier with carries of its repository queued behind it hurries, and says so.
 
 `--ledger-tests` feeds a ledger facts in every order, board before release, release before board, stale
 after fresh, A then B then A, and holds it to: every crate in one yard at most, a move outranking any

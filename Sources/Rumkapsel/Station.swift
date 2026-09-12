@@ -604,9 +604,6 @@ final class Station {
         var spine: Int
         var rooms: [String: SavedRoom]
         var stored: Int?
-        /// From before the ledger: counts kept on the station. Read by nothing now.
-        var storedByRepo: [String: Int]?
-        var stagedByRepo: [String: Int]?
         var ledger: Ledger?
     }
     struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
