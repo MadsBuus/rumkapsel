@@ -242,7 +242,9 @@ final class GitHubResolver {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        // The board is one query and the station's main cue: once a minute, whatever the setting says
+        // for the heavier per-repository asks.
+        if let (_, at) = project, Date().timeIntervalSince(at) < min(interval, 60) { lock.unlock(); return }
         if inFlight.contains("project") { lock.unlock(); return }
         inFlight.insert("project")
         lock.unlock()
@@ -548,6 +550,12 @@ final class GitHubResolver {
     func pull(branch: String, repoRoot: String) -> PullRequest? {
         lock.lock(); defer { lock.unlock() }
         return pulls[repoRoot + "@" + branch]?.0
+    }
+
+    /// Whether the branch's pull request has been asked for and answered at all, even with "none".
+    func pullAnswered(branch: String, repoRoot: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return pulls[repoRoot + "@" + branch] != nil
     }
 
     /// Commits on the worktree's branch that are not on the default branch, or nil if unknown yet.

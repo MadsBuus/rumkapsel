@@ -288,6 +288,9 @@ struct Ledger: Codable {
         if c.placed == nil { crates[c.key] = nil } else { crates[c.key] = c }
     }
 
+    /// One crate struck off: its pull request closed without merging, so it was never merged work.
+    mutating func forget(repo: String, number: Int) { crates[Ledger.key(repo, number)] = nil }
+
     /// Everything of a repository forgotten: the source is gone from the fleet.
     mutating func forget(repo: String) { crates = crates.filter { $0.value.repo != repo } }
 }

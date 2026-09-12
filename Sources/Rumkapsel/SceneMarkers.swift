@@ -96,6 +96,7 @@ extension StationController {
                 let boxOpacity = 1.0
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
+                    if world.haulOrdered(office: key) { continue }   // on its way to storage: drawn once, on the arms
                     count = min(16, max(1, cb.count))
                     // A teammate's pull request is a crate with its sticker; pushes before a PR are cubes.
                     let prNumber = world.crewRoomInfo[key]?.prNumber

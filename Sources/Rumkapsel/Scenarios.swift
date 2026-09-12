@@ -297,6 +297,23 @@ enum Scenarios {
             return open.isEmpty ? nil : "the ledger still disagrees about \(open.map { "#\($0.number)" }.joined(separator: ", "))"
         }),
 
+        Scenario("teammate PR closed unmerged: red, nothing carried, no crate", [
+            ("Target: api#5158", 0.3),
+            ("Teammate: New branch", 3.0),
+            ("Teammate: Open PR", 1.0),
+            ("Teammate: Close PR", 0.3),
+        ], tail: 8, expects: [
+            .crewActivity("leo", "pr_open"),
+            .log("pull request closed, not merged"),
+        ], forbids: [
+            .carry(to: .storage),
+        ], floor: { sim in
+            // Never merged work: nothing of it in storage, on the floor or in the ledger.
+            let st = sim.station.world.fleet.stations["work"]!
+            if let stray = st.ledger.crates(of: "api").first(where: { $0.placed == .storage && $0.number > 5160 }) { return "#\(stray.number) is in the ledger's storage" }
+            return nil
+        }),
+
         Scenario("PR closed unmerged: red, nothing carried", [
             ("Target: web#455", 0.3),
             ("Open PR", 2.0),

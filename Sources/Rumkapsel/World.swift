@@ -535,12 +535,24 @@ final class World {
             let author = crewRoomInfo[key]?.author ?? ""
             // A teammate's office that we also have checked out stays: the local scan decides its fate.
             guard room.worktree == nil else { crewRoomInfo[key] = nil; crewBoxes[key] = nil; continue }
-            // Its crate goes to storage on someone's arms first; the office clears once that is done.
+            // Gone from the open list: merged, or closed without merging. The pull request itself is the
+            // authority on which. The feed may already say; otherwise it is asked, and until it answers
+            // nothing moves: a crate that was never merged work must not be carried to storage.
             var hauling = false
             let branch = crewRoomInfo[key]?.branch ?? ""
-            let closedUnmerged = feed.contains { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }
+            let root = repoRoots.first { $0.value.repo == room.repo }?.key
+            var state: String?
+            if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }) { state = "CLOSED" }
+            else if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_merge" && $0.e.branch == branch }) { state = "MERGED" }
+            else if let root {
+                github.refresh(branch: branch, repoRoot: root)
+                if github.pullAnswered(branch: branch, repoRoot: root) { state = github.pull(branch: branch, repoRoot: root)?.state ?? "CLOSED" }
+            } else { state = "MERGED" }   // no checkout of the repository here: nothing to ask, and nothing on the floor to carry
+            guard let state else { continue }
+            let closedUnmerged = state != "MERGED"
             if closedUnmerged {
-                // Closed without merging: red for ten minutes, then gone. Nothing to carry.
+                // Closed without merging: red for ten minutes, then gone. Nothing to carry, and no crate.
+                if let n = crewRoomInfo[key]?.prNumber { station.ledger.forget(repo: room.repo ?? "", number: n) }
                 if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
             } else if !haulOrdered(office: key), station.hasPad {
