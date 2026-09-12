@@ -5,6 +5,15 @@ import Foundation
 enum Yard: String, Codable {
     case storage, deck, pad
 
+    /// What to call it out loud.
+    var words: String {
+        switch self {
+        case .storage: return "storage"
+        case .deck: return "the deck"
+        case .pad: return "the rocket"
+        }
+    }
+
     init?(area: Spot.Area) {
         switch area {
         case .storage: self = .storage
@@ -38,6 +47,10 @@ struct Ledger: Codable {
         case pallet(row: Int, column: Int, level: Int)
     }
 
+    /// A crate's place in a yard: which group of rows (the deck's tested or untested), which column,
+    /// and the order it was given there, from which its level in the stack is ranked.
+    struct Slot: Codable, Equatable { var yard: Yard; var group: Int; var column: Int; var order: Int }
+
     struct Crate: Codable {
         let repo: String
         let number: Int
@@ -57,6 +70,10 @@ struct Ledger: Codable {
         /// Where the station physically has it. Nil while the source alone has placed it: standing
         /// wherever the rows draw it.
         var at: Placement?
+        /// The place it holds in the yard it stands in, given when it was set down or first drawn.
+        var slot: Slot?
+        /// The place spoken for ahead of it in the yard it is bound for, from the order until set-down.
+        var bound: Slot?
 
         var key: String { "\(repo)|\(number)" }
         /// On someone's arms, spoken for, or on the pallet: not standing on its row.
@@ -73,6 +90,8 @@ struct Ledger: Codable {
         var area: Spot.Area? { if case .slot(let area, _, _) = at { return area }; return nil }
         /// A row with nothing left to say is dropped.
         var isEmpty: Bool { placed == nil && wanted == nil && heading == nil && at == nil }
+        /// Standing in a yard's rows: belonging there and not on the arms or the pallet.
+        func stands(in yard: Yard) -> Bool { placed == yard && !inTransit }
         /// Where the rows draw it or hold a slot for it: the yard it belongs to, or the one it is bound for.
         func belongs(to yard: Yard) -> Bool { placed == yard || heading == yard }
         /// The source and the station disagree, nothing is carrying it, and the source's word is the
@@ -175,6 +194,7 @@ struct Ledger: Codable {
     mutating func unorder(repo: String, number: Int) {
         guard var c = crates[Ledger.key(repo, number)] else { return }
         c.heading = nil
+        c.bound = nil
         crates[c.key] = c.isEmpty ? nil : c
     }
 
@@ -206,9 +226,13 @@ struct Ledger: Codable {
     mutating func clearPad(repo: String) {
         for c in crates.values where c.repo == repo && c.area == .pad { place(c.repo, c.number, nil) }
     }
-    /// After a relaunch nothing is on anyone's arms or on a pallet: what was is standing somewhere.
+    /// After a relaunch nothing is on anyone's arms or on a pallet, and nothing is bound anywhere:
+    /// what was is standing somewhere, and asks for its place again.
     mutating func forgetTransit() {
-        for c in crates.values where c.inTransit { place(c.repo, c.number, nil) }
+        for var c in crates.values where c.inTransit || c.bound != nil || c.heading != nil {
+            c.at = nil; c.bound = nil; c.heading = nil
+            crates[c.key] = c.isEmpty ? nil : c
+        }
     }
 
     /// How many of a repository's crates are on someone's arms right now.
@@ -224,7 +248,36 @@ struct Ledger: Codable {
         c.placed = yard
         c.heading = nil
         c.movedAt = c.wanted == yard ? nil : at
+        // Down: the place spoken for ahead is the place it holds now.
+        if let b = c.bound, b.yard == yard { c.slot = b }
+        c.bound = nil
         crates[k] = c
+    }
+
+    // MARK: places in the rows
+
+    mutating func setSlot(repo: String, number: Int, _ slot: Slot?) {
+        guard var c = crates[Ledger.key(repo, number)] else { return }
+        c.slot = slot; crates[c.key] = c
+    }
+    mutating func setBound(repo: String, number: Int, _ slot: Slot?) {
+        guard var c = crates[Ledger.key(repo, number)] else { return }
+        c.bound = slot; crates[c.key] = c
+    }
+
+    /// A place in a yard for one more crate, among the places already held there: the lowest free
+    /// rank on one of the repository's own columns, else the lowest column nobody holds, else the
+    /// repository's shortest column, never one tower. `avoiding` is a column it may not go back to.
+    static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil) -> Slot {
+        let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
+        func height(_ column: Int) -> Int { here.filter { $0.slot.column == column }.count }
+        func next(_ column: Int) -> Slot { Slot(yard: yard, group: group, column: column, order: (here.filter { $0.slot.column == column }.map(\.slot.order).max() ?? -1) + 1) }
+        let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted()
+        for column in mine where column != avoiding && height(column) < 3 { return next(column) }
+        let owned = Set(here.map(\.slot.column))
+        if let free = (0..<max(cap, 1)).first(where: { !owned.contains($0) && $0 != avoiding }) { return next(free) }
+        if let column = mine.filter({ $0 != avoiding }).min(by: { height($0) < height($1) }) { return next(column) }
+        return next(0)
     }
 
     /// What cannot be carried is redrawn where the source says, once.

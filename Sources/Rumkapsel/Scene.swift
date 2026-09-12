@@ -198,6 +198,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
     struct Cargo {
         var command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""
+        /// The place the carry is aimed at: asked for when the order is taken, again with the crate on
+        /// the arms, and grounded at set-down. The command itself names only the yard.
+        var aim: Spot
         /// When the current leg began: the order, then the assignment, then the pickup. Patience runs per leg.
         var issuedAt = 0.0
         /// Carries queued behind this one: the carrier picks up the pace.

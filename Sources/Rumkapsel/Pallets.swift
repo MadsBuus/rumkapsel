@@ -192,7 +192,7 @@ extension StationController {
         p.state = .loading
         p.bornAt = clock
         for (i, item) in cargo.enumerated() {
-            guard let n = crateNode("storage", item.crate, at: item.from) else { continue }
+            guard let n = crateNode(item.crate) else { continue }
             let s = Props.palletSlot(i)
             p.toLoad.append((item.crate, n, StationTruth.PalletSlot(row: s.row, column: s.column, level: s.level)))
         }
@@ -421,7 +421,7 @@ extension StationController {
         p.nextAt = clock + 3.0
         // The rows are redrawn every time one leaves, so take the crate standing there now, not the
         // node this pallet was handed when it was ordered: that one is long gone from the scene.
-        let node = crateNode("storage", item.crate) ?? item.node
+        let node = crateNode(item.crate) ?? item.node
         world.putOnPallet(item.crate, at: item.slot)
         let to = Props.palletOffset(row: item.slot.row, column: item.slot.column, level: item.slot.level)
         // Into the pallet's own space, so it rides along once it has landed.
@@ -447,10 +447,10 @@ extension StationController {
         p.aboard.removeFirst()
         p.nextAt = clock + 3.0
         let repo = item.crate.repo
-        // Bound for a yard from here: that yard holds a slot for it, asked for now that it is coming down.
-        station.ledger.order(repo: repo, number: item.crate.number, to: p.wantsBack ? .storage : .deck)
-        let to = p.wantsBack ? world.storageSlot(station: station, repo: repo, number: item.crate.number)
-                             : world.deckSlot(station: station, repo: repo, number: item.crate.number)
+        // Bound for a yard from here: that yard holds a place for it, asked for now that it is coming down.
+        let yard: Yard = p.wantsBack ? .storage : .deck
+        station.ledger.order(repo: repo, number: item.crate.number, to: yard)
+        guard let to = world.slotNow(for: item.crate, toward: yard) else { return }
         world.truth.takeOffPallet(item.crate)   // off the pallet's slot; its row still says pallet until it is down
         let where_ = item.node.worldPosition
         let yaw = Double(p.node.eulerAngles.y) + Double(item.node.eulerAngles.y)

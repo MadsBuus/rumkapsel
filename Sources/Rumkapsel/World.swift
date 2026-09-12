@@ -700,8 +700,8 @@ final class World {
         let repo: String; let number: Int; let index: Int; let cleared: Bool
         let group: Int; let column: Int; let level: Int
         let cell: Cell; let pos: SIMD3<Double>; let yaw: Double
-        /// Not standing here: on someone's arms, on the pallet, or still on its way in. The slot is
-        /// its all the same, so nothing else is put there and it lands where the rows will draw it.
+        /// Not standing here: on its way in, its place spoken for. The rows do not draw it and nothing
+        /// else is put there.
         var carried = false
     }
 
@@ -715,19 +715,16 @@ final class World {
         case waiting
     }
 
-    /// Where every crate stands in storage or on the deck, from the ledger alone, so a carrier can be
+    /// Where every crate stands in storage or on the deck, from the ledger's rows, so a carrier can be
     /// sent to the exact spot a crate will occupy and nothing jumps when the layout is redrawn.
     /// Every other row holds crates with aisles between; the deck keeps tested crates on the row nearest
     /// the pad and untested on the far row; within a row, crates group by repository in stacks of three.
-    /// A crate on its way in holds a slot from the order and comes back `carried`: the rows do not draw
-    /// it, and nothing else takes its place. A crate that has left the rows, on someone's arms or on the
-    /// pallet, holds nothing: the stack it was in settles, and it asks for a slot again when it comes back.
-    /// `stillUntested` keeps one deck crate in the untested row even though the board has cleared it:
-    /// that is where it still stands, and a carry to the tested row has to start from there.
-    /// `leaving` names crates ("repo#number") to lay the yard out without, as it will be once they have
-    /// gone; `aside` names crates to give a fresh slot away from the column they stand in.
-    func yardLayout(station: Station, area: String, stillUntested: Int? = nil,
-                    leaving: Set<String> = [], aside: Set<String> = []) -> [YardSlot] {
+    /// A crate keeps the place its row records until it leaves; a crate bound for the yard holds the
+    /// place spoken for ahead of it and comes back `carried`. A crate with no place yet is given one
+    /// here and the row remembers it. `stillUntested` keeps one deck crate in the untested row even
+    /// though the board has cleared it: that is where it still stands. `aside` names crates
+    /// ("repo#number") to give a fresh place away from the column they stand in.
+    func yardLayout(station: Station, area: String, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
         let cells = area == "deck" ? station.deckCells : station.storageCells
         let neat = area == "deck"
         let yard: Yard = area == "deck" ? .deck : .storage
@@ -739,77 +736,46 @@ final class World {
         let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
         func row(_ group: Int) -> [Cell] { area == "deck" && rowList.count > 1 ? (group == 0 ? testedRow : untestedRow) : sorted }
 
-        // Every crate keeps the slot it was given until it leaves: a column of its repository's, and a rank
-        // in that column. Ranks re-settle when a crate below is taken out, so a stack never floats. New
-        // crates take the lowest free rank in the repository's columns, or the lowest free column.
-        let yardKey = "\(station.name)|\(area)"
-        var slots = yardSlots[yardKey] ?? [:]
-        var avoid: [String: Int] = [:]
-        for name in aside {
-            for (key, v) in slots where key.hasSuffix("|" + name) { avoid[key] = v.column; slots[key] = nil }
-        }
-        var present: Set<String> = []
-        var out: [YardSlot] = []
-        func owner(group: Int, column: Int) -> String? {
-            slots.first { $0.key.hasPrefix("\(group)|") && $0.value.column == column }?.key.split(separator: "|")[1].split(separator: "#").first.map(String.init)
-        }
+        struct Entry { let crate: Ledger.Crate; let group: Int; let cleared: Bool; let carried: Bool; let index: Int; var slot: Ledger.Slot? }
+        var entries: [Entry] = []
         for repo in Set(station.ledger.crates.values.map(\.repo)).sorted() {
-            let mine = station.ledger.holds(yard, repo: repo).filter { c in
-                let standing = c.placed == yard && !c.inTransit
-                return (standing || c.heading == yard) && !leaving.contains("\(repo)#\(c.number)")
-            }.prefix(48)
+            let mine = station.ledger.crates(of: repo).filter { $0.stands(in: yard) || $0.heading == yard }.prefix(48)
             for (k, c) in mine.enumerated() {
-                let number = c.number
-                let carried = c.placed != yard || c.inTransit
+                let carried = !c.stands(in: yard)
                 var cleared = area == "deck" && c.cleared
-                if cleared, number != 0, number == stillUntested { cleared = false }
+                if cleared, c.number != 0, c.number == stillUntested { cleared = false }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
-                let key = "\(group)|\(repo)#\(number > 0 ? "\(number)" : "i\(k)")"
-                present.insert(key)
-                if slots[key] == nil {
-                    let cap = row(group).count * 2
-                    let mine = Set(slots.filter { $0.key.hasPrefix("\(group)|\(repo)#") }.map { $0.value.column }).sorted()
-                    var chosen: (column: Int, order: Int)?
-                    for column in mine where avoid[key] != column {   // the repository's own columns first, lowest free rank
-                        let filled = slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == column }.count
-                        if filled < 3 { chosen = (column, filled); break }
-                    }
-                    if chosen == nil {   // a fresh column, the lowest one nobody holds
-                        if let free = (0..<cap).first(where: { owner(group: group, column: $0) == nil && avoid[key] != $0 }) { chosen = (free, 0) }
-                        else if !mine.isEmpty {   // over capacity: the repository's shortest column, never one tower
-                            func height(_ c: Int) -> Int { slots.filter { $0.key.hasPrefix("\(group)|") && $0.value.column == c }.count }
-                            let column = mine.filter { avoid[key] != $0 }.min { height($0) < height($1) } ?? mine[0]
-                            chosen = (column, height(column))
-                        }
-                        else { chosen = (0, 0) }
-                    }
-                    slots[key] = (column: chosen!.column, order: chosen!.order)
-                }
-                out.append(YardSlot(repo: repo, number: number, index: k, cleared: cleared, group: group,
-                                    column: slots[key]!.column, level: 0, cell: row(group)[slots[key]!.column / 2], pos: .zero, yaw: 0, carried: carried))
+                var slot = carried ? c.bound : c.slot
+                if let s = slot, s.yard != yard || s.group != group { slot = nil }   // from another yard or row: asked for again
+                if aside["\(repo)#\(c.number)"] != nil { slot = nil }
+                entries.append(Entry(crate: c, group: group, cleared: cleared, carried: carried, index: k, slot: slot))
             }
         }
-        for key in slots.keys where !present.contains(key) { slots[key] = nil }   // gone: the slot is free again
-        // Levels: rank within the column by the order each crate was given, so a stack settles from the floor.
-        var ranked: [YardSlot] = []
-        for slot in out {
-            let key = "\(slot.group)|\(slot.repo)#\(slot.number > 0 ? "\(slot.number)" : "i\(slot.index)")"
-            let mine = slots[key]!
-            let level = slots.filter { $0.key.hasPrefix("\(slot.group)|") && $0.value.column == mine.column && $0.value.order < mine.order }.count
-            let cellsOfRow = row(slot.group)
-            let cell = cellsOfRow[mine.column / 2], side = Double(mine.column % 2) * 0.5 - 0.25
-            let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: slot.repo, number: slot.number, index: slot.index)
-            let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
-            ranked.append(YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, group: slot.group,
-                                   column: mine.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: slot.carried))
+        // Places already held come first, so a newcomer sees them; then each crate without one is given one.
+        var held: [(repo: String, slot: Ledger.Slot)] = entries.compactMap { e in e.slot.map { (e.crate.repo, $0) } }
+        for i in entries.indices where entries[i].slot == nil {
+            let e = entries[i]
+            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
+                                    avoiding: aside["\(e.crate.repo)#\(e.crate.number)"])
+            entries[i].slot = slot
+            held.append((e.crate.repo, slot))
+            if e.carried { station.ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }
+            else { station.ledger.setSlot(repo: e.crate.repo, number: e.crate.number, slot) }
         }
-        yardSlots[yardKey] = slots
-        return ranked
+        // Levels: rank within the column by the order each crate was given, so a stack settles from the floor.
+        var out: [YardSlot] = []
+        for e in entries {
+            let s = e.slot!
+            let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
+            let cellsOfRow = row(s.group)
+            let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
+            let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number, index: e.index)
+            let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
+            out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, group: s.group,
+                                column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
+        }
+        return out
     }
-
-    /// Each crate's slot in a yard, by "station|area" then "group|repo#number": its column and the order
-    /// it was given, from which its level is ranked.
-    private var yardSlots: [String: [String: (column: Int, order: Int)]] = [:]
 
     /// A little disorder in storage, seeded per crate so a crate keeps its own nudge and turn wherever
     /// it lands in the rows. Unnumbered crates fall back to their place in the pile.
@@ -828,8 +794,6 @@ final class World {
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) -> YardChange {
         let k = station.name + "|" + repo
         station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: c.clearedNumbers, updated: c.updated), repo: repo)
-        // Per crate: one under way is skipped, the rest are dealt with. Only the pallet holds the whole
-        // repository, since it is one errand for all of a repository's crates at once.
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.
         guard truth.pallets[station.name]?.repo != repo,
@@ -849,25 +813,39 @@ final class World {
         return .snapped
     }
 
-    // MARK: commands the reconciler issues
+    // MARK: places, asked for
 
-    /// Where a crate bound for the deck will stand: the slot the deck layout holds for it, once it has
-    /// been ordered there.
-    func deckSlot(station: Station, repo: String, number: Int) -> Spot {
-        let deck = yardLayout(station: station, area: "deck")
-        if let s = deck.first(where: { $0.repo == repo && $0.number == number }) {
-            return yardSpot(s.cleared ? .tested : .deck, station: station, repo: repo, slot: grounded(s, in: deck, station: station.name))
+    /// The place a crate bound for a yard will land on, asked for now: the row holds it from the
+    /// first ask. Storage or the deck by the rows; the rocket by its hatch.
+    func slotNow(for crate: CrateRef, toward yard: Yard) -> Spot? {
+        guard let station = fleet.stations[crate.station] else { return nil }
+        switch yard {
+        case .storage, .deck:
+            let area = yard == .deck ? "deck" : "storage"
+            let layout = yardLayout(station: station, area: area)
+            guard let s = layout.first(where: { $0.repo == crate.repo && $0.number == crate.number }) else {
+                return floorSpot(yard == .deck ? .deck : .storage, station: station, repo: crate.repo,
+                                 cell: (yard == .deck ? station.deckCells : station.storageCells).first ?? Cell(x: 0, y: 0))
+            }
+            return yardSpot(s.cleared ? .tested : (yard == .deck ? .deck : .storage), station: station, repo: crate.repo,
+                            slot: grounded(s, in: layout))
+        case .pad:
+            return padSpot(station: station, repo: crate.repo)
         }
-        let c = station.deckCells[(station.staged[repo] ?? 0) % max(1, station.deckCells.count)]
-        return Spot(area: .deck, station: station.name, owner: repo, label: repo, cell: c,
-                    pos: SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y)))
     }
 
-    /// Stacks are built from the ground up. If a landing slot has come out with air under it — a count
-    /// that shifted, a crate already on someone's arms — the crate lands on the lowest free level of the
-    /// same column instead.
-    private func grounded(_ slot: YardSlot, in layout: [YardSlot], station: String) -> YardSlot {
-        let column = layout.filter { $0.group == slot.group && $0.column == slot.column && $0.index != slot.index && !$0.carried }
+    /// On the floor in front of the loading hatch, on the deck side of the hull: an ordinary set-down.
+    func padSpot(station: Station, repo: String) -> Spot {
+        let cell = station.padCells.first ?? Cell(x: 0, y: 0)
+        let pc = station.padCenter
+        return Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
+                    pos: SIMD3(station.offset.x + pc.x, 0, station.offset.y + pc.y + 0.5))
+    }
+
+    /// Stacks are built from the ground up. If a landing place has come out with air under it, a crate
+    /// under it still on someone's arms, the crate lands on the lowest free level of the column instead.
+    private func grounded(_ slot: YardSlot, in layout: [YardSlot]) -> YardSlot {
+        let column = layout.filter { $0.group == slot.group && $0.column == slot.column && $0.number != slot.number && !$0.carried }
         let taken = Set(column.map(\.level))
         var level = slot.level
         while level > 0 && !taken.contains(level - 1) { level -= 1 }
@@ -875,7 +853,7 @@ final class World {
         guard level != slot.level else { return slot }
         return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared,
                         group: slot.group, column: slot.column, level: level, cell: slot.cell,
-                        pos: SIMD3(slot.pos.x, Double(level) * 0.34, slot.pos.z), yaw: slot.yaw)
+                        pos: SIMD3(slot.pos.x, Double(level) * 0.34, slot.pos.z), yaw: slot.yaw, carried: slot.carried)
     }
 
     private func yardSpot(_ area: Spot.Area, station: Station, repo: String, slot: YardSlot) -> Spot {
@@ -889,45 +867,54 @@ final class World {
              pos: SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y)))
     }
 
-    /// Storage crates the source says reached staging, by number: one carry each, from the slot a crate
-    /// stands on to the slot the deck layout holds for it. Stacks are taken from the top: a crate that
-    /// is staying and stands on one that is going is moved aside first, onto another of the repository's
-    /// stacks, and nothing is ever pulled out from under another crate.
+    /// The spot a crate stands on in a yard right now, for a carry's `from`.
+    private func standingSpot(_ s: YardSlot, area: String, station: Station) -> Spot {
+        yardSpot(area == "deck" ? (s.cleared ? .tested : .deck) : .storage, station: station, repo: s.repo, slot: s)
+    }
+
+    // MARK: commands the reconciler issues
+
+    /// Stacks are taken from the top. Whatever stands on `slot` in its column and is not itself going
+    /// is moved aside first, top down, each to a fresh place on another of the repository's columns in
+    /// the same yard: a carry within the yard. Nothing is ever pulled out from under another crate.
+    private func aside(station: Station, area: String, above slot: YardSlot, going: Set<Int>, standing: [YardSlot], after: inout [Int: Int]) -> [Command] {
+        let blockers = standing.filter { $0.group == slot.group && $0.column == slot.column && $0.level > slot.level && !going.contains($0.number) }
+            .sorted { $0.level > $1.level }
+        guard !blockers.isEmpty else { return [] }
+        let yard: Yard = area == "deck" ? .deck : .storage
+        let moved = yardLayout(station: station, area: area, aside: Dictionary(uniqueKeysWithValues: blockers.map { ("\($0.repo)#\($0.number)", $0.column) }))
+        var out: [Command] = []
+        for b in blockers {
+            guard moved.contains(where: { $0.repo == b.repo && $0.number == b.number }) else { continue }
+            let crate = CrateRef(station: station.name, repo: b.repo, number: b.number)
+            station.ledger.order(repo: b.repo, number: b.number, to: yard)
+            let command = Command.carry(crate, from: standingSpot(b, area: area, station: station), to: yard, after: after[b.column].map { [$0] } ?? [])
+            after[b.column] = command.id
+            out.append(command)
+        }
+        return out
+    }
+
+    /// Storage crates the source says reached staging, by number: one carry each to the deck, the
+    /// deck holding a place for each from the order, blockers moved aside first.
     func carryToDeck(station: Station, repo: String, numbers: [Int]) -> [Command] {
         let wanted = Set(numbers)
         let standing = yardLayout(station: station, area: "storage").filter { $0.repo == repo && !$0.carried }
-        let going = standing.filter { wanted.contains($0.number) }
+        let going = standing.filter { wanted.contains($0.number) }.sorted { ($0.level, $0.index) > ($1.level, $1.index) }
         guard !going.isEmpty else { return [] }
         var out: [Command] = []
-        var above: [Int: Int] = [:]     // the carry that has to clear a storage column before the crate under it moves
-        var landed: [String: Int] = [:] // and the one that has to land before anything is set on top of it
-        // Blockers first: whatever stands on a going crate and is staying, top down, to a slot on
-        // another column of the repository's, laid out as storage will be once the going crates are gone.
-        let blockers = standing.filter { s in !wanted.contains(s.number) && going.contains { $0.column == s.column && $0.level < s.level } }
-            .sorted { ($0.level, $0.index) > ($1.level, $1.index) }
-        if !blockers.isEmpty {
-            let settled = yardLayout(station: station, area: "storage", leaving: Set(going.map { "\(repo)#\($0.number)" }),
-                                     aside: Set(blockers.map { "\(repo)#\($0.number)" }))
-            for b in blockers {
-                guard let to = settled.first(where: { $0.repo == repo && $0.number == b.number }) else { continue }
-                let crate = CrateRef(station: station.name, repo: repo, number: b.number)
-                station.ledger.order(repo: repo, number: b.number, to: .storage)
-                let command = Command.carry(crate, from: yardSpot(.storage, station: station, repo: repo, slot: b),
-                                            to: yardSpot(.storage, station: station, repo: repo, slot: grounded(to, in: settled, station: station.name)),
-                                            after: above[b.column].map { [$0] } ?? [])
-                above[b.column] = command.id
-                out.append(command)
-            }
-        }
-        for slot in going.sorted(by: { ($0.level, $0.index) > ($1.level, $1.index) }) {
+        var above: [Int: Int] = [:]     // per storage column: the carry that has to clear it before the crate under moves
+        var landed: [String: Int] = [:] // per deck place: the carry whose crate has to be down before anything is set on top
+        for slot in going { out += aside(station: station, area: "storage", above: slot, going: wanted, standing: standing, after: &above) }
+        for slot in going {
             let crate = CrateRef(station: station.name, repo: repo, number: slot.number)
-            station.ledger.order(repo: repo, number: slot.number, to: .deck)   // the deck holds its slot from here
-            let to = deckSlot(station: station, repo: repo, number: slot.number)
+            station.ledger.order(repo: repo, number: slot.number, to: .deck)
+            guard let to = slotNow(for: crate, toward: .deck) else { continue }
             let column = "\(Int((to.pos.x * 100).rounded()))|\(Int((to.pos.z * 100).rounded()))"
             var waits: [Int] = []
             if let clear = above[slot.column] { waits.append(clear) }
             if to.level > 0, let under = landed["\(column)|\(to.level - 1)"] { waits.append(under) }
-            let command = Command.carry(crate, from: yardSpot(.storage, station: station, repo: repo, slot: slot), to: to, after: waits)
+            let command = Command.carry(crate, from: standingSpot(slot, area: "storage", station: station), to: .deck, after: waits)
             above[slot.column] = command.id
             landed["\(column)|\(to.level)"] = command.id
             out.append(command)
@@ -938,83 +925,40 @@ final class World {
     /// What a pallet takes: every crate of a repository standing in storage, top of each stack first,
     /// twelve at most. Anything already on someone's arms stays where it is.
     func palletCargo(station: Station, repo: String) -> [(crate: CrateRef, from: Spot)] {
-        yardLayout(station: station, area: "storage").filter { $0.repo == repo }
+        yardLayout(station: station, area: "storage").filter { $0.repo == repo && !$0.carried }
             .sorted { ($0.level, $0.index) > ($1.level, $1.index) }
-            .compactMap { slot in
-                guard !slot.carried else { return nil }
-                return (CrateRef(station: station.name, repo: repo, number: slot.number), yardSpot(.storage, station: station, repo: repo, slot: slot))
-            }
+            .map { (CrateRef(station: station.name, repo: repo, number: $0.number), standingSpot($0, area: "storage", station: station)) }
             .prefix(12).map { $0 }
     }
 
-    /// Where a crate coming off the pallet lands in storage: the slot the rows hold for it, the same
-    /// one a merged office's package would be given.
-    func storageSlot(station: Station, repo: String, number: Int) -> Spot {
-        let layout = yardLayout(station: station, area: "storage")
-        guard let slot = layout.last(where: { $0.repo == repo && $0.number == number }) else {
-            return floorSpot(.storage, station: station, repo: repo, cell: station.storageCells.first ?? Cell(x: 0, y: 0))
-        }
-        return yardSpot(.storage, station: station, repo: repo, slot: grounded(slot, in: layout, station: station.name))
-    }
-
-    /// A merged office's package, from the office floor to the slot storage will give it: the next free
-    /// place on the repository's stacks, top of the current one or a new one. Storage holds the slot
-    /// from the order.
+    /// A merged office's package, from the office door to storage. Storage holds a place for it from
+    /// the order; the place itself is asked for with the crate on the arms.
     func carryToStorage(station: Station, room: Room, repo: String, number: Int) -> Command {
         station.ledger.order(repo: repo, number: number, to: .storage)
-        let layout = yardLayout(station: station, area: "storage")
-        let slot = layout.last { $0.repo == repo && $0.number == number }
-        let cell = slot?.cell ?? station.storageCells.first ?? Cell(x: 0, y: 0)
-        let to = slot.map { yardSpot(.storage, station: station, repo: repo, slot: grounded($0, in: layout, station: station.name)) }
-            ?? floorSpot(.storage, station: station, repo: repo, cell: cell)
-        let door = station.doorCell(of: room.key) ?? room.cells.first ?? cell
+        let door = station.doorCell(of: room.key) ?? room.cells.first ?? Cell(x: 0, y: 0)
         let from = Spot(area: .office, station: station.name, owner: room.key, label: room.name, cell: door,
                         pos: SIMD3(station.offset.x + Double(door.x), 0, station.offset.y + Double(door.y)))
-        return .carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: to)
+        return .carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: .storage)
     }
 
     /// One crate passed QA: across the aisle to the tested row. A named crate, so whatever is stacked on
-    /// top of it moves aside first, each to the slot the redraw will give it.
+    /// top of it moves aside first.
     func carryToTested(station: Station, repo: String, number: Int) -> [Command] {
         let crate = CrateRef(station: station.name, repo: repo, number: number)
         guard !isCarried(crate) else { return [] }
-        let standing = yardLayout(station: station, area: "deck", stillUntested: number)
-        let settled = yardLayout(station: station, area: "deck")
-        guard let here = standing.first(where: { $0.repo == repo && $0.number == number && !$0.carried }) else {
-            let cell = station.deckCells.first ?? Cell(x: 0, y: 0)
-            return [.carry(crate, from: floorSpot(.deck, station: station, repo: repo, cell: cell),
-                           to: floorSpot(.tested, station: station, repo: repo, cell: cell))]
-        }
-        var out: [Command] = []
-        var previous: [Int] = []
-        for above in standing.filter({ $0.group == here.group && $0.column == here.column && $0.level > here.level })
-                             .sorted(by: { $0.level > $1.level }) {
-            let other = CrateRef(station: station.name, repo: above.repo, number: above.number)
-            guard !above.carried,
-                  let dest = settled.first(where: { $0.repo == above.repo && $0.number == above.number && $0.number != 0 }),
-                  dest.pos != above.pos else { continue }
-            let command = Command.carry(other, from: yardSpot(above.cleared ? .tested : .deck, station: station, repo: above.repo, slot: above),
-                                        to: yardSpot(dest.cleared ? .tested : .deck, station: station, repo: above.repo, slot: dest),
-                                        after: previous)
-            previous = [command.id]
-            out.append(command)
-        }
-        let landing = settled.first { $0.repo == repo && $0.number == number }
-        let to = landing.map { yardSpot(.tested, station: station, repo: repo, slot: $0) }
-            ?? floorSpot(.tested, station: station, repo: repo, cell: here.cell)
-        out.append(.carry(crate, from: yardSpot(.deck, station: station, repo: repo, slot: here), to: to, after: previous))
+        let standing = yardLayout(station: station, area: "deck", stillUntested: number).filter { !$0.carried }
+        guard let here = standing.first(where: { $0.repo == repo && $0.number == number }) else { return [] }
+        var above: [Int: Int] = [:]
+        var out = aside(station: station, area: "deck", above: here, going: [number], standing: standing, after: &above)
+        station.ledger.order(repo: repo, number: number, to: .deck)
+        out.append(.carry(crate, from: standingSpot(here, area: "deck", station: station), to: .deck, after: above[here.column].map { [$0] } ?? []))
         return out
     }
 
     /// Cleared to launch: every crate named goes from its row into the rocket on the pad, stacks taken
     /// from the top down.
     func carryToPad(station: Station, repo: String, from area: String, numbers: [Int]) -> [Command] {
-        let cell = station.padCells.first ?? Cell(x: 0, y: 0)
-        let pc = station.padCenter
-        // On the floor in front of the loading hatch, on the deck side of the hull: an ordinary set-down.
-        let to = Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
-                      pos: SIMD3(station.offset.x + pc.x, 0, station.offset.y + pc.y + 0.5))
-        let slots = yardLayout(station: station, area: area)
+        let slots = yardLayout(station: station, area: area).filter { !$0.carried }
         let order = numbers.sorted { a, b in
             let sa = slots.first { $0.repo == repo && $0.number == a }, sb = slots.first { $0.repo == repo && $0.number == b }
             return (sa?.level ?? 0, a) > (sb?.level ?? 0, b)
@@ -1023,10 +967,11 @@ final class World {
         var above: [Int: Int] = [:]
         for number in order {
             let slot = slots.first { $0.repo == repo && $0.number == number }
-            let from = slot.map { yardSpot(area == "deck" ? ($0.cleared ? .tested : .deck) : .storage, station: station, repo: repo, slot: $0) }
-                ?? floorSpot(area == "deck" ? .deck : .storage, station: station, repo: repo, cell: cell)
+            let from = slot.map { standingSpot($0, area: area, station: station) }
+                ?? floorSpot(area == "deck" ? .deck : .storage, station: station, repo: repo, cell: station.padCells.first ?? Cell(x: 0, y: 0))
             let key = (slot?.group ?? 0) * 1000 + (slot?.column ?? 0)
-            let command = Command.carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: to,
+            station.ledger.order(repo: repo, number: number, to: .pad)
+            let command = Command.carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: .pad,
                                         after: above[key].map { [$0] } ?? [])
             if slot != nil { above[key] = command.id }
             out.append(command)
@@ -1059,17 +1004,6 @@ final class World {
     func landed(station: Station, repo: String, number: Int, in yard: Yard, at now: Date) {
         station.ledger.landed(repo: repo, number: number, in: yard, at: now)
         fleet.save()
-    }
-
-    /// The slot a crate under way should land on, asked for now that it is on the arms: the yard the
-    /// order named, the stack as it stands this moment. Nil where the slot is not the yard's to give.
-    func slotNow(for crate: CrateRef, toward to: Spot) -> Spot? {
-        guard let station = fleet.stations[crate.station] else { return nil }
-        switch to.area {
-        case .storage: return storageSlot(station: station, repo: crate.repo, number: crate.number)
-        case .deck, .tested: return deckSlot(station: station, repo: crate.repo, number: crate.number)
-        default: return nil
-        }
     }
 
     /// A carry that will not happen after all: the crate stays where it is and its slot ahead is free.

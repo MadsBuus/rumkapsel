@@ -100,7 +100,7 @@ extension StationController {
         m.phaseUntil = 0
         m.pending = nil
         if announce { logEvent(c.words) }
-        if redirected, case .carry(_, _, let to) = c.kind { walk(m, to: to.cell) }
+        if redirected, let aim = cargo[c.id]?.aim { walk(m, to: aim.cell) }
     }
 
     /// On to the next phase of the command in hand.
@@ -216,10 +216,7 @@ extension StationController {
         m.nextWanderAt = clock + Double.random(in: 1...3)
     }
 
-    func walk(_ m: Minion, to cell: Cell) {
-        guard let station = fleet.stations[m.station] else { return }
-        m.path = route(m, to: cell)
-    }
+    func walk(_ m: Minion, to cell: Cell) { m.path = route(m, to: cell) }
 
     /// Spots taken by the other minions on a station, as the pathfinder sees them: solid, like props.
     func crowd(around m: Minion) -> Set<Cell> {
@@ -539,13 +536,12 @@ extension StationController {
     /// Takes a carry command and the crate it moves. The crate is spoken for from here on, so nothing
     /// else is told to move it and the yard layout leaves its spot alone.
     func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
-        guard let crate = command.crate else { return }
+        guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return }
         world.claim(crate)
-        if case .carry(_, _, let to) = command.kind, let yard = Yard(area: to.area), let station = fleet.stations[crate.station] {
-            station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        }
+        station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
+        guard let aim = world.slotNow(for: crate, toward: yard) else { return }
         node.name = "haul"
-        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, issuedAt: clock)
+        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
     }
 
     /// Drops every carry tied to a room, freeing whoever was carrying.
@@ -553,7 +549,7 @@ extension StationController {
     /// crate belongs in storage whatever becomes of the office.
     private func cancelCarries(roomKey: String) {
         for (id, c) in cargo where c.roomKey == roomKey {
-            if case .carry(_, _, let to) = c.command.kind, to.area == .storage { continue }
+            if case .carry(_, _, let to) = c.command.kind, to == .storage { continue }
             c.node.removeFromParentNode()
             if let crate = c.command.crate { world.forgetPlacement(crate); world.unorder(crate) }
             cargo[id] = nil
@@ -561,19 +557,10 @@ extension StationController {
         }
     }
 
-    /// The node a crate stands on, by the name the yard gave it. Unnumbered crates of a repository
-    /// share a name, so a carry takes the one standing on the slot it names.
-    func crateNode(_ area: String, _ crate: CrateRef, at spot: Spot? = nil) -> SCNNode? {
-        let name = "\(area):\(crate.station)|\(crate.repo)|\(crate.number)"
-        let all = markerRoot.childNodes.filter { $0.name == name }
-        guard let spot else { return all.first }
-        return all.min { a, b in
-            func d(_ n: SCNNode) -> Double {
-                let p = n.worldPosition
-                return pow(Double(p.x) - spot.pos.x, 2) + pow(Double(p.y) - spot.pos.y, 2) + pow(Double(p.z) - spot.pos.z, 2)
-            }
-            return d(a) < d(b)
-        }
+    /// The node a crate stands on in the rows, by the name the yard gave it.
+    func crateNode(_ crate: CrateRef) -> SCNNode? {
+        let tail = ":\(crate.station)|\(crate.repo)|\(crate.number)"
+        return markerRoot.childNodes.first { ($0.name ?? "") == "storage" + tail || ($0.name ?? "") == "deck" + tail }
     }
 
     /// Merged: the office's package is carried to the storage bay in one trip. The model has already
@@ -598,16 +585,15 @@ extension StationController {
         let list = commands ?? world.carryToDeck(station: station, repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
         var started = 0
         for command in list {
-            guard let crate = command.crate, case .carry(_, let from, let to) = command.kind,
-                  let node = crateNode(from.area == .storage ? "storage" : "deck", crate, at: from) else {
+            guard let crate = command.crate, case .carry(_, _, let to) = command.kind, let node = crateNode(crate) else {
                 if let crate = command.crate { world.unorder(crate) }   // nothing on the floor to carry: the order is off
                 continue
             }
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                // Where it actually went down: the order may have been re-aimed, or sent back, on the way.
-                let landedIn = world.area(of: crate).flatMap(Yard.init(area:)) ?? Yard(area: to.area) ?? .deck
+                // Where it actually went down: the order may have been sent back on the way.
+                let landedIn = world.area(of: crate).flatMap(Yard.init(area:)) ?? to
                 world.landed(station: station, repo: repo, number: crate.number, in: landedIn, at: now)
                 node.removeFromParentNode()
                 rebuildMarkers()
@@ -660,12 +646,12 @@ extension StationController {
     /// The carry's patience ran out: the crate is down where the order says, whoever was carrying it
     /// lets go, and the log says the station caught up. The picture takes the snap; the ledger is right.
     private func setDownLate(_ id: Int, _ job: Cargo) {
-        guard case .carry(let crate, _, let to) = job.command.kind else { return }
+        guard case .carry(let crate, _, let yard) = job.command.kind else { return }
         cargo[id] = nil
         let m = job.carrier.flatMap { minions[$0] }
         if let m, m.carried === job.node { m.carried = nil }
-        world.setDown(crate, at: to)
-        handle(.log("\(crate.words) set down late in \(to.words): the station caught up"))
+        world.setDown(crate, at: job.aim)
+        handle(.log("\(crate.words) set down late in \(yard.words): the station caught up"))
         job.onDone()
         if let m, m.current?.id == id { finish(m) }
     }
@@ -673,10 +659,11 @@ extension StationController {
     /// The board put a crate back where it stands while a carry was under way: the order is off. On
     /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
     func cancelCarry(_ id: Int, backTo from: Spot) {
-        guard let job = cargo[id], let crate = job.command.crate else { return }
+        guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
         if let who = job.carrier, let m = minions[who], m.carried === job.node {
-            let back = job.command.aimed(at: from)
+            let back = job.command.aimed(at: yard)
             cargo[id]?.command = back
+            cargo[id]?.aim = from
             world.unorder(crate)
             start(m, back)
             handle(.log("\(crate.words): back where it was, the board changed its mind"))
@@ -694,11 +681,9 @@ extension StationController {
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
     /// was when the order went out. The order keeps its id; only its destination moves.
     func reaim(_ id: Int, for m: Minion) {
-        guard let job = cargo[id], case .carry(let crate, _, let to) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: to), fresh.pos != to.pos else { return }
-        let c = job.command.aimed(at: fresh)
-        cargo[id]?.command = c
-        m.current = c
+        guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
+              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
+        cargo[id]?.aim = fresh
     }
 
     // MARK: crew
@@ -771,8 +756,7 @@ extension StationController {
     /// it is moved aside first, one carry each, and those go first.
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
         for command in world.carryToTested(station: station, repo: repo, number: number) {
-            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
-                  let node = crateNode("deck", crate, at: from) else { continue }
+            guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 node.removeFromParentNode()

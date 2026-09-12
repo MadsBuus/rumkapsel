@@ -98,9 +98,9 @@ struct Expect {
     // MARK: commands
 
     /// A crate carried to a yard: any crate, or one by number.
-    static func carry(_ number: Int? = nil, to area: Spot.Area) -> Expect {
-        command("carry \(number.map { "#\($0)" } ?? "a crate") to \(area)") {
-            if case .carry(let crate, _, let to) = $0 { return to.area == area && (number == nil || crate.number == number) }; return false
+    static func carry(_ number: Int? = nil, to yard: Yard) -> Expect {
+        command("carry \(number.map { "#\($0)" } ?? "a crate") to \(yard)") {
+            if case .carry(let crate, _, let to) = $0 { return to == yard && (number == nil || crate.number == number) }; return false
         }
     }
     static func deliverOffice(by who: String) -> Expect {

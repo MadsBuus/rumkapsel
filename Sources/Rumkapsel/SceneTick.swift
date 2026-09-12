@@ -429,14 +429,13 @@ extension StationController {
                     // There: work at it for its span of station time, then back to the quarters.
                     if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; continue }
                     if clock >= m.phaseUntil { crewRested(m) }
-                case .carry(let crate, _, let aimed):
-                    // The destination as it is now: a re-aim or a reversal may have moved it since the order.
-                    let to: Spot = { if case .carry(_, _, let t) = cargo[m.current?.id ?? -1]?.command.kind { return t }; return aimed }()
+                case .carry(let crate, _, _):
                     guard let id = m.current?.id, let job = cargo[id] else {
                         // The crate went away: put down whatever is on the arms, where it stands.
                         dropWhereStanding(m)
                         finish(m); continue
                     }
+                    let to = job.aim   // the place as it is now: asked again at lift, or sent back
                     switch m.phaseKind {
                     case .walk:
                         advance(m); continue
@@ -462,8 +461,7 @@ extension StationController {
                         advance(m)
                         // Up on the arms: now the slot is asked for, against the stack as it stands this moment.
                         reaim(id, for: m)
-                        if case .carry(_, _, let dest) = m.current?.kind { walk(m, to: standCell(station, near: dest.cell)) }
-                        else { walk(m, to: standCell(station, near: to.cell)) }
+                        walk(m, to: standCell(station, near: (cargo[id]?.aim ?? to).cell))
                         continue
                     case .haul:
                         advance(m); continue

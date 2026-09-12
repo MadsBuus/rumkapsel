@@ -59,9 +59,9 @@ struct Command {
     let words: String
 
     enum Kind {
-        /// A crate from one spot to another: an office's package to storage, storage to the deck,
-        /// the untested row to the tested one, either to the rocket.
-        case carry(crate: CrateRef, from: Spot, to: Spot)
+        /// A crate from where it stands to a yard: an office's package to storage, storage to the
+        /// deck, either to the rocket. The yard alone: the slot is asked for with the crate on the arms.
+        case carry(crate: CrateRef, from: Spot, to: Yard)
         /// Fetch a new office's crate from the bay and walk it in.
         case deliverOffice(key: String)
         /// Somewhere to be: the lounge, the dorm, the hallway.
@@ -217,11 +217,11 @@ struct Command {
         self.id = id; self.kind = kind; self.words = words; self.patience = patience; self.after = after
     }
 
-    /// The same carry, the same order, aimed at another slot: what a carrier is handed when the slot
-    /// is asked for again with the crate on the arms, or when the board changes its mind.
-    func aimed(at to: Spot) -> Command {
+    /// The same carry, the same order, bound for another yard: what a carrier is handed when the
+    /// board changes its mind and the crate goes back where it came from.
+    func aimed(at yard: Yard) -> Command {
         guard case .carry(let crate, let from, _) = kind else { return self }
-        return Command(id: id, kind: .carry(crate: crate, from: from, to: to), words: "carrying \(crate.words) to \(to.words)", patience: patience, after: after)
+        return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", patience: patience, after: after)
     }
 
     /// The same command said differently: for hover and the log when its pace changes.
@@ -231,7 +231,7 @@ struct Command {
 
     // MARK: the usual ones
 
-    static func carry(_ crate: CrateRef, from: Spot, to: Spot, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
+    static func carry(_ crate: CrateRef, from: Spot, to: Yard, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
         Command(kind: .carry(crate: crate, from: from, to: to),
                 words: "carrying \(crate.words) to \(to.words)",
                 patience: seconds, after: after)

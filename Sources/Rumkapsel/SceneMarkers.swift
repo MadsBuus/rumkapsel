@@ -93,7 +93,7 @@ extension StationController {
                 var ghosts = 0                 // uncommitted work: unfinished, translucent boxes
                 var pr: PullRequest?
                 var packaged = false           // a pull request bundles everything into one strapped package
-                var boxOpacity = 1.0
+                let boxOpacity = 1.0
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
                     count = min(16, max(1, cb.count))
@@ -430,10 +430,11 @@ extension StationController {
     /// Which row a rocket loads from: the deck when releases go through staging, storage otherwise.
     private var loadSource: String { ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck" }
 
-    /// Nothing of this repository left standing on its row, and nothing on anyone's arms.
+    /// Nothing of this repository left belonging to its row, and nothing on anyone's arms.
     private func padClear(_ r: Rocket) -> Bool {
-        let onFloor = markerRoot.childNodes.contains { ($0.name ?? "").hasPrefix("\(loadSource):\(r.station)|\(r.repo)|") }
-        return !onFloor && world.carriedCount(station: r.station, repo: r.repo) == 0
+        let yard: Yard = loadSource == "deck" ? .deck : .storage
+        let left = fleet.stations[r.station]?.ledger.crates(of: r.repo).contains { $0.placed == yard } ?? false
+        return !left && world.carriedCount(station: r.station, repo: r.repo) == 0
     }
 
     /// Hands out a carry for every crate of the repository still standing on its row. A crate already
@@ -442,12 +443,11 @@ extension StationController {
         guard let station = fleet.stations[r.station] else { return }
         let source = loadSource
         let repo = r.repo
-        let boxes = markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(source):\(r.station)|\(repo)|") }
-        guard !boxes.isEmpty else { return }
-        let numbers = boxes.map { Int($0.name?.split(separator: "|").last ?? "") ?? 0 }
+        let yard: Yard = source == "deck" ? .deck : .storage
+        let numbers = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
+        guard !numbers.isEmpty else { return }
         for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
-            guard let crate = command.crate, case .carry(_, let from, _) = command.kind,
-                  let b = crateNode(source, crate, at: from) else { continue }
+            guard let crate = command.crate, let b = crateNode(crate) else { if let c = command.crate { world.unorder(c) }; continue }
             r.assigned.insert(crate.key)   // ordered aboard: the launch waits for it
             r.pending.insert(command.id)
             carry(command, node: b) { [weak self, weak r] in
