@@ -99,11 +99,28 @@ extension StationController {
         }
     }
 
-    /// Where the shower's water comes from, in world x/z: the nozzle over the corner across from the bowl.
+    /// The bath's two fixtures and the corner of its tile each backs into: the toilet and the shower
+    /// take the tiles that are neither the doorway nor the far corner the room's name is cut into.
+    /// The corner is the unit direction from the room's middle out to the tile's outer wall corner.
+    func bathFixtures(station: Station, bath: Room) -> (toilet: Cell, shower: Cell, toiletCorner: SIMD2<Double>, showerCorner: SIMD2<Double>) {
+        let door = station.doorCell(of: bath.key)
+        let maxY = bath.cells.map(\.y).max()!
+        let sign = Cell(x: bath.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
+        var tiles = bath.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        while tiles.count < 2, let more = bath.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
+        let mid = SIMD2(bath.cells.map { Double($0.x) }.reduce(0, +) / Double(bath.cells.count),
+                        bath.cells.map { Double($0.y) }.reduce(0, +) / Double(bath.cells.count))
+        func corner(_ c: Cell) -> SIMD2<Double> {
+            let d = SIMD2(Double(c.x), Double(c.y)) - mid
+            return SIMD2(d.x < 0 ? -1 : 1, d.y < 0 ? -1 : 1)
+        }
+        return (tiles[0], tiles[1], corner(tiles[0]), corner(tiles[1]))
+    }
+
+    /// Where the shower's water comes from, in world x/z: the nozzle over the shower tile's corner.
     func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
-        let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        let sc2 = cells.count > 1 ? cells[1] : cells.last!
-        return SIMD2(station.offset.x + Double(sc2.x) + 0.3, station.offset.y + Double(sc2.y) - 0.18)
+        let f = bathFixtures(station: station, bath: bath)
+        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.18 * f.showerCorner.y)
     }
 
     /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
@@ -125,6 +142,32 @@ extension StationController {
     }
 
     /// The tile a workout stands on, and the exact spot and facing for it.
+    /// A visit to the bath: the shower or the bowl, whichever is free, walked to and acted for its
+    /// whole time, then back to where the minion came from. False when both fixtures are taken.
+    @discardableResult
+    func visitBath(_ m: Minion, station: Station) -> Bool {
+        guard let bath = station.rooms["kind:bath"] else { return false }
+        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
+        let want = m.showering ? 1 : 0
+        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { return false }
+        m.showering = fixture == 1
+        m.fixture = fixture
+        m.bathDue = 0
+        let back = m.place
+        send(m, to: .bath)
+        start(m, .bath(m.showering ? .shower : .quick, back: back))
+        m.phaseUntil = clock + (m.showering ? 10 : 6)
+        let f = bathFixtures(station: station, bath: bath)
+        let cell = m.showering ? f.shower : f.toilet
+        m.path = route(m, to: cell)
+        // Then the exact spot: under the nozzle with the wall at the back, or a step in front of the bowl, facing it.
+        let nozzle = showerNozzle(station: station, bath: bath)
+        m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
+                                  : SIMD2(Double(cell.x) + 0.02 * f.toiletCorner.x, Double(cell.y) - 0.1 * f.toiletCorner.y)
+        m.facing = m.showering ? atan2(f.showerCorner.x, -f.showerCorner.y) : atan2(f.toiletCorner.x, f.toiletCorner.y)
+        return true
+    }
+
     /// A turn in the gym, on a fixture nobody else is on: walked to, then acted for its whole time,
     /// then back to where the minion came from. False when every fixture is taken.
     @discardableResult
@@ -636,29 +679,7 @@ extension StationController {
                             send(m, to: back)
                         }
                     } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
-                        // One to a fixture: the shower or the bowl, whichever is free; both taken, wait.
-                        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
-                        let want = m.showering ? 1 : 0
-                        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { continue }
-                        m.showering = fixture == 1
-                        m.fixture = fixture
-                        // Off to the bath for a moment, then back to wherever it was.
-                        m.bathDue = 0
-                        let back = m.place
-                        send(m, to: .bath)
-                        start(m, .bath(m.showering ? .shower : .quick, back: back))
-                        m.phaseUntil = clock + (m.showering ? 10 : 6)
-                        // Toilet in the near corner, shower in the far one: pick one and walk to it, facing the fixture.
-                        if let bath = station.rooms["kind:bath"] {
-                            let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                            let cell = m.showering ? (cells.count > 1 ? cells[1] : cells.last!) : cells.first!
-                            m.path = route(m, to: cell)
-                            // Then the exact spot: under the nozzle, or a step in front of the bowl, facing it.
-                            let nozzle = showerNozzle(station: station, bath: bath)
-                            m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
-                                                      : SIMD2(Double(cell.x) - 0.02, Double(cell.y) + 0.1)
-                            m.facing = m.showering ? .pi / 4 : -.pi * 3 / 4
-                        }
+                        if !visitBath(m, station: station) { continue }   // both fixtures taken: wait
                     }
                     if m.place == .gym, m.exercising {
                         // Once on the tile, shuffle onto the fixture itself and square up to it.

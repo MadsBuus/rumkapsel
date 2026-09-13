@@ -242,33 +242,31 @@ extension StationController {
                 staticRoot.addChildNode(shelf)
             }
             if let bath = station.rooms["kind:bath"] {
-                // A toilet in one corner and a shower post in the other.
-                let cells = bath.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-                let tc = cells.first!, sc = cells.last!
+                // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
+                let f = bathFixtures(station: station, bath: bath)
+                let tc = f.toilet, sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
                 let bowl = SCNNode(geometry: faceted(SCNCylinder(radius: 0.13, height: 0.2), 4))
                 bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
-                bowl.position = v3(station.offset.x + Double(tc.x) - 0.22, 0.1, station.offset.y + Double(tc.y) - 0.22)
+                bowl.position = v3(station.offset.x + Double(tc.x) + 0.22 * tk.x, 0.1, station.offset.y + Double(tc.y) + 0.22 * tk.y)
                 let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
                 tank.geometry!.firstMaterial = bowl.geometry!.firstMaterial
-                tank.position = v3(0, 0.15, -0.14)
+                tank.position = v3(0, 0.15, 0.14 * tk.y)
                 bowl.addChildNode(tank)
                 bowl.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(bowl)
                 // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
-                // It takes the corner across from the toilet; the far corner is the sign's.
-                let sc2 = cells.count > 1 ? cells[1] : sc
                 let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
                 arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3, 0.62, station.offset.y + Double(sc2.y) - 0.35)
+                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.62, station.offset.y + Double(sc2.y) + 0.35 * sk.y)
                 let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
                 nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                nozzle.position = v3(0, -0.03, 0.1)
+                nozzle.position = v3(0, -0.03, -0.1 * sk.y)
                 arm.addChildNode(nozzle)
                 arm.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(arm)
                 let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
                 drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
-                drain.position = v3(station.offset.x + Double(sc2.x) + 0.3, 0.01, station.offset.y + Double(sc2.y) - 0.25)
+                drain.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.01, station.offset.y + Double(sc2.y) + 0.25 * sk.y)
                 drain.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(drain)
             }

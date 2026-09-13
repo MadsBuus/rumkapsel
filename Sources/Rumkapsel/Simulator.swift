@@ -1080,14 +1080,17 @@ extension StationController {
         enqueue { [self] in
             switch nudge {
             case .bath:
-                // The bath only pulls on someone settled and not working: send them to the couch first.
-                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.busy }
-                guard let m = free.first(where: { $0.place == .lounge }) ?? free.first else {
-                    handle(.log("nobody free for the bath")); return
+                // The press says "now": whoever is resting goes for a shower straight away, picked as for the gym.
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
+                    ?? could.first(where: { !$0.isCrew && !$0.busy })
+                    ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
+                    ?? could.first(where: { $0.isCrew && !$0.busy })
+                guard let m, let station = fleet.stations[m.station], station.rooms["kind:bath"] != nil else {
+                    handle(.log(could.isEmpty ? "nobody free for the bath" : "no bath on the station")); return
                 }
-                if m.place != .lounge { send(m, to: .lounge) }
-                m.bathDue = clock
                 m.showering = true
+                if !visitBath(m, station: station) { handle(.log("both fixtures in the bath are taken")) }
             case .workout:
                 // The press says "now": whoever is resting takes a turn straight away, night or not.
                 // A worker on the couch first; then any worker not working; then a worker whose session is

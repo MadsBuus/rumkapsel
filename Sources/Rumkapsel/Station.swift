@@ -171,7 +171,9 @@ final class Station {
     /// Eight flat beds, one per dorm tile.
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
         guard let q = rooms["kind:quarters"] else { return [] }
-        return q.cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
+        // Nothing sits in a doorway: a sleeper on the door cell would shut the room to everyone else.
+        let door = doorCell(of: "kind:quarters")
+        return q.cells.filter { $0 != door }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
     }
     /// Couch spots along the lounge walls where free workers sit.
     var couches: [SIMD2<Double>] {
@@ -364,6 +366,7 @@ final class Station {
         rooms[old] = nil
         rooms[new] = nr
         for c in nr.cells { occupied[c] = new }
+        forgetFloorPlan()
     }
 
     func removeRoom(key: String) {

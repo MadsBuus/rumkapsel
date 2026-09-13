@@ -229,10 +229,12 @@ extension StationController {
         return out
     }
 
-    /// A walk for a minion: round the props and round everyone else.
+    /// A walk for a minion: round the props and round everyone else. When the only way through is
+    /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
     func route(_ m: Minion, to cell: Cell) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
-        return station.path(from: m.pos, to: cell, avoiding: crowd(around: m))
+        let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m))
+        return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
 
     /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.

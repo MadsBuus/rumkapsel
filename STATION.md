@@ -79,6 +79,8 @@ since real stations mandate both.
   not even at the start of the day: they arrive one by one, or spread before they set off.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
+- Nothing sits in a doorway: no bed, couch, shower, fixture or sign on a room's door cell, and
+  nobody settles there. A room with its door cell taken is shut to everyone else.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
   with the pixels where they belong. Nobody wanders off mid-shower.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
