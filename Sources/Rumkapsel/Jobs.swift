@@ -178,8 +178,9 @@ extension StationController {
     }
 
     func send(_ m: Minion, to place: Place) {
-        // A minion on a job goes where the job takes it; rest waits until the job is done.
-        if m.onJob { return }
+        // A minion on a job goes where the job takes it; rest waits until the job is done. A turn in
+        // the gym lasts its whole time too: a session's refresh re-planning rest does not cut it short.
+        if m.onJob || m.exercising { return }
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
         var place = place

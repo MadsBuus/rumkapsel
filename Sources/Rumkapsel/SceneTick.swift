@@ -125,6 +125,24 @@ extension StationController {
     }
 
     /// The tile a workout stands on, and the exact spot and facing for it.
+    /// A turn in the gym, on a fixture nobody else is on: walked to, then acted for its whole time,
+    /// then back to where the minion came from. False when every fixture is taken.
+    @discardableResult
+    func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool {
+        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
+        guard let kind = Command.Workout.allCases.filter({ !taken.contains($0) }).randomElement() else { return false }
+        let back = m.place
+        m.couch = nil
+        send(m, to: .gym)
+        start(m, .exercise(kind, back: back), announce: true)
+        m.phaseUntil = clock + Double.random(in: 18...30)
+        let stand = gymStand(station: station, gym: gym, kind)
+        m.path = route(m, to: stand.cell)
+        m.fetchSpot = stand.spot
+        m.facing = stand.facing
+        return true
+    }
+
     func gymStand(station: Station, gym: Room, _ kind: Command.Workout) -> (cell: Cell, spot: SIMD2<Double>, facing: Double) {
         let world = gymSpots(station: station, gym: gym)[kind.rawValue]
         let local = SIMD2(world.x - station.offset.x, world.y - station.offset.y)
@@ -661,22 +679,7 @@ extension StationController {
                               !isNight(station), let gym = station.rooms["kind:gym"] {
                         // The lounge gets dull by day: a turn in the gym, one to a fixture, whichever is free.
                         if m.nextWorkoutAt == 0 { m.nextWorkoutAt = clock + Double.random(in: 240...600) }
-                        if clock >= m.nextWorkoutAt {
-                            let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
-                            let pick = Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
-                            m.nextWorkoutAt = 0
-                            if let kind = pick {
-                                let back = m.place
-                                m.couch = nil
-                                send(m, to: .gym)
-                                start(m, .exercise(kind, back: back), announce: true)
-                                m.phaseUntil = clock + Double.random(in: 18...30)
-                                let stand = gymStand(station: station, gym: gym, kind)
-                                m.path = route(m, to: stand.cell)
-                                m.fetchSpot = stand.spot
-                                m.facing = stand.facing
-                            }
-                        }
+                        if clock >= m.nextWorkoutAt { m.nextWorkoutAt = 0; _ = takeTurnInGym(m, station: station, gym: gym) }
                     } else if m.place != .lounge { m.nextWorkoutAt = 0 }
                     if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                         if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }

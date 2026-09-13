@@ -1089,14 +1089,21 @@ extension StationController {
                 m.bathDue = clock
                 m.showering = true
             case .workout:
-                // Somebody settled in the lounge and not working: the gym is due for them now.
-                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.busy }
-                guard let m = free.first(where: { $0.place == .lounge }) ?? free.first else {
-                    handle(.log("nobody free for the gym")); return
+                // The press says "now": whoever is resting takes a turn straight away, night or not.
+                // A worker on the couch first; then any worker not working; then a worker whose session is
+                // quiet but still counted busy; then a teammate asleep in the quarters. Only a job, the
+                // bath or a turn already in hand rules someone out.
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
+                    ?? could.first(where: { !$0.isCrew && !$0.busy })
+                    ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
+                    ?? could.first(where: { $0.isCrew && !$0.busy })
+                guard let m, let station = fleet.stations[m.station], let gym = station.rooms["kind:gym"] else {
+                    handle(.log(could.isEmpty ? "nobody free for the gym" : "no gym on the station")); return
                 }
-                if m.place != .lounge { send(m, to: .lounge) }
                 m.bathDue = 0
-                m.nextWorkoutAt = clock
+                m.nextWorkoutAt = 0
+                if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
             case .wedge:
                 // Whoever is carrying a crate stops dead: the station has to catch up without them.
                 guard let m = minions.values.first(where: { !$0.wedged && { if case .carry = $0.current?.kind { return true }; return false }($0) }) else {
