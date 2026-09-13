@@ -79,8 +79,20 @@ since real stations mandate both.
   not even at the start of the day: they arrive one by one, or spread before they set off.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
-- Nothing sits in a doorway: no bed, couch, shower, fixture or sign on a room's door cell, and
-  nobody settles there. A room with its door cell taken is shut to everyone else.
+- Two can pass each other on one tile, side by side, but never slide through each other: a body
+  is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
+  Whoever finds someone in the way waits a beat, then goes round.
+
+## Rooms
+
+- A room opens to the corridor through one doorway: the room tile that touches the hallway. Nothing
+  sits in it, no bed, couch, shower, fixture or sign, and nobody settles there; a room with its
+  door tile taken is shut to everyone else.
+- Fixtures stand along the walls away from the door, one minion to each: a bed, a couch, the bowl,
+  the shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it.
+- The middle of a room stays clear to walk through; a room holds as many as it has free tiles.
+- The dorm, lounge and bath touch each other off the corridor, the gym beside them; the yard blocks
+  join by doorways of their own and keep their aisles clear.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
   with the pixels where they belong. Nobody wanders off mid-shower.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another

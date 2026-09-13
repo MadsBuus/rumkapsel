@@ -223,8 +223,10 @@ extension StationController {
     func crowd(around m: Minion) -> Set<Cell> {
         var out: Set<Cell> = []
         for o in minions.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
-            let s = Station.sub(o.pos)
-            for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } }
+            // A body, standing or lying, is solid at the middle of its tile, like a crate: the way past
+            // runs along the tile's edge, a third of a tile off. Two can pass on one tile, never through
+            // each other; that is the walk's own rule, which waits on whoever is in the way in step.
+            out.insert(Station.sub(o.pos))
         }
         return out
     }
