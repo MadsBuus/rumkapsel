@@ -9,16 +9,16 @@ import Foundation
 
 enum Walk {
     /// Someone within this of the walker, and not behind it, is being passed: far enough for the awkward moment.
-    static let reach = 1.4
+    static let reach = 1.0
     /// A pass begun is held until the other is this far behind, so it never flickers when the two are abreast.
     static let behind = 0.35
     /// How far the figure leans off its line while passing: a shoulder's width.
-    static let sidestep = 0.24
+    static let sidestep = 0.16
     /// Within this of a waypoint counts as there.
     static let arrive = 0.08
     /// The pass is driven by the gap to the other, no clock: from `reach` in, slow down and turn to face them;
     /// from `leanFrom` in, lean out and wriggle past; behind, straighten up and stride on.
-    static let leanFrom = 0.6
+    static let leanFrom = 0.5
     /// The pace while passing, of the walk's own.
     static let slowTo = 0.35
 
