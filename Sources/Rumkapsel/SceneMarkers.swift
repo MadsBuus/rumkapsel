@@ -391,10 +391,8 @@ extension StationController {
     private func take(_ r: Rocket, _ command: Command) {
         r.command = command
         r.phase = 0
-        r.since = clock
         r.assigned = []   // a new stage orders its own cargo; what is already aboard stays aboard
         r.pending = []
-        r.moaned = 0
         issue(command, by: "rocket", announce: true)
         beginRocketPhase(r)
     }
@@ -430,13 +428,7 @@ extension StationController {
                 // read short of what is really on the pad: the carries themselves are the second,
                 // exact witness, and both have to agree before the rocket may go.
                 let short = r.assigned.count - world.aboard(station: r.station, repo: r.repo)
-                guard padClear(r), r.pending.isEmpty, short <= 0 else {
-                    if clock - r.since > 90, clock - r.moaned > 30 {
-                        r.moaned = clock
-                        logEvent("\(r.repo): the rocket holds, \(max(short, 1)) crate\(max(short, 1) == 1 ? "" : "s") still to come aboard")
-                    }
-                    continue
-                }
+                guard padClear(r), r.pending.isEmpty, short <= 0 else { continue }
                 advanceRocket(r)
             case .climb:
                 if clock >= r.until {
@@ -456,7 +448,6 @@ extension StationController {
     private func advanceRocket(_ r: Rocket) {
         if r.phase + 1 < r.command.phases.count {
             r.phase += 1
-            r.since = clock
             beginRocketPhase(r)
             return
         }

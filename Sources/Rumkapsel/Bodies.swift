@@ -62,7 +62,6 @@ extension StationController {
             }
             cargo[c.id]?.command = c.from(spot)   // the same order, the same id: only where it starts moved
             cargo[c.id]?.carrier = nil
-            cargo[c.id]?.issuedAt = clock
             cargo[c.id]?.hurry = false
             cargo[c.id]?.gaveUp.insert(m.id)   // somebody else's turn, while there is somebody else
             m.current = nil; m.phase = 0; m.phaseUntil = 0; m.fetchSpot = nil

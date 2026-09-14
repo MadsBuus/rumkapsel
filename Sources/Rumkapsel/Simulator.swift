@@ -513,7 +513,7 @@ final class SimulatorModel: ObservableObject {
                        openRelease(repo, production: true) == nil ? "no open production release on \(repo)" : nil),
             ]),
             Group(id: "Station", note: nil, buttons: [
-                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Workout"), button("Wedge carrier"),
+                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Workout"), button("Meet in the hall"), button("Wedge carrier"),
             ]),
         ]
     }
@@ -784,6 +784,7 @@ final class SimulatorModel: ObservableObject {
         case "Everyone to lounge": station.simulate(.lounge)
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
+        case "Meet in the hall": station.simulate(.meet)
         case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
 
@@ -1044,7 +1045,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, night(Bool?), wedge, workout }
+enum SimNudge { case bath, chore, lounge, meet, night(Bool?), wedge, workout }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1140,6 +1141,21 @@ extension StationController {
                 }
                 m.bathDue = 0
                 if let st = fleet.stations[m.station], !startRoam(m, station: st) { handle(.log("nowhere clear to roam")) }
+            case .meet:
+                // Two free minions set at the two ends of the hall's east-west arm, facing each other, each
+                // ordered straight along the row to the other's spot: they have to pass, and the walk rule shows how.
+                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && $0.carried == nil && !$0.lying }
+                guard free.count >= 2, let st = fleet.stations[free[0].station] else { handle(.log("nobody free to meet")); return }
+                let a = free[0], b = free.first { $0.station == a.station && $0.id != a.id } ?? free[1]
+                let half = st.corridorCells.map(\.x).max() ?? 2
+                for (m, from, to) in [(a, -half, half), (b, half, -half)] {
+                    m.couch = nil; m.bed = nil
+                    send(m, to: .core)
+                    m.pos = SIMD2(Double(from), 0)
+                    m.facing = atan2(Double(to - from), 0)
+                    m.path = stride(from: from, through: to, by: to > from ? 1 : -1).dropFirst().map { SIMD2(Double($0), 0) }
+                }
+                handle(.log("\(a.home.name) and \(b.home.name) meet in the hall"))
             case .lounge:
                 for m in minions.values where !m.isCrew && !m.onJob {
                     m.busy = false

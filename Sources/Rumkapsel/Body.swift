@@ -95,6 +95,8 @@ class Body {
     var napping = false
     /// When this walk was last planned again because the floor changed under it: at most once a second.
     var lastReplanAt = -10.0
+    /// The bearing held for the length of a pass, so the spot beside the waypoint stays one spot; nil when nobody is in the way.
+    var passDir: SIMD2<Double>?
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false

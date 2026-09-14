@@ -206,7 +206,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         /// the arms, and grounded at set-down. The command itself names only the yard.
         var aim: Spot
         /// When the current leg began: the order, then the assignment, then the pickup. Patience runs per leg.
-        var issuedAt = 0.0
         /// Carries queued behind this one: the carrier picks up the pace.
         var hurry = false
         /// Who gave this carry up: passed over for it while anyone else is free.

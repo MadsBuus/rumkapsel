@@ -102,7 +102,7 @@ Agreed direction, in the order things flow. Not all of it exists yet.
    what keeps a source snap from undoing what a minion just did.
 
 Steps 4 to 7 exist for crates, described in the next section. `Commands.swift` holds `Command` (a kind, a
-phase list with each phase marked interruptible or not, a patience, and words for humans) and
+phase list with each phase marked interruptible or not, and words for humans) and
 `StationTruth` (the pallet out and what rides on it, offices ordered and crates waiting in the bay). Where
 each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. `World`
 issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — and the scene
@@ -172,11 +172,9 @@ arms, it walks back. It runs from `flushScene` and the half-second tick, never f
 A carry names a yard, nothing more (`Command.carry(crate:from:to: Yard)`). The job holds the aim: a
 place asked for when the order is taken, which the yard then holds for the crate (`bound`); asked for
 again with the crate up on the arms, against the stack as it stands that moment; grounded at set-down,
-when `bound` becomes `slot`. One aside routine serves every planner. Truth before the picture: a carry's
-patience, ninety station seconds per leg, covers the wait for a carrier, the walk to the crate and the
-carry itself; a carry that has not landed by then is set down where its order says, whoever was carrying
-it lets go, and the log says the station caught up. So the ledger is never more than one patience behind
-the source. A carrier with carries of its repository queued behind it hurries, and says so.
+when `bound` becomes `slot`. One aside routine serves every planner. A carry that stalls is given up by
+the body reconciler and goes back in the queue from where the crate lies; nothing is ever set down by a
+clock. A carrier with carries of its repository queued behind it hurries, and says so.
 
 `--ledger-tests` feeds a ledger facts in every order, board before release, release before board, stale
 after fresh, A then B then A, and holds it to: every crate in one yard at most, a move outranking any

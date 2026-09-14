@@ -614,7 +614,6 @@ extension StationController {
                         if m.carried == nil {
                             lift(m, job.node)
                             self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
-                            cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
                         }
                         if clock < m.phaseUntil { continue }
                         advance(m)

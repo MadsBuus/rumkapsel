@@ -32,9 +32,12 @@ enum Walk {
             let close = dist2(o.pos, target) < reach * reach || dist2(o.pos, m.pos) < reach * reach
             return ahead && close ? o : nil
         }
-        guard let near else { return (target, nil, .zero) }
-        // Always to the walker's own right: no side to choose, nothing to remember.
-        let right = SIMD2(dir.y, -dir.x)
+        guard let near else { m.passDir = nil; return (target, nil, .zero) }
+        // Always to the walker's own right of the bearing it had when the pass began: the bearing to a near
+        // waypoint swings as the walker closes in, and a spot that swung with it could never be reached.
+        let held = m.passDir ?? dir
+        m.passDir = held
+        let right = SIMD2(held.y, -held.x)
         let spot = target + right * sidestep
         let cell = Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded()))
         if station.walkable.contains(cell), !station.obstacles.contains(Station.sub(spot)) { return (spot, near, right) }
@@ -50,15 +53,15 @@ enum Walk {
         let dist = (d.x * d.x + d.y * d.y).squareRoot()
         let stride = speed * dt
         m.pos = dist <= stride ? aim : m.pos + d / dist * stride
-        // There: at the waypoint itself, or, with someone in the way, anywhere within a sidestep of it.
-        // The bearing to a near waypoint swings as the walker closes in, so the spot beside it is never
-        // chased to the exact point; close enough is the pass done.
-        let there = dist2(aim, m.pos) < arrive * arrive || (near != nil && dist2(target, m.pos) < (sidestep + arrive) * (sidestep + arrive))
-        if there {
+        // There: at the waypoint, or at the fixed spot beside it while someone is in the way.
+        if dist2(aim, m.pos) < arrive * arrive {
             if near == nil { m.pos = target }
             m.path.removeFirst()
         }
-        if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
+        // Passing, the body turns to face the one it passes and slides by sideways, like two broad
+        // shoulders in a doorway; clear again, it faces the way it walks.
+        if let near { m.facing = atan2(near.pos.x - m.pos.x, near.pos.y - m.pos.y) }
+        else if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
         return near
     }
 
