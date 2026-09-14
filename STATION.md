@@ -84,6 +84,14 @@ since real stations mandate both.
   Whoever finds someone in the way waits a beat, then goes round. Someone on a couch or in bed is
   on the furniture, off the walkway, and in nobody's way.
 
+## Tasks and work
+
+- An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue
+  the pull request closes, the pull request's own number when it closes none. One crate per task,
+  however many pull requests it took; the crate's hover lists them, and its click opens the task.
+- Releases are made of pull requests. What git says a release carries is translated to tasks on the
+  floor where the link is known, and stays a pull request where it is not.
+
 ## Bodies
 
 - One owner per body. The command in hand owns a minion's place, path and pose. Nothing else

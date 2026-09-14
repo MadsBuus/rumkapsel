@@ -1005,9 +1005,12 @@ final class World {
         guard station.hasPad, !haulOrdered(office: key) else { return [] }
         guard hasPackage(key) else { nothingToHaul.insert(key); return [] }   // nothing to carry: free to clear at once
         let repo = room.repo ?? "work"
-        // A crate is its pull request's number: with none known there is nothing the yard could hold.
-        guard let number = room.branch.flatMap({ b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.number } }) ?? crewRoomInfo[key]?.prNumber, number > 0
-        else { nothingToHaul.insert(key); return [] }
+        // A crate is a task: the issue the pull request closes when it closes one, else the pull request
+        // itself. With no pull request known there is nothing the yard could hold.
+        let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+        guard let prNumber = pull?.number ?? crewRoomInfo[key]?.prNumber, prNumber > 0 else { nothingToHaul.insert(key); return [] }
+        let fromKey = room.key.firstMatch(of: #/#(\d+)$/#).flatMap { Int($0.1) }
+        let number = pull?.closes.first ?? github.task(repo: repo, pull: prNumber) ?? fromKey ?? prNumber
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }

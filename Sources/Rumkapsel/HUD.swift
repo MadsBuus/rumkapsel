@@ -250,7 +250,10 @@ extension StationController {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let parts = h.split(separator: "|")
-            infoLabel.text = "\(parts[1]) · PR #\(n) · \(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging") · click to open"
+            let repo = String(parts[1])
+            let prs = github.pulls(repo: repo, task: n)
+            let what = prs.isEmpty ? "PR #\(n)" : "issue #\(n) · " + prs.map { "PR #\($0)" }.joined(separator: ", ")
+            infoLabel.text = "\(repo) · \(what) · \(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging") · click to open"
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
@@ -286,7 +289,7 @@ extension StationController {
             return
         }
         guard let root = world.repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root),
-              let url = URL(string: "https://github.com/\(owner)/pull/\(n)") else { return }
+              let url = URL(string: "https://github.com/\(owner)/\(github.pulls(repo: repo, task: n).isEmpty ? "pull" : "issues")/\(n)") else { return }
         DispatchQueue.main.async { NSWorkspace.shared.open(url) }
     }
 
