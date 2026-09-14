@@ -43,6 +43,9 @@ enum Cue {
     case packed(String)
     /// The rows are drawn again.
     case redraw
+    /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
+    case palletLift(station: String, crate: CrateRef)
+    case palletLanded(station: String, crate: CrateRef, aboard: Bool)
 }
 
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
@@ -81,6 +84,14 @@ final class Simulation<B: Body> {
     var hooks: SimHooks?
     /// Crates under way, by command id.
     var cargo: [Int: Cargo] = [:]
+    /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
+    /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
+    var pallets: [String: PalletJob] = [:]
+    var palletWishes: [String: Bool] = [:]
+    /// Station time as a date: the wall clock in the app, the simulated clock in a simulator, so a slow
+    /// frame can never age a session or a landing.
+    private let epoch = Date()
+    var now: Date { hooks != nil ? epoch.addingTimeInterval(clock) : Date() }
     /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
     /// What the scene shows once, drained every frame.
@@ -550,11 +561,12 @@ final class Simulation<B: Body> {
         return m.path.isEmpty ? .there : .wondering
     }
 
-    /// One frame of a body with nowhere to walk, once the scene has run the pallet errands, which are still
-    /// its own: a crate seen to (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
+    /// One frame of a body with nowhere to walk: a pallet errand (`Pallet.swift`), a crate seen to
+    /// (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
     /// life — QA's rows, the bath and gym rules, the idle clock, the visits, the wander — or the way
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
+        if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.

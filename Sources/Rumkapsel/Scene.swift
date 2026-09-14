@@ -175,15 +175,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var rocketActors: [String: Rocket] = [:]
     /// Every shuttle in the air right now, each running its flight command.
     var shuttles: [Shuttle] = []
-    /// The one hover pallet a station may have out, keyed by station name.
-    var pallets: [String: Pallet] = [:]
+    /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
+    var palletViews: [String: PalletView] = [:]
     /// The panel on the wall by each storage doorway, so an order can make it blink.
     var consolePanels: [String: SCNNode] = [:]
     /// Props on their way out, fading on the station's clock rather than on an action.
     var fadingProps: [(node: SCNNode, at: Double)] = []
-    /// A staging release that ended before its pallet was out, by "station|repo": true pushes the
-    /// pallet to the deck once it is loaded, false empties it back into storage.
-    var palletWishes: [String: Bool] = [:]
     var lastBoxCount: [String: Int] = [:]
     /// What each marker was last drawn as, by node name: an office's boxes by everything that shapes
     /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
@@ -279,8 +276,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
     /// runs at its own pace and may stall. Everything on the station that judges freshness against
     /// "now" reads this, so a slow frame can never age a session or a landing.
-    private let simEpoch = Date()
-    var now: Date { sim.map { simEpoch.addingTimeInterval($0.clock) } ?? Date() }
+    var now: Date { simulation.now }
     var demoClock = 0.0
     var demoMerged = false
     var demoStaged = false
@@ -935,15 +931,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
-            orderPallet(station: station, repo: repo, number: number)
+            simulation.orderPallet(station: station, repo: repo, number: number)
         case .stagingMerged(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) merged")
-            palletMerged(station: station, repo: repo)
+            simulation.palletMerged(station: station, repo: repo)
         case .stagingClosed(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) closed, not merged")
-            palletClosed(station: station, repo: repo)
+            simulation.palletClosed(station: station, repo: repo)
         case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
             break    // the rocket command that comes with it is the cue; the log line came as a .log
         case .releaseMerged(let stationName, let repo, _, _, _, false):
@@ -1035,14 +1031,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             lastHaulSchedule = clock
             simulation.scheduleCarries()
             tickRockets()
-            servicePallets()
+            simulation.servicePallets()
             simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
             simulation.replanBlockedWalks()
         }
         tickShuttles()
-        tickPallets()
+        simulation.stepPallets(dt: dt)
+        drawPallets()
         tickCrateMotions()
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.minion.node.position.x), 0, Double(pm.minion.node.position.z))

@@ -79,7 +79,7 @@ enum Props {
 
     /// The hover pallet: a flat two-tier slab that floats a hand's breadth off the floor, with a
     /// glowing rim and a cushion of light under it. Three rows of four crates stand on the top plate.
-    static let palletWidth = 1.8, palletDepth = 1.4, palletLift = 0.12
+    static let palletWidth = PalletGeometry.width, palletDepth = PalletGeometry.depth, palletLift = PalletGeometry.lift
 
     static func pallet(color: NSColor) -> SCNNode {
         let n = SCNNode()
@@ -161,14 +161,10 @@ enum Props {
     }
 
     /// Where crate `index` stands on a pallet: four across, three rows back, stacked past twelve.
-    static func palletSlot(_ index: Int) -> (row: Int, column: Int, level: Int) {
-        (row: (index / 4) % 3, column: index % 4, level: index / 12)
-    }
+    static func palletSlot(_ index: Int) -> (row: Int, column: Int, level: Int) { PalletGeometry.slot(index) }
 
     /// That slot's place on the pallet's own top plate.
-    static func palletOffset(row: Int, column: Int, level: Int) -> SIMD3<Double> {
-        SIMD3((Double(column) - 1.5) * 0.42, 0.025 + Double(level) * 0.34, (Double(row) - 1) * 0.42)
-    }
+    static func palletOffset(row: Int, column: Int, level: Int) -> SIMD3<Double> { PalletGeometry.offset(row: row, column: column, level: level) }
 
     /// A small wall panel: the storage console, where a pallet is ordered.
     static func console(color: NSColor) -> SCNNode {

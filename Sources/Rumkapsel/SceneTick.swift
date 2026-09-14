@@ -192,18 +192,17 @@ extension StationController {
             case .waking: m.node.opacity = m.opacity; posed = false
             case .walking, .wondering: break
             case .there:
-                switch m.current?.kind {
-                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
-                    palletStep(m, station: station); posed = false
-                default:
-                    switch simulation.stepThere(m, station: station, dt: dt) {
-                    case .gone: despawn(m); continue
-                    case .spent: posed = false
-                    case .posed: break
-                    }
+                switch simulation.stepThere(m, station: station, dt: dt) {
+                case .gone: despawn(m); continue
+                case .spent: posed = false
+                case .posed: break
                 }
             }
             mirrorLoad(m)
+            if simulation.palletErrand(of: m) != nil {
+                m.setTool(errandTool(m))
+                if case .pushPallet = m.current?.kind, m.path.isEmpty { drawPusher(m, station: station) }
+            }
             guard posed else { continue }
             simulation.stepRest(m, station: station, dt: dt)
             pose(m, station: station, dt: dt)
@@ -295,6 +294,8 @@ extension StationController {
                 moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
             } else { markersDirty = true }
         case .redraw: markersDirty = true
+        case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
+        case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
         }
     }
 
@@ -392,7 +393,7 @@ extension StationController {
                 }
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working && !(m.place == .lounge && resting && m.couch != nil) && palletErrand(of: m) == nil { m.setTool(nil) }
+            if !working && !(m.place == .lounge && resting && m.couch != nil) && simulation.palletErrand(of: m) == nil { m.setTool(nil) }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

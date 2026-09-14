@@ -52,7 +52,7 @@ extension StationController {
             }
         }
         // A hover pallet is a heavy thing standing on the floor: walks go round it, never through it.
-        for (name, p) in pallets {
+        for (name, p) in simulation.pallets {
             let f = Double(Station.fine)
             let hx = Props.palletWidth / 2, hy = Props.palletDepth / 2
             for sx in Int(((p.spot.x - hx) * f).rounded())...Int(((p.spot.x + hx) * f).rounded()) {

@@ -120,7 +120,7 @@ final class Invariants {
             let crate = CrateRef(station: s.station, repo: s.repo, number: s.number)
             // On someone's arms, on the pallet or in the air: it is allowed to move.
             if c.world.crate(crate)?.inTransit == true { resting[s.name] = nil; continue }
-            if c.pallets[s.station]?.flight != nil { continue }
+            if c.simulation.pallets[s.station]?.flight != nil { continue }
             if let was = resting[s.name] {
                 let d = ((was.x - s.pos.x) * (was.x - s.pos.x) + (was.y - s.pos.y) * (was.y - s.pos.y)
                          + (was.z - s.pos.z) * (was.z - s.pos.z)).squareRoot()
