@@ -329,6 +329,8 @@ final class Minion: Body {
         legs.opacity = on ? 1 : 0
         SCNTransaction.commit()
         staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
+        // The shadow goes with the body onto the seat, and back to the spot.
+        shadow.runAction(.move(to: v3(0.03 + seatOffset.x, 0.003, 0.02 + seatOffset.y), duration: on ? 0.5 : 0.45))
     }
 
     /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
