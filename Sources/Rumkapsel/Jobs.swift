@@ -78,6 +78,7 @@ extension StationController {
     /// Every command issued, whoever runs it, goes past the taps: the log line and the panel.
     func issue(_ c: Command, by who: String, announce: Bool = false) {
         sim?.onCommand?(c, who)
+        if sim == nil { StationLog.write("command", "\(who): \(c.words)") }
         if announce { logEvent(c.words) }
     }
 

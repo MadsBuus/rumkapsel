@@ -820,6 +820,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.
     func handle(_ event: WorldEvent) {
         sim?.onEvent?(event)
+        if sim == nil { StationLog.write("event", SimulatorModel.describe(event)) }
         switch event {
         case .worldLoaded:
             break

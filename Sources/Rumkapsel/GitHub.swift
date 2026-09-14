@@ -294,6 +294,9 @@ final class GitHubResolver {
     /// board grows, Shipped most of all, and the whole of it is read only as a backstop; what moved
     /// in the last while is a handful of items and one small query. Each moved item's linked pull
     /// requests are then expected to change, and asked.
+    /// Which hundred of the not-shipped items the next delta asks by number.
+    private var deltaPage = 0
+
     func refreshProjectDelta(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
@@ -316,9 +319,34 @@ final class GitHubResolver {
               closedByPullRequestsReferences(first: 5) { nodes { url state } }
               projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
             """
-            guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
-                  let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
-                  let nodes = ((obj["data"] as? [String: Any])?["search"] as? [String: Any])?["nodes"] as? [[String: Any]] else { return }
+            var nodes: [[String: Any]] = []
+            if let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
+               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
+               let found = ((obj["data"] as? [String: Any])?["search"] as? [String: Any])?["nodes"] as? [[String: Any]] { nodes += found }
+            // A move on the board does not touch the issue's own timestamp, so the search above never
+            // sees one. The items that can still move, everything not shipped, are asked by number,
+            // a hundred at a time, round and round: a move shows within a round.
+            let shipped = ConfigStore.shared.current.statuses.shipped
+            let live = items.filter { $0.status != shipped }.sorted { ($0.repo, $0.number) < ($1.repo, $1.number) }
+            if !live.isEmpty {
+                let page = 100
+                let start = min(deltaPage * page, max(0, live.count - 1)) / page * page
+                deltaPage = (start / page + 1) * page < live.count ? start / page + 1 : 0
+                let batch = live[start..<min(live.count, start + page)]
+                let fields = """
+                number title url repository { name } assignees(first: 5) { nodes { login } }
+                closedByPullRequestsReferences(first: 5) { nodes { url state } }
+                projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+                """
+                let parts = batch.enumerated().map { i, it in
+                    "i\(i): repository(owner: \"\(owner)\", name: \"\(it.repo)\") { issue(number: \(it.number)) { \(fields) } }"
+                }
+                trace("ask project items \(batch.count) of \(live.count) not shipped")
+                if let out = run(["gh", "api", "graphql", "-f", "query={ " + parts.joined(separator: " ") + " }"], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
+                   let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let data = obj["data"] as? [String: Any] {
+                    for (_, v) in data { if let issue = (v as? [String: Any])?["issue"] as? [String: Any] { nodes.append(issue) } }
+                }
+            }
             var fresh: [ProjectItem] = []
             for content in nodes {
                 guard let n = content["number"] as? Int, let repo = (content["repository"] as? [String: Any])?["name"] as? String,
@@ -697,6 +725,7 @@ final class GitHubResolver {
     /// What the poller is doing, on stderr, when GITHUB_DIAG is set or `--github-diag` runs.
     static var diag = ProcessInfo.processInfo.environment["GITHUB_DIAG"] != nil
     private func trace(_ text: String) {
+        StationLog.write("github", text)
         guard GitHubResolver.diag else { return }
         FileHandle.standardError.write("GH \(ISO8601DateFormatter().string(from: Date())) \(text)\n".data(using: .utf8)!)
     }
