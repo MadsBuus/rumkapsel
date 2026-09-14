@@ -44,6 +44,12 @@ enum WalkTests {
             expect(a.path.isEmpty && a.pos == SIMD2(2, 0) && b.path.isEmpty && b.pos == SIMD2(0, 0), "both exactly there: \(a.pos) \(b.pos)")
         }
 
+        test("a walk that ends beside someone ends straight, lean gone, facing the way it came") {
+            let m = body("a", 0.5, 0), o = body("b", 1.2, 0); m.path = [SIMD2(1, 0)]
+            for _ in 0..<200 { _ = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }
+            expect(m.path.isEmpty && m.lean == .zero && abs(m.facing - atan2(1.0, 0.0)) < 1e-9, "square at the end: lean \(m.lean) facing \(m.facing)")
+        }
+
         say(failures == 0 ? "walk: all passed" : "walk: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

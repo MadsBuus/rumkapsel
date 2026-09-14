@@ -46,6 +46,13 @@ enum Walk {
         let stride = speed * pace * dt
         m.pos = dist <= stride ? target : m.pos + d / dist * stride
         if dist2(target, m.pos) < arrive * arrive { m.pos = target; m.path.removeFirst() }
+        // A walk that ends ends straight: whatever the pass was doing, the figure faces the way it came
+        // and stands square; nobody is left half-turned toward someone who happened to be near.
+        if m.path.isEmpty {
+            m.lean = .zero
+            if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
+            return nil
+        }
         if let near, dist > 1e-9 {
             let dir = d / dist
             // 2. Turn to face the other, 3. then, closer, lean a shoulder to the walker's own right and wriggle past.
