@@ -382,7 +382,10 @@ extension StationController {
                 if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
             }
             if m.wakeUntil > 0 {
-                if clock < m.wakeUntil { m.node.opacity = m.opacity; continue } else { m.wakeUntil = 0 }
+                if clock < m.wakeUntil { m.node.opacity = m.opacity; continue }
+                m.wakeUntil = 0
+                // Out of the shuttle: a job handed over while still stepping out begins now.
+                if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
             }
             if let target = m.path.first, clock >= m.wonderUntil {
                 let d = target - m.pos

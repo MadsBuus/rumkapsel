@@ -99,7 +99,8 @@ extension StationController {
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
-        m.pending = nil
+        // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
+        if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { logEvent(c.words) }
         if redirected, let aim = cargo[c.id]?.aim { walk(m, to: aim.cell) }
     }
