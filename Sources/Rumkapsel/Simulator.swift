@@ -1138,9 +1138,8 @@ extension StationController {
                 guard let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && !$0.isChore }) else {
                     handle(.log("nobody free for a chore")); return
                 }
-                m.nextChoreAt = clock
                 m.bathDue = 0
-                if m.place != .lounge { send(m, to: .lounge) }
+                if let st = fleet.stations[m.station], !startRoam(m, station: st) { handle(.log("nowhere clear to roam")) }
             case .lounge:
                 for m in minions.values where !m.isCrew && !m.onJob {
                     m.busy = false

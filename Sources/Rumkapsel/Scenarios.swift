@@ -3,15 +3,16 @@
 // Each scenario is a name, a list of simulator buttons with a pause after each, and what the run
 // must have recorded when it is over: presses, events, commands and who ran them, as the values
 // they were. Nothing here reads the log's prose. Every scenario gets its own station and its own
-// made-up org, runs headless at sixteen times speed off the same frame heartbeat `--snapshot` uses,
+// made-up org, runs headless with station time stepped in 1/30 s ticks as fast as the machine goes,
 // and passes only if every expectation was met, in order, nothing forbidden was recorded, the floor
 // check agrees, and the invariant checker found nothing.
 //
-//     --scenarios              every scenario
+//     --scenarios              every scenario but the soak
 //     --scenarios pallet       only the ones whose name contains "pallet"
+//     --scenarios --soak       the soak as well: the idle station left alone for three hours
 //     --scenarios-verbose      print each scenario's whole log
 //
-// Exits non-zero if anything failed. Waits are in real seconds; one is about sixteen simulated.
+// Exits non-zero if anything failed. Every wait is in station seconds: "press, wait 40, judge".
 
 import AppKit
 
@@ -143,9 +144,9 @@ struct Expect {
 
 struct Scenario {
     let name: String
-    /// A button and the real seconds to wait after pressing it.
+    /// A button and the station seconds to wait after pressing it.
     let steps: [(press: String, wait: Double)]
-    /// Real seconds to keep the station running after the last press.
+    /// Station seconds to keep the station running after the last press.
     let tail: Double
     /// What must have been recorded, in this order.
     let expects: [Expect]
@@ -156,12 +157,14 @@ struct Scenario {
     /// A minion giving up mid-command is a stall the body reconciler caught: a bug in a scripted run,
     /// unless the scenario means to provoke one.
     var allowGiveUp = false
+    /// A long run that watches the station left alone. Runs only when asked for by name or `--soak`.
+    var soak = false
     /// What must stand on the floor when it is over, for the things the run does not record as it
     /// goes. Returns the reason it failed, or nil.
     let floor: (@MainActor (SimulatorController) -> String?)?
 
     init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [Expect], forbids: [Expect] = [],
-         allowSkips: Bool = false, allowGiveUp: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
+         allowSkips: Bool = false, allowGiveUp: Bool = false, soak: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
         self.tail = tail
@@ -169,10 +172,23 @@ struct Scenario {
         self.forbids = forbids
         self.allowSkips = allowSkips
         self.allowGiveUp = allowGiveUp
+        self.soak = soak
         self.floor = floor
     }
 
     /// How many crates of a repository stand in a yard row right now, by the name the scene gives them.
+    /// Every visit of a kind that ran its course lasted its planned time, counted from arrival.
+    @MainActor
+    static func lasted(_ sim: SimulatorController, _ kind: String) -> String? {
+        let visits = sim.station.visitLog.filter { $0.kind == kind }
+        guard !visits.isEmpty else { return "no \(kind) ran its course" }
+        if let none = visits.first(where: { $0.planned <= 0 }) { return "a \(kind) had no length of its own (\(none.lasted) s)" }
+        if let short = visits.first(where: { $0.lasted + 0.25 < $0.planned }) {
+            return "a \(kind) lasted \(String(format: "%.1f", short.lasted)) s of its \(String(format: "%.1f", short.planned))"
+        }
+        return nil
+    }
+
     @MainActor static func crates(_ sim: SimulatorController, _ area: String, _ repo: String) -> Int {
         sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(area):work|\(repo)|") }.count
     }
@@ -193,10 +209,10 @@ enum Scenarios {
     /// never depends on what the picker happened to be left on.
     @MainActor static let all: [Scenario] = [
         Scenario("own PR opens, merges, crate reaches storage", [
-            ("Target: ios#298", 0.3),
-            ("Open PR", 2.0),
-            ("Merge PR", 0.3),
-        ], tail: 12, expects: [
+            ("Target: ios#298", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 4.8),
+        ], tail: 192, expects: [
             .log("PR #298 open"),
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
@@ -205,10 +221,10 @@ enum Scenarios {
         }),
 
         Scenario("teammate branch then PR: one shuttle, one crate", [
-            ("Target: api#5158", 0.3),
-            ("Teammate: New branch", 3.0),
-            ("Teammate: Open PR", 0.3),
-        ], tail: 12, expects: [
+            ("Target: api#5158", 4.8),
+            ("Teammate: New branch", 48),
+            ("Teammate: Open PR", 4.8),
+        ], tail: 192, expects: [
             .officeOpened("task:api#", .shuttle, board: "leo"),
             .crewActivity("leo", "branch_create"),
             .flight,
@@ -220,11 +236,11 @@ enum Scenarios {
         }),
 
         Scenario("a late carrier: the crate waits on the bay floor and is still fetched", [
-            ("Target: api#5158", 0.3),
-            ("Teammate: New branch", 2.5),
-            ("Peer: New office", 2.5),        // the floor plan changes while the crate is coming down
-            ("New branch in repo", 0.3),      // and again, with a second delivery under way
-        ], tail: 30, expects: [
+            ("Target: api#5158", 4.8),
+            ("Teammate: New branch", 40),
+            ("Peer: New office", 40),        // the floor plan changes while the crate is coming down
+            ("New branch in repo", 4.8),      // and again, with a second delivery under way
+        ], tail: 480, expects: [
             .deliverOffice(by: "leo"),
         ], floor: { sim in
             let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
@@ -234,11 +250,11 @@ enum Scenarios {
         }),
 
         Scenario("an office renamed twice while its shuttle is in the air: the crate is still walked in", [
-            ("Target: api#5158", 0.3),
-            ("New branch in repo", 1.0),   // my new office: a shuttle is ordered, the worker sets off
-            ("Switch branch", 1.5),        // renamed while the ship is in the air
-            ("Switch branch", 0.3),        // and again, before it lands
-        ], tail: 30, expects: [
+            ("Target: api#5158", 4.8),
+            ("New branch in repo", 16),   // my new office: a shuttle is ordered, the worker sets off
+            ("Switch branch", 24),        // renamed while the ship is in the air
+            ("Switch branch", 4.8),        // and again, before it lands
+        ], tail: 480, expects: [
             .flight,
             .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
             .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
@@ -252,10 +268,10 @@ enum Scenarios {
         }),
 
         Scenario("staging release opens, merges: the pallet crosses", [
-            ("Target: web#455", 0.3),
-            ("Release: Staging opens", 5.0),
-            ("Release: Staging merges", 0.3),
-        ], tail: 10, expects: [
+            ("Target: web#455", 4.8),
+            ("Release: Staging opens", 80),
+            ("Release: Staging merges", 4.8),
+        ], tail: 160, expects: [
             .stagingOpened("web"),
             .dispatch("web"),
             .loadPallet("web"),
@@ -268,10 +284,10 @@ enum Scenarios {
         }),
 
         Scenario("staging release closes: the pallet unloads back", [
-            ("Target: web#455", 0.3),
-            ("Release: Staging opens", 5.0),
-            ("Release: Staging closes", 0.3),
-        ], tail: 10, expects: [
+            ("Target: web#455", 4.8),
+            ("Release: Staging opens", 80),
+            ("Release: Staging closes", 4.8),
+        ], tail: 160, expects: [
             .stagingOpened("web"),
             .loadPallet("web"),
             .stagingClosed("web"),
@@ -285,11 +301,11 @@ enum Scenarios {
         }),
 
         Scenario("a repository whose merges deploy: the merged crate goes straight up in a rocket of its own", [
-            ("Target: ios#298", 0.3),
-            ("Repo: Ships on merge", 0.3),
-            ("Open PR", 2.0),
-            ("Merge PR", 0.3),
-        ], tail: 45, expects: [
+            ("Target: ios#298", 4.8),
+            ("Repo: Ships on merge", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 4.8),
+        ], tail: 720, expects: [
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .rocket(.launch, "ios"),
@@ -300,14 +316,14 @@ enum Scenarios {
         }),
 
         Scenario("a repository without staging: merged work waits in storage and the rocket loads from there", [
-            ("Target: ios#298", 0.3),
-            ("Repo: No staging", 0.3),
-            ("Open PR", 2.0),
-            ("Merge PR", 8.0),                   // the package is carried to storage
-            ("Release: Production opens", 3.0),  // release/v… into master
-            ("Release: Mark tested", 8.0),       // cleared: the rocket loads, from storage
-            ("Release: Production merges", 0.3),
-        ], tail: 14, expects: [
+            ("Target: ios#298", 4.8),
+            ("Repo: No staging", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 128),                   // the package is carried to storage
+            ("Release: Production opens", 48),  // release/v… into master
+            ("Release: Mark tested", 128),       // cleared: the rocket loads, from storage
+            ("Release: Production merges", 4.8),
+        ], tail: 224, expects: [
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .rocket(.standBy, "ios"),
@@ -320,11 +336,11 @@ enum Scenarios {
         }),
 
         Scenario("production release: mark tested, merge, the rocket lifts", [
-            ("Target: web#455", 0.3),
-            ("Release: Production opens", 3.0),
-            ("Release: Mark tested", 6.0),
-            ("Release: Production merges", 0.3),
-        ], tail: 12, expects: [
+            ("Target: web#455", 4.8),
+            ("Release: Production opens", 48),
+            ("Release: Mark tested", 96),
+            ("Release: Production merges", 4.8),
+        ], tail: 192, expects: [
             .releaseOpened("web", untested: true),
             .rocket(.standBy, "web"),
             .rocket(.load(1), "web"),
@@ -343,12 +359,12 @@ enum Scenarios {
         }),
 
         Scenario("staging merges before the board: the deck keeps the pallet's crates", [
-            ("Target: web#455", 0.3),
-            ("Release: Staging opens", 5.0),
-            ("Release: Staging merges (board lags)", 10.0),   // the pallet crosses and empties while the board still says storage
-            ("Commit", 1.0),                                  // any redraw meanwhile: the source must not take them back
-            ("Board: Catch up", 0.3),                         // the board's poll arrives: nothing left to carry
-        ], tail: 6, expects: [
+            ("Target: web#455", 4.8),
+            ("Release: Staging opens", 80),
+            ("Release: Staging merges (board lags)", 160),   // the pallet crosses and empties while the board still says storage
+            ("Commit", 16),                                  // any redraw meanwhile: the source must not take them back
+            ("Board: Catch up", 4.8),                         // the board's poll arrives: nothing left to carry
+        ], tail: 96, expects: [
             .stagingOpened("web"),
             .stagingMerged("web"),
             .pushPallet("web"),
@@ -370,12 +386,12 @@ enum Scenarios {
         }),
 
         Scenario("teammate PR closed unmerged, feed behind: red, nothing carried, no crate", [
-            ("Target: api#5158", 0.3),
-            ("Teammate: New branch", 3.0),
-            ("Teammate: Open PR", 1.0),
-            ("Teammate: Close PR (feed lags)", 0.5),   // gone from the open list, no close in the feed
-            ("Board: Move api#5161 to Backlog", 0.3),  // and off the board's development column: now the office must decide
-        ], tail: 8, expects: [
+            ("Target: api#5158", 4.8),
+            ("Teammate: New branch", 48),
+            ("Teammate: Open PR", 16),
+            ("Teammate: Close PR (feed lags)", 8),   // gone from the open list, no close in the feed
+            ("Board: Move api#5161 to Backlog", 4.8),  // and off the board's development column: now the office must decide
+        ], tail: 128, expects: [
             .crewActivity("leo", "pr_open"),
             .log("pull request closed, not merged"),
         ], forbids: [
@@ -388,10 +404,10 @@ enum Scenarios {
         }),
 
         Scenario("PR closed unmerged: red, nothing carried", [
-            ("Target: web#455", 0.3),
-            ("Open PR", 2.0),
-            ("Close PR", 0.3),
-        ], tail: 9, expects: [
+            ("Target: web#455", 4.8),
+            ("Open PR", 32),
+            ("Close PR", 4.8),
+        ], tail: 144, expects: [
             .log("PR #455 open"),
             .log("#455 booking flow: pull request closed, not merged"),
         ], forbids: [
@@ -399,10 +415,10 @@ enum Scenarios {
         ]),
 
         Scenario("peer arrives and leaves: fade in, office held", [
-            ("Peer: Leave", 4.0),
-            ("Peer: Arrive", 6.0),
-            ("Peer: Leave", 0.3),
-        ], tail: 6, expects: [
+            ("Peer: Leave", 64),
+            ("Peer: Arrive", 96),
+            ("Peer: Leave", 4.8),
+        ], tail: 96, expects: [
             .officeOpened("task:web#460", .fade, peer: "kim"),
             .peerLeft("kim"),
             .peerArrived("kim"),
@@ -414,17 +430,17 @@ enum Scenarios {
         }),
 
         Scenario("peer office kicked", [
-            ("Target: web#460", 0.3),
-            ("Peer: Kick office", 0.3),
-        ], tail: 8, expects: [
+            ("Target: web#460", 4.8),
+            ("Peer: Kick office", 4.8),
+        ], tail: 128, expects: [
             .officeArchived("work|task:web#460", reason: "kicked"),
             .log("kicked #460 artist tags off the station"),
         ]),
 
         Scenario("session ends: the office stays", [
-            ("Target: api#5158", 0.3),
-            ("Session ends", 0.3),
-        ], tail: 10, expects: [
+            ("Target: api#5158", 4.8),
+            ("Session ends", 4.8),
+        ], tail: 160, expects: [
             .press("Session ends"),
         ], floor: { sim in
             // Nothing disappears without a cue: an office outlives the session that opened it.
@@ -433,9 +449,9 @@ enum Scenarios {
         }),
 
         Scenario("night falls, then morning", [
-            ("Night", 6.0),
-            ("Day", 0.3),
-        ], tail: 8, expects: [
+            ("Night", 96),
+            ("Day", 4.8),
+        ], tail: 128, expects: [
             .press("Night"),
             .sleep,
             .log("night falls"),
@@ -445,18 +461,18 @@ enum Scenarios {
         ]),
 
         Scenario("a bath lasts its whole time", [
-            ("Everyone to lounge", 3.0),
-            ("Bath", 0.3),
-        ], tail: 14, expects: [
+            ("Everyone to lounge", 48),
+            ("Bath", 4.8),
+        ], tail: 416, expects: [
             .bath,
-        ]),
+        ], floor: { sim in Scenario.lasted(sim, "bath") }),
 
         Scenario("pallet operator stays on the errand through the night", [
-            ("Target: web#455", 0.5),
-            ("Release: Staging opens", 6.0),   // whoever is nearest the console takes the errand
-            ("Night", 6.0),                    // bedtime does not take it off the pallet
-            ("Release: Staging merges", 0.5),
-        ], tail: 30, expects: [
+            ("Target: web#455", 8),
+            ("Release: Staging opens", 96),   // whoever is nearest the console takes the errand
+            ("Night", 96),                    // bedtime does not take it off the pallet
+            ("Release: Staging merges", 8),
+        ], tail: 480, expects: [
             .pushPallet("web"),
             .unloadPallet("web", back: false),
         ], floor: { sim in
@@ -471,20 +487,20 @@ enum Scenarios {
             return operators.count == 1 ? nil : "the pallet passed through \(operators.count) pairs of hands: \(operators.joined(separator: ", "))"
         }),
         Scenario("a commit lands: the worker stows a cube", [
-            ("Target: web#455", 0.5),
-            ("Commit", 0.5),
-        ], tail: 8, expects: [
+            ("Target: web#455", 8),
+            ("Commit", 8),
+        ], tail: 128, expects: [
             .stow(by: "#455 booking flow"),
         ]),
         Scenario("a stacked deck goes aboard: the carrier hurries", [
-            ("Target: web#455", 0.3),
-            ("Release: Staging opens", 5.0),
-            ("Release: Staging merges (board lags)", 10.0),   // three web crates on the deck, one column
-            ("Board: Catch up", 0.5),
-            ("Release: Production opens", 3.0),
-            ("Release: Mark tested", 6.0),                    // the rocket loads all three: a chain, top down
-            ("Release: Production merges", 0.3),
-        ], tail: 10, expects: [
+            ("Target: web#455", 4.8),
+            ("Release: Staging opens", 80),
+            ("Release: Staging merges (board lags)", 160),   // three web crates on the deck, one column
+            ("Board: Catch up", 8),
+            ("Release: Production opens", 48),
+            ("Release: Mark tested", 96),                    // the rocket loads all three: a chain, top down
+            ("Release: Production merges", 4.8),
+        ], tail: 160, expects: [
             .rocket(.load(3), "web"),
             .carry(to: .pad),
             .log("more waiting"),   // the carrier with carries queued behind it says so
@@ -496,11 +512,11 @@ enum Scenarios {
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
         Scenario("a wedged carrier gives up: the crate goes back in the queue and another lands it", [
-            ("Target: ios#298", 0.3),
-            ("Open PR", 2.0),
-            ("Merge PR", 0.6),        // the package is ordered to storage and a carrier takes it
-            ("Wedge carrier", 0.3),   // and stops dead on the way
-        ], tail: 28, expects: [       // ten station seconds standing, then the give-up, then the retry
+            ("Target: ios#298", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 9.6),        // the package is ordered to storage and a carrier takes it
+            ("Wedge carrier", 4.8),   // and stops dead on the way
+        ], tail: 448, expects: [       // ten station seconds standing, then the give-up, then the retry
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .press("Wedge carrier"),
@@ -516,9 +532,9 @@ enum Scenarios {
             return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
         }),
         Scenario("a peer's office in use is solid, with a real minion in it", [
-            ("Target: web#455", 0.3),
-            ("Peer: New office", 3.0),
-        ], tail: 6, expects: [], floor: { sim in
+            ("Target: web#455", 4.8),
+            ("Peer: New office", 48),
+        ], tail: 96, expects: [], floor: { sim in
             let world = sim.station.world
             guard let st = world.fleet.stations["work"], let snap = world.peerSnapshots.values.first?.snap else { return "no peer snapshot arrived" }
             let working = snap.minions.filter { !$0.asleep }
@@ -531,23 +547,34 @@ enum Scenarios {
         }),
 
         Scenario("a turn in the gym lasts its whole time", [
-            ("Everyone to lounge", 3.0),
-            ("Workout", 0.3),
-        ], tail: 14, expects: [
+            ("Everyone to lounge", 48),
+            ("Workout", 4.8),
+        ], tail: 640, expects: [
             .workout,
             .goTo(.lounge),   // and back to the couch after
-        ]),
-        Scenario("a chore", [
-            ("Everyone to lounge", 3.0),
-            ("Chore", 0.3),
-        ], tail: 12, expects: [
+        ], floor: { sim in Scenario.lasted(sim, "gym") }),
+        Scenario("a look round the station lasts its whole time", [
+            ("Everyone to lounge", 48),
+            ("Chore", 4.8),
+        ], tail: 640, expects: [
             .chore,
-        ]),
+        ], floor: { sim in Scenario.lasted(sim, "roam") }),
+
+        Scenario("an idle station keeps a mix, each visit for its whole time", [
+            ("Everyone to lounge", 48),
+        ], tail: 11520, expects: [], soak: true, floor: { sim in
+            let log = sim.station.visitLog
+            let kinds = Dictionary(grouping: log, by: \.kind).mapValues(\.count)
+            if kinds.count < 2 { return "only \(kinds) in three idle hours" }
+            if let most = kinds.values.max(), Double(most) > 0.8 * Double(log.count) { return "one activity took over: \(kinds)" }
+            for kind in kinds.keys.sorted() { if let why = Scenario.lasted(sim, kind) { return why } }
+            return nil
+        }),
     ]
 }
 
-/// Runs the suite off one heartbeat: a frame asked for thirty times a second, the presses timed
-/// against the wall clock, and each scenario judged when its time is up.
+/// Runs the suite in one tight loop: station time stepped a thirtieth of a second at a time, the
+/// presses timed on it, and each scenario judged when its time is up.
 @MainActor
 final class ScenarioRunner {
     private let scenarios: [Scenario]
@@ -561,8 +588,11 @@ final class ScenarioRunner {
     private var failed = 0
     private let suiteStart = Date()
 
-    init(filter: String?, verbose: Bool) {
-        scenarios = Scenarios.all.filter { s in filter.map { s.name.localizedCaseInsensitiveContains($0) } ?? true }
+    init(filter: String?, verbose: Bool, soak: Bool = false) {
+        scenarios = Scenarios.all.filter { s in
+            if let filter { return s.name.localizedCaseInsensitiveContains(filter) }
+            return soak || !s.soak
+        }
         self.verbose = verbose
     }
 
@@ -587,10 +617,13 @@ final class ScenarioRunner {
         step = 0
         simTime = 0
         startedAt = CACurrentMediaTime()
-        // A beat for the seed to settle before the first press; waits are the old wall seconds at 16x.
-        nextPressAt = 16.0
+        // Sixteen station seconds for the seed to settle before the first press.
+        nextPressAt = ScenarioRunner.settle
         endAt = .greatestFiniteMagnitude
     }
+
+    /// Station seconds before a scenario's first press.
+    static let settle = 16.0
 
     private func frame() {
         guard let sim else { return }
@@ -601,8 +634,8 @@ final class ScenarioRunner {
             let it = s.steps[step]
             sim.model.press(it.press)
             step += 1
-            nextPressAt = simTime + it.wait * 16
-            if step == s.steps.count { endAt = simTime + s.tail * 16 }
+            nextPressAt = simTime + it.wait
+            if step == s.steps.count { endAt = simTime + s.tail }
         }
         if simTime >= endAt { judge() }
     }

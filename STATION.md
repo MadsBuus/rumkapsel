@@ -81,7 +81,14 @@ since real stations mandate both.
   through a room. With something in their hands they need even more room.
 - Two can pass each other on one tile, side by side, but never slide through each other: a body
   is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
-  Whoever finds someone in the way waits a beat, then goes round. Someone on a couch or in bed is
+  Whoever finds someone in the way waits a beat, then goes round. Someone standing idle in a walker's
+  way, with nowhere to be, steps aside to a free spot beside them; nobody settles in a doorway.
+  A walk is planned again at most once a second, however crowded the way.
+- A doorway is one lane: the door tile, and the tile outside it for anyone going in or coming out;
+  walking past along the corridor claims nothing. A walker claims the lane before stepping in; anyone else waits outside, and steps
+  aside if the one coming through needs the spot. A claim lapses a few station seconds after it was last
+  renewed, so a stuck walker cannot lock a door. Every timing on the station runs on the station clock,
+  so holding space speeds all of it up alike. Someone on a couch or in bed is
   on the furniture, off the walkway, and in nobody's way. Where there is no way round, in a
   doorway say, the one who yields steps a third of a tile aside and goes on from there.
 - A chore never stands in a doorway, the yard's or a room's: a body standing there shuts it.
@@ -164,6 +171,10 @@ since real stations mandate both.
 - The gym is one room off the living cluster with four fixtures, a treadmill, a bench with a barbell,
   a bag and a mat, one minion to each, a turn lasting its whole time. Loungers who stand near each
   other talk; the rest stretch, look round, shuffle and yawn now and then.
+- A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
+  the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
+  Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts
+  when the minion arrives, never when it sets off. Roamers keep apart, except to watch a steaming rocket.
 
 ## The world and the station
 
