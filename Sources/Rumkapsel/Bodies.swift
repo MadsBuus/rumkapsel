@@ -49,9 +49,9 @@ extension StationController {
         handle(.log("\(m.home.name) gives up \(c.words): \(why)"))
         switch c.kind {
         case .carry(_, let from, _):
-            guard let job = cargo[c.id] else { finish(m); return }
+            guard cargo[c.id] != nil else { finish(m); return }
             var spot = from
-            if m.carried === job.node {
+            if let node = cargoNodes[c.id], m.carried === node {
                 dropWhereStanding(m)   // the crate lies an arm's length behind, on the way it came: the next carrier reaches it without passing the body
                 let behind = SIMD2(m.pos.x - sin(m.facing) * Hands.arm, m.pos.y - cos(m.facing) * Hands.arm)
                 let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
@@ -79,8 +79,8 @@ extension StationController {
                 m.current = nil
                 send(m, to: m.place)   // the same rest, planned afresh from here
             } else {
-                m.setStatic(false, frame: 0)
-                m.setBench(false)
+                m.seated = false
+                m.onBench = false
                 m.fixture = nil
                 finish(m)
             }

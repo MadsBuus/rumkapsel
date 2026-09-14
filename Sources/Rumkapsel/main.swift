@@ -42,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if args.contains("--idle-tests") { IdleTests.run() }
         // The walk step on its own: made-up bodies meeting on a made-up floor.
         if args.contains("--walk-tests") { WalkTests.run() }
+        // The simulation on its own: a body sent about a station of the fleet's making, no scene.
+        if args.contains("--sim-tests") { SimulationTests.run() }
         // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120

@@ -40,89 +40,33 @@ extension StationController {
         return nil
     }
 
-    // MARK: commands
+    // MARK: the simulation's side of a body
 
-    /// Hands a command to an actor. It replaces the one in hand at the next interruptible phase;
-    /// mid-lift or setting down it waits its turn, and only one waits at a time.
-    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) { start(m, c, announce: announce) }
-
-    /// A command that has run its course hands over to its successor: the pallet's push to its unload.
-    /// Not a new order cutting in, so the interruptible rule does not apply.
-    func handOver(_ m: Minion, _ c: Command, announce: Bool = false) {
-        m.current = nil
-        begin(m, c, announce: announce)
-    }
-
-    /// The one way to give a minion an order. It takes over at the next interruptible phase; mid-lift or
-    /// setting down it waits its turn, and only one waits at a time.
-    func start(_ m: Minion, _ c: Command, announce: Bool = false) {
-        guard m.current == nil || canInterrupt(m, with: c) else { m.pending = c; return }
-        begin(m, c, announce: announce)
-    }
-
-    /// Walking and standing about can be cut into; a crouch cannot, and a carry only to send the
-    /// crate on the arms somewhere else.
-    private func canInterrupt(_ m: Minion, with c: Command) -> Bool {
-        guard m.wakeUntil == 0 else { return false }   // still stepping out of the shuttle
-        // A job holds something and is not simply dropped: only another job may cut in on it. A rest
-        // or a message waits its turn, and begins the moment the job is done.
-        if m.onJob, !c.isJob { return false }
-        let phase = m.phaseKind
-        if phase.takesNewDestination {
-            guard let held = m.current?.crate, let want = c.crate else { return false }
-            return held == want
-        }
-        return phase.interruptible
-    }
-
-    /// Every command issued, whoever runs it, goes past the taps: the log line and the panel.
-    func issue(_ c: Command, by who: String, announce: Bool = false) {
-        sim?.onCommand?(c, who)
-        if sim == nil { StationLog.write("command", "\(who): \(c.words)") }
-        if announce { logEvent(c.words) }
-    }
-
-    private func begin(_ m: Minion, _ c: Command, announce: Bool = false) {
-        // A carry is one minion's from the moment it begins, however it began: from the scheduler or
-        // from the pending slot after a pack. Somebody else already on it means this one stands down.
-        if case .carry = c.kind, let job = cargo[c.id] {
-            if let who = job.carrier, who != m.id { m.pending = nil; if m.current == nil { send(m, to: restPlace(m)) }; return }
-            if job.carrier == nil { cargo[c.id]?.carrier = m.id; cargo[c.id]?.issuedAt = clock }
-        }
-        issue(c, by: m.home.name)
-        // Redirected mid-carry: keep the crate and walk on to the new spot.
-        let redirected = m.carried != nil && m.current?.crate != nil && m.current?.crate == c.crate
-        // A change of orders is visible: a beat standing, head up, then off. A message from you is urgent.
-        if let old = m.current, !redirected, old.kindName != c.kindName, m.state == .settled {
-            if case .work = c.kind { m.wonderUntil = clock + 0.15 } else { m.wonderUntil = clock + 0.5 }
-        }
-        m.current = c
-        m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
-        m.phaseUntil = 0
-        m.actFor = c.visitSeconds ?? 0; m.actStartedAt = 0   // the order carries its visit's length; the clock starts on arrival
-        // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
-        if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
-        if announce { logEvent(c.words) }
-        if redirected, let aim = cargo[c.id]?.aim { walk(m, to: aim.cell) }
-    }
-
-    /// On to the next phase of the command in hand.
-    func advance(_ m: Minion) {
-        guard let c = m.current else { return }
-        m.phaseUntil = 0
-        if m.phase + 1 < c.phases.count { m.phase += 1 }
-    }
-
-    /// Done, or given up: whatever was queued starts now, else the minion goes back to resting.
-    /// The destination, when given, is where the minion goes back to: one order, not a rest and then another.
-    func finish(_ m: Minion, to place: Place? = nil) {
-        m.current = nil
-        m.phase = 0
-        m.phaseUntil = 0
-        m.fetchSpot = nil
-        if let next = m.pending { m.pending = nil; begin(m, next, announce: next.isJob) }
-        else { send(m, to: place ?? restPlace(m)) }
-    }
+    /// The orders, the rest and the walks are the simulation's (`Simulation.swift`); the scene asks
+    /// for them here by the names it always used.
+    func start(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
+    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
+    func handOver(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.handOver(m, c, announce: announce) }
+    func issue(_ c: Command, by who: String, announce: Bool = false) { simulation.issue(c, by: who, announce: announce) }
+    func advance(_ m: Minion) { simulation.advance(m) }
+    func finish(_ m: Minion, to place: Place? = nil) { simulation.finish(m, to: place) }
+    func dismiss(_ m: Minion) { simulation.dismiss(m) }
+    func isNight(_ station: Station) -> Bool { simulation.isNight(station) }
+    func restPlace(_ m: Minion) -> Place { simulation.restPlace(m) }
+    func resettle(_ station: Station) { simulation.resettle(station) }
+    func send(_ m: Minion, to place: Place) { simulation.send(m, to: place) }
+    func walk(_ m: Minion, to cell: Cell) { simulation.walk(m, to: cell) }
+    func route(_ m: Minion, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] { simulation.route(m, to: cell, round: blocker) }
+    func standCell(_ st: Station, near cell: Cell) -> Cell { simulation.standCell(st, near: cell) }
+    func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool { simulation.atArmsLength(m, of: spot, dt: dt) }
+    func startLift(_ m: Minion, height: Double) { simulation.startLift(m, height: height) }
+    func liftDue(_ m: Minion) -> Bool { simulation.liftDue(m) }
+    func startSetDown(_ m: Minion, level: Int) { simulation.startSetDown(m, level: level) }
+    @discardableResult func visitBath(_ m: Minion, station: Station) -> Bool { simulation.visitBath(m, station: station) }
+    @discardableResult func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool { simulation.takeTurnInGym(m, station: station, gym: gym) }
+    @discardableResult func startRoam(_ m: Minion, station: Station) -> Bool { simulation.startRoam(m, station: station) }
+    func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) { simulation.react(m, activity, place: place, minutes: minutes, words: words) }
+    func crewRested(_ m: Minion) { simulation.crewRested(m) }
 
     /// A command whose target went away, or given up: put down what is on the arms, an arm's length in
     /// front of where the minion stands, so the body is not left standing over the crate.
@@ -138,135 +82,6 @@ extension StationController {
         moveCrate(held, legs: [MotionLeg(to: behind, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
         world.dropped(by: m.id)
-    }
-
-    /// Off the station: through the airlock when there is one, and gone once inside.
-    func dismiss(_ m: Minion) {
-        m.state = .leaving
-        start(m, .leave)
-        m.couch = nil; m.bed = nil
-        guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement(),
-              let inner = station.airlockInner.first(where: { $0.x == hatch.inside.x }) else { return }
-        m.place = .airlock
-        m.path = route(m, to: inner)
-        // Then, after the cycle, out through the hatch onto the bay: where the shuttle would pick them up.
-        let wait = SIMD2(Double(inner.x), Double(inner.y))
-        m.path += [wait] + station.path(from: wait, to: hatch.bay)
-    }
-
-    /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
-    func isNight(_ station: Station) -> Bool {
-        if let forced = sim?.night { return forced }
-        let hour = Calendar.current.component(.hour, from: Date())
-        return hour >= 22 || hour < 7
-    }
-
-    /// Where a minion belongs given what it is doing and the hour.
-    func restPlace(_ m: Minion) -> Place {
-        Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
-    }
-
-    /// After the floor changes, everyone carries on: settled somewhere still valid, stay; walking to a
-    /// spot that still exists, keep it and re-plan from here; only if the target is gone, go somewhere new.
-    func resettle(_ station: Station) {
-        for m in minions.values where m.station == station.name && !m.onJob && m.state != .leaving {
-            let cells = station.cells(of: m.place)
-            if m.path.isEmpty {
-                if m.place == .core || cells.contains(m.cell) { continue }
-            } else if let last = m.path.last {
-                let dest = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
-                if cells.contains(dest) {
-                    m.path = route(m, to: dest)
-                    if !m.path.isEmpty || m.cell == dest { continue }
-                }
-            }
-            send(m, to: m.place)
-        }
-    }
-
-    func send(_ m: Minion, to place: Place) {
-        // One owner per body: the command in hand owns place, path and pose. Rest may only be planned
-        // for a minion with nothing but rest in hand; a job or a visit is finished first by its own
-        // end, and only then does the minion go back. A session's refresh, a floor change or the
-        // panel asking for rest under a command in hand changes nothing.
-        if let c = m.current, !c.isRest { return }
-        guard let station = fleet.stations[m.station] else { return }
-        if place != .quarters { m.bed = nil; m.napping = false }
-        var place = place
-        if place == .quarters, m.bed == nil {
-            let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
-            m.bed = station.beds.indices.first { !used.contains($0) }
-            if m.bed == nil { place = .lounge }   // every bed taken: the lounge
-        }
-        if place != .lounge { m.couch = nil }
-        if place == .lounge, m.couch == nil {
-            let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.couch))
-            m.couch = station.couches.indices.first { !used.contains($0) }
-        }
-        // One to a couch: if someone already holds this seat, give it up and stand at the table.
-        if place == .lounge, let c = m.couch, minions.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.couch == c }) {
-            m.couch = nil
-        }
-        let cells = station.cells(of: place)
-        let target: Cell
-        if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
-        else if place == .lounge, let c = m.couch, c < station.couches.count, let lounge = station.rooms["kind:lounge"] {
-            let spot = station.couches[c]
-            target = lounge.cells.min { a, b in hypot(Double(a.x) - spot.x, Double(a.y) - spot.y) < hypot(Double(b.x) - spot.x, Double(b.y) - spot.y) } ?? lounge.cells[0]
-        }
-        else {
-            // Never the doorway: a body settled there shuts the room to everyone else.
-            let door: Cell? = { if case .room(let k) = place { return station.doorCell(of: k) }; return nil }()
-            let spots = cells.filter { $0 != door }
-            guard let t = (spots.isEmpty ? cells : spots).randomElement() else { return }
-            target = t
-        }
-        m.place = place
-        start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping))
-        m.path = route(m, to: target)
-        // No way found and far off: walk straight rather than stand still or slide.
-        if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
-        m.nextWanderAt = clock + Double.random(in: 1...3)
-    }
-
-    func walk(_ m: Minion, to cell: Cell) { m.path = route(m, to: cell) }
-
-    /// Spots taken by the other minions on a station, as the pathfinder sees them: solid, like props.
-    func crowd(around m: Minion, round blocker: String? = nil) -> Set<Cell> {
-        var out: Set<Cell> = []
-        for o in minions.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
-            // A body, standing or lying, is solid at the middle of its tile, like a crate: the way past
-            // runs along the tile's edge, a third of a tile off. Two can pass on one tile, never through
-            // each other; that is the walk's own rule, which waits on whoever is in the way in step.
-            // Whoever just stood in the way gets a whole tile's berth, so two walkers meeting head-on
-            // both go round rather than each waiting on the other.
-            if o.lying || (o.couch != nil && o.path.isEmpty) { continue }   // on the furniture: off the walkway
-            let s = Station.sub(o.pos)
-            if o.id == blocker { for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } } }
-            else { out.insert(s) }
-        }
-        // A ship over its slot, coming down or unloading, owns the ground under it: walks keep half a
-        // tile off, so a carrier waiting on a crate stands beside the slot and never under the ship.
-        if let station = fleet.stations[m.station] {
-            for s in shuttles where s.station == m.station {
-                guard case .flight(_, _, let slot) = s.command.kind, slot < station.hangarSlots.count,
-                      s.phase < (s.command.phases.firstIndex(of: .rise) ?? Int.max) else { continue }
-                let at = station.hangarSlots[slot], c = Station.sub(at)
-                for dx in -2...2 { for dy in -2...2 {
-                    let sub = Cell(x: c.x + dx, y: c.y + dy), p = Station.point(ofSub: sub)
-                    if hypot(p.x - at.x, p.y - at.y) < 0.55 { out.insert(sub) }
-                } }
-            }
-        }
-        return out
-    }
-
-    /// A walk for a minion: round the props and round everyone else. When the only way through is
-    /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
-    func route(_ m: Minion, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
-        guard let station = fleet.stations[m.station] else { return [] }
-        let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
-        return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
 
     /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.
@@ -590,7 +405,8 @@ extension StationController {
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard) else { return }
         node.name = "haul"
-        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
+        cargoNodes[command.id] = node
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
     }
 
     /// Drops every carry tied to a room, freeing whoever was carrying.
@@ -599,7 +415,7 @@ extension StationController {
     private func cancelCarries(roomKey: String) {
         for (id, c) in cargo where c.roomKey == roomKey {
             if case .carry(_, _, let to) = c.command.kind, to == .storage { continue }
-            c.node.removeFromParentNode()
+            cargoNodes.removeValue(forKey: id)?.removeFromParentNode()
             if let crate = c.command.crate { world.forgetPlacement(crate); world.unorder(crate) }
             cargo[id] = nil
             if let who = c.carrier, let m = minions[who] { m.carried = nil; world.dropped(by: m.id); finish(m) }
@@ -701,8 +517,9 @@ extension StationController {
     private func setDownLate(_ id: Int, _ job: Cargo) {
         guard case .carry(let crate, _, let yard) = job.command.kind else { return }
         cargo[id] = nil
+        let node = cargoNodes.removeValue(forKey: id)
         let m = job.carrier.flatMap { minions[$0] }
-        if let m, m.carried === job.node { m.carried = nil }
+        if let m, let node, m.carried === node { m.carried = nil }
         world.setDown(crate, at: job.aim)
         handle(.log("\(crate.words) set down late in \(yard.words): the station caught up"))
         job.onDone()
@@ -713,7 +530,7 @@ extension StationController {
     /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
     func cancelCarry(_ id: Int, backTo from: Spot) {
         guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
-        if let who = job.carrier, let m = minions[who], m.carried === job.node {
+        if let who = job.carrier, let m = minions[who], let node = cargoNodes[id], m.carried === node {
             let back = job.command.aimed(at: yard)
             cargo[id]?.command = back
             cargo[id]?.aim = from
@@ -723,7 +540,7 @@ extension StationController {
             return
         }
         if let who = job.carrier, let m = minions[who], m.current?.id == id { finish(m) }
-        job.node.removeFromParentNode()
+        cargoNodes.removeValue(forKey: id)?.removeFromParentNode()
         world.forgetPlacement(crate)
         world.unorder(crate)
         cargo[id] = nil
@@ -731,24 +548,7 @@ extension StationController {
         handle(.log("\(crate.words): stays put, the board changed its mind"))
     }
 
-    /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
-    /// was when the order went out. The order keeps its id; only its destination moves.
-    func reaim(_ id: Int, for m: Minion) {
-        guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
-        cargo[id]?.aim = fresh
-    }
-
     // MARK: crew
-
-    /// A teammate's reaction has run its course: back to the quarters, or the bots' room.
-    func crewRested(_ m: Minion) {
-        m.busy = false
-        m.activity = .sleeping
-        clearPyramids(m)
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
-        send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
-    }
 
     /// The crew's minions, brought in line with who the model says is around.
     func setCrewRoster(_ members: [String: CrewMember], bots: Int) {
@@ -796,16 +596,6 @@ extension StationController {
             addPyramid(for: m)
         default: break
         }
-    }
-
-    /// Hands a teammate a reaction: where to be, what to do there, and until when.
-    func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) {
-        m.activity = activity
-        m.busy = true
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
-        if m.lying { m.setSleeping(false); m.bed = nil }
-        if m.place != place || m.path.isEmpty { send(m, to: place) }
-        start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
 
     /// A tested crate crosses the aisle to the tested row on someone's arms. Anything stacked on top of

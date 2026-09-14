@@ -45,7 +45,13 @@ class Body {
         }
     }
     var hammerUp = false
+    /// The poses the simulation decides and the scene draws: flat on the back in bed or on the bench,
+    /// sat on the bowl (its middle at `seatOffset` in the body's own frame), or on the bench itself.
     var lying = false
+    var seated = false
+    var seatOffset = SIMD2<Double>(0, 0)
+    var onBench = false
+    var nextFidgetAt = 0.0
     var wakeUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
@@ -152,4 +158,8 @@ class Body {
     var words: String { current?.words ?? "nothing in particular" }
 
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
+
+    /// Waiting on you: hopping for the first minute, pacing after that. Not while on a job.
+    func isJumping(at clock: Double) -> Bool { activity == .waiting && clock - waitingSince < 60 && !onJob }
+    func isPacing(at clock: Double) -> Bool { activity == .waiting && clock - waitingSince >= 60 && !onJob }
 }

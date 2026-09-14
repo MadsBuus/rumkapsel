@@ -243,12 +243,12 @@ extension StationController {
             }
             if let bath = station.rooms["kind:bath"] {
                 // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
-                let f = bathFixtures(station: station, bath: bath)
+                let f = station.bathFixtures(bath: bath)
                 let sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
                 // A WC, square to the walls: a pedestal, the seat on it at Minion.seat, a dark inset
                 // for the hole, and the tank standing on the back of the seat against the wall.
                 let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
-                let spot = bowlSpot(station: station, bath: bath)
+                let spot = station.bowlSpot(bath: bath)
                 let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
                 bowl.geometry!.firstMaterial = porcelain
                 bowl.position = v3(spot.x, (Minion.seat - 0.06) / 2, spot.y)
@@ -313,7 +313,7 @@ extension StationController {
             if let gym = station.rooms["kind:gym"] {
                 // Four fixtures on the four corner tiles: a treadmill, a bench with a barbell over it, a
                 // bag on an arm, and a mat. The middle tiles stay clear to walk through.
-                let spots = gymSpots(station: station, gym: gym)
+                let spots = station.gymSpots(gym: gym)
                 let dark = lit(NSColor(rgb: (0.22, 0.23, 0.28)))
                 let steel = lit(NSColor(rgb: (0.66, 0.68, 0.74)))
                 // Fixtures are stood on, lain on and stepped round: not obstacles, so they are not "room:" props.
@@ -352,7 +352,7 @@ extension StationController {
                 }
                 place(bar)
                 // The bag: a post in the corner with an arm out, and the bag hanging from it.
-                let out = gymOutward(station: station, gym: gym, at: spots[2])
+                let out = station.gymOutward(gym: gym, at: spots[2])
                 let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
                 bagPost.geometry!.firstMaterial = steel
                 bagPost.position = v3(spots[2].x + out.x * 0.3, 0.55, spots[2].y + out.y * 0.3)

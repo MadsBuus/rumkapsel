@@ -33,12 +33,13 @@ final class Minion: Body {
     private let bodyHeight: Double
     private let bodyDepth: Double
     var smoothFacing = 0.0
-    private(set) var onBench = false
-    private(set) var seated = false
-    private var seatOffset = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
+    /// What the figure is posed as right now, against what the body says it should be.
+    private var posedOnBench = false
+    private var posedSeated = false
+    private var posedLying = false
+    private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
-    var nextFidgetAt = 0.0
     private var staticNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
@@ -71,7 +72,7 @@ final class Minion: Body {
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
     }
     /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
-    private var staticSpot: SCNVector3 { seated ? v3(seatOffset.x, Minion.seat + bodyDepth * 0.4, seatOffset.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
+    private var staticSpot: SCNVector3 { posedSeated ? v3(posedSeat.x, Minion.seat + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
     /// The top of the bowl, where a sitter's thighs rest.
     static let seat = 0.2
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
@@ -290,8 +291,8 @@ final class Minion: Body {
 
     /// Flat on the back on the bench, arms up, or off it again.
     func setBench(_ on: Bool) {
-        guard on != onBench else { return }
-        onBench = on
+        guard on != posedOnBench else { return }
+        posedOnBench = on
         body.removeAllActions()
         if on {
             body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true), .move(to: v3(0, 0.2 + bodyDepth / 2, 0), duration: 0.5)]))
@@ -304,9 +305,9 @@ final class Minion: Body {
     /// behind when negative): the body bends into a sit, the torso upright on the seat, thighs out
     /// in front and shins down to the floor. Or straighten and stand back up onto the spot.
     func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0)) {
-        guard on != seated else { return }
-        seated = on
-        seatOffset = on ? offset : SIMD2(0, 0)
+        guard on != posedSeated else { return }
+        posedSeated = on
+        posedSeat = on ? offset : SIMD2(0, 0)
         body.removeAllActions()
         let torso = bodyHeight * 0.62
         let pose: SCNAction
@@ -330,12 +331,12 @@ final class Minion: Body {
         SCNTransaction.commit()
         staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
         // The shadow goes with the body onto the seat, and back to the spot.
-        shadow.runAction(.move(to: v3(0.03 + seatOffset.x, 0.003, 0.02 + seatOffset.y), duration: on ? 0.5 : 0.45))
+        shadow.runAction(.move(to: v3(0.03 + posedSeat.x, 0.003, 0.02 + posedSeat.y), duration: on ? 0.5 : 0.45))
     }
 
     /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
     func fidget() {
-        guard seated, !body.hasActions else { return }
+        guard posedSeated, !body.hasActions else { return }
         let side = Bool.random() ? 0.08 : -0.08
         let over = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(side), duration: 0.18); over.timingMode = .easeInEaseOut
         let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut
@@ -344,8 +345,8 @@ final class Minion: Body {
 
     /// Tip over onto the back in the dorm, or stand back up.
     func setSleeping(_ asleep: Bool) {
-        guard asleep != lying else { return }
-        lying = asleep
+        guard asleep != posedLying else { return }
+        posedLying = asleep
         body.removeAllActions()
         if asleep {
             body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.7, usesShortestUnitArc: true), .move(to: v3(0, bodyDepth / 2, 0), duration: 0.7)]))

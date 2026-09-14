@@ -52,13 +52,25 @@ after the caller has finished placing its workers.
 Shapes mean things: a hexagon is a packed office, a cube is a piece of work, a square strapped crate is a pull
 request, a pyramid is a session input. Nothing is round.
 
+The station apart from the picture is `Simulation` (`Simulation.swift`, no SceneKit): the clock, the bodies
+and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands' timing
+and the carries under way (`Cargo`). It is generic over the body: `Simulation<Minion>` in the app,
+`Simulation<Body>` under `--sim-tests`. A frame is three steps per body, `stepWalk`, `stepThere` and
+`stepRest`; the scene runs them itself with its own commands in between, until those have moved in too. What
+the scene shows once, a flush, a fidget, a hop, is a `Cue` the simulation hands back, and what the simulation
+cannot see yet, the ground a ship owns and a steaming rocket, the scene lends as closures. A body's pose is a
+fact on the body, lying, seated, on the bench, and the scene draws it each frame. Where the fixtures stand is
+the station's (`Fixtures.swift`).
+
 The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
 shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
 the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
 `SceneMarkers.swift` the crates, cones, rockets and power; `SceneTick.swift` the per-frame worker loop and the demo
-clock; `Jobs.swift` what a worker is told to do; `HUD.swift` the overlay; `Minion.swift` one worker's body;
-`Actors.swift` the props that run commands of their own, a shuttle's flight, a rocket's stages and a pallet's
-load; `Pallets.swift` the dispatcher's errand from the console to the deck.
+clock, the commands whose crates are still nodes, and the pose; `Jobs.swift` the hauls, deliveries and the crew,
+and the seam through which the scene asks the simulation for orders and walks by their old names; `HUD.swift`
+the overlay; `Minion.swift` one worker's figure on its `Body`; `Actors.swift` the props that run commands of
+their own, a shuttle's flight, a rocket's stages and a pallet's load; `Pallets.swift` the dispatcher's errand
+from the console to the deck.
 
 ## Debts
 
@@ -111,7 +123,7 @@ a new one replaces the old at the next interruptible phase, at most one waits, a
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
 it holds where it stands.
 
-Every crate that moves by hand goes through one lift and one set-down (`SceneTick.swift`, the `Hands`
+Every crate that moves by hand goes through one lift and one set-down (`Hands` in `Simulation.swift`, the
 constants with `startLift`/`lift` and `startSetDown`/`setDown`/`release`): an arm's length away and facing
 it, a crouch whose posture comes from how high the crate stands, the crate up past the chest and onto the
 arms, and out of the arms onto its slot turned the way the layout will draw it. The office delivery uses the

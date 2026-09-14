@@ -90,37 +90,12 @@ extension StationController {
         }
     }
 
-    /// Every worker, once a frame: its walk, its pose, its props.
     /// A shuttle that dropped this office's crate and has not risen from the slot yet.
     func shipStillOver(order: Int, station: String) -> Bool {
         shuttles.contains { s in
             guard s.station == station, case .flight(let kind, _, _) = s.command.kind, case .dropCrate(let id) = kind, id == order else { return false }
             return s.phase < 3   // approach, descend, unload
         }
-    }
-
-    /// The bath's two fixtures and the corner of its tile each backs into: the toilet and the shower
-    /// take the tiles that are neither the doorway nor the far corner the room's name is cut into.
-    /// The corner is the unit direction from the room's middle out to the tile's outer wall corner.
-    func bathFixtures(station: Station, bath: Room) -> (toilet: Cell, shower: Cell, toiletCorner: SIMD2<Double>, showerCorner: SIMD2<Double>) {
-        let door = station.doorCell(of: bath.key)
-        let maxY = bath.cells.map(\.y).max()!
-        let sign = Cell(x: bath.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
-        var tiles = bath.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        while tiles.count < 2, let more = bath.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
-        let mid = SIMD2(bath.cells.map { Double($0.x) }.reduce(0, +) / Double(bath.cells.count),
-                        bath.cells.map { Double($0.y) }.reduce(0, +) / Double(bath.cells.count))
-        func corner(_ c: Cell) -> SIMD2<Double> {
-            let d = SIMD2(Double(c.x), Double(c.y)) - mid
-            return SIMD2(d.x < 0 ? -1 : 1, d.y < 0 ? -1 : 1)
-        }
-        return (tiles[0], tiles[1], corner(tiles[0]), corner(tiles[1]))
-    }
-
-    /// Where the bowl stands, in world x/z: into the toilet tile's corner, the tank against the wall behind it.
-    func bowlSpot(station: Station, bath: Room) -> SIMD2<Double> {
-        let f = bathFixtures(station: station, bath: bath)
-        return SIMD2(station.offset.x + Double(f.toilet.x) + 0.22 * f.toiletCorner.x, station.offset.y + Double(f.toilet.y) + 0.22 * f.toiletCorner.y)
     }
 
     /// The flush: a beat of water colour flickering in the bowl, then gone.
@@ -133,217 +108,6 @@ extension StationController {
         let blink = SCNAction.sequence([.fadeOpacity(to: 1, duration: 0.06), .fadeOpacity(to: 0.3, duration: 0.1)])
         water.runAction(.sequence([.repeat(blink, count: 5), .fadeOut(duration: 0.2), .removeFromParentNode()]))
     }
-
-    /// Where the shower's water comes from, in world x/z: the nozzle over the shower tile's corner.
-    func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
-        let f = bathFixtures(station: station, bath: bath)
-        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.25 * f.showerCorner.y)
-    }
-
-    /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
-    /// tiles that are neither the doorway nor the far corner the room's name is cut into.
-    func gymSpots(station: Station, gym: Room) -> [SIMD2<Double>] {
-        let door = station.doorCell(of: gym.key)
-        let maxY = gym.cells.map(\.y).max()!
-        let sign = Cell(x: gym.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
-        var tiles = gym.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        while tiles.count < 4, let more = gym.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
-        return tiles.prefix(4).map { SIMD2(station.offset.x + Double($0.x), station.offset.y + Double($0.y)) }
-    }
-
-    /// Which way is out from a gym tile: toward the nearest outer wall, for a post to stand against.
-    func gymOutward(station: Station, gym: Room, at spot: SIMD2<Double>) -> SIMD2<Double> {
-        let cx = station.offset.x + Double(gym.cells.map(\.x).reduce(0, +)) / Double(gym.cells.count)
-        let cy = station.offset.y + Double(gym.cells.map(\.y).reduce(0, +)) / Double(gym.cells.count)
-        return SIMD2(spot.x >= cx ? 1 : -1, spot.y >= cy ? 1 : -1)
-    }
-
-    /// The tile a workout stands on, and the exact spot and facing for it.
-    /// A visit to the bath: the shower or the bowl, whichever is free, walked to and acted for its
-    /// whole time, then back to where the minion came from. False when both fixtures are taken.
-    @discardableResult
-    func visitBath(_ m: Minion, station: Station) -> Bool {
-        guard let bath = station.rooms["kind:bath"] else { return false }
-        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
-        let want = m.showering ? 1 : 0
-        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { return false }
-        m.showering = fixture == 1
-        m.fixture = fixture
-        m.bathDue = 0
-        let back = m.place
-        send(m, to: .bath)
-        start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60))   // a shower two to three minutes, the toilet one
-        let f = bathFixtures(station: station, bath: bath)
-        let cell = m.showering ? f.shower : f.toilet
-        m.path = route(m, to: cell)
-        // Then the exact spot: under the nozzle with the wall at the back, or a step in front of the bowl, facing it.
-        let nozzle = showerNozzle(station: station, bath: bath)
-        m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
-                                  : SIMD2(Double(cell.x) + 0.02 * f.toiletCorner.x, Double(cell.y) - 0.1 * f.toiletCorner.y)
-        m.facing = m.showering ? atan2(f.showerCorner.x, -f.showerCorner.y) : atan2(f.toiletCorner.x, f.toiletCorner.y)
-        return true
-    }
-
-    /// A lounger's idle clock ran out: one thing to do, by weight (`IdlePick`). A look round the station
-    /// most often, a turn in the gym by day, the bath, and now and then simply staying on the couch with a book.
-    func pickIdle(_ m: Minion, station: Station) {
-        let gymFree = station.rooms["kind:gym"] != nil && freeGymFixture(m) != nil
-        let pick = IdlePick.pick(roll: Double.random(in: 0..<1), night: isNight(station), crew: m.isCrew,
-                                 gymFree: gymFree, bath: station.rooms["kind:bath"] != nil, shower: Bool.random())
-        switch pick {
-        case .roam:
-            startRoam(m, station: station)
-        case .gym:
-            if let gym = station.rooms["kind:gym"], takeTurnInGym(m, station: station, gym: gym) { return }
-            startRoam(m, station: station)
-        case .bath(let shower):
-            m.showering = shower
-            if visitBath(m, station: station) { return }
-            startRoam(m, station: station)
-        case .read:
-            break   // reading on the couch: nothing to walk to, and the clock starts again
-        }
-    }
-
-    /// A look round the station: a clear spot out of every doorway, apart from where others stand and
-    /// where other roamers are headed; beside the pad when a loaded rocket steams, where company is fine.
-    @discardableResult
-    func startRoam(_ m: Minion, station: Station) -> Bool {
-        let rocketReady = rocketActors.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
-        let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
-        let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
-        let clear = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
-            .filter { !doorways.contains($0) }
-            .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
-        let others = minions.values.filter { $0.id != m.id && $0.station == m.station }
-        let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
-        guard let spot = RoamSpots.choose(clear: clear, taken: taken, company: rocketReady) else { return false }
-        start(m, .chore(spot: spot, seconds: Double.random(in: 120...240)))   // two to four minutes looking round
-        guard case .chore = m.current?.kind else { return false }
-        m.couch = nil
-        m.place = .core
-        m.path = route(m, to: spot)
-        m.nextWanderAt = clock + 60   // lingering at the spot, not wandering off it
-        return true
-    }
-
-    /// A visit ran its course: how long it lasted from arrival, against how long it was meant to. For the checks.
-    func visitDone(_ m: Minion, _ kind: String) {
-        guard sim != nil else { return }
-        visitLog.append((kind: kind, lasted: m.actStartedAt > 0 ? clock - m.actStartedAt : 0, planned: m.actFor))
-    }
-
-    /// A turn in the gym, on a fixture nobody else is on: walked to, then acted for its whole time,
-    /// then back to where the minion came from. False when every fixture is taken.
-    @discardableResult
-    func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool {
-        guard let kind = freeGymFixture(m) else { return false }
-        let back = m.place
-        m.couch = nil
-        send(m, to: .gym)
-        start(m, .exercise(kind, back: back, seconds: Double.random(in: 240...480)), announce: true)   // four to eight minutes on a fixture
-        let stand = gymStand(station: station, gym: gym, kind)
-        m.path = route(m, to: stand.cell)
-        m.fetchSpot = stand.spot
-        m.facing = stand.facing
-        return true
-    }
-
-    /// A gym fixture nobody else on the station is on, at random; nil when every one is taken.
-    func freeGymFixture(_ m: Minion) -> Command.Workout? {
-        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
-        return Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
-    }
-
-    func gymStand(station: Station, gym: Room, _ kind: Command.Workout) -> (cell: Cell, spot: SIMD2<Double>, facing: Double) {
-        let world = gymSpots(station: station, gym: gym)[kind.rawValue]
-        let local = SIMD2(world.x - station.offset.x, world.y - station.offset.y)
-        let cell = Cell(x: Int(local.x.rounded()), y: Int(local.y.rounded()))
-        switch kind {
-        case .treadmill: return (cell, local + SIMD2(0, -0.05), 0)               // on the slab, facing the rail
-        case .bench: return (cell, local + SIMD2(0, -0.18), 0)                   // lying under the bar
-        case .bag:                                                               // a step in from the post, squared up to the bag
-            let out = gymOutward(station: station, gym: gym, at: world)
-            return (cell, local - out * 0.2, atan2(out.x, out.y))
-        case .mat: return (cell, local, .pi / 4)                                  // the middle of the mat
-        }
-    }
-
-    // MARK: hands
-
-    /// Everything a crate does between two slots, in one place. Every crate that moves by hand — a
-    /// carry, an office delivery, anything later — goes through `startLift`/`lift` and
-    /// `startSetDown`/`setDown`/`release`, so there is one lift on the station and one set-down.
-    ///
-    /// The arcs are crate motions on the station clock (`CrateMotion`), and so are the phases. Both
-    /// are derived from the numbers below and nowhere else, so the two cannot drift: a phase is exactly
-    /// its arc plus the beat around it, whatever those durations are changed to.
-    enum Hands {
-        /// The crate's two legs off its slot: back at its own height, then up onto the arms.
-        static let liftFirst = 0.3, liftSecond = 0.35
-        /// Crouched over it before the hands take hold.
-        static let liftCrouch = 0.45
-        /// Out of the arms, over the slot, and squarely down onto it.
-        static let setDownFirst = 0.35, setDownSecond = 0.45
-        /// A beat standing over it before straightening up.
-        static let setDownSettle = 0.3
-        static var liftArc: Double { liftFirst + liftSecond }
-        static var liftSeconds: Double { liftCrouch + liftArc }
-        static var setDownArc: Double { setDownFirst + setDownSecond }
-        static var setDownSeconds: Double { setDownArc + setDownSettle }
-        /// How high one crate stands on the next.
-        static let level = 0.34
-        /// An arm's length, and the slack either side of it.
-        static let arm = 0.34, near = 0.28, far = 0.42
-        /// How long a crate takes to settle down a level when the one under it is taken away.
-        static let settleSeconds = 0.6
-    }
-
-    /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
-    /// Who holds when two meet: a load first, then a job, then rest; the name breaks a tie. Comparable
-    /// as a tuple so the order is total and the same pair always resolves the same way.
-    func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool {
-        let to = spot - m.pos
-        let dist = (to.x * to.x + to.y * to.y).squareRoot()
-        if dist > 0.05 { m.facing = atan2(to.x, to.y) }
-        // Far off: walked to the cell beside it, round whatever stands in the way. From there the last
-        // bit is a shuffle, and a cell it already stands on is never walked to again.
-        if dist > 0.9, let st = fleet.stations[m.station] {
-            let stand = standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-            if m.path.isEmpty, m.cell != stand { m.path = route(m, to: stand); return false }
-        }
-        guard m.path.isEmpty else { return false }
-        guard dist < Hands.near || dist > Hands.far else { return true }
-        // Right on top of the slot: a step back the way it is facing, so the crate goes down in front.
-        let dir = dist > 0.001 ? to / dist : SIMD2(sin(m.facing), cos(m.facing))
-        let want = spot - dir * Hands.arm
-        m.pos += (want - m.pos) * min(1, dt * 6)
-        return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
-    }
-
-    /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
-    /// Where to stand for a slot: its own cell when the centre is clear, else the neighbouring cell with
-    /// the clearest centre. A crate row is never walked into; the aisle beside it is.
-    func standCell(_ st: Station, near cell: Cell) -> Cell {
-        func blocked(_ c: Cell) -> Int {
-            var n = 0
-            for dx in -1...1 {
-                for dy in -1...1 where st.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) { n += 1 }
-            }
-            return n
-        }
-        if blocked(cell) == 0 { return cell }
-        let options = cell.neighbours.filter { st.walkable.contains($0) }
-        return options.min { blocked($0) < blocked($1) } ?? cell
-    }
-
-    func startLift(_ m: Minion, height: Double) {
-        m.handsAt = max(0, Int((height / Hands.level).rounded()))
-        m.phaseUntil = clock + Hands.liftSeconds
-    }
-
-    /// True once the crouch is over and the hands should be on the crate.
-    func liftDue(_ m: Minion) -> Bool { clock >= m.phaseUntil - Hands.liftArc }
 
     /// The crate comes off its slot and onto the arms, and stays there until it is set down. Off the
     /// floor it comes up past the chest; off a stack it slides back at its own height first, then up:
@@ -365,12 +129,6 @@ extension StationController {
         moveCrate(node, legs: [MotionLeg(to: via, seconds: Hands.liftFirst, ease: .easeOut),
                                MotionLeg(to: SIMD3(0, m.headHeight + 0.14, 0), seconds: Hands.liftSecond)])
         m.carried = node
-    }
-
-    /// Standing over the slot: the level it goes onto decides the posture, the set-down the clock.
-    func startSetDown(_ m: Minion, level: Int) {
-        m.handsAt = level
-        m.phaseUntil = clock + Hands.setDownSeconds
     }
 
     /// The crate leaves the arms and goes down onto its slot. Level 0 is set down carefully in front;
@@ -428,392 +186,251 @@ extension StationController {
         }
     }
 
+    /// Every worker, once a frame. The simulation walks it and runs the quiet commands; the scene runs
+    /// the commands whose crates are still nodes, then draws the pose the body says it holds.
     func tickMinions(dt: Double) {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
             if hovered == "minion:" + m.id { continue }
-            m.waitingOn = nil
-            let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
-            let jumping = m.activity == .waiting && waitingAge < 60 && !m.onJob
-            let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
-            // Pace by the task, not by who: a loaded minion is the slowest thing on the station, below
-            // a stroll; hurrying to work is the fastest; pacing while waiting is slower still.
-            // A hurried haul is quicker on its feet, still below a busy walk: the crate is heavy all the same.
-            let hurried = m.current.flatMap { cargo[$0.id]?.hurry } ?? false
-            let speed = m.wedged ? 0 : m.isHauling ? (hurried ? 1.7 : 1.1) : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
-            if m.lying, !m.path.isEmpty {
-                if m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.setSleeping(false); m.bed = nil }
-            }
-            if m.wakeUntil > 0 {
-                if clock < m.wakeUntil { m.node.opacity = m.opacity; continue }
-                m.wakeUntil = 0
-                // Out of the shuttle: a job handed over while still stepping out begins now.
-                if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
-            }
-            if let target = m.path.first, clock >= m.wonderUntil {
-                // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
-                // the line. The other does the same, so two head-on pass without either stopping or
-                // planning again. Someone on a couch or in bed is on the furniture, not in the way.
-                let others = minions.values.filter { o in
-                    o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
-                        && !o.lying && !(o.couch != nil && o.path.isEmpty)
+            switch simulation.stepWalk(m, station: station, dt: dt) {
+            case .waking: m.node.opacity = m.opacity; continue
+            case .walking, .wondering: break
+            case .there:
+                if !runSceneCommand(m, station: station, dt: dt) { continue }
+                switch simulation.stepThere(m, station: station, dt: dt) {
+                case .gone: despawn(m); continue
+                case .spent: continue
+                case .posed: break
                 }
-                m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others, station: station)?.id
-            } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
-                switch m.current?.kind {
-                case .stow:
-                    // There: the cube comes off the head and goes down onto its place on the floor,
-                    // and the box drawn there takes over as it lands.
-                    if m.phaseKind == .walk {
-                        advance(m)
-                        m.phaseUntil = clock + 0.7
-                        if let (cube, box) = m.stowing {
-                            let world = cube.worldPosition
-                            stopCrate(cube)
-                            cube.removeFromParentNode()
-                            cube.position = world
-                            propRoot.addChildNode(cube)
-                            let at = SIMD3(Double(box.position.x), Double(box.position.y), Double(box.position.z))
-                            moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box] in
-                                self?.drone.thud()
-                                box?.opacity = 1
-                                cube.removeFromParentNode()
-                            }
-                        }
-                        continue
+            }
+            simulation.stepRest(m, station: station, dt: dt)
+            pose(m, station: station, dt: dt)
+        }
+        for cue in simulation.drainCues() { play(cue) }
+    }
+
+    /// What the simulation decided this frame that the scene shows once.
+    private func play(_ cue: Cue) {
+        switch cue {
+        case .flush(_, let bowl, let front): flush(at: bowl, front: front)
+        case .fidget(let id): minions[id]?.fidget()
+        case .hop(let id):
+            minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
+        case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }
+        }
+    }
+
+    /// The commands whose crates are still the scene's nodes, run when the body has nowhere to walk:
+    /// a stow, an office delivery, the pallet errands, packing, a carry. False when the frame is spent.
+    private func runSceneCommand(_ m: Minion, station: Station, dt: Double) -> Bool {
+        switch m.current?.kind {
+        case .stow:
+            // There: the cube comes off the head and goes down onto its place on the floor,
+            // and the box drawn there takes over as it lands.
+            if m.phaseKind == .walk {
+                advance(m)
+                m.phaseUntil = clock + 0.7
+                if let (cube, box) = m.stowing {
+                    let world = cube.worldPosition
+                    stopCrate(cube)
+                    cube.removeFromParentNode()
+                    cube.position = world
+                    propRoot.addChildNode(cube)
+                    let at = SIMD3(Double(box.position.x), Double(box.position.y), Double(box.position.z))
+                    moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box] in
+                        self?.drone.thud()
+                        box?.opacity = 1
+                        cube.removeFromParentNode()
                     }
-                    if clock < m.phaseUntil { continue }
-                    m.stowing = nil
+                }
+                return false
+            }
+            if clock < m.phaseUntil { return false }
+            m.stowing = nil
+            finish(m)
+            send(m, to: m.place)
+            return false
+        case .deliverOffice(let id):
+            // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
+            // way any crate is lifted, and set down on the office's own slot before the reveal.
+            // The order is the identity; the room it goes to is whatever the order says now.
+            guard let order = world.truth.deliveries[id] else {
+                // Delivered by someone else, or the office is gone: nothing to fetch.
+                m.carried?.removeFromParentNode(); m.carried = nil
+                finish(m); return false
+            }
+            let r = order.roomKey
+            let key = order.key
+            let slot = officeCrateSlot(station: station, roomKey: r)
+            switch m.phaseKind {
+            case .walk:
+                advance(m); return false
+            case .approach:
+                // Watching the crate come down, and the shuttle lift off it, before going over.
+                if let spot = m.fetchSpot {
+                    let d = spot - m.pos
+                    if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
+                }
+                if !order.landed { m.waitingOn = "the crate to come down"; return false }
+                if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; return false }
+                if let spot = m.fetchSpot {
+                    m.fetchSpot = nil
+                    m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+                    return false
+                }
+                guard m.path.isEmpty else { return false }
+                // An arm's length from the crate, facing it, then the crouch: the same as any carry.
+                if let box = boxes[key] {
+                    let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
+                    guard atArmsLength(m, of: at, dt: dt) else { return false }
+                    startLift(m, height: Double(box.worldPosition.y))
+                } else {
+                    startLift(m, height: 0)
+                }
+                advance(m); return false
+            case .lift:
+                guard liftDue(m) else { return false }
+                if m.carried == nil, let box = boxes[key] { lift(m, box) }
+                if clock < m.phaseUntil { return false }
+                advance(m)
+                // The office went away while the crate was in the air: nothing to walk it into.
+                // Carried to the corridor outside the doorway and set down just inside it.
+                if let slot { walk(m, to: station.doorOutside(of: r) ?? slot.cell) } else { reveal(key); finish(m) }
+                return false
+            case .haul:
+                advance(m); return false
+            default:
+                guard let slot, let box = m.carried else {
+                    m.carried?.removeFromParentNode()
+                    m.carried = nil
+                    reveal(key)
                     finish(m)
-                    send(m, to: m.place)
-                    continue
-                case .deliverOffice(let id):
-                    // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
-                    // way any crate is lifted, and set down on the office's own slot before the reveal.
-                    // The order is the identity; the room it goes to is whatever the order says now.
-                    guard let order = world.truth.deliveries[id] else {
-                        // Delivered by someone else, or the office is gone: nothing to fetch.
-                        m.carried?.removeFromParentNode(); m.carried = nil
-                        finish(m); continue
-                    }
-                    let r = order.roomKey
-                    let key = order.key
-                    let slot = officeCrateSlot(station: station, roomKey: r)
-                    switch m.phaseKind {
-                    case .walk:
-                        advance(m); continue
-                    case .approach:
-                        // Watching the crate come down, and the shuttle lift off it, before going over.
-                        if let spot = m.fetchSpot {
-                            let d = spot - m.pos
-                            if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
-                        }
-                        if !order.landed { m.waitingOn = "the crate to come down"; continue }
-                        if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; continue }
-                        if let spot = m.fetchSpot {
-                            m.fetchSpot = nil
-                            m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-                            continue
-                        }
-                        guard m.path.isEmpty else { continue }
-                        // An arm's length from the crate, facing it, then the crouch: the same as any carry.
-                        if let box = boxes[key] {
-                            let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
-                            guard atArmsLength(m, of: at, dt: dt) else { continue }
-                            startLift(m, height: Double(box.worldPosition.y))
-                        } else {
-                            startLift(m, height: 0)
-                        }
-                        advance(m); continue
-                    case .lift:
-                        guard liftDue(m) else { continue }
-                        if m.carried == nil, let box = boxes[key] { lift(m, box) }
-                        if clock < m.phaseUntil { continue }
-                        advance(m)
-                        // The office went away while the crate was in the air: nothing to walk it into.
-                        // Carried to the corridor outside the doorway and set down just inside it.
-                        if let slot { walk(m, to: station.doorOutside(of: r) ?? slot.cell) } else { reveal(key); finish(m) }
-                        continue
-                    case .haul:
-                        advance(m); continue
-                    default:
-                        guard let slot, let box = m.carried else {
-                            m.carried?.removeFromParentNode()
-                            m.carried = nil
-                            reveal(key)
-                            finish(m)
-                            continue
-                        }
-                        let spot = SIMD2(slot.pos.x - station.offset.x, slot.pos.z - station.offset.y)
-                        if m.phaseUntil == 0 {
-                            guard atArmsLength(m, of: spot, dt: dt) else { continue }
-                            startSetDown(m, level: slot.level)
-                            setDown(m, box, to: slot.pos, yaw: slot.yaw, level: slot.level)
-                            continue
-                        }
-                        let toSpot = spot - m.pos
-                        if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
-                        if clock < m.phaseUntil { continue }
-                        release(m, box, at: slot.pos, yaw: slot.yaw)
-                        reveal(key)   // set down on its slot: the office fades in round it as the crate fades out
-                        finish(m)
-                        continue
-                    }
-                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
-                    palletStep(m, station: station)
-                    continue
-                case .pack(let office):
-                    // At the office's package slot: down on the knees over it for a moment, then the
-                    // crate is there, strapped, and the worker straightens up.
-                    let key = "\(m.station)|\(office)"
-                    if m.phaseKind == .walk {
-                        advance(m)
-                        m.phaseUntil = clock + 1.8
-                        continue
-                    }
-                    if clock < m.phaseUntil { continue }
-                    packing.remove(key)
-                    if let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) {
-                        pkg.opacity = 1
-                        let at = SIMD3(Double(pkg.position.x), Double(pkg.position.y), Double(pkg.position.z))
-                        pkg.scale = SCNVector3(0.05, 0.05, 0.05)
-                        moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
-                    } else { markersDirty = true }
-                    finish(m)
-                    send(m, to: m.place)
-                    continue
-                case .react(_, _, let seconds):
-                    // There: work at it for its span of station time, then back to the quarters.
-                    if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; continue }
-                    if clock >= m.phaseUntil { crewRested(m) }
-                case .carry(let crate, _, _):
-                    guard let id = m.current?.id, let job = cargo[id] else {
-                        // The crate went away: put down whatever is on the arms, where it stands.
-                        dropWhereStanding(m)
-                        finish(m); continue
-                    }
-                    let to = job.aim   // the place as it is now: asked again at lift, or sent back
-                    switch m.phaseKind {
-                    case .walk:
-                        advance(m); continue
-                    case .approach:
-                        // Stand an arm's length from the crate, facing it, before taking hold.
-                        let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
-                        guard atArmsLength(m, of: boxAt, dt: dt) else { continue }
-                        advance(m)
-                        startLift(m, height: Double(job.node.worldPosition.y))
-                        continue
-                    case .lift:
-                        // Take hold at the crate's own height, bring it up and over the head.
-                        let boxAt = SIMD2(Double(job.node.worldPosition.x) - station.offset.x, Double(job.node.worldPosition.z) - station.offset.y)
-                        let toBox = boxAt - m.pos
-                        if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                        guard liftDue(m) else { continue }
-                        if m.carried == nil {
-                            lift(m, job.node)
-                            self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
-                            cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
-                        }
-                        if clock < m.phaseUntil { continue }
-                        advance(m)
-                        // Up on the arms: now the slot is asked for, against the stack as it stands this moment.
-                        reaim(id, for: m)
-                        walk(m, to: standCell(station, near: (cargo[id]?.aim ?? to).cell))
-                        continue
-                    case .haul:
-                        advance(m); continue
-                    default:
-                        // Set the crate down squarely on its slot, then a beat before straightening up.
-                        // A crate is heavy: it stays on the arms all the way there and the hands do the lowering.
-                        let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
-                        if m.phaseUntil == 0 {
-                            // A step back from the spot so the crate goes down in front, not underfoot.
-                            guard atArmsLength(m, of: spot, dt: dt) else { continue }
-                            startSetDown(m, level: to.level)
-                            setDown(m, job.node, to: to.pos, yaw: to.yaw, level: to.level)
-                            continue
-                        }
-                        let toSpot = spot - m.pos
-                        if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
-                        if clock < m.phaseUntil { continue }
-                        release(m, job.node, at: to.pos, yaw: to.yaw)
-                        cargo[id] = nil
-                        self.world.setDown(crate, at: to)
-                        job.onDone()
-                        finish(m)
-                        continue
-                    }
-                default:
-                    break
+                    return false
                 }
-                // There: the quiet commands move on from walking to being there, so truth says so too.
-                if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
-                    switch c.kind {
-                    case .goTo, .bath, .exercise, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
-                        advance(m)
-                        // A visit's time starts here, on arrival, not when the walk began.
-                        if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
-                    default: break
-                    }
+                let spot = SIMD2(slot.pos.x - station.offset.x, slot.pos.z - station.offset.y)
+                if m.phaseUntil == 0 {
+                    guard atArmsLength(m, of: spot, dt: dt) else { return false }
+                    startSetDown(m, level: slot.level)
+                    setDown(m, box, to: slot.pos, yaw: slot.yaw, level: slot.level)
+                    return false
                 }
-                switch m.state {
-                case .arriving:
-                    m.state = .settled
-                case .settled:
-                    if m.isQA, clock >= m.nextWanderAt {
-                        // Stack by stack along the untested row: stand in the aisle beside it, face it, sweep it.
-                        let stacks = Dictionary(grouping: world.yardLayout(station: station, area: "deck").filter { !$0.cleared }, by: \.column)
-                            .values.compactMap { $0.first }.sorted { $0.column < $1.column }
-                        if !stacks.isEmpty {
-                            let stack = stacks[m.qaStop % stacks.count]
-                            m.qaStop += 1
-                            let aisle = [Cell(x: stack.cell.x, y: stack.cell.y - 1), Cell(x: stack.cell.x, y: stack.cell.y + 1)]
-                                .first { station.deckCells.contains($0) } ?? stack.cell
-                            m.path = route(m, to: aisle)
-                            m.facing = atan2(stack.pos.x - station.offset.x - Double(aisle.x), stack.pos.z - station.offset.y - Double(aisle.y))
-                        }
-                        m.nextWanderAt = clock + Double.random(in: 4...7)
-                        m.setTool(.scanner)
-                        if clock >= m.nextImpatience {
-                            m.nextImpatience = clock + Double.random(in: 5...9)
-                            m.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
-                        }
-                    }
-                    // Bath rules: a shower after a long stretch of work, maybe a pee after a short one,
-                    // and loungers go now and then. Never while busy, carrying, on a job or in bed.
-                    if m.busy && !m.wasBusy { m.busySince = clock; m.bathDue = 0 }
-                    if !m.busy && m.wasBusy && !m.isSubagent {
-                        let stretch = clock - m.busySince
-                        if stretch > 20 * 60 { m.bathDue = clock + Double.random(in: 3...20); m.showering = true }
-                        else if stretch > 3 * 60 { m.shortStretches += 1; if m.shortStretches % 2 == 0 { m.bathDue = clock + Double.random(in: 3...20); m.showering = false } }
-                    }
-                    m.wasBusy = m.busy
-                    let settled = m.path.isEmpty
-                    // Roaming: a look round the station, lingering at the spot for its time, then back to the couch.
-                    if m.isChore {
-                        if settled, m.phase > 0, clock >= m.phaseUntil { visitDone(m, "roam"); finish(m, to: .lounge) }
-                    } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0, m.carried == nil {
-                        // One idle clock per lounger (`IdleClock`). When it runs out one thing is picked, and the clock
-                        // starts again only once that is done and the lounger is back: leaving does not reset it.
-                        // Whatever was picked starts from the next frame: this frame's "settled" is from the couch.
-                        if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); continue }
-                    }
-                    if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
-                    if m.place == .bath {
-                        // Once in the cell, shuffle to the fixture itself: under the nozzle, or in front of the bowl.
-                        if settled, let spot = m.fetchSpot {
-                            let d = spot - m.pos
-                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
-                            m.fetchSpot = nil
-                            // Squared up to the fixture, the wall or the bowl, for the whole visit.
-                            if let bath = station.rooms["kind:bath"] {
-                                let f = bathFixtures(station: station, bath: bath)
-                                let corner = m.showering ? f.showerCorner : f.toiletCorner
-                                m.facing = atan2(corner.x, corner.y)
-                            }
-                        }
-                        if settled {
-                            m.setStatic(true, frame: Int(clock * 12))
-                            if m.showering, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
-                                // Pixel water from the nozzle, falling past the shoulders onto the drain.
-                                m.nextDropAt = clock + 0.05
-                                let nozzle = showerNozzle(station: station, bath: bath)
-                                let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
-                                drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-                                drop.position = v3(nozzle.x + Double.random(in: -0.04...0.04), 0.66, nozzle.y + Double.random(in: -0.04...0.04))
-                                propRoot.addChildNode(drop)
-                                let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
-                                drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
-                            }
-                            if !m.showering, let bath = station.rooms["kind:bath"] {
-                                // The bowl: turn round and sit, a fidget now and then, up again just before the
-                                // visit ends with the flush behind. All on the visit's own clock.
-                                let standAt = m.phaseUntil - 0.7
-                                let bowl = bowlSpot(station: station, bath: bath)
-                                let f = bathFixtures(station: station, bath: bath)
-                                if !m.seated, clock < standAt, m.phaseUntil > 0 {
-                                    // Sat square on the WC, facing straight out from the tank, wherever it stood.
-                                    let to = bowl - station.offset - m.pos
-                                    m.facing = atan2(0, -f.toiletCorner.y)
-                                    let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
-                                    m.setSeated(true, at: SIMD2(across, ahead - 0.02))
-                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3)
-                                } else if m.seated, clock >= standAt {
-                                    m.setSeated(false)
-                                    flush(at: bowl, front: f.toiletCorner.y)
-                                } else if m.seated, clock >= m.nextFidgetAt {
-                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
-                                    m.fidget()
-                                }
-                            }
-                        }
-                        if clock >= m.phaseUntil && settled {   // done; work waits its turn
-                            m.setSeated(false)
-                            m.setStatic(false, frame: 0)
-                            m.fixture = nil
-                            var back = restPlace(m)
-                            if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
-                            visitDone(m, "bath")
-                            finish(m, to: back)   // the visit is over: one order back, to where it came from
-                        }
-                    } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
-                        if !visitBath(m, station: station) { continue }   // both fixtures taken: wait
-                    }
-                    if m.place == .gym, m.exercising {
-                        // Once on the tile, shuffle onto the fixture itself and square up to it.
-                        if settled, let spot = m.fetchSpot {
-                            let d = spot - m.pos
-                            if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
-                            m.fetchSpot = nil
-                            if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = gymStand(station: station, gym: gym, kind).facing }
-                            if m.workout == .bench { m.setBench(true) }
-                        }
-                        if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
-                            m.setBench(false)
-                            var back = restPlace(m)
-                            if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
-                            visitDone(m, "gym")
-                            finish(m, to: back)   // the turn is over: one order back, to where it came from
-                        }
-                    }
-                    if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
-                        if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
-                    } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !jumping {
-                        let door: Cell? = { if case .room(let k) = m.place { return station.doorCell(of: k) }; return nil }()
-                        let choices = station.cells(of: m.place).filter { $0 != m.cell && $0 != door }   // wander anywhere but the doorway
-                        if let dest = choices.randomElement() { m.path = route(m, to: dest) }
-                        m.nextWanderAt = clock + (pacing ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
-                    }
-                case .leaving:
-                    // Solid all the way to the airlock. Inside, the inner door shuts and the chamber
-                    // cycles for a beat; then out through the hatch, fading onto the bay.
-                    let inChamber = station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell)
-                    if station.airlockCells.isEmpty || (inChamber && m.phaseKind != .walk) {
-                        m.opacity -= dt * 1.2
-                        if m.opacity <= 0 { despawn(m); continue }
-                    } else if inChamber, m.phaseKind == .walk, station.airlockInner.contains(m.cell) {
-                        advance(m)
-                        m.wonderUntil = clock + 1.5   // the cycle
-                    }
-                }
+                let toSpot = spot - m.pos
+                if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                if clock < m.phaseUntil { return false }
+                release(m, box, at: slot.pos, yaw: slot.yaw)
+                reveal(key)   // set down on its slot: the office fades in round it as the crate fades out
+                finish(m)
+                return false
             }
-            if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
-            var bunkLift = 0.0
-            // Seats and beds draw a minion in only while it has nothing else to do.
-            if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
-                m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
+        case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
+            palletStep(m, station: station)
+            return false
+        case .pack(let office):
+            // At the office's package slot: down on the knees over it for a moment, then the
+            // crate is there, strapped, and the worker straightens up.
+            let key = "\(m.station)|\(office)"
+            if m.phaseKind == .walk {
+                advance(m)
+                m.phaseUntil = clock + 1.8
+                return false
             }
-            if m.path.isEmpty, m.isResting, m.place == .quarters {
-                if let b = m.bed, b < station.beds.count {
-                    m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
-                    bunkLift = station.beds[b].level == 1 ? 0.36 : 0
+            if clock < m.phaseUntil { return false }
+            packing.remove(key)
+            if let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) {
+                pkg.opacity = 1
+                let at = SIMD3(Double(pkg.position.x), Double(pkg.position.y), Double(pkg.position.z))
+                pkg.scale = SCNVector3(0.05, 0.05, 0.05)
+                moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
+            } else { markersDirty = true }
+            finish(m)
+            send(m, to: m.place)
+            return false
+        case .carry(let crate, _, _):
+            guard let id = m.current?.id, let job = cargo[id], let node = cargoNodes[id] else {
+                // The crate went away: put down whatever is on the arms, where it stands.
+                dropWhereStanding(m)
+                finish(m); return false
+            }
+            let to = job.aim   // the place as it is now: asked again at lift, or sent back
+            switch m.phaseKind {
+            case .walk:
+                advance(m); return false
+            case .approach:
+                // Stand an arm's length from the crate, facing it, before taking hold.
+                let boxAt = SIMD2(Double(node.worldPosition.x) - station.offset.x, Double(node.worldPosition.z) - station.offset.y)
+                guard atArmsLength(m, of: boxAt, dt: dt) else { return false }
+                advance(m)
+                startLift(m, height: Double(node.worldPosition.y))
+                return false
+            case .lift:
+                // Take hold at the crate's own height, bring it up and over the head.
+                let boxAt = SIMD2(Double(node.worldPosition.x) - station.offset.x, Double(node.worldPosition.z) - station.offset.y)
+                let toBox = boxAt - m.pos
+                if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
+                guard liftDue(m) else { return false }
+                if m.carried == nil {
+                    lift(m, node)
+                    self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
+                    cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
                 }
+                if clock < m.phaseUntil { return false }
+                advance(m)
+                // Up on the arms: now the slot is asked for, against the stack as it stands this moment.
+                simulation.reaim(id)
+                walk(m, to: standCell(station, near: (cargo[id]?.aim ?? to).cell))
+                return false
+            case .haul:
+                advance(m); return false
+            default:
+                // Set the crate down squarely on its slot, then a beat before straightening up.
+                // A crate is heavy: it stays on the arms all the way there and the hands do the lowering.
+                let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
+                if m.phaseUntil == 0 {
+                    // A step back from the spot so the crate goes down in front, not underfoot.
+                    guard atArmsLength(m, of: spot, dt: dt) else { return false }
+                    startSetDown(m, level: to.level)
+                    setDown(m, node, to: to.pos, yaw: to.yaw, level: to.level)
+                    return false
+                }
+                let toSpot = spot - m.pos
+                if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
+                if clock < m.phaseUntil { return false }
+                release(m, node, at: to.pos, yaw: to.yaw)
+                cargo[id] = nil
+                cargoNodes[id] = nil
+                self.world.setDown(crate, at: to)
+                job.onDone()
+                finish(m)
+                return false
+            }
+        default:
+            return true
+        }
+    }
+
+    /// The figure drawn where the body is, held as the body says: sleeping, seated, on the bench, blurred
+    /// in the bath; then the one little routine per activity, so you can tell at a glance what it is up to.
+    private func pose(_ m: Minion, station: Station, dt: Double) {
+            m.setSleeping(m.lying)
+            m.setSeated(m.seated, at: m.seatOffset)
+            m.setBench(m.onBench)
+            m.setStatic(m.place == .bath && m.path.isEmpty, frame: Int(clock * 12))
+            if m.place == .bath, m.path.isEmpty, m.showering, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
+                // Pixel water from the nozzle, falling past the shoulders onto the drain.
+                m.nextDropAt = clock + 0.05
+                let nozzle = station.showerNozzle(bath: bath)
+                let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
+                drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
+                drop.position = v3(nozzle.x + Double.random(in: -0.04...0.04), 0.66, nozzle.y + Double.random(in: -0.04...0.04))
+                propRoot.addChildNode(drop)
+                let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
+                drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
             }
             let resting = m.path.isEmpty && m.state == .settled
-            if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.setSleeping(true) }
-            let jump = jumping && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
+            let bunkLift = m.place == .quarters && m.path.isEmpty && m.isResting && m.bed.map { $0 < station.beds.count && station.beds[$0].level == 1 } == true ? 0.36 : 0
+            let jump = m.isJumping(at: clock) && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
             m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
@@ -925,7 +542,6 @@ extension StationController {
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
                 case .bench:       // on the back along the bench, and the bar goes up and down over the chest
                     tilt = 0; roll = 0
-                    if !m.lying { m.setSleeping(true) }   // the walk step sits it up again when the turn is over
                     props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
                 case .bag:         // jabs: a lean into each, and the bag swings off it
                     let jab = max(0, sin(t * 5.5))
@@ -988,6 +604,5 @@ extension StationController {
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)
             if lean != 0 { m.node.position.x += CGFloat(sin(m.smoothFacing) * lean); m.node.position.z += CGFloat(cos(m.smoothFacing) * lean) }
-        }
     }
 }

@@ -44,3 +44,9 @@ ledger tests already follow that shape; the scene is what is still mixed in.
   scene gets its own thin tests: given a simulation state, the right nodes exist at the right places.
 - This is the largest change; do it in slices: bodies and walks first (already close), then carries and
   crates, then rockets and shuttles. The rulebook is STATION.md; every rule keeps its scenario.
+- Done so far: `Simulation` (`Simulation.swift`) owns the clock, the bodies, the orders, the walks, the rest and
+  the idle life, and steps the quiet commands (goTo, sleep, work, bath, exercise, chore, qa, react, leave); the
+  scene runs the carries, stows, deliveries and pallet errands between the simulation's steps and draws the
+  pose the body says it holds. `--sim-tests` steps a bare `Simulation<Body>` through a send, a bath visit, a
+  gym turn, a rest refused under a visit, the idle clock and the airlock. Still the scene's: carries and
+  stows, pallets, shuttles and rockets, and the body reconciler.
