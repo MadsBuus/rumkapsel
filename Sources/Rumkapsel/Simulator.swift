@@ -1097,6 +1097,13 @@ extension StationController {
         enqueue { [self] in handle(world.kick(roomKey: key)); flushScene() }
     }
 
+    /// A sim press says "now": whatever a minion was doing that is not a job is dropped so the press can take.
+    private func free(_ m: Minion) {
+        m.busy = false
+        m.activity = .waiting
+        if let c = m.current, !c.isRest { finish(m) }
+    }
+
     func simulate(_ nudge: SimNudge) {
         enqueue { [self] in
             switch nudge {
@@ -1107,9 +1114,11 @@ extension StationController {
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
+                    ?? could.first   // the press says now: a busy worker drops its work for it
                 guard let m, let station = fleet.stations[m.station], station.rooms["kind:bath"] != nil else {
                     handle(.log(could.isEmpty ? "nobody free for the bath" : "no bath on the station")); return
                 }
+                free(m)
                 m.showering = true
                 if !visitBath(m, station: station) { handle(.log("both fixtures in the bath are taken")) }
             case .workout:
@@ -1122,11 +1131,13 @@ extension StationController {
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
+                    ?? could.first   // the press says now: a busy worker drops its work for it
                 guard let m, let station = fleet.stations[m.station], let gym = station.rooms["kind:gym"] else {
                     handle(.log(could.isEmpty ? "nobody free for the gym" : "no gym on the station")); return
                 }
                 m.bathDue = 0
                 m.nextWorkoutAt = 0
+                free(m)
                 if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
             case .wedge:
                 // Whoever is carrying a crate stops dead: the station has to catch up without them.
@@ -1136,9 +1147,11 @@ extension StationController {
                 m.wedged = true
                 handle(.log("\(m.home.name) is wedged: not another step"))
             case .chore:
-                guard let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && !$0.isChore }) else {
-                    handle(.log("nobody free for a chore")); return
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.isChore && $0.carried == nil }
+                guard let m = could.first(where: { !$0.isCrew && !$0.busy }) ?? could.first(where: { !$0.isCrew }) ?? could.first else {
+                    handle(.log("nobody to send on a chore")); return
                 }
+                free(m)
                 m.bathDue = 0
                 if let st = fleet.stations[m.station], !startRoam(m, station: st) { handle(.log("nowhere clear to roam")) }
             case .meet:
