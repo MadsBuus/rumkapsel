@@ -59,6 +59,19 @@ enum PipelineTests {
             expect(p.source == "history", "from history, got \(p.source): \(p.why)")
         }
 
+        test("no releases and a workflow deploying on push: every merge ships, as release-note-bot does") {
+            let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names, deploysOnPush: true)
+            expect(p.shipsOnMerge && p.trunk == "main" && p.source == "workflow", "ships on merge from main, got \(p.ship) from \(p.trunk), \(p.source)")
+            let q = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names)
+            expect(!q.shipsOnMerge, "without a deploying workflow it does not")
+            let r = PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                             merges: features("develop", 6) + times(M(base: "production", head: "staging"), 2) + times(M(base: "staging", head: "develop"), 2),
+                                             file: nil, names: names, deploysOnPush: true)
+            expect(!r.shipsOnMerge, "a repository with releases ships by release, whatever its workflows do")
+            let f = PipelineDetection.detect(branches: ["main"], merges: [], file: ReleaseFile(ship: "merge"), names: names)
+            expect(f.shipsOnMerge && f.source == "file", "the repository's file can say so")
+        }
+
         test("no history: the branch names decide") {
             let p = PipelineDetection.detect(branches: ["develop", "staging", "production"], merges: [], file: nil, names: names)
             expect(flow(p) == "develop → staging → production", "got \(flow(p))")

@@ -388,6 +388,18 @@ final class World {
     func stagingIsDeck(station: String, repo: String) -> Bool {
         root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? !ConfigStore.shared.current.stagingBranch.isEmpty
     }
+    /// Whether a repository's merges deploy at once, rather than waiting for a release.
+    func shipsOnMerge(station: String, repo: String) -> Bool {
+        root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).shipsOnMerge } ?? false
+    }
+    /// A merge launch has climbed: its crates are gone from the ledger outright. No source will ever say
+    /// they shipped, so nothing else would take the rows away.
+    func forgetShipped(station: String, repo: String) {
+        guard let st = fleet.stations[station] else { return }
+        for c in st.ledger.crates(of: repo) where c.placed == .pad { st.ledger.forget(repo: repo, number: c.number) }
+    }
+    /// Rockets going up for a merge rather than a release, as "station|repo": they stand on the pad too.
+    var mergeLaunches: Set<String> = []
     /// Whether a station's deck is in use: some repository on it has a staging branch.
     func deckInUse(station: String) -> Bool {
         let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
@@ -403,7 +415,7 @@ final class World {
 
     /// Pads that should hold a rocket right now, as "station|repo".
     func padRockets() -> Set<String> {
-        Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil })
+        Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
     }
 
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
@@ -843,6 +855,9 @@ final class World {
     @discardableResult
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) -> YardChange {
         let k = station.name + "|" + repo
+        // A repository whose merges ship has no release and no board word about its crates: the floor's
+        // own moves are the only truth, and an empty answer must not take a crate off the pad before it goes.
+        if github.pipeline(repoRoot: root).shipsOnMerge { return .snapped }
         station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: c.clearedNumbers, updated: c.updated), repo: repo)
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.

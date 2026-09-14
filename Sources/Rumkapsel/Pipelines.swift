@@ -17,6 +17,8 @@ struct ReleaseFile: Codable, Equatable {
     var releaseBranches: [String]?
     /// Whether the board's storage and QA columns fill the yard; left out, the board itself decides.
     var boardColumns: Bool?
+    /// "merge" when every merge into the trunk deploys, "release" when releases do.
+    var ship: String?
 }
 
 enum PipelineDetection {
@@ -30,7 +32,7 @@ enum PipelineDetection {
     }
 
     static func detect(branches: Set<String>, merges: [Merge], file: ReleaseFile?,
-                       names: (trunk: String, staging: String, production: String)) -> Pipeline {
+                       names: (trunk: String, staging: String, production: String), deploysOnPush: Bool = false) -> Pipeline {
         // A branch counts only if the repository still has it; with no branch list at all, any name will do.
         let exists: (String) -> Bool = { b in !b.isEmpty && (branches.isEmpty || branches.contains(b)) }
         let releaseLike: (String) -> Bool = { h in defaultReleaseBranches.contains { matches(h, $0) } }
@@ -82,6 +84,11 @@ enum PipelineDetection {
         if source == "branches" {
             why = merges.isEmpty ? "branch names only: no history read" : "branch names: no release among the last \(merges.count) merges"
         }
+        // No releases, and a workflow that deploys on every push to the trunk: every merge ships.
+        var ship = "release"
+        if production.isEmpty, deploysOnPush {
+            ship = "merge"; source = "workflow"; why = "deploys on every push to \(trunk)"
+        }
 
         // The repository's own word, where it gives one.
         if let f = file {
@@ -89,9 +96,10 @@ enum PipelineDetection {
             if let s = f.staging { staging = s }
             if let p = f.production { production = p }
             if let r = f.releaseBranches { releaseBranches = r }
+            if let s = f.ship { ship = s }
             source = "file"; why = ".github/rumkapsel.json"
         }
         return Pipeline(trunk: trunk, staging: staging, production: production, releaseBranches: releaseBranches,
-                        boardColumns: file?.boardColumns, source: source, why: why)
+                        boardColumns: file?.boardColumns, source: source, why: why, ship: ship)
     }
 }

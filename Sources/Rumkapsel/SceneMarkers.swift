@@ -338,6 +338,15 @@ extension StationController {
         take(r, command)
     }
 
+    /// A repository whose merges deploy: a small rocket takes what is waiting in storage straight up.
+    func launchOnMerge(station: Station, repo: String) {
+        let key = station.name + "|" + repo
+        guard rocketActors[key] == nil else { return }   // one going up already: the next goes when it has climbed
+        world.mergeLaunches.insert(key)
+        handle(rocket: station.name, repo: repo, label: "rocket:|\(repo) · deployed on merge", untested: false, tall: false, cargo: 1,
+               command: .rocket(.launch, station: station.name, repo: repo))
+    }
+
     /// The rocket prop itself, on its slot on the pad.
     /// Where a rocket stands on the pad, by slot, as the pad is now.
     private func padPosition(station: Station, slot: Int) -> SCNVector3 {
@@ -397,6 +406,7 @@ extension StationController {
             loadCrates(r)
         case .climb:
             world.clearPad(station: r.station, repo: r.repo)
+            if world.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
             liftOff(r.node)
             r.until = clock + 15
             fleet.save()
@@ -429,7 +439,14 @@ extension StationController {
                 }
                 advanceRocket(r)
             case .climb:
-                if clock >= r.until { r.node.removeFromParentNode(); rocketActors[r.key] = nil }
+                if clock >= r.until {
+                    r.node.removeFromParentNode(); rocketActors[r.key] = nil
+                    // A merge that landed while this one climbed goes up next.
+                    if world.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
+                       st.ledger.crates(of: r.repo).contains(where: { $0.placed == .storage }) {
+                        launchOnMerge(station: st, repo: r.repo)
+                    }
+                }
             default: continue
             }
         }

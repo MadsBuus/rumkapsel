@@ -65,6 +65,9 @@ struct Pipeline: Equatable {
     /// Where this came from, "file", "history", "branches" or "settings", and in a few words why.
     var source: String = "settings"
     var why: String = ""
+    /// "merge" when every merge into the trunk deploys and ships at once; "release" when releases do.
+    var ship: String = "release"
+    var shipsOnMerge: Bool { ship == "merge" }
     var hasStaging: Bool { !staging.isEmpty }
     func isReleaseHead(_ head: String) -> Bool {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
@@ -513,6 +516,20 @@ final class GitHubResolver {
         return releases[repoRoot]?.0
     }
 
+    /// Whether one of the repository's workflows, as the trunk has them, deploys on a push to the trunk.
+    private func workflowsDeploy(onPushTo trunk: String, repoRoot: String) -> Bool {
+        let ref = run(["git", "rev-parse", "--verify", "-q", "origin/\(trunk)"], cwd: repoRoot) != nil ? "origin/\(trunk)" : "HEAD"
+        guard let listing = run(["git", "ls-tree", "--name-only", ref, ".github/workflows/"], cwd: repoRoot),
+              let names = String(data: listing, encoding: .utf8) else { return false }
+        let deployWords = ["deploy", "serverless", "flyctl", "vercel", "railway", "heroku", "kubectl", "helm upgrade", "docker push", "gcloud", "cdk deploy"]
+        for path in names.split(separator: "\n") where path.hasSuffix(".yml") || path.hasSuffix(".yaml") {
+            guard let data = run(["git", "show", "\(ref):\(path)"], cwd: repoRoot), let text = String(data: data, encoding: .utf8)?.lowercased() else { continue }
+            let onPush = text.contains("push:") && text.range(of: "branches:\\s*\\[?[^\\]\\n]*\\b\(NSRegularExpression.escapedPattern(for: trunk.lowercased()))\\b", options: .regularExpression) != nil
+            if onPush, deployWords.contains(where: { text.contains($0) }) { return true }
+        }
+        return false
+    }
+
     /// The repository's pipeline as its branches say, or the settings' names until they have been read.
     func pipeline(repoRoot: String) -> Pipeline {
         lock.lock(); defer { lock.unlock() }
@@ -740,8 +757,13 @@ final class GitHubResolver {
                 // A missing file is a failed call: no file.
                 let file = run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
                     .flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
-                pipe = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file,
-                                                names: (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch))
+                let names = (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch)
+                var detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names)
+                // No releases found: a workflow that deploys on every push to the trunk means every merge ships.
+                if detected.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: detected.trunk, repoRoot: repoRoot) {
+                    detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
+                }
+                pipe = detected
                 if answered { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
             }
             let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production

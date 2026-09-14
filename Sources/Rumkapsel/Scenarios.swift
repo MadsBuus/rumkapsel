@@ -284,6 +284,21 @@ enum Scenarios {
             return storage >= 2 ? nil : "only \(storage) web crates back in storage"
         }),
 
+        Scenario("a repository whose merges deploy: the merged crate goes straight up in a rocket of its own", [
+            ("Target: ios#298", 0.3),
+            ("Repo: Ships on merge", 0.3),
+            ("Open PR", 2.0),
+            ("Merge PR", 0.3),
+        ], tail: 45, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
+            return row?.placed == nil ? nil : "#298 is still placed in \(String(describing: row?.placed)) after the launch"
+        }),
+
         Scenario("a repository without staging: merged work waits in storage and the rocket loads from there", [
             ("Target: ios#298", 0.3),
             ("Repo: No staging", 0.3),
@@ -600,6 +615,14 @@ final class ScenarioRunner {
         if verbose {
             say("--- \(s.name) ---")
             for l in sim.model.logLines { say("    " + l) }
+            if let st = sim.station.world.fleet.stations["work"] {
+                for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
+                    say("    crate  \(c.repo)#\(c.number): placed \(String(describing: c.placed)) wanted \(String(describing: c.wanted)) heading \(String(describing: c.heading)) at \(String(describing: c.at))")
+                }
+            }
+            for r in sim.station.rocketActors.values {
+                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · assigned \(r.assigned.count), pending \(r.pending.count), aboard \(sim.station.world.aboard(station: r.station, repo: r.repo))")
+            }
             // Every body at the end, for the failures the records do not explain.
             for m in sim.station.minions.values.sorted(by: { $0.home.name < $1.home.name }) {
                 let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""

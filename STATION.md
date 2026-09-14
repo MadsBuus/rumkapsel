@@ -96,7 +96,9 @@ since real stations mandate both.
   production, and a branch released onward into production is staging. Where there is no history, the
   branch names decide: develop, else main or master; staging where it exists; production, else master
   or main. A file .github/rumkapsel.json on the repository's default branch overrides both, for everyone.
-  Releases come from the trunk, from staging, or from a release or hotfix branch. With staging a
+  Releases come from the trunk, from staging, or from a release or hotfix branch. A repository with no
+  releases and a workflow deploying on every push to its trunk ships on merge: the merged crate goes to
+  storage and straight up in a small rocket of its own. With staging a
   repository's rocket loads from the deck, without from storage. The board fills its yard only if it
   moves work through the storage and QA columns, or its file says so; otherwise its yard comes from git.
 - Releases are made of pull requests. What git says a release carries is translated to tasks on the

@@ -617,6 +617,8 @@ extension StationController {
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
+            // Every merge ships: the crate goes up at once, in a rocket of its own.
+            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
         }
     }
 

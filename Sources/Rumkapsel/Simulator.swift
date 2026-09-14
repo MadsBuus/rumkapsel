@@ -492,6 +492,7 @@ final class SimulatorModel: ObservableObject {
             ]),
             Group(id: "Release (\(repo))", note: nil, buttons: [
                 button("Repo: No staging", "No staging branch (develop → master)", noStaging.contains(repo) ? "\(repo) already has no staging" : nil),
+                button("Repo: Ships on merge", "Every merge deploys (no releases)", nil),
                 button("Release: Staging opens", "Staging opens",
                        noStaging.contains(repo) ? "\(repo) has no staging branch" : openRelease(repo, production: false) != nil ? "a staging release is already open on \(repo)" : nil),
                 button("Release: Staging merges", "Staging merges",
@@ -705,6 +706,10 @@ final class SimulatorModel: ObservableObject {
             move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
 
         // Releases, on the target's repository
+        case "Repo: Ships on merge":
+            let cfg = ConfigStore.shared.current
+            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "workflow", why: "deploys on every push", ship: "merge"), for: root(repo))
+            pushGitHub()
         case "Repo: No staging":
             noStaging.insert(repo)
             let cfg = ConfigStore.shared.current
