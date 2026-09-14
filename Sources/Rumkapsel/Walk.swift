@@ -21,6 +21,8 @@ enum Walk {
     static let leanFrom = 0.5
     /// The pace while passing, of the walk's own.
     static let slowTo = 0.35
+    /// How far the figure hangs back with the turn, before the slide out.
+    static let stepBack = 0.1
 
     /// The body being passed this tick, if any: close and not behind.
     static func passing(_ m: Body, target: SIMD2<Double>, others: [Body]) -> Body? {
@@ -70,7 +72,8 @@ enum Walk {
             // shoulders lie along the line; 3. then, closer, slide a shoulder out to the right and pass.
             m.facing = atan2(-dir.y, dir.x)
             let out = min(1, max(0, (leanFrom - gap) / (leanFrom - sidestep)))
-            m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out)
+            // A small step back with the turn, the hesitation, which the slide out then takes over.
+            m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out) - dir * (stepBack * closing * (1 - out))
         } else {
             // 4. Face the way again and 5. stride on; the scene eases the lean away.
             m.lean = .zero
