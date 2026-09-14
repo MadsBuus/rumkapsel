@@ -17,7 +17,7 @@ enum Walk {
     /// Within this of a waypoint counts as there.
     static let arrive = 0.08
     /// The pass is driven by the gap to the other, no clock: from `reach` in, slow down and turn to face them;
-    /// from `leanFrom` in, lean out and wriggle past; behind, straighten up and stride on.
+    /// from `leanFrom` in, slide out; behind, straighten up and stride on.
     static let leanFrom = 0.5
     /// The pace while passing, of the walk's own.
     static let slowTo = 0.35
@@ -67,11 +67,10 @@ enum Walk {
         if let near, dist > 1e-9 {
             let dir = d / dist
             // 2. A quarter turn side-on, toward the side the other goes by on, the walker's left, so the
-            // shoulders lie along the line; 3. then, closer, lean a shoulder out to the right and wriggle past.
+            // shoulders lie along the line; 3. then, closer, slide a shoulder out to the right and pass.
             m.facing = atan2(-dir.y, dir.x)
             let out = min(1, max(0, (leanFrom - gap) / (leanFrom - sidestep)))
-            let wriggle = out > 0 ? sin(gap * 40) * 0.03 : 0
-            m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out) + dir * wriggle
+            m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out)
         } else {
             // 4. Face the way again and 5. stride on; the scene eases the lean away.
             m.lean = .zero
