@@ -532,7 +532,7 @@ final class SimulatorModel: ObservableObject {
     }
 
     /// The clock's own row, never blocked.
-    let timeNames = ["Pause", "Resume", "Step", "1x", "4x", "16x"]
+    let timeNames = ["Pause", "Resume", "Step", "0.25x", "0.5x", "1x", "4x", "16x"]
 
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
 
@@ -1023,7 +1023,7 @@ struct SimulatorPanel: View {
             HStack(spacing: 6) {
                 Button(model.paused ? "Resume" : "Pause") { model.press(model.paused ? "Resume" : "Pause") }
                 Button("Step") { model.press("Step") }
-                ForEach(["1x", "4x", "16x"], id: \.self) { s in
+                ForEach(["0.25x", "0.5x", "1x", "4x", "16x"], id: \.self) { s in
                     Button(s) { model.press(s) }
                         .buttonStyle(.borderedProminent)
                         .tint(model.speed == (Double(s.dropLast()) ?? 1) ? .accentColor : .gray)

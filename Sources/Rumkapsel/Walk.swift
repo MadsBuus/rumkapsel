@@ -9,16 +9,18 @@ import Foundation
 
 enum Walk {
     /// Someone within this of the walker, and not behind it, is being passed: far enough for the awkward moment.
-    static let reach = 0.8
+    static let reach = 1.4
+    /// A pass begun is held until the other is this far behind, so it never flickers when the two are abreast.
+    static let behind = 0.35
     /// How far the figure leans off its line while passing: a shoulder's width.
     static let sidestep = 0.24
     /// Within this of a waypoint counts as there.
     static let arrive = 0.08
     /// The pass is driven by the gap to the other, no clock: from `reach` in, slow down and turn to face them;
     /// from `leanFrom` in, lean out and wriggle past; behind, straighten up and stride on.
-    static let leanFrom = 0.5
+    static let leanFrom = 0.6
     /// The pace while passing, of the walk's own.
-    static let slowTo = 0.4
+    static let slowTo = 0.35
 
     /// The body being passed this tick, if any: close and not behind.
     static func passing(_ m: Body, target: SIMD2<Double>, others: [Body]) -> Body? {
@@ -26,16 +28,24 @@ enum Walk {
         let len = (line.x * line.x + line.y * line.y).squareRoot()
         guard len > 1e-6 else { return nil }
         let dir = line / len
-        return others.min { a, b in dist2(a.pos, m.pos) < dist2(b.pos, m.pos) }.flatMap { o -> Body? in
-            let ahead = (o.pos.x - m.pos.x) * dir.x + (o.pos.y - m.pos.y) * dir.y > -0.1
+        // The one already being passed is kept until clearly behind or gone; only then is anyone else looked at.
+        if let id = m.passingId, let o = others.first(where: { $0.id == id }) {
+            let along = (o.pos.x - m.pos.x) * dir.x + (o.pos.y - m.pos.y) * dir.y
+            if along > -behind, dist2(o.pos, m.pos) < reach * reach * 1.5 { return o }
+        }
+        m.passingId = nil
+        let found = others.min { a, b in dist2(a.pos, m.pos) < dist2(b.pos, m.pos) }.flatMap { o -> Body? in
+            let ahead = (o.pos.x - m.pos.x) * dir.x + (o.pos.y - m.pos.y) * dir.y > 0
             return ahead && dist2(o.pos, m.pos) < reach * reach ? o : nil
         }
+        m.passingId = found?.id
+        return found
     }
 
     /// One tick of one walker toward the first waypoint of its path: moves it along its line, pops the
     /// waypoint on arrival, plays the pass on its clock, and says who was being passed.
     static func step(_ m: Body, speed: Double, dt: Double, others: [Body]) -> Body? {
-        guard let target = m.path.first else { m.lean = .zero; return nil }
+        guard let target = m.path.first else { m.lean = .zero; m.passingId = nil; return nil }
         let d = target - m.pos
         let dist = (d.x * d.x + d.y * d.y).squareRoot()
         let near = passing(m, target: target, others: others)
@@ -50,6 +60,7 @@ enum Walk {
         // and stands square; nobody is left half-turned toward someone who happened to be near.
         if m.path.isEmpty {
             m.lean = .zero
+            m.passingId = nil
             if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
             return nil
         }
