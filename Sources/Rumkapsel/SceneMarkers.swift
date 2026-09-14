@@ -7,15 +7,16 @@ extension StationController {
     /// Tells each station what is standing on its floor, so walks thread between the props.
     func refreshObstacles() {
         var blocked: [String: Set<Cell>] = [:]
-        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>) {
+        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>, into: inout [String: Set<Cell>]) {
             let (lo, hi) = node.boundingBox
             let p = SIMD2(Double(node.position.x) - offset.x, Double(node.position.z) - offset.y)
             let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8
             let f = Double(Station.fine)
             for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
-                for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[station, default: []].insert(Cell(x: sx, y: sy)) }
+                for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { into[station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
+        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>) { mark(station, node, offset: offset, into: &blocked) }
         for n in markerRoot.childNodes {
             guard let name = n.name, let colon = name.firstIndex(of: ":"), let bar = name.firstIndex(of: "|"), colon < bar else { continue }
             let stationName = String(name[name.index(after: colon)..<bar])
@@ -37,12 +38,19 @@ extension StationController {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
-        // Furniture and fixtures: anything standing on a room's floor that is not a tile.
-        for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
-            let key = String(n.name!.dropFirst(5))
-            guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
-            mark(st.name, n, offset: st.offset)
+        // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
+        // static redraw and read from there: nothing on the static root moves between redraws.
+        if furnitureObstaclesAt != staticRoot.childNodes.count {
+            furnitureObstaclesAt = staticRoot.childNodes.count
+            var furniture: [String: Set<Cell>] = [:]
+            for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
+                let key = String(n.name!.dropFirst(5))
+                guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
+                mark(st.name, n, offset: st.offset, into: &furniture)
+            }
+            furnitureObstacles = furniture
         }
+        for (station, cells) in furnitureObstacles { blocked[station, default: []].formUnion(cells) }
         // The airlock door posts stand in the walls; the way through is between them.
         for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
             let stationName = String(door.name!.dropFirst("airlockdoor:".count))

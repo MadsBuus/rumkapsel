@@ -187,6 +187,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var markerSignatures: [String: String] = [:]
     /// Crates under way, by node: the one table that moves a crate's picture.
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
+    /// The cells the furniture covers, per station, and the static root's size when that was read.
+    var furnitureObstacles: [String: Set<Cell>] = [:]
+    var furnitureObstaclesAt = -1
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]

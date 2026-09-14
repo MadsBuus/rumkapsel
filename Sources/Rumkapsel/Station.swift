@@ -451,9 +451,10 @@ final class Station {
             if let near, !near.isEmpty {
                 // Beside the given rooms: closest to their floor first, then the usual order.
                 let set = Set(near)
-                func gap(_ c: Cell) -> Int { near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }
+                var gaps: [Cell: Int] = [:]
+                for c in anchors { gaps[c] = near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }   // once each, not once per comparison
                 anchors.sort {
-                    let ga = gap($0), gb = gap($1)
+                    let ga = gaps[$0]!, gb = gaps[$1]!
                     if ga != gb { return ga < gb }
                     return (max(abs($0.x), abs($0.y)), $0.x, $0.y) < (max(abs($1.x), abs($1.y)), $1.x, $1.y)
                 }
