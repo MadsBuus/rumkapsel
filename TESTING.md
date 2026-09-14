@@ -44,12 +44,37 @@ ledger tests already follow that shape; the scene is what is still mixed in.
   scene gets its own thin tests: given a simulation state, the right nodes exist at the right places.
 - This is the largest change; do it in slices: bodies and walks first (already close), then carries and
   crates, then rockets and shuttles. The rulebook is STATION.md; every rule keeps its scenario.
-- Done so far: `Simulation` (`Simulation.swift`) owns the clock, the bodies, the orders, the walks, the rest and
-  the idle life, and steps the quiet commands (goTo, sleep, work, bath, exercise, chore, qa, react, leave); the
-  carries, office deliveries, stows and packs (`Carries.swift`) and the body reconciler (`Bodies.swift`) are its
-  too, and a body's load is a fact on it, the scene lifting the node when the load appears and landing it where
-  the body says it went. The scene runs the pallet errands between the simulation's steps and draws the pose
-  the body says it holds. `--sim-tests` steps a bare `Simulation<Body>` through a send, a bath visit, a gym
-  turn, a rest refused under a visit, the idle clock, the airlock, a carry from storage to the deck, and a
-  wedged carrier giving up. Still the scene's: the pallets, the shuttles and the rockets, and the ledger's
-  `landed` written by what the scene does when a carry lands.
+- Done, the four slices: `Simulation` (`Simulation.swift`) owns the clock, the bodies, the orders, the walks,
+  the rest and the idle life, and steps every command a body runs: the quiet ones there, the carries, office
+  deliveries, stows and packs in `Carries.swift`, the pallet errand in `Pallet.swift`, and the body reconciler
+  in `Bodies.swift`; the shuttles' flights and the rockets' stages are its too (`Ships.swift`). A body's load
+  and pose are facts on it; a pallet, a flight and a rocket are numbers on the station clock; the scene keeps a
+  node for each and places it from those facts, and what it shows once comes back as a cue. Nothing the scene
+  draws decides anything, and the simulation borrows nothing from the scene any more.
+- `--sim-tests` steps a bare `Simulation<Body>` through a send, a bath visit, a gym turn, a rest refused under
+  a visit, the idle clock, the airlock, a carry from storage to the deck with the ledger in step, a wedged
+  carrier giving up, and the whole pallet errand from the console to the deck.
+- Measured on 2026-09-14, the gate of sixteen scenarios: 17 s before the split, 12 s after it and after the
+  station's fixed cells, the placement's neighbour distances and the furniture's obstacle cells stopped being
+  rebuilt on every read. A sample of the run puts what is left in three places: the bodies' step and their
+  routes, about a third; the invariants and the yard reconciliation, about a fifth; the simulator's presses,
+  which place rooms and redraw the static floor, about an eighth.
+
+## Change 4: the scenario suite on the simulation alone
+
+Not done. Three things still make a scenario need a `StationController`, and they are the remaining slice:
+
+- The event glue. `Scene.handle(_:)` turns a `WorldEvent` into what happens: an office merged becomes a haul
+  from where the package node stands, a staging release becomes a pallet order, an archive cancels carries and
+  sinks the tiles. The decisions in it belong in the simulation, with the drawing left as cues; the package's
+  cell, today read off its node, would come from the office's far cells worked out on the model side.
+- The obstacles. `refreshObstacles` reads the props' bounding boxes to tell the station what a walk goes round.
+  The crates come from the ledger's layout, the cones from the bodies, the pallet and the rockets from the
+  simulation already; the furniture is the last part read off nodes, and would become a table of footprints per
+  room kind that `SceneStatic` draws from too.
+- The stows. `rebuildMarkers` notices a commit count going up and hands the owner a stow while it draws; the
+  count is the world's, and the order should be issued from the model's diff, not from the redraw.
+- With those three moved, `ScenarioRunner` can build a `Simulation<Body>` and a `World` without a view, press
+  the same simulator buttons through the world's entry points, and judge the same records and invariants,
+  the invariants reading the ledger and the bodies rather than the nodes. The scene then gets its own test:
+  given a simulation state, the right nodes exist at the right places, checked on one frame.
