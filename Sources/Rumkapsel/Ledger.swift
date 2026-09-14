@@ -234,8 +234,13 @@ struct Ledger: Codable {
     /// After a relaunch nothing is on anyone's arms or on a pallet, and nothing is bound anywhere:
     /// what was is standing somewhere, and asks for its place again.
     mutating func forgetTransit() {
-        for var c in crates.values where c.inTransit || c.bound != nil || c.heading != nil {
-            c.at = nil; c.bound = nil; c.heading = nil
+        for var c in crates.values where c.inTransit || c.bound != nil || c.heading != nil || c.movedAt != nil {
+            c.at = nil; c.bound = nil; c.heading = nil; c.orderedOver = nil
+            // A hand move from before the relaunch is history: the source is read afresh at launch and its
+            // word is taken again, so a crate the board moved on while the station was away is carried on.
+            // Aboard the rocket is the exception: the board keeps counting a loaded crate on the deck until
+            // it ships, and the hold does not give it back for that.
+            if c.placed != .pad { c.movedAt = nil }
             crates[c.key] = c.isEmpty ? nil : c
         }
     }

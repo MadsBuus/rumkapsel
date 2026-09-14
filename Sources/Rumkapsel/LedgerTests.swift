@@ -122,6 +122,17 @@ enum LedgerTests {
             expect(m["web", 8]?.placed == .deck && m.disagreements(repo: "web").isEmpty, "no word since the order: the station's move stands")
         }
 
+        test("after a relaunch the source's word is taken again, except aboard the rocket") {
+            var l = Ledger()
+            l.adopt(word(deck: [1, 2], cleared: [2], updated: [1: at(0), 2: at(0)]), repo: "web")
+            l.order(repo: "web", number: 1, to: .storage); l.landed(repo: "web", number: 1, in: .storage, at: at(10))   // moved by hand against the word
+            l.order(repo: "web", number: 2, to: .pad); l.landed(repo: "web", number: 2, in: .pad, at: at(10))           // loaded into the rocket
+            l.forgetTransit()   // the relaunch
+            l.adopt(word(deck: [1, 2], cleared: [2], updated: [1: at(0), 2: at(0)]), repo: "web")   // the board read afresh, unchanged
+            expect(l.disagreements(repo: "web").map(\.number) == [1], "the hand move is history: #1 is carried on to the deck")
+            expect(l["web", 2]?.placed == .pad, "#2 stays aboard")
+        }
+
         test("every crate is in one yard at most, whatever the order of facts") {
             let words = [word(storage: [1], updated: [1: at(1)]), word(deck: [1], updated: [1: at(2)]), word(storage: [1], updated: [1: at(3)])]
             for order in [[0, 1, 2], [2, 1, 0], [1, 0, 2], [0, 2, 1]] {
