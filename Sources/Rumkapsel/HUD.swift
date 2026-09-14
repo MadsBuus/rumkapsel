@@ -65,8 +65,8 @@ extension StationController {
         let withRockets = Set(world.repoRoots.filter { github.openReleases(repoRoot: $0.key)?.isEmpty == false }.map(\.value.repo))
         let repos = fleet.repoColors.keys.filter { withOffices.contains($0) || withRockets.contains($0) }
             .sorted { fleet.repoColors[$0]! < fleet.repoColors[$1]! }
-        guard !repos.isEmpty else { return }
-        var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|"
+        let showTitles = ConfigStore.shared.current.showTitles
+        var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|\(showTitles)|"
         let rootOf = Dictionary(world.repoRoots.map { ($0.value.repo, $0.key) }, uniquingKeysWith: { a, _ in a })
         for repo in repos {
             let offices = fleet.stations.values.flatMap { $0.rooms.values }.filter { $0.repo == repo }.count
@@ -78,8 +78,8 @@ extension StationController {
         legendSignature = signature
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
-        let slot = hud.size.width / CGFloat(repos.count)
-        for (i, repo) in repos.enumerated() {
+        let slot = hud.size.width / CGFloat(max(1, repos.count))
+        for (i, repo) in repos.enumerated() where showTitles {
             let x = slot * (CGFloat(i) + 0.5)
             let name = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             name.fontSize = 14
@@ -179,9 +179,11 @@ extension StationController {
     }
 
     func updateInfo() {
-        let active = minions.values.filter { $0.state != .leaving }
+        // The counters are your sessions: one body per session on a station that is shown. Teammates,
+        // subagents and workers whose session ended are on the floor but not in the count.
+        let active = minions.values.filter { $0.state != .leaving && !$0.isCrew && !$0.isSubagent && $0.freeSince == 0 && fleet.stations[$0.station] != nil }
         let busy = active.filter(\.busy).count
-        let waiting = active.filter { $0.activity == .waiting }.count
+        let waiting = active.filter { $0.activity == .waiting && !$0.busy }.count
         let asleep = active.filter { $0.activity == .sleeping }.count
         statusLabel.text = ""
         infoLabel.position = CGPoint(x: 14, y: 12)

@@ -740,7 +740,8 @@ final class Fleet {
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors
         assignColors()   // by name, whatever order an older save gave them
-        for (name, s) in saved.stations where name != "crew" {
+        let showPrivate = ConfigStore.shared.current.showPrivate
+        for (name, s) in saved.stations where name != "crew" && (name != "private" || showPrivate) {
             let station = Station(name: name)
             station.restore(s)
             station.ensureFixedRoom(.quarters)

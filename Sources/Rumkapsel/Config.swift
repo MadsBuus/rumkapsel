@@ -20,9 +20,17 @@ struct AppConfig: Codable, Equatable {
     var workOwners: [String] = ["Tattoodo"]
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
+    /// The backstop: how often the whole board and every repository are read again. Changes arrive
+    /// within seconds regardless, from the board's delta, the activity feeds and the predictive asks.
     var githubMinutes: Int = 5
     var sleepMinutes: Int = 5
     var showCrew: Bool = true
+    /// The private station, and the repository titles across the top: shown unless turned off.
+    /// Optional so config files from before they existed still decode.
+    var showPrivateStation: Bool?
+    var showRepoTitles: Bool?
+    var showPrivate: Bool { showPrivateStation ?? true }
+    var showTitles: Bool { showRepoTitles ?? true }
     var trunkBranch: String = "develop"        // where feature branches merge
     var stagingBranch: String = "staging"      // optional: a test deck between trunk and production
     var productionBranch: String = "production"
@@ -79,14 +87,18 @@ struct AppConfig: Codable, Equatable {
 
     /// Station for a session: an explicit repo override first, then the rule.
     func station(cwd: String, owner: String?, repo: String) -> String {
-        if let o = repos[repo], o.station != "auto" { return o.station }
-        switch stationRule {
-        case "conductor": return cwd.contains("/conductor/") ? "work" : "private"
-        case "owner":
-            let owners = Set(workOwners.map { $0.lowercased() })
-            return (owner.map { owners.contains($0) } ?? false) || cwd.contains("/conductor/") ? "work" : "private"
-        default: return "work"
+        let name: String
+        if let o = repos[repo], o.station != "auto" { name = o.station }
+        else {
+            switch stationRule {
+            case "conductor": name = cwd.contains("/conductor/") ? "work" : "private"
+            case "owner":
+                let owners = Set(workOwners.map { $0.lowercased() })
+                name = (owner.map { owners.contains($0) } ?? false) || cwd.contains("/conductor/") ? "work" : "private"
+            default: name = "work"
+            }
         }
+        return name == "private" && !showPrivate ? "hidden" : name
     }
 
     func crewEnabled(repo: String) -> Bool { showCrew && repos[repo]?.station != "hidden" }

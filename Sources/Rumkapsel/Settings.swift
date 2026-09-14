@@ -30,7 +30,7 @@ struct SettingsView: View {
             people.tabItem { Label("People", systemImage: "person.2") }
             general.tabItem { Label("General", systemImage: "gear") }
         }
-        .frame(width: 600, height: 440)
+        .frame(width: 600, height: 500)
     }
 
     private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -59,7 +59,10 @@ struct SettingsView: View {
             .disabled(model.config.stationRule != "owner")
             .opacity(model.config.stationRule == "owner" ? 1 : 0.5)
             Divider()
+            Toggle("Show the private station", isOn: Binding(get: { model.config.showPrivate }, set: { model.config.showPrivateStation = $0 }))
+                .disabled(model.config.stationRule == "none").opacity(model.config.stationRule == "none" ? 0.5 : 1)
             Toggle("Show teammates' branches and pull requests on the work station", isOn: $model.config.showCrew)
+            Toggle("Show repository titles across the top", isOn: Binding(get: { model.config.showTitles }, set: { model.config.showRepoTitles = $0 }))
             Text("Hide a repository under Repositories to keep it off the station entirely.").font(.caption).foregroundStyle(.secondary)
         }
         .onChange(of: model.config) { _ in model.commit() }
@@ -152,8 +155,12 @@ struct SettingsView: View {
             Toggle("Float on top of other windows", isOn: $model.floatOn).onChange(of: model.floatOn) { onFloat($0) }
             Toggle("Open at login", isOn: $model.launchAtLogin).onChange(of: model.launchAtLogin) { onLaunchAtLogin($0) }
             Divider()
-            Stepper("Ask GitHub every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
-            Stepper("Minions sleep after \(model.config.sleepMinutes) quiet min", value: $model.config.sleepMinutes, in: 1...60)
+            Stepper("Re-read the whole board and every repository every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
+            Text("The backstop only. Board changes arrive within about twenty seconds, each repository's activity feed is checked once a minute, and a pull request you just opened, pushed or merged is asked about right away.")
+                .font(.caption).foregroundStyle(.secondary)
+            Stepper("A minion sleeps after \(model.config.sleepMinutes) quiet min", value: $model.config.sleepMinutes, in: 1...60)
+            Text("A session with no activity for this long is asleep in the dorm; an hour of quiet and the worker is free for the next session.")
+                .font(.caption).foregroundStyle(.secondary)
             Divider()
             Toggle("Share my station on the local network", isOn: $model.config.shareOnLAN)
             HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
