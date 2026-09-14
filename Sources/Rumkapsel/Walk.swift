@@ -55,8 +55,9 @@ enum Walk {
         }
         if let near, dist > 1e-9 {
             let dir = d / dist
-            // 2. Turn to face the other, 3. then, closer, lean a shoulder to the walker's own right and wriggle past.
-            m.facing = atan2(near.pos.x - m.pos.x, near.pos.y - m.pos.y)
+            // 2. A quarter turn side-on, toward the side the other goes by on, the walker's left, so the
+            // shoulders lie along the line; 3. then, closer, lean a shoulder out to the right and wriggle past.
+            m.facing = atan2(-dir.y, dir.x)
             let out = min(1, max(0, (leanFrom - gap) / (leanFrom - sidestep)))
             let wriggle = out > 0 ? sin(gap * 40) * 0.03 : 0
             m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out) + dir * wriggle

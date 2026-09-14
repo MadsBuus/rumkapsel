@@ -27,7 +27,7 @@ enum WalkTests {
             var near: Body?
             for _ in 0..<12 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }   // closer than the lean gap now
             expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) > Walk.sidestep * 0.5, "leaning right after the turn: \(m.lean)")
-            expect(abs(m.facing - atan2(o.pos.x - m.pos.x, o.pos.y - m.pos.y)) < 1e-9, "facing the one passed")
+            expect(abs(m.facing - atan2(0.0, 1.0)) < 1e-9, "turned side-on, a quarter turn to its left: \(m.facing)")
             let back = body("c", 0, 0); back.path = [SIMD2(1, 0)]
             expect(Walk.step(back, speed: 1.4, dt: 1.0 / 30, others: [body("d", -0.3, 0)]) == nil && back.lean == .zero, "behind: no lean")
         }
