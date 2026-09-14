@@ -173,6 +173,8 @@ since real stations mandate both.
   the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
   Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts
   when the minion arrives, never when it sets off. Roamers keep apart, except to watch a steaming rocket.
+- You may pick a lounger's next thing from its bubble: the gym, bed, a book on the couch, the shower or
+  the bowl, given the way the idle clock gives it. One with a job in hand, or at work, is not for picking.
 
 ## The world and the station
 
