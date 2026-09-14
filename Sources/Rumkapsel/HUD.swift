@@ -315,7 +315,6 @@ extension StationController {
         } else if world.isProvisional(station, room) && room.worktree == nil {
             parts.append("held for a while · nobody is working here right now")
         }
-        if room.key == "kind:bots" { parts.append("dependabot and friends") }
         if room.key == "kind:lounge" { parts.append("waiting on you for a while · they chat here before bed") }
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
@@ -407,6 +406,13 @@ extension StationController {
             }
         } else if h.hasPrefix("rocket:") {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+        } else if h.hasPrefix("decon:"), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
+            let repo = String(h.split(separator: "|")[1])
+            infoLabel.text = "\(repo) · unidentified object · PR #\(n) · merge clears it into storage, closing ejects it · click to open"
+        } else if h.hasPrefix("decon:") {
+            let name = String(h.dropFirst(6))
+            let waiting = fleet.stations[name]?.ledger.allCrates.filter { $0.alien && $0.placed == .decon }.count ?? 0
+            infoLabel.text = "decon · dependabot and friends wait here · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let parts = h.split(separator: "|")
             let repo = String(parts[1])

@@ -18,7 +18,7 @@ struct CrateRef: Hashable {
 
 /// Somewhere on the floor a crate can stand, and enough to walk there.
 struct Spot {
-    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, floor }
+    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, decon, floor }
     var area: Area
     var station: String
     /// The room key of an office, the repository of a yard row; empty elsewhere.
@@ -40,6 +40,7 @@ struct Spot {
         case .deck: return "the deck"
         case .tested: return "the deck, tested row"
         case .pad: return "the rocket"
+        case .decon: return "decon"
         case .floor: return "the floor"
         }
     }

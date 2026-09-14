@@ -560,7 +560,16 @@ final class World {
                 boardOffices.append((it.repo, it, login))
             }
         }
-        guard !open.isEmpty || !feed.isEmpty || !boardOffices.isEmpty else { return events }
+        // Bot pull requests are not work: each is an object of unknown origin in decon, no office and
+        // nobody for it. The bots' room of old, if a saved layout still has one, goes.
+        for old in ["kind:bots", "kind:mail"] where station.rooms[old] != nil { station.removeRoom(key: old); changed = true }
+        var deconMoved = false
+        events += screen(station: station, open: open, feed: feed, moved: &deconMoved)
+        let inDecon = station.ledger.allCrates.contains { $0.alien && $0.placed == .decon }
+        guard !open.isEmpty || !feed.isEmpty || !boardOffices.isEmpty || inDecon else {
+            if changed || deconMoved { events.append(changed ? .layoutChanged : .markersChanged) }
+            return events
+        }
 
         // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
         var liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
@@ -640,11 +649,6 @@ final class World {
                                                   title: it.title, author: login, url: it.url, state: "OPEN", last: now)
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
-        let botCount = open.filter(\.pr.isBot).count
-        if botCount > 0 {
-            if station.ensureRoom(key: "kind:bots", name: "bots", repo: nil, color: RGB(r: 0.36, g: 0.40, b: 0.50), lastActive: .distantFuture, shape: Station.rect(2, 2)) { changed = true }
-            crewBoxes[sk + "kind:bots"] = (botCount, "NONE", RGB(r: 0.55, g: 0.6, b: 0.7))
-        }
 
         // One grey minion per teammate with an open PR or recent activity.
         var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
@@ -656,7 +660,7 @@ final class World {
             let homeKey = open.first { $0.pr.author == login }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) } ?? "kind:quarters"
             roster[login] = CrewMember(homeKey: homeKey, repo: open.first { $0.pr.author == login }?.repo ?? "crew")
         }
-        events.append(.crewRoster(members: roster, bots: botCount))
+        events.append(.crewRoster(members: roster))
         events.append(changed ? .layoutChanged : .markersChanged)
 
         // What just happened: only fresh events move minions and make the log.
@@ -673,6 +677,46 @@ final class World {
         }
         // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
+        return events
+    }
+
+    /// Decon: bot pull requests, one object each. An arrival is a new number on a repository's open
+    /// list, and the hatch says so. An object gone from the list is asked after: the feed may say, else
+    /// the pull request is fetched, and until it answers the object stays. Merged, it is cleared and
+    /// ordered into storage like any merged crate; closed, it is ejected.
+    private func screen(station: Station, open: [(repo: String, pr: OpenPR)], feed: [(repo: String, e: FeedEvent)],
+                        moved: inout Bool) -> [WorldEvent] {
+        var events: [WorldEvent] = []
+        let cfg = ConfigStore.shared.current
+        for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name && cfg.crewEnabled(repo: info.repo) {
+            guard github.teamOpenPRs(repoRoot: root) != nil else { continue }   // not answered yet: nothing has gone
+            let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }
+            let (arrived, gone) = station.ledger.adoptDecon(open: bots.map(\.pr.number), repo: info.repo)
+            if !arrived.isEmpty { moved = true }
+            if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name)) }
+            for n in arrived where isReady(info.repo) {
+                let title = bots.first { $0.pr.number == n }?.pr.title ?? ""
+                events.append(.log("unidentified object #\(n) in decon · \(title.prefix(48))"))
+            }
+            for n in gone {
+                var state: String?
+                if feed.contains(where: { $0.repo == info.repo && $0.e.kind == "pr_close" && $0.e.prNumber == n }) { state = "CLOSED" }
+                else if feed.contains(where: { $0.repo == info.repo && $0.e.kind == "pr_merge" && $0.e.prNumber == n }) { state = "MERGED" }
+                else {
+                    github.refresh(pull: n, repoRoot: root)
+                    if github.pullAnswered(number: n, repoRoot: root) { state = github.pull(number: n, repoRoot: root)?.state }
+                }
+                guard let state else { continue }
+                moved = true
+                if state == "MERGED", station.hasPad {
+                    station.ledger.order(repo: info.repo, number: n, to: .storage)
+                    events.append(.deconCleared(station: station.name, repo: info.repo, number: n))
+                } else {
+                    station.ledger.forget(repo: info.repo, number: n)
+                    events.append(.log("#\(n) ejected from decon" + (state == "MERGED" ? "" : ", never cleared")))
+                }
+            }
+        }
         return events
     }
 
@@ -760,6 +804,8 @@ final class World {
     /// how high in that stack it sits, counted from the floor. Only the top of a column can be picked.
     struct YardSlot {
         let repo: String; let number: Int; let index: Int; let cleared: Bool
+        /// A bot's pull request, of unknown origin: grey, whichever yard it stands in.
+        let alien: Bool
         let group: Int; let column: Int; let level: Int
         let cell: Cell; let pos: SIMD3<Double>; let yaw: Double
         /// Not standing here: on its way in, its place spoken for. The rows do not draw it and nothing
@@ -787,11 +833,12 @@ final class World {
     /// though the board has cleared it: that is where it still stands. `aside` names crates
     /// ("repo#number") to give a fresh place away from the column they stand in.
     func yardLayout(station: Station, area: String, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
-        let cells = area == "deck" ? station.deckCells : station.storageCells
-        let neat = area == "deck"
-        let yard: Yard = area == "deck" ? .deck : .storage
+        let cells = area == "deck" ? station.deckCells : area == "decon" ? station.deconCells : station.storageCells
+        let neat = area != "storage"
+        let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         guard !cells.isEmpty else { return [] }
         let rows = Set(cells.map(\.y)).sorted()
+        // Every other row holds crates with aisles between, decon included: a carrier reaches every crate from an aisle.
         let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
         let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let rowList = crateRows.sorted()
@@ -813,12 +860,29 @@ final class World {
                 entries.append(Entry(crate: c, group: group, cleared: cleared, carried: carried, index: k, slot: slot))
             }
         }
+        // Decon shows a dozen objects at most, the oldest first; the rest are counted, not stacked to the ceiling.
+        if area == "decon" { entries = Array(entries.sorted { $0.crate.number < $1.crate.number }.prefix(12)) }
         // Places already held come first, so a newcomer sees them; then each crate without one is given one.
         var held: [(repo: String, slot: Ledger.Slot)] = entries.compactMap { e in e.slot.map { (e.crate.repo, $0) } }
         for i in entries.indices where entries[i].slot == nil {
             let e = entries[i]
-            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
+            let slot: Ledger.Slot
+            if area == "decon" {
+                // A grid, not stacks: the first free place along the floor, and up only once the floor is full.
+                // An object keeps its place when the one under it goes: nothing here settles.
+                let columns = max(1, row(0).count * 2)
+                let taken = Set(held.map { "\($0.slot.column)|\($0.slot.order)" })
+                var pick = Ledger.Slot(yard: .decon, group: 0, column: 0, order: 0)
+                search: for level in 0..<3 {
+                    for column in 0..<columns where !taken.contains("\(column)|\(level)") {
+                        pick = Ledger.Slot(yard: .decon, group: 0, column: column, order: level); break search
+                    }
+                }
+                slot = pick
+            } else {
+                slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
                                     avoiding: aside["\(e.crate.repo)#\(e.crate.number)"])
+            }
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
             if e.carried { station.ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }
@@ -828,12 +892,13 @@ final class World {
         var out: [YardSlot] = []
         for e in entries {
             let s = e.slot!
-            let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
+            // In decon a place's order is its level; in a stack the level is ranked from the floor.
+            let level = area == "decon" ? s.order : held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
             let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
             let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
-            out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, group: s.group,
+            out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien, group: s.group,
                                 column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
         }
         return out
@@ -885,15 +950,15 @@ final class World {
     func slotNow(for crate: CrateRef, toward yard: Yard) -> Spot? {
         guard let station = fleet.stations[crate.station] else { return nil }
         switch yard {
-        case .storage, .deck:
-            let area = yard == .deck ? "deck" : "storage"
+        case .storage, .deck, .decon:
+            let area = yard == .deck ? "deck" : yard == .decon ? "decon" : "storage"
+            let plain: Spot.Area = yard == .deck ? .deck : yard == .decon ? .decon : .storage
             let layout = yardLayout(station: station, area: area)
             guard let s = layout.first(where: { $0.repo == crate.repo && $0.number == crate.number }) else {
-                return floorSpot(yard == .deck ? .deck : .storage, station: station, repo: crate.repo,
-                                 cell: (yard == .deck ? station.deckCells : station.storageCells).first ?? Cell(x: 0, y: 0))
+                return floorSpot(plain, station: station, repo: crate.repo,
+                                 cell: (yard == .deck ? station.deckCells : yard == .decon ? station.deconCells : station.storageCells).first ?? Cell(x: 0, y: 0))
             }
-            return yardSpot(s.cleared ? .tested : (yard == .deck ? .deck : .storage), station: station, repo: crate.repo,
-                            slot: grounded(s, in: layout))
+            return yardSpot(s.cleared ? .tested : plain, station: station, repo: crate.repo, slot: grounded(s, in: layout))
         case .pad:
             return padSpot(station: station, repo: crate.repo)
         }
@@ -925,7 +990,7 @@ final class World {
         while level > 0 && !taken.contains(level - 1) { level -= 1 }
         while taken.contains(level) { level += 1 }
         guard level != slot.level else { return slot }
-        return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared,
+        return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, alien: slot.alien,
                         group: slot.group, column: slot.column, level: level, cell: slot.cell,
                         pos: SIMD3(slot.pos.x, Double(level) * 0.34, slot.pos.z), yaw: slot.yaw, carried: slot.carried)
     }
@@ -943,7 +1008,7 @@ final class World {
 
     /// The spot a crate stands on in a yard right now, for a carry's `from`.
     private func standingSpot(_ s: YardSlot, area: String, station: Station) -> Spot {
-        yardSpot(area == "deck" ? (s.cleared ? .tested : .deck) : .storage, station: station, repo: s.repo, slot: s)
+        yardSpot(area == "deck" ? (s.cleared ? .tested : .deck) : area == "decon" ? .decon : .storage, station: station, repo: s.repo, slot: s)
     }
 
     // MARK: commands the reconciler issues
@@ -1013,6 +1078,14 @@ final class World {
         let from = Spot(area: .office, station: station.name, owner: room.key, label: room.name, cell: door,
                         pos: SIMD3(station.offset.x + Double(door.x), 0, station.offset.y + Double(door.y)))
         return .carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: .storage)
+    }
+
+    /// An object cleared from decon, from where it stands to storage next door. Nil when it is not
+    /// standing there: on someone's arms already, or never drawn.
+    func carryFromDecon(station: Station, repo: String, number: Int) -> Command? {
+        guard let here = yardLayout(station: station, area: "decon").first(where: { $0.repo == repo && $0.number == number && !$0.carried }) else { return nil }
+        station.ledger.order(repo: repo, number: number, to: .storage)
+        return .carry(CrateRef(station: station.name, repo: repo, number: number), from: standingSpot(here, area: "decon", station: station), to: .storage)
     }
 
     /// One crate passed QA: across the aisle to the tested row. A named crate, so whatever is stacked on

@@ -67,6 +67,9 @@ struct Expect {
     static func boardMoved(_ repo: String, to stage: WorldEvent.Stage) -> Expect {
         event("boardMoved \(repo) -> \(stage)") { if case .boardMoved(let it, _, let to) = $0 { return it.repo == repo && to == stage }; return false }
     }
+    static func deconCleared(_ repo: String) -> Expect {
+        event("deconCleared \(repo)") { if case .deconCleared(_, let r, _) = $0 { return r == repo }; return false }
+    }
     static func officeMerged(_ key: String) -> Expect {
         event("officeMerged \(key)") { if case .officeMerged(_, let k, _, _) = $0 { return k == key }; return false }
     }
@@ -350,6 +353,41 @@ enum Scenarios {
         ], forbids: [
             .carry(455, to: .storage),
         ]),
+
+        Scenario("a bot's pull request: an object in decon, merged, cleared into storage", [
+            ("Target: ios#298", 4.8),
+            ("Bot: Open PR", 32),
+            ("Bot: Merge PR", 4.8),
+        ], tail: 192, expects: [
+            .event("deconArrived") { if case .deconArrived = $0 { return true }; return false },
+            .log("in decon"),
+            .deconCleared("ios"),
+            .carry(to: .storage),
+        ], forbids: [
+            .officeOpened("task:ios#", .shuttle),   // nothing from decon gets an office or a shuttle
+        ], floor: { sim in
+            let st = sim.station.world.fleet.stations["work"]!
+            if Scenario.crates(sim, "decon", "ios") > 0 { return "an object is still in decon" }
+            guard let row = st.ledger.crates(of: "ios").first(where: \.alien) else { return "the cleared object left the ledger" }
+            if row.placed != .storage || row.heading != nil { return "the object is \(String(describing: row.placed)), not in storage" }
+            return Scenario.crates(sim, "storage", "ios") > 0 ? nil : "no ios crate stands in storage"
+        }),
+
+        Scenario("a bot's pull request closed unmerged: ejected from decon, nothing carried", [
+            ("Target: web#455", 4.8),
+            ("Bot: Open PR", 32),
+            ("Bot: Close PR", 4.8),
+        ], tail: 64, expects: [
+            .log("in decon"),
+            .log("ejected from decon, never cleared"),
+        ], forbids: [
+            .carry(to: .storage),
+            .deconCleared("web"),
+        ], floor: { sim in
+            let st = sim.station.world.fleet.stations["work"]!
+            if Scenario.crates(sim, "decon", "web") > 0 { return "an object is still in decon" }
+            return st.ledger.crates(of: "web").contains(where: \.alien) ? "the ejected object is still in the ledger" : nil
+        }),
 
         Scenario("peer arrives and leaves: fade in, office held", [
             ("Peer: Leave", 64),

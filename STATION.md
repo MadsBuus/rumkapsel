@@ -107,6 +107,21 @@ since real stations mandate both.
 - Releases are made of pull requests. What git says a release carries is translated to tasks on the
   floor where the link is known, and stays a pull request where it is not.
 
+## Decon
+
+- A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
+  floor. It is an object of unknown origin, and it waits in **decon**, the chamber on storage's outer
+  wall with a hatch in its far wall. Objects come in through the hatch, never by shuttle and never
+  through the airlock: the hatch light flashes and a little vapour rolls in, and that is all the fuss
+  an update gets. A dozen show on the floor, grey with the unscreened green on the plate; the rest are
+  counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
+- An object whose pull request merges is cleared: whoever is free carries it through the doorway into
+  storage next door, and from there it is a crate like any other. It waits for the release, rides the
+  pallet and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
+  feature ships seven things. It stays grey wherever it goes, so storage still reads as "two real,
+  five bumps". Nothing from decon is ever QA's business: on the deck it counts as tested from the start.
+- An object whose pull request closes unmerged is ejected and forgotten. Nothing is carried.
+
 ## Bodies
 
 - One owner per body. The command in hand owns a minion's place, path and pose. Nothing else

@@ -245,7 +245,7 @@ extension StationController {
             }
             // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
             // the hands, for as long as the carry lasts.
-            for area in ["storage", "deck"] where station.hasPad {
+            for area in ["storage", "deck", "decon"] where station.hasPad {
                 let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
@@ -264,7 +264,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = slot.cleared ? "tested" : "untested"
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -285,9 +285,12 @@ extension StationController {
                         }
                         continue
                     }
-                    let c = NSColor(fleet.color(forRepo: slot.repo))
-                    // In the yard the light is off, except green with a sticker on a tested crate.
-                    let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38, approved: slot.cleared)
+                    // Of unknown origin: grey wherever it stands, a bot's, not a repository's work.
+                    let c = slot.alien ? Palette.alien : NSColor(fleet.color(forRepo: slot.repo))
+                    // In the yard the light is off, except green with a sticker on a tested crate, and
+                    // the unscreened green of decon on what still waits there.
+                    let band = area == "decon" ? Palette.alienLight : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
+                    let pkg = Props.package(color: c.lighter(0.1), band: band, size: 0.38, approved: slot.cleared)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name
@@ -557,6 +560,24 @@ extension StationController {
             }
         }
         emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
+    }
+
+    /// Something came through decon's hatch: the light over it flashes and a little vapour rolls in.
+    func hatchBlink(station name: String) {
+        guard let light = hatchLights[name], let st = fleet.stations[name] else { return }
+        light.removeAllActions()
+        let on = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.lighter(0.3) }
+        let off = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.darker(0.35) }
+        light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
+        let (pos, facing) = st.deconHatch
+        for _ in 0..<6 {
+            let p = SCNNode(geometry: SCNBox(width: 0.14, height: 0.14, length: 0.14, chamferRadius: 0))
+            p.geometry!.firstMaterial = flat(NSColor(rgb: (0.8, 0.95, 0.85)))
+            p.opacity = 0.6
+            p.position = v3(st.offset.x + pos.x + facing.x * 0.2, 0.25 + Double.random(in: 0...0.3), st.offset.y + pos.y + Double.random(in: -0.4...0.4))
+            propRoot.addChildNode(p)
+            p.runAction(.sequence([.group([.moveBy(x: CGFloat(facing.x * Double.random(in: 0.4...0.9)), y: 0.3, z: CGFloat(Double.random(in: -0.3...0.3)), duration: 1.8), .scale(to: 2.0, duration: 1.8), .fadeOut(duration: 1.8)]), .removeFromParentNode()]))
+        }
     }
 
     /// Lights flicker on when a dark office gets activity, and dim when it is left alone.

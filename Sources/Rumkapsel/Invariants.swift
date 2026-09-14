@@ -74,7 +74,7 @@ final class Invariants {
     private func standing(_ c: StationController) -> [Standing] {
         var out: [Standing] = []
         for n in c.markerRoot.childNodes {
-            guard let name = n.name, name.hasPrefix("storage:") || name.hasPrefix("deck:") else { continue }
+            guard let name = n.name, name.hasPrefix("storage:") || name.hasPrefix("deck:") || name.hasPrefix("decon:") else { continue }
             let parts = name.split(separator: ":", maxSplits: 1)
             guard parts.count == 2 else { continue }
             let bits = parts[1].split(separator: "|")
@@ -93,7 +93,8 @@ final class Invariants {
     private func merged(_ c: StationController) {
         guard let fate = c.sim?.pullState else { return }
         for station in c.fleet.stations.values {
-            for row in station.ledger.crates.values where row.placed != nil || row.at != nil {
+            // An object in decon is not a crate yet: its pull request's fate is what takes it out, at the next poll.
+            for row in station.ledger.crates.values where (row.placed != nil || row.at != nil) && row.placed != .decon {
                 if fate(row.repo, row.number) == "CLOSED" {
                     flag("a crate is a merged pull request", "\(station.name)|\(row.repo)#\(row.number)", "its pull request closed without merging")
                 }
@@ -171,8 +172,9 @@ final class Invariants {
         // Stacks are built from the floor: no crate with air under it. Columns are half a cell apart
         // and storage nudges each crate by up to a tenth, so a column is a cluster in x along its
         // row rather than a rounding. A level is 0.34 high.
+        // Decon is a grid, not stacks: nothing there settles when something under it leaves.
         var rows: [String: [Standing]] = [:]
-        for s in all {
+        for s in all where !s.name.hasPrefix("decon:") {
             guard let station = c.fleet.stations[s.station] else { continue }
             rows["\(s.station)|\(Int((s.pos.z - station.offset.y).rounded()))", default: []].append(s)
         }
@@ -208,6 +210,7 @@ final class Invariants {
         cells.formUnion(station.padCells)
         cells.formUnion(station.storageCells)
         cells.formUnion(station.deckCells)
+        cells.formUnion(station.deconCells)
         cells.formUnion(station.corridorCells)
         for room in station.rooms.values { cells.formUnion(room.cells) }
         floorCache[station.name] = (signature, cells)
