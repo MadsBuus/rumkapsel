@@ -361,6 +361,8 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     // A scripted suite has no window and wants no dock icon in the way.
-    app.setActivationPolicy(CommandLine.arguments.contains("--scenarios") ? .accessory : .regular)
+    // Headless runs never take the keyboard: the scenario suite, every model-only test and a snapshot.
+    let headlessRun = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
+    app.setActivationPolicy(headlessRun ? .accessory : .regular)
     app.run()
 }
