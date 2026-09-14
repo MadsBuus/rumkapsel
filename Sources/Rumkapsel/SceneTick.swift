@@ -37,9 +37,9 @@ extension StationController {
         logEvent("#450 opened a pull request")
         if let st = fleet.stations["work"] {
             for (i, repo) in ["api-node-nest", "tattoodo-web"].enumerated() {
-                handle(rocket: st.name, repo: repo, label: "rocket:https://github.com|demo release",
-                       untested: i == 1, tall: i == 1, cargo: 0,
-                       command: .rocket(.standBy, station: st.name, repo: repo))
+                simulation.rocket(station: st.name, repo: repo, label: "rocket:https://github.com|demo release",
+                                  untested: i == 1, tall: i == 1, cargo: 0,
+                                  command: .rocket(.standBy, station: st.name, repo: repo))
             }
         }
     }
@@ -67,9 +67,9 @@ extension StationController {
                 haulMergedBoxes(station: st, key: key, roomName: room.name, repo: room.repo ?? "work", number: 450)
             }
             if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 { demoStaged = true; stageCargo(station: st, repo: "tattoodo-web") }
-            if clock > 30, let r = rocketActors["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {
-                handle(rocket: st.name, repo: "tattoodo-web", label: r.label, untested: false, tall: true, cargo: 0,
-                       command: .rocket(.launch, station: st.name, repo: "tattoodo-web"))
+            if clock > 30, let r = simulation.rockets["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {
+                simulation.rocket(station: st.name, repo: "tattoodo-web", label: r.label, untested: false, tall: true, cargo: 0,
+                                  command: .rocket(.launch, station: st.name, repo: "tattoodo-web"))
                 logEvent("tattoodo-web launched to production: release 2.14")
             }
             if clock > 6, !minions.keys.contains("demo-new") {
@@ -85,16 +85,8 @@ extension StationController {
                                     title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
                 let m = spawnMinion(s, station: "work", home: h)
                 m.busy = true; m.activity = .coding("app")
-                startDelivery(m, roomKey: h.key)
+                simulation.startDelivery(m, roomKey: h.key)
             }
-        }
-    }
-
-    /// A shuttle that dropped this office's crate and has not risen from the slot yet.
-    func shipStillOver(order: Int, station: String) -> Bool {
-        shuttles.contains { s in
-            guard s.station == station, case .flight(let kind, _, _) = s.command.kind, case .dropCrate(let id) = kind, id == order else { return false }
-            return s.phase < 3   // approach, descend, unload
         }
     }
 
@@ -192,18 +184,17 @@ extension StationController {
             case .waking: m.node.opacity = m.opacity; posed = false
             case .walking, .wondering: break
             case .there:
-                switch m.current?.kind {
-                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
-                    palletStep(m, station: station); posed = false
-                default:
-                    switch simulation.stepThere(m, station: station, dt: dt) {
-                    case .gone: despawn(m); continue
-                    case .spent: posed = false
-                    case .posed: break
-                    }
+                switch simulation.stepThere(m, station: station, dt: dt) {
+                case .gone: despawn(m); continue
+                case .spent: posed = false
+                case .posed: break
                 }
             }
             mirrorLoad(m)
+            if simulation.palletErrand(of: m) != nil {
+                m.setTool(errandTool(m))
+                if case .pushPallet = m.current?.kind, m.path.isEmpty { drawPusher(m, station: station) }
+            }
             guard posed else { continue }
             simulation.stepRest(m, station: station, dt: dt)
             pose(m, station: station, dt: dt)
@@ -295,6 +286,13 @@ extension StationController {
                 moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
             } else { markersDirty = true }
         case .redraw: markersDirty = true
+        case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
+        case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
+        case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
+        case .sweep(let up): drone.sweep(up: up)
+        case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
+        case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)
+        case .rocketLoading, .liftOff, .steam, .rocketGone, .intoHold: play(rocket: cue)
         }
     }
 
@@ -392,7 +390,7 @@ extension StationController {
                 }
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working && !(m.place == .lounge && resting && m.couch != nil) && palletErrand(of: m) == nil { m.setTool(nil) }
+            if !working && !(m.place == .lounge && resting && m.couch != nil) && simulation.palletErrand(of: m) == nil { m.setTool(nil) }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

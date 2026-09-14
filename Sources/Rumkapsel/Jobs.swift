@@ -78,135 +78,13 @@ extension StationController {
         for d in world.truth.deliveries.values.sorted(by: { $0.id < $1.id }) {
             StationLog.write("dump", "delivery \(d.id): \(d.key) slot \(d.slot) \(d.landed ? "on the floor" : "in the air") for \(d.session ?? "-")")
         }
-        for s in shuttles { StationLog.write("dump", "shuttle: \(s.command.words) phase \(s.phaseKind)") }
+        for s in simulation.flights { StationLog.write("dump", "shuttle: \(s.command.words) phase \(s.phaseKind)") }
         for st in fleet.stations.values {
             for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
                 StationLog.write("dump", "crate \(c.repo)#\(c.number): wanted \(c.wanted.map(\.words) ?? "nowhere") placed \(c.placed.map(\.words) ?? "nowhere")\(c.heading.map { " heading \($0.words)" } ?? "")\(c.movedAt != nil ? " moved by hand" : "")")
             }
         }
         for (id, job) in cargo { StationLog.write("dump", "cargo \(id): \(job.command.words) carrier \(job.carrier ?? "none") aim \(job.aim.cell.x),\(job.aim.cell.y) at \(String(format: "%.2f,%.2f", job.aim.pos.x, job.aim.pos.z))") }
-    }
-
-    /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.
-    func shipsInFlight(_ station: String) -> Int { shuttles.filter { $0.station == station }.count }
-
-    /// A new worker arrives by shuttle: it stays invisible until the ship has set down, then steps out.
-    func arriveByShuttle(_ m: Minion) {
-        guard let station = fleet.stations[m.station], station.hasHangar, let anchor = hangarAnchors[m.station] else { return }
-        let slotIndex = shipsInFlight(m.station) % station.hangarSlots.count
-        let slot = station.hangarSlots[slotIndex]
-        m.pos = slot
-        m.opacity = 0
-        m.node.opacity = 0
-        m.wakeUntil = clock + 8.1   // held until the ship lands
-        let ship = shuttle(color: NSColor(fleet.color(forRepo: m.home.repo)))
-        let local = SIMD3(slot.x - station.hangarCenter.x, 0, slot.y - station.hangarCenter.y)
-        let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
-        let start = local + corners.randomElement()!, high = local + SIMD3(0, 5, 0), down = local + SIMD3(0, 0.55, 0), exit = local + corners.randomElement()!
-        ship.position = v3(start.x, start.y, start.z)
-        anchor.addChildNode(ship)
-        let command = Command.flight(.bringWorker(m.id), station: m.station, slot: slotIndex,
-                                     what: "a new worker for \(m.home.name)")
-        launch(Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
-                       restYaw: nil, drift: 0, unloadAt: 0.6, unloadFor: 1.0) { [weak m] in
-            m?.opacity = 1
-            m?.wakeUntil = 0
-        })
-        drone.sweep(up: false)
-    }
-
-    /// The shuttle body, wings in a repo colour.
-    private func shuttle(color: NSColor) -> SCNNode {
-        let ship = SCNNode()
-        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
-        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
-        ship.addChildNode(hull)
-        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
-        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
-        cockpit.position = v3(0.16, 0.11, 0)
-        ship.addChildNode(cockpit)
-        for side in [-1.0, 1.0] {
-            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
-            wing.geometry!.firstMaterial = lit(color)
-            wing.position = v3(-0.14, 0, side * 0.34)
-            ship.addChildNode(wing)
-        }
-        for side in [-1.0, 1.0] {
-            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
-            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            skid.position = v3(0, -0.14, side * 0.16)
-            ship.addChildNode(skid)
-        }
-        return ship
-    }
-
-    /// Hands a flight to a new shuttle: the log and the panel see the command, the tick flies it.
-    private func launch(_ ship: Shuttle) {
-        issue(ship.command, by: "shuttle", announce: true)
-        ship.begin(at: clock)
-        shuttles.append(ship)
-    }
-
-    /// One frame of every flight in the air.
-    func tickShuttles() {
-        shuttles.removeAll { !$0.advance(at: clock) }
-    }
-
-    /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away.
-    /// Everything is parented to the hangar anchor, so a station shifting underneath does not misalign it.
-    func startDelivery(_ m: Minion, roomKey: String) {
-        guard let station = fleet.stations[m.station], station.hasHangar, let room = station.rooms[roomKey],
-              let anchor = hangarAnchors[m.station] else { return }
-        let key = "\(station.name)|\(roomKey)"
-        // A slot with nothing on it and no ship bound for it; every slot taken, the least recently ordered.
-        let slotIndex = world.truth.freeSlots(station: station.name, of: station.hangarSlots.count).first
-            ?? shipsInFlight(m.station) % station.hangarSlots.count
-        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m.id)
-        let slotLocal = station.hangarSlots[slotIndex] - station.hangarCenter
-        let slot = SIMD3(slotLocal.x, 0, slotLocal.y)
-
-        let box = Props.crate(color: NSColor(room.color))
-        box.position = v3(slot.x, 0.09, slot.z)
-        box.opacity = 0
-        box.name = "room:" + key
-        anchor.addChildNode(box)
-        boxes[key] = box
-
-        let ship = shuttle(color: NSColor(room.color))
-        let corners: [SIMD3<Double>] = [SIMD3(12, 9, 12), SIMD3(-12, 9, 12), SIMD3(12, 9, -12), SIMD3(-12, 9, -12)]
-        let start = slot + corners.randomElement()!
-        let high = slot + SIMD3(0, 5.0, 0)
-        let down = slot + SIMD3(0, 0.55, 0)
-        let exit = slot + corners.randomElement()! * SIMD3(1, 0.9, 1)
-        ship.position = v3(start.x, start.y, start.z)
-        ship.look(at: v3(high.x, high.y, high.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
-        anchor.addChildNode(ship)
-        let command = Command.flight(.dropCrate(order: order), station: m.station, slot: slotIndex,
-                                     what: "the office for \(room.name)")
-        let flight = Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
-                             restYaw: Double.random(in: 0..<(2 * .pi)), drift: Double.random(in: -0.6...0.6),
-                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
-            box.opacity = 1
-            box.position = v3(slot.x, 0.42, slot.z)
-            self?.moveCrate(box, legs: [MotionLeg(to: SIMD3(slot.x, 0.09, slot.z), seconds: 0.5, ease: .easeIn)])
-            self?.world.truth.crateLanded(order: order)   // on the floor now: it will be fetched, by whoever is free
-        }
-        // A hard sequence: the crate comes out only once its carrier stands at the slot. With no carrier
-        // left for it, the ship unloads anyway and the crate waits on the floor.
-        let spot = station.hangarSlots[slotIndex], stationName = m.station
-        flight.ready = { [weak self] in
-            guard let self, let carrier = self.minions.values.first(where: { o in
-                guard o.station == stationName, case .deliverOffice(let k) = o.current?.kind else { return false }
-                return k == order
-            }) else { return true }
-            return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
-        }
-        launch(flight)
-        drone.sweep(up: false)
-        assign(m, .deliverOffice(order: order, name: room.name), announce: false)
-        m.place = .hangar
-        m.fetchSpot = station.hangarSlots[slotIndex]
-        walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
     }
 
     /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
@@ -408,6 +286,13 @@ extension StationController {
         cargoNodes[command.id] = node
     }
 
+    /// A carry the simulation ordered on its own, into a rocket: the crate standing on its row is the node for the arms.
+    func carryOrdered(id: Int, crate: CrateRef) {
+        guard cargoNodes[id] == nil, let node = crateNode(crate) else { return }
+        node.name = "haul"
+        cargoNodes[id] = node
+    }
+
     /// The node a crate stands on in the rows, by the name the yard gave it.
     func crateNode(_ crate: CrateRef) -> SCNNode? {
         let tail = ":\(crate.station)|\(crate.repo)|\(crate.number)"
@@ -424,7 +309,7 @@ extension StationController {
             world.unorder(crate)
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             rebuildMarkers(); refreshRockets()
-            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
+            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
             return
         }
         carry(command, node: node) { [weak self] in
@@ -435,7 +320,7 @@ extension StationController {
             // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
             if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
             refreshRockets()
-            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
+            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
 
@@ -458,7 +343,7 @@ extension StationController {
             rebuildMarkers()
             refreshRockets()
             // Every merge ships: the crate goes up at once, in a rocket of its own.
-            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
+            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
 
@@ -557,7 +442,7 @@ extension StationController {
                 return c.deckNumbers.filter { !alien.contains($0) }.count > c.clearedNumbers.filter { !alien.contains($0) }.count
             }
         }
-        let cleared = rocketActors.values.contains { $0.station == station.name && $0.isSteaming }
+        let cleared = simulation.rockets.values.contains { $0.station == station.name && $0.isSteaming }
         let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
         let current = minions.values.first { $0.station == station.name && $0.isQA }
         if wanted, current == nil, let m = free.first(where: { !$0.onJob }) {

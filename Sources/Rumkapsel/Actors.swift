@@ -1,209 +1,199 @@
-// The props that run commands: shuttles flying in, rockets on the pad.
+// The shuttles and the rockets as the scene draws them: a ship node per flight, placed where the
+// simulation's `Flight` says; a rocket node per `RocketJob`, sized to its pile while it stands by,
+// lifting off with flame and steam when the simulation says so. Nothing here decides anything.
 
 import AppKit
 import SceneKit
 
-/// One shuttle flight. Its command's phases are the flight itself: approach, descend, unload, rise,
-/// leave. Each phase runs its own SCNAction and the tick moves to the next when its time is up.
-final class Shuttle {
+/// The node for one flight, and whether it has turned toward its way out.
+final class ShuttleView {
     let node: SCNNode
-    let station: String
-    let command: Command
-    /// The flight path, in the hangar anchor's own space, so a station shifting does not misalign it.
-    let high: SIMD3<Double>, down: SIMD3<Double>, exit: SIMD3<Double>
-    /// Where the ship comes to rest facing, and the drift it settles into. Nil keeps its heading.
-    let restYaw: Double?, drift: Double
-    /// How far into the unload phase the cargo comes out, and how long the ship waits after.
-    let unloadAt: Double, unloadFor: Double
-    /// Setting the cargo down: the worker steps out, or the crate lands in the bay.
-    let onUnload: () -> Void
-    /// Whether the cargo may come out yet: a crate waits for its carrier to stand at the slot. The
-    /// ship holds over the slot until this says so; nil unloads on its own clock.
-    var ready: (() -> Bool)?
-    var phase = 0
-    var until = 0.0
-    private var unloaded = false
-    /// The phase in hand: where it started, when, and where it is going. The flight is drawn from
-    /// these on the station clock, so it pauses, steps and speeds with everything else.
-    private var startedAt = 0.0
-    private var from = SIMD3<Double>(0, 0, 0), to = SIMD3<Double>(0, 0, 0)
-    private var yawFrom = 0.0, yawTo = 0.0, turning = false
-
-    init(node: SCNNode, station: String, command: Command, high: SIMD3<Double>, down: SIMD3<Double>,
-         exit: SIMD3<Double>, restYaw: Double?, drift: Double, unloadAt: Double, unloadFor: Double,
-         onUnload: @escaping () -> Void) {
-        self.node = node; self.station = station; self.command = command
-        self.high = high; self.down = down; self.exit = exit
-        self.restYaw = restYaw; self.drift = drift
-        self.unloadAt = unloadAt; self.unloadFor = unloadFor; self.onUnload = onUnload
-    }
-
-    var phaseKind: Command.Phase {
-        let p = command.phases
-        return p[min(phase, p.count - 1)]
-    }
-
-    /// How long each phase of a flight lasts. The unload phase holds the ship still over its slot.
-    private var duration: Double {
-        switch phaseKind {
-        case .approach: return 3.0
-        case .descend: return 4.5
-        case .unload: return unloadAt + unloadFor
-        case .rise: return 2.5
-        default: return 3.0
-        }
-    }
-
-    /// Starts the phase in hand.
-    func begin(at clock: Double) {
-        until = clock + duration
-        startedAt = clock
-        from = SIMD3(Double(node.position.x), Double(node.position.y), Double(node.position.z))
-        to = from
-        turning = false
-        switch phaseKind {
-        case .approach: to = high
-        case .descend:
-            to = down
-            if let restYaw {
-                node.eulerAngles = SCNVector3(0, restYaw, 0)
-                yawFrom = restYaw; yawTo = restYaw + drift; turning = true
-            }
-        case .unload: break
-        case .rise: to = high
-        default:
-            if restYaw != nil { node.look(at: v3(exit.x, exit.y, exit.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0)) }
-            to = exit
-        }
-    }
-
-    /// Where the ship is along the phase: eased the way each leg wants it.
-    private func place(at clock: Double) {
-        guard duration > 0, phaseKind != .unload else { return }
-        let t = min(1, max(0, (clock - startedAt) / duration))
-        let e: Double
-        switch phaseKind {
-        case .approach: e = 1 - (1 - t) * (1 - t)                 // ease out
-        case .descend: e = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2   // ease in, ease out
-        default: e = t * t                                        // ease in
-        }
-        let p = from + (to - from) * e
-        node.position = v3(p.x, p.y, p.z)
-        if turning { node.eulerAngles.y = CGFloat(yawFrom + (yawTo - yawFrom) * e) }
-    }
-
-    /// One frame of the flight. Returns false once the ship is gone.
-    func advance(at clock: Double) -> Bool {
-        place(at: clock)
-        if phaseKind == .unload, !unloaded, let ready, !ready() { until = clock + unloadAt + unloadFor; return true }   // holding over the slot
-        if phaseKind == .unload, !unloaded, clock >= until - unloadFor { unloaded = true; onUnload() }
-        guard clock >= until else { return true }
-        guard phase + 1 < command.phases.count else { node.removeFromParentNode(); return false }
-        phase += 1
-        begin(at: clock)
-        return true
-    }
+    var leaving = false
+    init(node: SCNNode) { self.node = node }
 }
 
-/// One repository's rocket. It runs one command at a time — standing by, loading, steaming, lifting
-/// off — and a stage only ever moves forward.
-final class Rocket {
-    let station: String
-    let repo: String
+/// The node for one rocket, and what it was drawn for, so it is only redrawn when that changes.
+final class RocketView {
     var node: SCNNode
-    var command: Command
-    var phase = 0
-    /// When the climb is over and the actor is done.
-    var until = 0.0
-    var label = ""
-    var untested = false
-    /// A production rocket is the tall one.
-    var tall = true
-    /// How much cargo the prop was drawn for, so it is only redrawn when that changes.
-    var cargoShown = -1
-    /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
-    /// them have been set down on the pad and not one moment before: a rocket never launches empty.
-    var assigned: Set<String> = []
-    /// The carries ordered aboard that have not set their crate down yet, by command id.
-    var pending: Set<Int> = []
-
-    init(station: String, repo: String, node: SCNNode, command: Command) {
-        self.station = station; self.repo = repo; self.node = node; self.command = command
-    }
-
-    var key: String { station + "|" + repo }
-
-    var stage: Command.RocketStage {
-        if case .rocket(let s, _, _) = command.kind { return s }
-        return .standBy
-    }
-
-    var phaseKind: Command.Phase {
-        let p = command.phases
-        return p[min(phase, p.count - 1)]
-    }
-
-    /// Loading or steaming: the yard may not take its crates back and QA is over.
-    var isBusy: Bool { stage.rank >= 1 }
-    var isSteaming: Bool { if case .steam = stage { return true }; return false }
-    var isLaunching: Bool { if case .launch = stage { return true }; return false }
+    var cargoShown: Int
+    var untestedShown: Bool
+    init(node: SCNNode, cargo: Int, untested: Bool) { self.node = node; cargoShown = cargo; untestedShown = untested }
 }
 
-/// One station's hover pallet. It has no command of its own: the dispatcher's does the talking, and
-/// the pallet carries the crates, bobs where it stands and floats them on and off by magic.
-final class Pallet {
-    let station: String
-    let repo: String
-    let number: Int
-    let node: SCNNode
-    /// The dark patch on the floor under it. Its own node, because it must not bob with the slab.
-    let shadow: SCNNode
-    /// The blinking light on the corner, found once when the prop is built.
-    let beacon: SCNNode?
-    /// Which minion is running the errand.
-    var dispatcher: String
-    /// Where it hovers, in the station's own coordinates, and the phase of its bob.
-    var spot: SIMD2<Double>
-    let bobPhase = Double.random(in: 0..<6.28)
-    /// The way to the deck, leg by leg: each one an axis-aligned target for the pallet's centre.
-    var route: [SIMD2<Double>] = []
-    /// The leg in hand: where it started and when the pushing began, for the ease-in.
-    var legFrom = SIMD2<Double>(0, 0)
-    var legAt = 0.0
-    /// True while hands are actually on it and it is creeping along a leg.
-    var pushing = false
-    /// Crates still to lift, top of each stack first, and where each one goes.
-    var toLoad: [(crate: CrateRef, node: SCNNode, slot: StationTruth.PalletSlot)] = []
-    /// What stands on it now, in the order it was loaded.
-    var aboard: [(crate: CrateRef, node: SCNNode)] = []
-    /// The crate in the air right now, if any. One at a time, and the wand glows while it flies.
-    var flight: Flight?
-    /// When the pallet faded in, so its opacity can ride the station's own clock.
-    var bornAt = 0.0
+extension StationController {
+    // MARK: shuttles
 
-    /// A crate on its way through the air, moved by the tick rather than by an action, so it lands
-    /// whether or not anything is drawing frames.
-    struct Flight {
-        let node: SCNNode
-        let from: SIMD3<Double>, to: SIMD3<Double>
-        let fromYaw: Double, toYaw: Double
-        let at: Double
-        let seconds: Double
-        let land: () -> Void
-    }
-    /// The clock the next crate leaves the ground.
-    var nextAt = 0.0
-    /// Asked for while it was still loading: push it out, or empty it back into storage.
-    var wantsPush = false
-    var wantsBack = false
-    /// Where it is in its errand, mirrored into station truth.
-
-    init(station: String, repo: String, number: Int, node: SCNNode, shadow: SCNNode, dispatcher: String, spot: SIMD2<Double>) {
-        self.station = station; self.repo = repo; self.number = number
-        self.node = node; self.shadow = shadow; self.dispatcher = dispatcher; self.spot = spot
-        self.beacon = node.childNode(withName: "beacon", recursively: true)
+    /// The shuttle body, wings in a repo colour.
+    private func shuttle(color: NSColor) -> SCNNode {
+        let ship = SCNNode()
+        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
+        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
+        ship.addChildNode(hull)
+        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
+        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
+        cockpit.position = v3(0.16, 0.11, 0)
+        ship.addChildNode(cockpit)
+        for side in [-1.0, 1.0] {
+            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
+            wing.geometry!.firstMaterial = lit(color)
+            wing.position = v3(-0.14, 0, side * 0.34)
+            ship.addChildNode(wing)
+        }
+        for side in [-1.0, 1.0] {
+            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
+            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
+            skid.position = v3(0, -0.14, side * 0.16)
+            ship.addChildNode(skid)
+        }
+        return ship
     }
 
-    var isEmpty: Bool { aboard.isEmpty && toLoad.isEmpty && flight == nil }
-    var isSettled: Bool { toLoad.isEmpty && flight == nil }
+    /// Every ship in the air, where the simulation has it. Everything is parented to the hangar
+    /// anchor, so a station shifting underneath does not misalign it; a flight that is over loses its node.
+    func drawShuttles() {
+        var live = Set<ObjectIdentifier>()
+        for f in simulation.flights {
+            guard let station = fleet.stations[f.station], let anchor = hangarAnchors[f.station] else { continue }
+            let id = ObjectIdentifier(f)
+            live.insert(id)
+            let v = shuttleViews[id] ?? {
+                let ship = shuttle(color: NSColor(fleet.color(forRepo: f.repo)))
+                anchor.addChildNode(ship)
+                let v = ShuttleView(node: ship)
+                shuttleViews[id] = v
+                return v
+            }()
+            let hc = station.hangarCenter
+            v.node.position = v3(f.pos.x - hc.x, f.pos.y, f.pos.z - hc.y)
+            if f.phaseKind == .leave, f.restYaw != nil, !v.leaving {
+                v.leaving = true
+                v.node.look(at: v3(f.exit.x - hc.x, f.exit.y, f.exit.z - hc.y), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
+            } else if f.phaseKind == .approach, f.restYaw != nil, f.phase == 0 {
+                v.node.look(at: v3(f.high.x - hc.x, f.high.y, f.high.z - hc.y), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
+            } else if let yaw = f.yaw, !v.leaving {
+                v.node.eulerAngles = SCNVector3(0, yaw, 0)
+            }
+        }
+        for (id, v) in shuttleViews where !live.contains(id) {
+            v.node.removeFromParentNode()
+            shuttleViews[id] = nil
+        }
+    }
+
+    /// A new office's crate, ordered: it lies unseen on its bay slot until the ship drops it.
+    func crateOrdered(key: String, station name: String, slot: Int, repo: String) {
+        guard let station = fleet.stations[name], let anchor = hangarAnchors[name], slot < station.hangarSlots.count else { return }
+        let local = station.hangarSlots[slot] - station.hangarCenter
+        let color = station.rooms[String(key.dropFirst(name.count + 1))]?.color ?? fleet.color(forRepo: repo)
+        let box = Props.crate(color: NSColor(color))
+        box.position = v3(local.x, 0.09, local.y)
+        box.opacity = 0
+        box.name = "room:" + key
+        anchor.addChildNode(box)
+        boxes[key] = box
+    }
+
+    /// The ship set it down: the crate comes into view and settles onto the floor.
+    func crateDropped(key: String, station name: String, slot: Int) {
+        guard let station = fleet.stations[name], let box = boxes[key], slot < station.hangarSlots.count else { return }
+        let local = station.hangarSlots[slot] - station.hangarCenter
+        box.opacity = 1
+        box.position = v3(local.x, 0.42, local.y)
+        moveCrate(box, legs: [MotionLeg(to: SIMD3(local.x, 0.09, local.y), seconds: 0.5, ease: .easeIn)])
+    }
+
+    // MARK: rockets
+
+    /// Where a rocket stands on the pad, by slot, as the pad is now.
+    func padPosition(station: Station, slot: Int) -> SCNVector3 {
+        let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
+        let pc = station.padCenter + offsets[slot % offsets.count]
+        return v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
+    }
+
+    private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
+        let n = Props.rocket(color: NSColor(fleet.color(forRepo: r.repo)), tall: r.tall, cargo: r.cargo)
+        if r.untested {
+            let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
+            deco.name = "hold"
+            n.addChildNode(deco)
+        }
+        n.position = padPosition(station: station, slot: slot)
+        n.name = r.label
+        n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
+        rocketRoot.addChildNode(n)
+        return n
+    }
+
+    /// Every rocket on a pad, drawn for what the simulation says it is: a new one gets a node on the
+    /// next slot; one standing by grows with what it will carry and stands where the pad is now; once
+    /// it is loading it keeps the size it had, and the steam and the flame stay where they are.
+    func drawRockets() {
+        let keys = simulation.rockets.keys.sorted()
+        for (key, r) in simulation.rockets {
+            guard let st = fleet.stations[r.station] else { continue }
+            let slot = (keys.firstIndex(of: key) ?? 0) % 4
+            guard let v = rocketViews[key] else {
+                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), cargo: r.cargo, untested: r.untested)
+                continue
+            }
+            guard r.stage.rank == 0, !v.node.hasActions else { continue }
+            if r.cargo / 3 != v.cargoShown / 3 || r.untested != v.untestedShown {
+                let position = v.node.position
+                v.node.removeFromParentNode()
+                v.node = rocketNode(station: st, r, slot: slot)
+                v.node.position = position
+                v.cargoShown = r.cargo
+                v.untestedShown = r.untested
+            } else if v.node.name != r.label {
+                v.node.name = r.label
+                v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
+            }
+            // Standing by, a rocket stands where the pad is now: the floor may have grown under it.
+            v.node.position = padPosition(station: st, slot: slot)
+        }
+    }
+
+    /// The simulation's word on a rocket, shown once: the hold's tape comes down, the flame goes on,
+    /// the steam starts, the node goes with the rocket, or a crate goes in through the hatch.
+    func play(rocket cue: Cue) {
+        switch cue {
+        case .rocketLoading(let key):
+            rocketViews[key]?.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
+        case .liftOff(let key):
+            if let node = rocketViews[key]?.node { liftOff(node) }
+        case .steam(let key):
+            if let node = rocketViews[key]?.node { addSteam(to: node) }
+        case .rocketGone(let key):
+            rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
+        case .intoHold(let key, let command):
+            // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
+            // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
+            guard let b = cargoNodes[command] else { return }
+            let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
+            let hull = SIMD3(at.x, at.y + 0.22, at.z - 0.45)
+            if let hatch = rocketViews[key]?.node.childNode(withName: "hatch", recursively: true) {
+                hatch.runAction(.sequence([.scale(to: 0.05, duration: 0.2), .wait(duration: 0.8), .scale(to: 1, duration: 0.2)]))
+            }
+            moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z), seconds: 0.3, ease: .easeOut),
+                                MotionLeg(to: hull, seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
+        default: break
+        }
+    }
+
+    /// Flame on, a slow climb that carries the rocket out of the frame, then gone.
+    func liftOff(_ node: SCNNode) {
+        drone.sweep(up: true)
+        node.childNode(withName: "flame", recursively: false)?.opacity = 1
+        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
+        rise.timingMode = .easeIn
+        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
+        node.runAction(.sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])]), .removeFromParentNode()]))
+    }
+
+    /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the due rings redrawn.
+    func refreshRockets() {
+        simulation.refreshRockets()
+        rebuildDueRings()
+    }
 }

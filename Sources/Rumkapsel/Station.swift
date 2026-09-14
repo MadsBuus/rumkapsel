@@ -98,10 +98,10 @@ final class Room {
 /// One station: a corridor cross with tetromino rooms snapped against it.
 final class Station {
     let name: String
-    var hasHangar = true
-    var hasPad = true
+    var hasHangar = true { didSet { forgetFloorPlan() } }
+    var hasPad = true { didSet { forgetFloorPlan() } }
     private(set) var rooms: [String: Room] = [:]
-    private(set) var spineHalfLength = 2
+    private(set) var spineHalfLength = 2 { didSet { forgetFloorPlan() } }
     private var occupied: [Cell: String] = [:]
     private var walkableCache: Set<Cell>?
     /// Which yard block or the corridor each cell is in, and the doorways through the yard: read on
@@ -112,12 +112,38 @@ final class Station {
     /// Couch and bed spots: read for every resting minion every tick, built once per floor plan.
     private var couchCache: [SIMD2<Double>]?
     private var bedCache: [(pos: SIMD2<Double>, cell: Cell, level: Int)]?
-    private func forgetFloorPlan() { walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:]; couchCache = nil; bedCache = nil }
+    private func forgetFloorPlan() { blocksCache = nil; walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:]; couchCache = nil; bedCache = nil }
     /// World-space offset of this station's local grid.
     var offset = SIMD2<Double>(0, 0)
 
+    /// The fixed parts of the floor, built once per floor plan: read on every step of every route,
+    /// every placement and every walk, so never as fresh arrays each time.
+    private struct Blocks {
+        var core: [Cell], airlock: [Cell], hangar: [Cell], storage: [Cell], deck: [Cell], pad: [Cell], decon: [Cell], corridor: [Cell]
+        /// Every cell no room may take.
+        var reserved: Set<Cell>
+    }
+    private var blocksCache: Blocks?
+    private var blocks: Blocks {
+        if let b = blocksCache { return b }
+        let core = makeCoreCells(), airlock = makeAirlockCells(), hangar = makeHangarCells()
+        let storage = yardBlock(0), deck = yardBlock(1), pad = yardBlock(2), decon = makeDeconCells()
+        var reserved = Set(core)
+        for cells in [airlock, hangar, storage, deck, pad, decon] { reserved.formUnion(cells) }
+        var corridor = Set<Cell>()
+        for i in -spineHalfLength...spineHalfLength {
+            corridor.insert(Cell(x: i, y: 0)); corridor.insert(Cell(x: i, y: 1))
+            corridor.insert(Cell(x: 0, y: i)); corridor.insert(Cell(x: 1, y: i))
+        }
+        let b = Blocks(core: core, airlock: airlock, hangar: hangar, storage: storage, deck: deck, pad: pad, decon: decon,
+                       corridor: corridor.filter { !reserved.contains($0) }, reserved: reserved)
+        blocksCache = b
+        return b
+    }
+
     /// The monolith sits in a 2x2 block at the end of the north corridor arm.
-    var coreCells: [Cell] {
+    var coreCells: [Cell] { blocks.core }
+    private func makeCoreCells() -> [Cell] {
         let y = -spineHalfLength - 1
         return [Cell(x: 0, y: y - 1), Cell(x: 1, y: y - 1), Cell(x: 0, y: y), Cell(x: 1, y: y)]
     }
@@ -125,12 +151,14 @@ final class Station {
     /// The hangar is the 4x2 bay across the outer end of the south corridor arm, wider than it is long.
     /// The airlock: a 2x2 chamber that carries the corridor's line on past its south end, before the
     /// bay. The inner door is on its corridor side, the hatch on its bay side.
-    var airlockCells: [Cell] { hasHangar ? (1...2).flatMap { d in (0...1).map { x in Cell(x: x, y: spineHalfLength + d) } } : [] }
+    var airlockCells: [Cell] { blocks.airlock }
+    private func makeAirlockCells() -> [Cell] { hasHangar ? (1...2).flatMap { d in (0...1).map { x in Cell(x: x, y: spineHalfLength + d) } } : [] }
     /// The chamber's inner row, just past the inner door: where a leaver waits for the cycle.
     var airlockInner: [Cell] { airlockCells.filter { $0.y == spineHalfLength + 1 } }
     /// The hatch: where the chamber's outer row opens onto the bay.
     var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.filter { $0.y == spineHalfLength + 2 }.map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
-    var hangarCells: [Cell] {
+    var hangarCells: [Cell] { blocks.hangar }
+    private func makeHangarCells() -> [Cell] {
         guard hasHangar else { return [] }
         let y = spineHalfLength + 3   // past the airlock
         return (-1...2).flatMap { x in (0..<2).map { d in Cell(x: x, y: y + d) } }
@@ -148,10 +176,10 @@ final class Station {
         return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
     }
     private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, 0.5 + Double(yardRow(index))) }
-    var storageCells: [Cell] { yardBlock(0) }
+    var storageCells: [Cell] { blocks.storage }
     var storageCenter: SIMD2<Double> { yardCenter(0) }
-    var deckCells: [Cell] { yardBlock(1) }
-    var padCells: [Cell] { yardBlock(2) }
+    var deckCells: [Cell] { blocks.deck }
+    var padCells: [Cell] { blocks.pad }
     var padCenter: SIMD2<Double> { yardCenter(2) }
     /// The storage row nearest the deck. Crates stack from the far wall, so this row is the pallet's.
     var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }
@@ -165,7 +193,8 @@ final class Station {
     /// Decon: a chamber two cells deep at the back of storage, on its south side, the yard's fourth
     /// block. Anything from outside waits in it until someone clears it into storage. Its hatch is in
     /// the back wall, the row nearest it is where the objects stand, and the row by storage is the aisle.
-    var deconCells: [Cell] {
+    var deconCells: [Cell] { blocks.decon }
+    private func makeDeconCells() -> [Cell] {
         guard hasPad else { return [] }
         let x0 = -spineHalfLength - 1, r = yardRow(0)
         return (3..<5).flatMap { d in (0..<4).map { x in Cell(x: x0 - x, y: r + d) } }
@@ -222,14 +251,7 @@ final class Station {
     }
 
     /// A two-wide corridor cross.
-    var corridorCells: [Cell] {
-        var out = Set<Cell>()
-        for i in -spineHalfLength...spineHalfLength {
-            out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
-            out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
-        }
-        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) && !deckCells.contains($0) && !deconCells.contains($0) }
-    }
+    var corridorCells: [Cell] { blocks.corridor }
 
     /// The corridor axes are never built on, however far they extend.
     func isSpineLine(_ c: Cell) -> Bool { c.x == 0 || c.x == 1 || c.y == 0 || c.y == 1 }
@@ -416,9 +438,7 @@ final class Station {
             && cells.contains { $0.neighbours.contains(where: isCorridor) }
     }
 
-    private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || airlockCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c) || deconCells.contains(c)
-    }
+    private func isReserved(_ c: Cell) -> Bool { isSpineLine(c) || blocks.reserved.contains(c) }
 
     private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
         let variants = rotations(of: shape)
@@ -431,9 +451,10 @@ final class Station {
             if let near, !near.isEmpty {
                 // Beside the given rooms: closest to their floor first, then the usual order.
                 let set = Set(near)
-                func gap(_ c: Cell) -> Int { near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }
+                var gaps: [Cell: Int] = [:]
+                for c in anchors { gaps[c] = near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }   // once each, not once per comparison
                 anchors.sort {
-                    let ga = gap($0), gb = gap($1)
+                    let ga = gaps[$0]!, gb = gaps[$1]!
                     if ga != gb { return ga < gb }
                     return (max(abs($0.x), abs($0.y)), $0.x, $0.y) < (max(abs($1.x), abs($1.y)), $1.x, $1.y)
                 }
@@ -466,7 +487,6 @@ final class Station {
                 }
             }
             spineHalfLength += 2
-            forgetFloorPlan()
         }
         // Give up gracefully: park the room in a free spot far out along the east arm.
         let far = Cell(x: spineHalfLength + 2, y: 2)

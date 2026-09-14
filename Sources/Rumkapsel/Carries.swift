@@ -69,6 +69,7 @@ extension Simulation {
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
         cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim)
+        cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
 
@@ -202,7 +203,7 @@ extension Simulation {
                     if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
                 }
                 if !order.landed { m.waitingOn = "the crate to come down"; return .spent }
-                if shipOver(id, m.station) { m.waitingOn = "the ship to lift off"; return .spent }
+                if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; return .spent }
                 if let spot = m.fetchSpot {
                     m.fetchSpot = nil
                     m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))

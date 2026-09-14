@@ -116,7 +116,7 @@ extension Simulation {
                 let roomKey = String(key.dropFirst(station.name.count + 1))
                 guard station.rooms[roomKey] != nil,
                       let m = free.first(where: { $0.home.key == roomKey }) ?? free.first else { continue }
-                orderShuttle(m, roomKey)
+                startDelivery(m, roomKey: roomKey)
             }
         }
     }

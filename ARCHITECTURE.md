@@ -28,8 +28,8 @@ one fresh answer each, compare it with what was known, change the model, and han
 arriving. Counts in the yard are reconciled, not snapped: crates the board says moved to staging are carried
 across by minions (`reconcile`), and only what cannot be carried is redrawn.
 
-Two things the model cannot see for itself, whether an office has a package on its floor and whether a
-rocket is mid-load, the scene lends it as closures (`hasPackage`, `rocketBusy`).
+One thing the model cannot see for itself, whether an office has a package on its floor, the scene lends it
+as a closure (`hasPackage`); whether a rocket is mid-load the simulation answers (`rocketBusy`).
 
 Rules that keep the place steady:
 
@@ -55,28 +55,30 @@ request, a pyramid is a session input. Nothing is round.
 
 The station apart from the picture is `Simulation` (`Simulation.swift`, no SceneKit): the clock, the bodies
 and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands, the
-carries, deliveries, stows and packs (`Carries.swift`) and the body reconciler (`Bodies.swift`). It is
-generic over the body: `Simulation<Minion>` in the app, `Simulation<Body>` under `--sim-tests`. A frame is
-three steps per body, `stepWalk`, `stepThere` and `stepRest`; the scene runs them itself with the pallet
-errands in between, until those have moved in too. What the scene shows once, a flush, a fidget, a hop, a
-landing, a reveal, is a `Cue` the simulation hands back, and what the simulation cannot see yet, the ground a
-ship owns, a ship still over its slot, a steaming rocket, the shuttle a new office is fetched by, the scene
-lends as closures. A body's pose is a fact on the body, lying, seated, on the bench, and so is its load: a
+carries, deliveries, stows and packs (`Carries.swift`), the body reconciler (`Bodies.swift`), the pallet
+errand (`Pallet.swift`) and the shuttles and rockets (`Ships.swift`). It is generic over the body:
+`Simulation<Minion>` in the app, `Simulation<Body>` under `--sim-tests`. A frame is three steps per body,
+`stepWalk`, `stepThere` and `stepRest`, and a step each for the flights, the pallets and the rockets; the
+scene runs them and draws after. What the scene shows once, a flush, a fidget, a hop, a landing, a reveal, a
+crate lifting onto the pallet, a rocket's flame, is a `Cue` the simulation hands back and the scene plays at
+the end of the frame. A body's pose is a fact on the body, lying, seated, on the bench, and so is its load: a
 crate by number or an office's crate by key, with `landing` saying where it left the arms. The scene mirrors
 that each frame (`mirrorLoad`): the node is lifted when the load appears, sent down its arc when the
 set-down phase begins, and put where the landing says when the load goes; a crate under way is a `Cargo` on
-the simulation and a node on the scene, by command id. Where the fixtures stand is the station's
-(`Fixtures.swift`).
+the simulation and a node on the scene, by command id. A pallet (`PalletJob`), a flight (`Flight`) and a
+rocket (`RocketJob`) are the same shape: the simulation keeps where they are and what they hold, the scene
+keeps a view per one (`PalletView`, `ShuttleView`, `RocketView`) and places it from those facts. Where the
+fixtures stand is the station's (`Fixtures.swift`).
 
 The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
 shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
 the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
-`SceneMarkers.swift` the crates, cones, rockets and power; `SceneTick.swift` the per-frame worker loop and the demo
-clock, the commands whose crates are still nodes, and the pose; `Jobs.swift` the hauls, deliveries and the crew,
-and the seam through which the scene asks the simulation for orders and walks by their old names; `HUD.swift`
-the overlay; `Minion.swift` one worker's figure on its `Body`; `Actors.swift` the props that run commands of
-their own, a shuttle's flight, a rocket's stages and a pallet's load; `Pallets.swift` the dispatcher's errand
-from the console to the deck.
+`SceneMarkers.swift` the crates, cones, the due rings, steam and power; `SceneTick.swift` the per-frame
+worker loop and the demo clock, the load mirror, the cues and the pose; `Jobs.swift` the hauls the events
+order, the crew, and the seam through which the scene asks the simulation for orders and walks by their old
+names; `HUD.swift` the overlay; `Minion.swift` one worker's figure on its `Body`; `Actors.swift` the ship and
+rocket nodes drawn from the simulation's flights and rockets; `Pallets.swift` the pallet's slab, shadow,
+light, pusher and flying crate drawn from its job.
 
 ## Debts
 
@@ -139,10 +141,10 @@ derived from the same durations, so the posture and the motion cannot drift apar
 drawn once, in the hands: the yard it left leaves it out, and the yard it is bound for holds its place
 without drawing it.
 
-Shuttles, rockets and the crew are actors too (`Actors.swift`). A `Shuttle` flies one `.flight` command —
+Shuttles, rockets and the crew run commands too (`Ships.swift`). A `Flight` flies one `.flight` command —
 `bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave, and the unload writes truth:
 the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
-go from approach to lift. A `Rocket`, one per station and repository, runs `.rocket` stages that only ever
+go from approach to lift. A `RocketJob`, one per station and repository, runs `.rocket` stages that only ever
 move forward: stand by, load, steam, launch. `World.applyReleases` reads the launch queue and the open
 releases and hands out those stages as commands — untested stands by, cleared loads, merged launches, and a
 launch loads first if it has to. The load phase issues the same `carryToPad` carries as before, remembers
@@ -250,7 +252,7 @@ until the release moves), `loadPallet` (the wand out, one crate at a time off th
 an arc, onto its pallet slot), `pushPallet` (hands on the pallet, shoving it leg by leg out through the
 storage doorway and across to the untested row) and `unloadPallet`
 (the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
-unmerged, and the empty pallet fades). The `Pallet` actor in `Actors.swift` holds the node, what is aboard
+unmerged, and the empty pallet fades). The `PalletJob` in `Pallet.swift` holds where it hovers, what is aboard
 and the crate in the air; its state is the truth's, read there and written there. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
 cushion of light, bobbing on a sine, with twelve sunk fields matching the crate slots, rivets along the
 rim, an amber corner light the tick blinks, and a floor shadow of its own that stays down and tightens as

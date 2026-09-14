@@ -549,7 +549,7 @@ final class ScenarioRunner {
                     say("    crate  \(c.repo)#\(c.number): placed \(String(describing: c.placed)) wanted \(String(describing: c.wanted)) heading \(String(describing: c.heading)) at \(String(describing: c.at))")
                 }
             }
-            for r in sim.station.rocketActors.values {
+            for r in sim.station.simulation.rockets.values {
                 say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · assigned \(r.assigned.count), pending \(r.pending.count), aboard \(sim.station.world.aboard(station: r.station, repo: r.repo))")
             }
             // Every body at the end, for the failures the records do not explain.

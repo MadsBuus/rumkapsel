@@ -171,19 +171,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
     let rocketRoot = SCNNode()
-    /// One rocket actor per repository with a release on the pad, keyed "station|repo".
-    var rocketActors: [String: Rocket] = [:]
-    /// Every shuttle in the air right now, each running its flight command.
-    var shuttles: [Shuttle] = []
-    /// The one hover pallet a station may have out, keyed by station name.
-    var pallets: [String: Pallet] = [:]
+    /// The rockets and the ships as drawn: a node per rocket by "station|repo", a node per flight.
+    var rocketViews: [String: RocketView] = [:]
+    var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
+    /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
+    var palletViews: [String: PalletView] = [:]
     /// The panel on the wall by each storage doorway, so an order can make it blink.
     var consolePanels: [String: SCNNode] = [:]
     /// Props on their way out, fading on the station's clock rather than on an action.
     var fadingProps: [(node: SCNNode, at: Double)] = []
-    /// A staging release that ended before its pallet was out, by "station|repo": true pushes the
-    /// pallet to the deck once it is loaded, false empties it back into storage.
-    var palletWishes: [String: Bool] = [:]
     var lastBoxCount: [String: Int] = [:]
     /// What each marker was last drawn as, by node name: an office's boxes by everything that shapes
     /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
@@ -191,6 +187,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var markerSignatures: [String: String] = [:]
     /// Crates under way, by node: the one table that moves a crate's picture.
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
+    /// The cells the furniture covers, per station, and the static root's size when that was read.
+    var furnitureObstacles: [String: Set<Cell>] = [:]
+    var furnitureObstaclesAt = -1
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
@@ -279,8 +278,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
     /// runs at its own pace and may stall. Everything on the station that judges freshness against
     /// "now" reads this, so a slow frame can never age a session or a landing.
-    private let simEpoch = Date()
-    var now: Date { sim.map { simEpoch.addingTimeInterval($0.clock) } ?? Date() }
+    var now: Date { simulation.now }
     var demoClock = 0.0
     var demoMerged = false
     var demoStaged = false
@@ -387,16 +385,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         // What the model cannot see for itself: a crate already on someone's arms, or a rocket mid-load.
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
-        world.rocketBusy = { [weak self] key in self?.rocketActors[key]?.isBusy ?? false }
-        // The scene's ears on the simulation, and what it lends the simulation until the ships and rockets move in.
+        // The scene's ears on the simulation.
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
-        simulation.shipSpots = { [weak self] station in self?.groundHeldByShips(station) ?? [] }
-        simulation.rocketReady = { [weak self] station in
-            self?.rocketActors.values.contains { $0.station == station && ($0.isSteaming || $0.isLaunching) } ?? false
-        }
-        simulation.shipOver = { [weak self] order, station in self?.shipStillOver(order: order, station: station) ?? false }
-        simulation.orderShuttle = { [weak self] m, roomKey in self?.startDelivery(m, roomKey: roomKey) }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
@@ -501,16 +492,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
-    /// The ground a ship owns over a station's bay: the slot under every ship coming down or unloading.
-    func groundHeldByShips(_ stationName: String) -> [SIMD2<Double>] {
-        guard let station = fleet.stations[stationName] else { return [] }
-        return shuttles.compactMap { s in
-            guard s.station == stationName, case .flight(_, _, let slot) = s.command.kind, slot < station.hangarSlots.count,
-                  s.phase < (s.command.phases.firstIndex(of: .rise) ?? Int.max) else { return nil }
-            return station.hangarSlots[slot]
-        }
-    }
-
     /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
     func onGitHubUpdate() {
         let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in
@@ -590,7 +571,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
             m.freeSince = 0
-            if isNew && !s.isSubagent && newRooms[s.id] == nil && !firstRun { arriveByShuttle(m) }
+            if isNew && !s.isSubagent && newRooms[s.id] == nil && !firstRun { simulation.arriveByShuttle(m) }
             _ = reused
             if m.station != stationName { despawn(m); continue }
             m.home = home
@@ -652,7 +633,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
             if let key = newRooms[s.id], !m.onJob, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
-                startDelivery(m, roomKey: key)
+                simulation.startDelivery(m, roomKey: key)
             } else if !m.onJob {
                 let place = restPlace(m)
                 if place != m.place || isNew { send(m, to: place) }
@@ -850,11 +831,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for roomKey in peerDeliveries {
             let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.busy }
                 .min(by: { $0.freeSince > $1.freeSince })
-            if let m = free { startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
+            if let m = free { simulation.startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
         }
         peerDeliveries = []
         for d in pendingCrewDeliveries {
-            if let m = minions["crew:" + d.login], !m.onJob { startDelivery(m, roomKey: d.key) } else { reveal(station.name + "|" + d.key) }
+            if let m = minions["crew:" + d.login], !m.onJob { simulation.startDelivery(m, roomKey: d.key) } else { reveal(station.name + "|" + d.key) }
         }
         pendingCrewDeliveries = []
     }
@@ -935,15 +916,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
-            orderPallet(station: station, repo: repo, number: number)
+            simulation.orderPallet(station: station, repo: repo, number: number)
         case .stagingMerged(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) merged")
-            palletMerged(station: station, repo: repo)
+            simulation.palletMerged(station: station, repo: repo)
         case .stagingClosed(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) closed, not merged")
-            palletClosed(station: station, repo: repo)
+            simulation.palletClosed(station: station, repo: repo)
         case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
             break    // the rocket command that comes with it is the cue; the log line came as a .log
         case .releaseMerged(let stationName, let repo, _, _, _, false):
@@ -951,7 +932,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName],
                world.truth.pallets[stationName]?.repo != repo { stageCargo(station: st, repo: repo) }
         case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
-            handle(rocket: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
+            simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
             promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:
@@ -1034,15 +1015,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
             simulation.scheduleCarries()
-            tickRockets()
-            servicePallets()
+            simulation.stepRockets()
+            simulation.servicePallets()
             simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
             simulation.replanBlockedWalks()
         }
-        tickShuttles()
-        tickPallets()
+        simulation.stepShuttles()
+        simulation.stepPallets(dt: dt)
+        drawShuttles()
+        drawRockets()
+        drawPallets()
         tickCrateMotions()
         for (id, pm) in peerMinions {
             let p = SIMD3(Double(pm.minion.node.position.x), 0, Double(pm.minion.node.position.z))

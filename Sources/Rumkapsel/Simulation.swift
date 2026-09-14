@@ -3,8 +3,8 @@
 // frame, and decides nothing: it reads a body's place, pose and load, and plays the cues it is handed.
 // `Simulation<Minion>` is what the app runs; `Simulation<Body>` is what a model-only test can step.
 //
-// What is still the scene's, and steps here one slice at a time: the carries, stows and office
-// deliveries, whose crates are nodes; the pallets; the shuttles and the rockets.
+// The scene's own are the nodes, the poses, the sounds and the decorations, and the reactions to a
+// landing that redraw the rows; what it cannot see for itself is a cue from here.
 
 import Foundation
 
@@ -43,6 +43,22 @@ enum Cue {
     case packed(String)
     /// The rows are drawn again.
     case redraw
+    /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
+    case palletLift(station: String, crate: CrateRef)
+    case palletLanded(station: String, crate: CrateRef, aboard: Bool)
+    /// A carry was ordered: the scene finds the crate's node for the arms.
+    case carryOrdered(id: Int, crate: CrateRef)
+    /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
+    case sweep(up: Bool)
+    /// A new office's crate: ordered onto its bay slot, unseen; then dropped there by the ship.
+    case crateOrdered(key: String, station: String, slot: Int, repo: String)
+    case crateDropped(key: String, station: String, slot: Int)
+    /// A rocket, by "station|repo": cleared to load, lifting off, steaming, gone; a crate into its hold.
+    case rocketLoading(key: String)
+    case liftOff(key: String)
+    case steam(key: String)
+    case rocketGone(key: String)
+    case intoHold(key: String, command: Int)
 }
 
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
@@ -81,6 +97,17 @@ final class Simulation<B: Body> {
     var hooks: SimHooks?
     /// Crates under way, by command id.
     var cargo: [Int: Cargo] = [:]
+    /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
+    /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
+    var pallets: [String: PalletJob] = [:]
+    var palletWishes: [String: Bool] = [:]
+    /// Every shuttle in the air, and one rocket per repository with a release on the pad, by "station|repo".
+    var flights: [Flight] = []
+    var rockets: [String: RocketJob] = [:]
+    /// Station time as a date: the wall clock in the app, the simulated clock in a simulator, so a slow
+    /// frame can never age a session or a landing.
+    private let epoch = Date()
+    var now: Date { hooks != nil ? epoch.addingTimeInterval(clock) : Date() }
     /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
     /// What the scene shows once, drained every frame.
@@ -88,16 +115,12 @@ final class Simulation<B: Body> {
     /// The scene's ears: every event, and every line for the log.
     var onEvent: (WorldEvent) -> Void = { _ in }
     var onLog: (String) -> Void = { _ in }
-    /// What the simulation cannot see for itself yet, lent by the scene until the shuttles and rockets
-    /// move in: the ground a ship owns over a station's bay, and whether a loaded rocket steams on its pad.
-    var shipSpots: (String) -> [SIMD2<Double>] = { _ in [] }
-    var rocketReady: (String) -> Bool = { _ in false }
-    /// Whether the ship that dropped an order's crate is still over its slot, and the shuttle a new
-    /// office is fetched by: both the scene's until the shuttles move in.
-    var shipOver: (Int, String) -> Bool = { _, _ in false }
-    var orderShuttle: (B, String) -> Void = { _, _ in }
 
-    init(world: World) { self.world = world }
+    init(world: World) {
+        self.world = world
+        // What the world cannot see for itself: a rocket mid-load, which keeps the yard's crates where they are.
+        world.rocketBusy = { [weak self] key in self?.rockets[key]?.isBusy ?? false }
+    }
 
     func cue(_ c: Cue) { cues.append(c) }
     func drainCues() -> [Cue] { defer { cues = [] }; return cues }
@@ -299,7 +322,7 @@ final class Simulation<B: Body> {
         }
         // A ship over its slot, coming down or unloading, owns the ground under it: walks keep half a
         // tile off, so a carrier waiting on a crate stands beside the slot and never under the ship.
-        for at in shipSpots(m.station) {
+        for at in groundHeldByShips(m.station) {
             let c = Station.sub(at)
             for dx in -2...2 { for dy in -2...2 {
                 let sub = Cell(x: c.x + dx, y: c.y + dy), p = Station.point(ofSub: sub)
@@ -427,7 +450,7 @@ final class Simulation<B: Body> {
     /// where other roamers are headed; beside the pad when a loaded rocket steams, where company is fine.
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
-        let rocketReady = rocketReady(station.name)
+        let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
         let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
         let clear = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
@@ -550,11 +573,12 @@ final class Simulation<B: Body> {
         return m.path.isEmpty ? .there : .wondering
     }
 
-    /// One frame of a body with nowhere to walk, once the scene has run the pallet errands, which are still
-    /// its own: a crate seen to (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
+    /// One frame of a body with nowhere to walk: a pallet errand (`Pallet.swift`), a crate seen to
+    /// (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
     /// life — QA's rows, the bath and gym rules, the idle clock, the visits, the wander — or the way
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
+        if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.
