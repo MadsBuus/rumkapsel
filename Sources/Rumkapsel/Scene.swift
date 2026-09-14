@@ -260,6 +260,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let demo: Bool
     /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
     var sim: SimHooks?
+    /// A scripted run with no frame ever drawn: the view's own tick and its decorations are skipped, since
+    /// nothing reads them. Everything on the station clock still runs, scene-side logic included.
+    var headless = false
     /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
     /// runs at its own pace and may stall. Everything on the station that judges freshness against
     /// "now" reads this, so a slow frame can never age a session or a landing.
@@ -998,7 +1001,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             budget -= step
             stepStation(dt: step)
         }
-        tickView(dt: dt)
+        if !headless { tickView(dt: dt) }
     }
 
     /// Everything that happens on the station, by its clock.

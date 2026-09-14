@@ -430,7 +430,7 @@ extension StationController {
     }
 
     func tickMinions(dt: Double) {
-        tickAirlockDoors(dt: dt)
+        if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.

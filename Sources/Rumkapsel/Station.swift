@@ -109,7 +109,10 @@ final class Station {
     private var yardAreaCache: [Cell: String]?
     private var doorwaysCache: [(Cell, Cell)]?
     private var doorCache: [String: Cell] = [:]
-    private func forgetFloorPlan() { walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:] }
+    /// Couch and bed spots: read for every resting minion every tick, built once per floor plan.
+    private var couchCache: [SIMD2<Double>]?
+    private var bedCache: [(pos: SIMD2<Double>, cell: Cell, level: Int)]?
+    private func forgetFloorPlan() { walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:]; couchCache = nil; bedCache = nil }
     /// World-space offset of this station's local grid.
     var offset = SIMD2<Double>(0, 0)
 
@@ -170,20 +173,26 @@ final class Station {
     var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
     /// Eight flat beds, one per dorm tile.
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
+        if let b = bedCache { return b }
         guard let q = rooms["kind:quarters"] else { return [] }
         // Nothing sits in a doorway: a sleeper on the door cell would shut the room to everyone else.
         let door = doorCell(of: "kind:quarters")
-        return q.cells.filter { $0 != door }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
+        let b = q.cells.filter { $0 != door }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
+        bedCache = b
+        return b
     }
     /// Couch spots along the lounge walls where free workers sit.
     var couches: [SIMD2<Double>] {
+        if let c = couchCache { return c }
         guard let l = rooms["kind:lounge"] else { return [] }
         let xs = l.cells.map(\.x), ys = l.cells.map(\.y)
         let minX = Double(xs.min()!), maxX = Double(xs.max()!), minY = Double(ys.min()!), maxY = Double(ys.max()!)
         let door = doorCell(of: "kind:lounge")
         let spots = [SIMD2(minX - 0.22, minY), SIMD2(minX - 0.22, maxY), SIMD2(maxX + 0.22, minY), SIMD2(maxX + 0.22, maxY), SIMD2(minX, maxY + 0.22), SIMD2(maxX, maxY + 0.22)]
         // Nothing parked across the doorway.
-        return spots.filter { s in door.map { hypot(s.x - Double($0.x), s.y - Double($0.y)) > 0.6 } ?? true }
+        let c = spots.filter { s in door.map { hypot(s.x - Double($0.x), s.y - Double($0.y)) > 0.6 } ?? true }
+        couchCache = c
+        return c
     }
 
     static func rect(_ w: Int, _ h: Int) -> [Cell] {

@@ -614,6 +614,7 @@ final class ScenarioRunner {
         guard index < scenarios.count else { return finish() }
         // A station and an org of its own, so nothing carries over from the scenario before.
         sim = SimulatorController(frame: NSRect(x: 0, y: 0, width: 1060, height: 700))
+        sim?.station.headless = true
         step = 0
         simTime = 0
         startedAt = CACurrentMediaTime()
