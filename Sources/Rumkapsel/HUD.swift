@@ -185,7 +185,12 @@ extension StationController {
         let busy = active.filter(\.busy).count
         let waiting = active.filter { $0.activity == .waiting && !$0.busy }.count
         let asleep = active.filter { $0.activity == .sleeping }.count
-        statusLabel.text = ""
+        // The cue for fast time: shown while space is held, gone the moment it is let go.
+        statusLabel.text = liveTimeScale > 1 ? "\(Int(liveTimeScale))× · holding space" : ""
+        statusLabel.horizontalAlignmentMode = .center
+        statusLabel.fontSize = 13
+        statusLabel.fontColor = Palette.pyramid
+        statusLabel.position = CGPoint(x: hud.size.width / 2, y: 12)
         infoLabel.position = CGPoint(x: 14, y: 12)
 
         if clock - hudClock > 0.5 {

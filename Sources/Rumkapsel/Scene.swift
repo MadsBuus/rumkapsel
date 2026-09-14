@@ -229,6 +229,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var eventLabels: [(SKLabelNode, Double)] = []
     var hovered: String?
     private var lastTick = 0.0
+    /// How fast station time runs in the live app: 1, or 4 while space is held.
+    var liveTimeScale = 1.0
     var clock = 0.0
     var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     var targetFocus = SIMD2<Double>(0, 0)
@@ -342,6 +344,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onPan = { [weak self] dx, dy in self?.enqueue { self?.pan(byPixels: dx, dy) } }
         view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
+        view.onHold = { [weak self] held in self?.liveTimeScale = held ? 4 : 1 }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
@@ -950,6 +953,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func tick(now: TimeInterval) {
         let dt = min(0.1, max(0, now - lastTick))
         lastTick = now
+        // Station time runs at real speed, or faster while space is held, in steps small enough that a
+        // minion still walks rather than jumps. The camera, labels and HUD stay on real time.
+        var budget = dt * (sim == nil ? liveTimeScale : 1)
+        while budget > 1e-9 {   // a rounding sliver is not a step: it would run every decision twice in one frame
+            let step = min(budget, 1.0 / 30.0)
+            budget -= step
+            stepStation(dt: step)
+        }
+        tickView(dt: dt)
+    }
+
+    /// Everything that happens on the station, by its clock.
+    private func stepStation(dt: Double) {
         clock += dt
         if !timers.isEmpty {
             let due = timers.filter { $0.at <= clock }
@@ -986,6 +1002,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             drone.setWorkload(load)
         }
+        tickMinions(dt: dt)
+    }
+
+    /// The view: camera, labels and HUD, on real time whatever the station clock is doing.
+    private func tickView(dt: Double) {
         if hud.size != viewSize { hud.size = viewSize }
         if keyMove != .zero {
             // Held WASD: a steady slide, a bit under the view's height per second.
@@ -1019,8 +1040,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if p.y > c.y + 40 { p.y -= 80 } else if p.y < c.y - 40 { p.y += 80 }
             n.position.x = p.x; n.position.z = p.y
         }
-
-        tickMinions(dt: dt)
 
         updateBeams()
         let camYaw = Double(rig.eulerAngles.y)

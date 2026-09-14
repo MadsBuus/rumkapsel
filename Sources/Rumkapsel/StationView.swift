@@ -12,6 +12,10 @@ final class StationView: SCNView {
     var onPan: ((Double, Double) -> Void)?
     var onTilt: ((Double) -> Void)?
     var onKey: ((String) -> Bool)?
+    /// Space held down, and let go: the station runs faster while it is held.
+    var onHold: ((Bool) -> Void)?
+    private var spaceHeld = false
+    private func releaseSpace() { if spaceHeld { spaceHeld = false; onHold?(false) } }
     /// Held WASD keys as a screen-relative direction (x right, y up) and Q/E as a zoom direction (+1 in), zero when none are down.
     var onMove: ((SIMD2<Double>, Double) -> Void)?
     private var heldKeys: Set<String> = []
@@ -21,6 +25,10 @@ final class StationView: SCNView {
     private var downPoint = NSPoint.zero
 
     override func keyDown(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == " ", event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            if !spaceHeld { spaceHeld = true; onHold?(true) }
+            return
+        }
         if let chars = event.charactersIgnoringModifiers?.lowercased(), Self.moveKeys[chars] != nil,
            event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
             if !event.isARepeat { heldKeys.insert(chars); moveChanged() }
@@ -30,15 +38,18 @@ final class StationView: SCNView {
         super.keyDown(with: event)
     }
     override func keyUp(with event: NSEvent) {
+        if event.charactersIgnoringModifiers == " " { releaseSpace(); return }
         if let chars = event.charactersIgnoringModifiers?.lowercased(), heldKeys.remove(chars) != nil { moveChanged(); return }
         super.keyUp(with: event)
     }
     override func flagsChanged(with event: NSEvent) {
+        if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { releaseSpace() }
         // A modifier pressed mid-move would swallow the key-up: let go of everything.
         if !heldKeys.isEmpty, !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { heldKeys = []; moveChanged() }
         super.flagsChanged(with: event)
     }
     override func resignFirstResponder() -> Bool {
+        releaseSpace()
         if !heldKeys.isEmpty { heldKeys = []; moveChanged() }
         return super.resignFirstResponder()
     }
@@ -58,6 +69,16 @@ final class StationView: SCNView {
 
     override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { true }
+    /// A key-up never arrives once the window loses focus: let go of space then, so the station is not left running fast.
+    private var resignObserver: NSObjectProtocol?
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let o = resignObserver { NotificationCenter.default.removeObserver(o); resignObserver = nil }
+        guard let window else { return }
+        resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+            self?.releaseSpace()
+        }
+    }
 
     override func magnify(with event: NSEvent) { onZoom?(1 + event.magnification, cursor(event)) }
     override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180, cursor(event)) }
