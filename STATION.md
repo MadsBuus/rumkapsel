@@ -92,6 +92,7 @@ since real stations mandate both.
 
 ## Tasks and work
 
+- A closed issue is finished work, whatever column the board left it in: it never makes an office.
 - An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue
   the pull request closes, the pull request's own number when it closes none. One crate per task,
   however many pull requests it took; the crate's hover lists them, and its click opens the task.
