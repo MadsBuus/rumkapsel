@@ -24,23 +24,41 @@ enum WalkTests {
 
         test("someone close ahead is passed with a lean to the walker's own right, facing them; behind is nobody's business") {
             let m = body("a", 0.6, 0), o = body("b", 1, 0); m.path = [SIMD2(1, 0), SIMD2(2, 0)]
-            let near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o])
-            expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) == Walk.sidestep, "leaning right: \(m.lean)")
-            expect(abs(m.facing - atan2(o.pos.x - m.pos.x, o.pos.y - m.pos.y)) < 1e-9, "facing the one passed")
-            let back = body("c", 0, 0); back.path = [SIMD2(1, 0)]
+            var near: Body?
+            for _ in 0..<12 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }   // closer than the lean gap now
+            expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) > Walk.sidestep * 0.5, "leaning right after the turn: \(m.lean)")
+            expect(abs(m.facing - atan2(0.0, 1.0)) < 1e-9, "turned side-on, a quarter turn to its left: \(m.facing)")
+            let back = body("c", 0, 0); back.path = [SIMD2(1, 0), SIMD2(2, 0)]
             expect(Walk.step(back, speed: 1.4, dt: 1.0 / 30, others: [body("d", -0.3, 0)]) == nil && back.lean == .zero, "behind: no lean")
         }
 
         test("the pass never moves the body off its line: two head-on both arrive exactly") {
             let a = body("a", 0, 0), b = body("b", 2, 0); a.path = [SIMD2(1, 0), SIMD2(2, 0)]; b.path = [SIMD2(1, 0), SIMD2(0, 0)]
             var leaned = false
-            for _ in 0..<200 {
+            for _ in 0..<300 {
                 _ = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b]); _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a])
                 if a.lean != .zero && b.lean != .zero && a.lean.y * b.lean.y < 0 { leaned = true }
                 expect(a.pos.y == 0 && b.pos.y == 0, "on the line")
             }
             expect(leaned, "they leaned to opposite sides as they met")
             expect(a.path.isEmpty && a.pos == SIMD2(2, 0) && b.path.isEmpty && b.pos == SIMD2(0, 0), "both exactly there: \(a.pos) \(b.pos)")
+        }
+
+        test("a walk that ends beside someone ends straight, lean gone, facing the way it came") {
+            let m = body("a", 0.5, 0), o = body("b", 1.2, 0); m.path = [SIMD2(1, 0)]
+            for _ in 0..<200 { _ = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }
+            expect(m.path.isEmpty && m.lean == .zero && abs(m.facing - atan2(1.0, 0.0)) < 1e-9, "square at the end: lean \(m.lean) facing \(m.facing)")
+        }
+
+        test("a pass never flickers: once begun it holds until the other is clearly behind") {
+            let a = body("a", 0, 0), b = body("b", 2, 0); a.path = [SIMD2(1, 0), SIMD2(2, 0), SIMD2(3, 0)]; b.path = [SIMD2(1, 0), SIMD2(0, 0), SIMD2(-1, 0)]
+            var states: [Bool] = []
+            for _ in 0..<400 {
+                let n = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b]); _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a])
+                states.append(n != nil)
+            }
+            let flips = zip(states, states.dropFirst()).filter { $0 != $1 }.count
+            expect(flips == 2, "one pass: in once, out once, got \(flips) changes")
         }
 
         say(failures == 0 ? "walk: all passed" : "walk: \(failures) failed")

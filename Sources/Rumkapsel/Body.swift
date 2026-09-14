@@ -120,6 +120,8 @@ class Body {
     var lastReplanAt = -10.0
     /// How far the figure is drawn off the body's line while passing someone: a shoulder to the right. Drawing only.
     var lean = SIMD2<Double>(0, 0)
+    /// Who is being passed, held from the first sight of them until they are clearly behind, so a pass never flickers.
+    var passingId: String?
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false
