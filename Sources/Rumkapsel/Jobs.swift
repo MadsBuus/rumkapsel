@@ -232,6 +232,7 @@ extension StationController {
             // each other; that is the walk's own rule, which waits on whoever is in the way in step.
             // Whoever just stood in the way gets a whole tile's berth, so two walkers meeting head-on
             // both go round rather than each waiting on the other.
+            if o.lying || (o.couch != nil && o.path.isEmpty) { continue }   // on the furniture: off the walkway
             let s = Station.sub(o.pos)
             if o.id == blocker { for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } } }
             else { out.insert(s) }

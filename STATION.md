@@ -81,7 +81,8 @@ since real stations mandate both.
   through a room. With something in their hands they need even more room.
 - Two can pass each other on one tile, side by side, but never slide through each other: a body
   is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
-  Whoever finds someone in the way waits a beat, then goes round.
+  Whoever finds someone in the way waits a beat, then goes round. Someone on a couch or in bed is
+  on the furniture, off the walkway, and in nobody's way.
 
 ## Bodies
 

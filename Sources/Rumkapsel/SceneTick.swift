@@ -393,9 +393,13 @@ extension StationController {
                 let step = speed * dt
                 let next = dist <= step ? target : m.pos + d / dist * step
                 // Solid to each other: someone in the way is waited for a moment, then walked round.
+                // Someone settled on a couch or in bed is on the furniture, not in the way; and someone
+                // already on the same spot is stepped away from, not waited on.
                 let ahead = minions.values.first { o in
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
+                        && !o.lying && !(o.couch != nil && o.path.isEmpty)
                         && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
+                        && (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.y - m.pos.y) * (o.pos.y - m.pos.y) > 0.15 * 0.15
                         && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
                 }
                 m.blockedBy = ahead?.id

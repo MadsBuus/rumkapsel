@@ -24,7 +24,7 @@ extension StationController {
             // Standing still is the whole point of a rest that has arrived, a lie-down or an act with time
             // left on it. A wait on a named fact is allowed its time, but not forever: a fact that has not
             // come in ninety station seconds is one that is not coming, and the wait is given up too.
-            let steady = (c.isRest && m.path.isEmpty) || m.lying || (m.phaseKind == .act && clock < m.phaseUntil)
+            let steady = (c.isRest && m.path.isEmpty) || m.lying || (m.path.isEmpty && clock < m.phaseUntil)   // any timed phase: an act, a reaction, a crouch
                 || m.isQA || { if case .leave = c.kind { return true }; if case .waitPallet = c.kind { return true }; return false }()   // walking the rows, the airlock's cycle, standing by a pallet for a release that may take hours: standing is the work
             if steady { m.stallMark = ""; continue }
             let s = Station.sub(m.pos)
@@ -70,6 +70,8 @@ extension StationController {
             if m.carried != nil { dropWhereStanding(m) }
             if world.truth.deliveries[id] != nil { world.truth.crateLanded(order: id); world.truth.fetchGivenUp(order: id, by: m.id) }
             finish(m)
+        case .react:
+            crewRested(m)   // a teammate's reaction ends the way it always ends: activity, tools and all
         default:
             if c.isRest {
                 m.current = nil
