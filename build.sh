@@ -1,9 +1,18 @@
 #!/bin/zsh
 # Builds rumkapsel.app into ./build. Add "run" to launch it afterwards.
+#   ./build.sh          the release build: optimised, universal (Apple silicon and Intel), a couple of minutes
+#   ./build.sh fast     a local build to try things: debug, this machine's architecture only, a few seconds
 set -e
 cd "$(dirname "$0")"
-swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
-BIN=.build/apple/Products/Release/Rumkapsel
+MODE=release
+for a in "$@"; do [ "$a" = fast ] && MODE=fast; done
+if [ "$MODE" = fast ]; then
+  swift build 2>&1 | grep -E 'error|Build complete' || true
+  BIN=.build/debug/Rumkapsel
+else
+  swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
+  BIN=.build/apple/Products/Release/Rumkapsel
+fi
 [ -x "$BIN" ] || { echo "build failed"; exit 1; }
 APP=build/rumkapsel.app
 rm -rf "$APP"
@@ -15,6 +24,7 @@ cp -R .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sp
 # The commit this build came from, so the running app can say which one it is.
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 [ -n "$(git status --porcelain 2>/dev/null)" ] && SHA="$SHA+"
+[ "$MODE" = fast ] && SHA="$SHA fast"
 SUBJ=$(git log -1 --pretty=%s 2>/dev/null | cut -c1-70 | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -39,5 +49,5 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 echo "built $APP"
-[ "$1" = "run" ] && open -g "$APP"
+for a in "$@"; do [ "$a" = run ] && open -g "$APP"; done
 exit 0

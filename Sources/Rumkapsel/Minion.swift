@@ -107,6 +107,17 @@ final class Minion {
     var nextBathAt = 0.0
     /// When the next turn in the gym is due, on the station clock; 0 until the lounge gets dull.
     var nextWorkoutAt = 0.0
+    /// How long the visit in hand lasts once the minion is there, and when it got there. The clock starts on
+    /// arrival, never when the walk began: the walk is not the visit.
+    var actFor = 0.0
+    var actStartedAt = 0.0
+    /// A lounger's one idle clock: when it runs out, one thing to do is picked.
+    var nextIdleAt = 0.0
+    /// When this minion's walk was last planned again because something stood in it: at most once a second,
+    /// so a crowded doorway costs a search a second, not one a frame.
+    var lastReplanAt = -10.0
+    /// The doorway this minion has claimed to walk through, while it is on its way through.
+    var heldLane: String?
     private(set) var onBench = false
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0

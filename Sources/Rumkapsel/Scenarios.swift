@@ -173,6 +173,18 @@ struct Scenario {
     }
 
     /// How many crates of a repository stand in a yard row right now, by the name the scene gives them.
+    /// Every visit of a kind that ran its course lasted its planned time, counted from arrival.
+    @MainActor
+    static func lasted(_ sim: SimulatorController, _ kind: String) -> String? {
+        let visits = sim.station.visitLog.filter { $0.kind == kind }
+        guard !visits.isEmpty else { return "no \(kind) ran its course" }
+        if let none = visits.first(where: { $0.planned <= 0 }) { return "a \(kind) had no length of its own (\(none.lasted) s)" }
+        if let short = visits.first(where: { $0.lasted + 0.25 < $0.planned }) {
+            return "a \(kind) lasted \(String(format: "%.1f", short.lasted)) s of its \(String(format: "%.1f", short.planned))"
+        }
+        return nil
+    }
+
     @MainActor static func crates(_ sim: SimulatorController, _ area: String, _ repo: String) -> Int {
         sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(area):work|\(repo)|") }.count
     }
@@ -447,9 +459,9 @@ enum Scenarios {
         Scenario("a bath lasts its whole time", [
             ("Everyone to lounge", 3.0),
             ("Bath", 0.3),
-        ], tail: 14, expects: [
+        ], tail: 26, expects: [
             .bath,
-        ]),
+        ], floor: { sim in Scenario.lasted(sim, "bath") }),
 
         Scenario("pallet operator stays on the errand through the night", [
             ("Target: web#455", 0.5),
@@ -533,16 +545,27 @@ enum Scenarios {
         Scenario("a turn in the gym lasts its whole time", [
             ("Everyone to lounge", 3.0),
             ("Workout", 0.3),
-        ], tail: 14, expects: [
+        ], tail: 40, expects: [
             .workout,
             .goTo(.lounge),   // and back to the couch after
-        ]),
-        Scenario("a chore", [
+        ], floor: { sim in Scenario.lasted(sim, "gym") }),
+        Scenario("a look round the station lasts its whole time", [
             ("Everyone to lounge", 3.0),
             ("Chore", 0.3),
-        ], tail: 12, expects: [
+        ], tail: 40, expects: [
             .chore,
-        ]),
+        ], floor: { sim in Scenario.lasted(sim, "roam") }),
+
+        Scenario("an idle station keeps a mix, each visit for its whole time", [
+            ("Everyone to lounge", 3.0),
+        ], tail: 720, expects: [], floor: { sim in
+            let log = sim.station.visitLog
+            let kinds = Dictionary(grouping: log, by: \.kind).mapValues(\.count)
+            if kinds.count < 2 { return "only \(kinds) in twelve idle minutes" }
+            if let most = kinds.values.max(), Double(most) > 0.8 * Double(log.count) { return "one activity took over: \(kinds)" }
+            for kind in kinds.keys.sorted() { if let why = Scenario.lasted(sim, kind) { return why } }
+            return nil
+        }),
     ]
 }
 

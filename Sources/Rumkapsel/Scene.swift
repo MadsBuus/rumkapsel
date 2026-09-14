@@ -233,6 +233,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var lastTick = 0.0
     /// How fast station time runs in the live app: 1, or 4 while space is held.
     var liveTimeScale = 1.0
+    /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
+    var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
+    /// Doorways as one-lane sections, per station: the cells of each, by lane id. Rebuilt on the beat.
+    var laneMap: [String: [Cell: String]] = [:]
+    /// The tile outside each room's door, per station: part of that door's lane for anyone going in or coming out.
+    var laneApproaches: [String: [Cell: (lane: String, room: String)]] = [:]
+    /// Who is going through a doorway, and until when on the station clock the claim holds unless renewed.
+    var doorClaims: [String: (holder: String, until: Double)] = [:]
     var clock = 0.0
     var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     var targetFocus = SIMD2<Double>(0, 0)
@@ -473,7 +481,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for m in minions.values where !m.path.isEmpty {
             guard let station = fleet.stations[m.station] else { continue }
             let blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
-            guard blocked, let last = m.path.last else { continue }
+            guard blocked, clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
+            m.lastReplanAt = clock
             m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
         }
     }
@@ -1010,6 +1019,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
+            rebuildLanes()
             replanBlockedWalks()
         }
         tickShuttles()

@@ -99,6 +99,7 @@ extension StationController {
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
+        m.actFor = 0; m.actStartedAt = 0   // a new command's visit length is set by whoever starts it
         // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
         if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { logEvent(c.words) }
@@ -113,13 +114,14 @@ extension StationController {
     }
 
     /// Done, or given up: whatever was queued starts now, else the minion goes back to resting.
-    func finish(_ m: Minion) {
+    /// The destination, when given, is where the minion goes back to: one order, not a rest and then another.
+    func finish(_ m: Minion, to place: Place? = nil) {
         m.current = nil
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
         if let next = m.pending { m.pending = nil; begin(m, next, announce: next.isJob) }
-        else { send(m, to: restPlace(m)) }
+        else { send(m, to: place ?? restPlace(m)) }
     }
 
     /// A command whose target went away, or given up: put down what is on the arms, an arm's length in
@@ -211,8 +213,13 @@ extension StationController {
             let spot = station.couches[c]
             target = lounge.cells.min { a, b in hypot(Double(a.x) - spot.x, Double(a.y) - spot.y) < hypot(Double(b.x) - spot.x, Double(b.y) - spot.y) } ?? lounge.cells[0]
         }
-        else if let t = cells.randomElement() { target = t }
-        else { return }
+        else {
+            // Never the doorway: a body settled there shuts the room to everyone else.
+            let door: Cell? = { if case .room(let k) = place { return station.doorCell(of: k) }; return nil }()
+            let spots = cells.filter { $0 != door }
+            guard let t = (spots.isEmpty ? cells : spots).randomElement() else { return }
+            target = t
+        }
         m.place = place
         start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping))
         m.path = route(m, to: target)
