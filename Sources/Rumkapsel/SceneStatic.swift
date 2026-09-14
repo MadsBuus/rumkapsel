@@ -8,7 +8,7 @@ extension StationController {
         if station.hangarCells.contains(c) { return "kind:hangar" }
         if station.airlockCells.contains(c) { return "kind:airlock" }
         if station.storageCells.contains(c) { return "kind:storage" }
-        if station.deckCells.contains(c) && !ConfigStore.shared.current.stagingBranch.isEmpty { return "kind:deck" }
+        if station.deckCells.contains(c) && world.deckInUse(station: station.name) { return "kind:deck" }
         if station.padCells.contains(c) { return "kind:pad" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
@@ -154,7 +154,7 @@ extension StationController {
             for c in station.storageCells {
                 addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
             }
-            if !ConfigStore.shared.current.stagingBranch.isEmpty {
+            if world.deckInUse(station: station.name) {
                 for c in station.deckCells {
                     addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
                 }
@@ -504,7 +504,7 @@ extension StationController {
             add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
 
             if station.hasPad {
-                if !ConfigStore.shared.current.stagingBranch.isEmpty {
+                if world.deckInUse(station: station.name) {
                     let deckLabel = floorSign("staging", color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
                     deckLabel.node.position.y = 0.012
                     let dc = station.deckCells

@@ -444,11 +444,11 @@ extension StationController {
     }
 
     /// Which row a rocket loads from: the deck when releases go through staging, storage otherwise.
-    private var loadSource: String { ConfigStore.shared.current.stagingBranch.isEmpty ? "storage" : "deck" }
+    private func loadSource(_ r: Rocket) -> String { world.stagingIsDeck(station: r.station, repo: r.repo) ? "deck" : "storage" }
 
     /// Nothing of this repository left belonging to its row, and nothing on anyone's arms.
     private func padClear(_ r: Rocket) -> Bool {
-        let yard: Yard = loadSource == "deck" ? .deck : .storage
+        let yard: Yard = loadSource(r) == "deck" ? .deck : .storage
         let left = fleet.stations[r.station]?.ledger.crates(of: r.repo).contains { $0.placed == yard } ?? false
         return !left && world.carriedCount(station: r.station, repo: r.repo) == 0
     }
@@ -457,7 +457,7 @@ extension StationController {
     /// spoken for is off the floor, so this can run every pass without doubling up.
     private func loadCrates(_ r: Rocket) {
         guard let station = fleet.stations[r.station] else { return }
-        let source = loadSource
+        let source = loadSource(r)
         let repo = r.repo
         let yard: Yard = source == "deck" ? .deck : .storage
         let numbers = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
@@ -510,8 +510,8 @@ extension StationController {
         if ringRoot.parent == nil { propRoot.addChildNode(ringRoot) }
         ringRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values where station.hasPad {
-            let pile = ConfigStore.shared.current.stagingBranch.isEmpty ? station.stored : station.staged
-            let waiting = pile.filter { $0.value > 0 }.map(\.key).sorted()
+            let waiting = Set(station.stored.keys).union(station.staged.keys)
+                .filter { repo in ((world.stagingIsDeck(station: station.name, repo: repo) ? station.staged : station.stored)[repo] ?? 0) > 0 }.sorted()
             let withRocket = Set(world.repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> String? in
                 (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) == true) ? info.repo : nil
             })

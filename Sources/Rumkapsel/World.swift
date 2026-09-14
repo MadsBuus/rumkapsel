@@ -367,14 +367,23 @@ final class World {
     /// Repositories whose releases have answered once. The first answer is quiet: whatever it holds already existed.
     private var stagingSeen: Set<String> = []
 
-    /// Whether the deck, rather than storage, is what a rocket loads from.
-    private var stagingIsDeck: Bool { !ConfigStore.shared.current.stagingBranch.isEmpty }
+    /// A repository's checkout, by station and name.
+    func root(station: String, repo: String) -> String? { repoRoots.first { $0.value.station == station && $0.value.repo == repo }?.key }
+    /// Whether the deck, rather than storage, is what a repository's rocket loads from: it has a staging branch.
+    func stagingIsDeck(station: String, repo: String) -> Bool {
+        root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? !ConfigStore.shared.current.stagingBranch.isEmpty
+    }
+    /// Whether a station's deck is in use: some repository on it has a staging branch.
+    func deckInUse(station: String) -> Bool {
+        let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
+        return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
+    }
 
     /// The release pull request whose rocket a repository's pad should hold, if any.
     private func padRelease(root: String) -> ReleasePR? {
         guard let open = github.openReleases(repoRoot: root) else { return nil }
         let hasProduction = open.contains(where: \.isProduction)
-        return open.first { $0.isProduction || (!hasProduction && !stagingIsDeck) }
+        return open.first { $0.isProduction || (!hasProduction && !github.pipeline(repoRoot: root).hasStaging) }
     }
 
     /// Pads that should hold a rocket right now, as "station|repo".
@@ -393,7 +402,7 @@ final class World {
 
     /// Crates a rocket would load: the deck when there is a staging branch, storage otherwise.
     func cargoWaiting(station: Station, repo: String) -> Int {
-        (stagingIsDeck ? station.staged : station.stored)[repo] ?? 0
+        (stagingIsDeck(station: station.name, repo: repo) ? station.staged : station.stored)[repo] ?? 0
     }
 
     /// The launch queue and the open releases, turned into events and rocket commands. A merged
@@ -440,7 +449,6 @@ final class World {
     /// closed without merging. One open staging release per repository at a time, which is what the
     /// one pallet per station is for.
     private func applyStaging() -> [WorldEvent] {
-        guard !ConfigStore.shared.current.stagingBranch.isEmpty else { return [] }
         var events: [WorldEvent] = []
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
             guard fleet.stations[info.station] != nil, let all = github.releases(repoRoot: root) else { continue }
@@ -820,7 +828,7 @@ final class World {
         let open = station.ledger.disagreements(repo: repo)
         guard !open.isEmpty else { return .snapped }
         let toDeck = open.filter { $0.placed == .storage && $0.wanted == .deck }.map(\.number)
-        if !toDeck.isEmpty, station.hasPad, !station.deckCells.isEmpty, !ConfigStore.shared.current.stagingBranch.isEmpty {
+        if !toDeck.isEmpty, station.hasPad, !station.deckCells.isEmpty, github.pipeline(repoRoot: root).hasStaging {
             let commands = carryToDeck(station: station, repo: repo, numbers: toDeck)
             if !commands.isEmpty { return .carryToDeck(commands) }
         }

@@ -273,7 +273,12 @@ extension StationController {
             infoLabel.text = "test deck · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
         } else if h.hasPrefix("pad:") {
             let name = String(h.dropFirst(4))
-            let due = (ConfigStore.shared.current.stagingBranch.isEmpty ? fleet.stations[name]?.stored : fleet.stations[name]?.staged)?.filter { $0.value > 0 }.map { "\($0.value) \($0.key)" }.sorted() ?? []
+            let due = fleet.stations[name].map { st in
+                Set(st.stored.keys).union(st.staged.keys).compactMap { repo -> String? in
+                    let n = (world.stagingIsDeck(station: name, repo: repo) ? st.staged : st.stored)[repo] ?? 0
+                    return n > 0 ? "\(n) \(repo)" : nil
+                }.sorted()
+            } ?? []
             infoLabel.text = "launch pad · release pull requests wait here; merging launches" + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
         } else if h.hasPrefix("hangar:") {
             infoLabel.text = "hangar · new offices arrive here by ship"

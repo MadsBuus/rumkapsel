@@ -135,6 +135,8 @@ final class SimulatorModel: ObservableObject {
     private var board: [ProjectItem] = []
     private var feeds: [String: [FeedEvent]] = [:]
     private var releases: [String: [ReleasePR]] = [:]
+    /// Repositories pressed to have no staging branch: develop to master through a release branch, like android.
+    private var noStaging: Set<String> = []
     private var launches: [(repo: String, pr: ReleasePR)] = []
     private var peerHere = false
     private var peerBeat: Timer?
@@ -489,8 +491,9 @@ final class SimulatorModel: ObservableObject {
                        board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil : "nothing of \(repo) in storage on the board"),
             ]),
             Group(id: "Release (\(repo))", note: nil, buttons: [
+                button("Repo: No staging", "No staging branch (develop → master)", noStaging.contains(repo) ? "\(repo) already has no staging" : nil),
                 button("Release: Staging opens", "Staging opens",
-                       openRelease(repo, production: false) != nil ? "a staging release is already open on \(repo)" : nil),
+                       noStaging.contains(repo) ? "\(repo) has no staging branch" : openRelease(repo, production: false) != nil ? "a staging release is already open on \(repo)" : nil),
                 button("Release: Staging merges", "Staging merges",
                        openRelease(repo, production: false) == nil ? "no open staging release on \(repo)" : nil),
                 // The merge is seen but the board is not: its poll comes later, by "Board: Catch up".
@@ -500,8 +503,11 @@ final class SimulatorModel: ObservableObject {
                        openRelease(repo, production: false) == nil ? "no open staging release on \(repo)" : nil),
                 button("Release: Production opens", "Production opens (untested)",
                        openRelease(repo, production: true) != nil ? "a production release is already open on \(repo)" : nil),
+                // Without staging there is no deck to test on: marking the release tested is the whole of it.
                 button("Release: Mark tested", "Mark tested",
-                       onDeck(repo).isEmpty ? "nothing on the deck for \(repo)" : nil),
+                       noStaging.contains(repo)
+                           ? (releases[repo]?.contains(where: { $0.state == "OPEN" && $0.isProduction && $0.untested }) == true ? nil : "no untested release on \(repo)")
+                           : (onDeck(repo).isEmpty ? "nothing on the deck for \(repo)" : nil)),
                 button("Release: Production merges", "Production merges (ship)",
                        openRelease(repo, production: true) == nil ? "no open production release on \(repo)" : nil),
             ]),
@@ -699,6 +705,13 @@ final class SimulatorModel: ObservableObject {
             move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
 
         // Releases, on the target's repository
+        case "Repo: No staging":
+            noStaging.insert(repo)
+            let cfg = ConfigStore.shared.current
+            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "master"), for: root(repo))
+            // Without staging nothing of the repository is ever on a deck: whatever the seed put there waits in storage.
+            move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
+            pushGitHub()
         case "Release: Staging opens":
             let cfg = ConfigStore.shared.current
             nextRelease += 1
@@ -710,7 +723,7 @@ final class SimulatorModel: ObservableObject {
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
-                                           url: pr.url, labels: pr.labels, mergedAt: station.now)
+                                           url: pr.url, labels: pr.labels, mergedAt: station.now, production: pr.production, staging: pr.staging)
             // With a board, the merge is a bell; the crates move because the columns move.
             if ConfigStore.shared.current.project != nil { launches.append((repo, releases[repo]![i])) }
             pushGitHub()
@@ -721,14 +734,16 @@ final class SimulatorModel: ObservableObject {
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "CLOSED",
-                                           url: pr.url, labels: pr.labels, mergedAt: nil)
+                                           url: pr.url, labels: pr.labels, mergedAt: nil, production: pr.production, staging: pr.staging)
             pushGitHub()
         case "Release: Production opens":
             let cfg = ConfigStore.shared.current
             nextRelease += 1
-            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to production", base: cfg.productionBranch,
-                                                         head: cfg.stagingBranch, state: "OPEN",
-                                                         url: "https://example.invalid/\(repo)/\(nextRelease)", labels: ["untested"], mergedAt: nil))
+            let bare = noStaging.contains(repo)
+            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to production", base: bare ? "master" : cfg.productionBranch,
+                                                         head: bare ? "release/v\(nextRelease)" : cfg.stagingBranch, state: "OPEN",
+                                                         url: "https://example.invalid/\(repo)/\(nextRelease)", labels: ["untested"], mergedAt: nil,
+                                                         production: true, staging: false))
             pushGitHub()
         case "Release: Mark tested":
             // QA passing takes the untested label off an open production release as well as
@@ -737,14 +752,14 @@ final class SimulatorModel: ObservableObject {
                 let pr = releases[repo]![i]
                 releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head,
                                                state: pr.state, url: pr.url,
-                                               labels: pr.labels.filter { !$0.lowercased().contains("untested") }, mergedAt: nil)
+                                               labels: pr.labels.filter { !$0.lowercased().contains("untested") }, mergedAt: nil, production: pr.production, staging: pr.staging)
             }
             move(onDeck(repo), to: statuses.cleared)
         case "Release: Production merges":
             guard let i = openRelease(repo, production: true) else { return }
             let pr = releases[repo]![i]
             let merged = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
-                                   url: pr.url, labels: pr.labels.filter { $0 != "untested" }, mergedAt: station.now)
+                                   url: pr.url, labels: pr.labels.filter { $0 != "untested" }, mergedAt: station.now, production: pr.production, staging: pr.staging)
             releases[repo]![i] = merged
             launches.append((repo, merged))
             pushGitHub()
@@ -755,7 +770,7 @@ final class SimulatorModel: ObservableObject {
             station.after(6) { [weak self] in
                 guard let self else { return }
                 let st = self.statuses
-                move(board.filter { $0.repo == shipping && ($0.status == st.cleared || $0.status == st.deck) }, to: st.shipped)
+                move(board.filter { $0.repo == shipping && ($0.status == st.cleared || $0.status == st.deck || (self.noStaging.contains(shipping) && $0.status == st.storage)) }, to: st.shipped)
             }
 
         // Station

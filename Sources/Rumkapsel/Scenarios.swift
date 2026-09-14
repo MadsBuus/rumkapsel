@@ -284,6 +284,26 @@ enum Scenarios {
             return storage >= 2 ? nil : "only \(storage) web crates back in storage"
         }),
 
+        Scenario("a repository without staging: merged work waits in storage and the rocket loads from there", [
+            ("Target: ios#298", 0.3),
+            ("Repo: No staging", 0.3),
+            ("Open PR", 2.0),
+            ("Merge PR", 8.0),                   // the package is carried to storage
+            ("Release: Production opens", 3.0),  // release/v… into master
+            ("Release: Mark tested", 8.0),       // cleared: the rocket loads, from storage
+            ("Release: Production merges", 0.3),
+        ], tail: 14, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .rocket(.standBy, "ios"),
+            .carry(to: .pad),
+            .releaseMerged("ios", production: true),
+            .rocket(.launch, "ios"),
+        ], floor: { sim in
+            let stored = Scenario.crates(sim, "storage", "ios")
+            return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
+        }),
+
         Scenario("production release: mark tested, merge, the rocket lifts", [
             ("Target: web#455", 0.3),
             ("Release: Production opens", 3.0),

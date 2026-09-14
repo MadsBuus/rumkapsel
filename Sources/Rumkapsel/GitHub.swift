@@ -38,13 +38,32 @@ struct ReleasePR: Equatable {
     let url: String
     let labels: [String]
     let mergedAt: Date?
-    var isProduction: Bool { base == ConfigStore.shared.current.productionBranch }
+    /// Whether the base is this repository's own production or staging branch, set when the release is
+    /// read against the repository's pipeline. Nil falls back to the branch names in the settings.
+    var production: Bool? = nil
+    var staging: Bool? = nil
+    var isProduction: Bool { production ?? (base == ConfigStore.shared.current.productionBranch) }
     /// A release into the staging branch: what the pallet carries crates for.
     var isStaging: Bool {
-        let staging = ConfigStore.shared.current.stagingBranch
-        return !staging.isEmpty && base == staging
+        if let staging { return staging }
+        let name = ConfigStore.shared.current.stagingBranch
+        return !name.isEmpty && base == name
     }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
+}
+
+/// A repository's own way to production: the branch work merges into, an optional staging branch
+/// between, and the branch releases go into. Read from the branches the repository actually has.
+struct Pipeline: Equatable {
+    let trunk: String
+    let staging: String
+    let production: String
+    var hasStaging: Bool { !staging.isEmpty }
+    /// The settings' names, for a repository whose branches have not been read yet.
+    static var configured: Pipeline {
+        let c = ConfigStore.shared.current
+        return Pipeline(trunk: c.trunkBranch, staging: c.stagingBranch, production: c.productionBranch)
+    }
 }
 
 /// One entry from a repository's activity feed.
@@ -181,6 +200,10 @@ final class GitHubResolver {
         var updated: [Int: Date] = [:]
     }
     private var cargo: [String: Cargo] = [:]
+    /// Each repository's pipeline, as its branches said at the last release read.
+    private var pipelines: [String: Pipeline] = [:]
+    /// Repositories whose work moves through the board's storage and QA columns: their yard is the board's.
+    private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
 
     /// What waits where for a repository: from the project board when one is configured, else from git history.
     func cargo(repoRoot: String) -> Cargo? {
@@ -192,12 +215,20 @@ final class GitHubResolver {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
             let mine = items.filter { $0.repo == repo }
-            guard !mine.isEmpty else { return cargo[repoRoot] }   // a repository not on the board keeps the git-history yard, pull requests and all
+            // The board fills a repository's yard only once the repository moves work through the storage and
+            // QA columns. One that goes from development straight to shipped is on the board but not in its
+            // middle: its yard comes from git, like a repository not on the board at all.
+            if mine.contains(where: { [st.storage, st.deck, st.cleared].contains($0.status) }), !boardYards.contains(repo) {
+                boardYards.insert(repo)
+                if let (all, at) = project { saveBoard(all, at: at) }
+            }
+            if !mine.isEmpty, boardYards.contains(repo) {
             let storage = mine.filter { $0.status == st.storage }.map(\.number).sorted()
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
             let updated = Dictionary(mine.compactMap { it in it.updatedAt.map { (it.number, $0) } }, uniquingKeysWith: { a, _ in a })
             return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated)
+            }
         }
         guard var c = cargo[repoRoot] else { return nil }
         // Releases are made of pull requests; the floor shows tasks. Where the link is known, translate.
@@ -224,7 +255,7 @@ final class GitHubResolver {
         let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
         return dir.appendingPathComponent("board.json")
     }
-    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date; var owners: [String: String]?; var tasks: [String: [String: Int]]? }
+    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date; var owners: [String: String]?; var tasks: [String: [String: Int]]?; var yards: [String]? }
     private static func loadBoardFile() -> SavedBoard? {
         guard let data = try? Data(contentsOf: boardURL) else { return nil }
         return try? JSONDecoder().decode(SavedBoard.self, from: data)
@@ -233,7 +264,8 @@ final class GitHubResolver {
     private func saveBoard(_ items: [ProjectItem], at: Date) {
         if frozen { return }
         let saved = SavedBoard(items: items, at: at, owners: owners,
-                               tasks: tasks.mapValues { Dictionary(uniqueKeysWithValues: $0.map { (String($0.key), $0.value) }) })
+                               tasks: tasks.mapValues { Dictionary(uniqueKeysWithValues: $0.map { (String($0.key), $0.value) }) },
+                               yards: boardYards.sorted())
         if let data = try? JSONEncoder().encode(saved) { try? data.write(to: GitHubResolver.boardURL) }
     }
 
@@ -468,6 +500,12 @@ final class GitHubResolver {
         return releases[repoRoot]?.0
     }
 
+    /// The repository's pipeline as its branches say, or the settings' names until they have been read.
+    func pipeline(repoRoot: String) -> Pipeline {
+        lock.lock(); defer { lock.unlock() }
+        return pipelines[repoRoot] ?? .configured
+    }
+
     /// Release pull requests that merged since the last poll, each returned once.
     /// A release merged that the scene has not launched yet: the deck must keep its crates for it.
     func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
@@ -669,22 +707,29 @@ final class GitHubResolver {
             if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
                 for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
-            let stagingBranch = remoteBranches.contains(cfg.stagingBranch) ? cfg.stagingBranch : ""
-            // Production: the configured branch if the repo has it, else main, else master (never the trunk itself).
-            let productionBranch = [cfg.productionBranch, "main", "master"].first { !$0.isEmpty && $0 != cfg.trunkBranch && remoteBranches.contains($0) } ?? ""
+            // This repository's own pipeline, from the branches it has, the settings' names looked for first.
+            // Trunk: develop, else main or master. Staging only where the branch exists. Production:
+            // production, else master, else main, never the trunk itself.
+            let trunk = [cfg.trunkBranch, "develop", "main", "master"].first { !$0.isEmpty && remoteBranches.contains($0) } ?? cfg.trunkBranch
+            let stagingBranch = remoteBranches.contains(cfg.stagingBranch) && cfg.stagingBranch != trunk ? cfg.stagingBranch : ""
+            let productionBranch = [cfg.productionBranch, "master", "main"].first { !$0.isEmpty && $0 != trunk && $0 != stagingBranch && remoteBranches.contains($0) } ?? ""
             let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
-            let heads: Set<String> = [cfg.trunkBranch, stagingBranch].filter { !$0.isEmpty }.reduce(into: []) { $0.insert($1) }
+            // A release comes from the trunk, from staging, or from a release or hotfix branch cut for it.
+            func isReleaseHead(_ head: String) -> Bool {
+                head == trunk || (!stagingBranch.isEmpty && head == stagingBranch) || head.hasPrefix("release") || head.hasPrefix("hotfix")
+            }
             for base in bases {
                 guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
                                      "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
                 for o in arr {
                     let head = o["headRefName"] as? String ?? ""
-                    guard heads.contains(head) else { continue }
+                    guard isReleaseHead(head) else { continue }
                     let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
                     found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
                                            head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
-                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))))
+                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
+                                           production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch))
                 }
             }
             // Cargo: PRs merged into trunk, split by the last staging and production releases.
@@ -712,9 +757,9 @@ final class GitHubResolver {
             }
             var exact = false
             if hasPipeline, !stagingBranch.isEmpty, !productionBranch.isEmpty {
-                _ = run(["git", "fetch", "-q", "origin", cfg.trunkBranch, stagingBranch, productionBranch], cwd: repoRoot)
+                _ = run(["git", "fetch", "-q", "origin", trunk, stagingBranch, productionBranch], cwd: repoRoot)
                 if let deck = prNumbers("origin/\(productionBranch)..origin/\(stagingBranch)"),
-                   let storage = prNumbers("origin/\(stagingBranch)..origin/\(cfg.trunkBranch)") {
+                   let storage = prNumbers("origin/\(stagingBranch)..origin/\(trunk)") {
                     let releaseNumbers = Set(found.map(\.number))
                     newCargo.deckNumbers = deck.filter { !releaseNumbers.contains($0) }
                     newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
@@ -723,7 +768,18 @@ final class GitHubResolver {
                     exact = true
                 }
             }
-            if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", cfg.trunkBranch, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
+            // No staging: what the trunk has that production has not is waiting in storage, whatever route the
+            // release takes to production, a release branch included.
+            if hasPipeline, !exact, stagingBranch.isEmpty, !productionBranch.isEmpty {
+                _ = run(["git", "fetch", "-q", "origin", trunk, productionBranch], cwd: repoRoot)
+                if let storage = prNumbers("origin/\(productionBranch)..origin/\(trunk)") {
+                    let releaseNumbers = Set(found.map(\.number))
+                    newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
+                    newCargo.storage = newCargo.storageNumbers.count
+                    exact = true
+                }
+            }
+            if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", trunk, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
@@ -741,7 +797,9 @@ final class GitHubResolver {
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
             }
-            let changed = previous != found || cargo[repoRoot] != newCargo
+            let pipe = Pipeline(trunk: trunk, staging: stagingBranch, production: productionBranch)
+            let changed = previous != found || cargo[repoRoot] != newCargo || pipelines[repoRoot] != pipe
+            pipelines[repoRoot] = pipe
             cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)
@@ -1053,6 +1111,13 @@ extension GitHubResolver {
     func inject(cargo c: Cargo, for repoRoot: String) {
         guard frozen else { return }
         lock.lock(); cargo[repoRoot] = c; lock.unlock()
+        notify()
+    }
+
+    /// A repository's pipeline, in place of the one its branches would have said.
+    func inject(pipeline p: Pipeline, for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); pipelines[repoRoot] = p; lock.unlock()
         notify()
     }
 

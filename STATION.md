@@ -91,6 +91,11 @@ since real stations mandate both.
 - An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue
   the pull request closes, the pull request's own number when it closes none. One crate per task,
   however many pull requests it took; the crate's hover lists them, and its click opens the task.
+- Every repository has its own way to production, read from its branches: work merges into develop,
+  else main or master; a staging branch is used only where it exists; releases go into production,
+  else master or main, from the trunk, from staging, or from a release or hotfix branch. With staging
+  its rocket loads from the deck, without from storage. The board fills a repository's yard only if
+  the repository moves work through the storage and QA columns; otherwise its yard comes from git.
 - Releases are made of pull requests. What git says a release carries is translated to tasks on the
   floor where the link is known, and stays a pull request where it is not.
 

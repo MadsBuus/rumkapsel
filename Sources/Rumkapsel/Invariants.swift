@@ -281,8 +281,9 @@ final class Invariants {
     /// A shuttle leaves before anyone walks under it.
     private func shuttlesOverhead(_ c: StationController) {
         for s in c.shuttles {
-            let rise = s.command.phases.firstIndex(of: .rise) ?? Int.max
-            guard s.phase < rise else { continue }
+            // Under means under a ship that is down over its slot, coming down or unloading. A ship on its
+            // approach is high in the air, crossing over the station on its way in.
+            guard s.phaseKind == .descend || s.phaseKind == .unload else { continue }
             let p = s.node.worldPosition
             guard let station = c.fleet.stations[s.station] else { continue }
             let local = SIMD2(Double(p.x) - station.offset.x, Double(p.z) - station.offset.y)
@@ -303,12 +304,14 @@ final class Invariants {
             // The launch command loads first; the rule is about the moment the climb begins.
             guard case .launch = r.stage, r.phaseKind == .climb else { continue }
             guard launched.insert(r.key).inserted else { continue }
-            let prefix = "deck:\(r.station)|\(r.repo)|"
+            // The yard the rocket loads from: the deck with staging, storage without.
+            let deck = c.world.stagingIsDeck(station: r.station, repo: r.repo)
+            let prefix = "\(deck ? "deck" : "storage"):\(r.station)|\(r.repo)|"
             let left = c.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix(prefix) }.count
             let arms = c.world.carriedCount(station: r.station, repo: r.repo)
             if left > 0 || arms > 0 {
                 flag("a rocket leaves only with its cargo aboard", r.key,
-                     "\(left) crate(s) still on the deck, \(arms) on someone's arms")
+                     "\(left) crate(s) still \(deck ? "on the deck" : "in storage"), \(arms) on someone's arms")
             }
         }
     }
