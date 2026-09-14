@@ -257,7 +257,7 @@ extension StationController {
                 // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
                 let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
                 arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.62, station.offset.y + Double(sc2.y) + 0.35 * sk.y)
+                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.72, station.offset.y + Double(sc2.y) + 0.35 * sk.y)   // clear of a head
                 let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
                 nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
                 nozzle.position = v3(0, -0.03, -0.1 * sk.y)

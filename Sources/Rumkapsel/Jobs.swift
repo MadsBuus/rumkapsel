@@ -99,7 +99,7 @@ extension StationController {
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
-        m.actFor = 0; m.actStartedAt = 0   // a new command's visit length is set by whoever starts it
+        m.actFor = c.visitSeconds ?? 0; m.actStartedAt = 0   // the order carries its visit's length; the clock starts on arrival
         // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
         if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { logEvent(c.words) }

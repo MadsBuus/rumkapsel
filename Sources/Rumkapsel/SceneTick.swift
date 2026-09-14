@@ -120,7 +120,7 @@ extension StationController {
     /// Where the shower's water comes from, in world x/z: the nozzle over the shower tile's corner.
     func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
         let f = bathFixtures(station: station, bath: bath)
-        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.18 * f.showerCorner.y)
+        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.25 * f.showerCorner.y)
     }
 
     /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
@@ -155,8 +155,7 @@ extension StationController {
         m.bathDue = 0
         let back = m.place
         send(m, to: .bath)
-        start(m, .bath(m.showering ? .shower : .quick, back: back))
-        m.actFor = m.showering ? 10 : 6
+        start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? 10 : 6))
         let f = bathFixtures(station: station, bath: bath)
         let cell = m.showering ? f.shower : f.toilet
         m.path = route(m, to: cell)
@@ -211,14 +210,13 @@ extension StationController {
             .filter { !doorways.contains($0) }
             .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
         let others = minions.values.filter { $0.id != m.id && $0.station == m.station }
-        let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot) = o.current?.kind { return spot }; return nil }
+        let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
         guard let spot = RoamSpots.choose(clear: clear, taken: taken, company: rocketReady) else { return false }
-        start(m, .chore(spot: spot))
+        start(m, .chore(spot: spot, seconds: Double.random(in: 10...25)))
         guard case .chore = m.current?.kind else { return false }
         m.couch = nil
         m.place = .core
         m.path = route(m, to: spot)
-        m.actFor = Double.random(in: 10...25)
         m.nextWanderAt = clock + 60   // lingering at the spot, not wandering off it
         return true
     }
@@ -237,8 +235,7 @@ extension StationController {
         let back = m.place
         m.couch = nil
         send(m, to: .gym)
-        start(m, .exercise(kind, back: back), announce: true)
-        m.actFor = Double.random(in: 18...30)
+        start(m, .exercise(kind, back: back, seconds: Double.random(in: 18...30)), announce: true)
         let stand = gymStand(station: station, gym: gym, kind)
         m.path = route(m, to: stand.cell)
         m.fetchSpot = stand.spot
@@ -783,6 +780,12 @@ extension StationController {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
                             m.fetchSpot = nil
+                            // Squared up to the fixture, the wall or the bowl, for the whole visit.
+                            if let bath = station.rooms["kind:bath"] {
+                                let f = bathFixtures(station: station, bath: bath)
+                                let corner = m.showering ? f.showerCorner : f.toiletCorner
+                                m.facing = atan2(corner.x, corner.y)
+                            }
                         }
                         if settled {
                             m.setStatic(true, frame: Int(clock * 12))
@@ -792,7 +795,7 @@ extension StationController {
                                 let nozzle = showerNozzle(station: station, bath: bath)
                                 let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
                                 drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-                                drop.position = v3(nozzle.x + Double.random(in: -0.05...0.05), 0.56, nozzle.y + Double.random(in: -0.05...0.05))
+                                drop.position = v3(nozzle.x + Double.random(in: -0.04...0.04), 0.66, nozzle.y + Double.random(in: -0.04...0.04))
                                 propRoot.addChildNode(drop)
                                 let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
@@ -802,7 +805,7 @@ extension StationController {
                             m.setStatic(false, frame: 0)
                             m.fixture = nil
                             var back = restPlace(m)
-                            if !m.busy, case .bath(_, let where_) = m.current?.kind { back = where_ }
+                            if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
                             visitDone(m, "bath")
                             finish(m, to: back)   // the visit is over: one order back, to where it came from
                         }
@@ -815,12 +818,13 @@ extension StationController {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
                             m.fetchSpot = nil
+                            if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = gymStand(station: station, gym: gym, kind).facing }
                             if m.workout == .bench { m.setBench(true) }
                         }
                         if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
                             m.setBench(false)
                             var back = restPlace(m)
-                            if !m.busy, case .exercise(_, let where_) = m.current?.kind { back = where_ }
+                            if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
                             visitDone(m, "gym")
                             finish(m, to: back)   // the turn is over: one order back, to where it came from
                         }
@@ -860,13 +864,14 @@ extension StationController {
             }
             let resting = m.path.isEmpty && m.state == .settled
             if resting && m.activity == .sleeping && m.place == .quarters { m.setSleeping(true) }
-            let jump = jumping && resting && m.place != .lounge ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0
+            let jump = jumping && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
             m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
-            let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
+            let onFixture = (m.bathing || m.exercising) && m.path.isEmpty && m.fetchSpot == nil
+            let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
@@ -969,8 +974,9 @@ extension StationController {
                 switch kind {
                 case .treadmill:   // running on the spot, leaning into the rail
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
-                case .bench:       // on the back, and the bar goes up and down over the chest
+                case .bench:       // on the back along the bench, and the bar goes up and down over the chest
                     tilt = 0; roll = 0
+                    if !m.lying { m.setSleeping(true) }   // the walk step sits it up again when the turn is over
                     props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
                 case .bag:         // jabs: a lean into each, and the bag swings off it
                     let jab = max(0, sin(t * 5.5))
