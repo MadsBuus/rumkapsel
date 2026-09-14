@@ -91,6 +91,8 @@ class Body {
     var actStartedAt = 0.0
     /// A lounger's one idle clock: when it runs out, one thing to do is picked.
     var idle = IdleClock()
+    /// Sent to bed from its bubble: it lies down whatever its session is up to, until it is sent elsewhere.
+    var napping = false
     /// When this walk was last planned again because the floor changed under it: at most once a second.
     var lastReplanAt = -10.0
     var bathDue = 0.0          // clock when a visit is owed, 0 when none

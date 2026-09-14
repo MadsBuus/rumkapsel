@@ -190,7 +190,7 @@ extension StationController {
         // panel asking for rest under a command in hand changes nothing.
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if place != .quarters { m.bed = nil }
+        if place != .quarters { m.bed = nil; m.napping = false }
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
