@@ -81,7 +81,7 @@ extension StationController {
                 guard case .carry(let crate, let from, _) = job.command.kind, crate.station == station.name,
                       let row = station.ledger[crate.repo, crate.number],
                       row.heading == .deck, row.placed == .storage, row.wanted == .storage, row.movedAt == nil else { continue }
-                cancelCarry(id, backTo: from)
+                simulation.cancelCarry(id, backTo: from)
             }
         }
     }
@@ -230,7 +230,7 @@ extension StationController {
                 // More commits than last time while the owner is in: the newest cube is not on the floor
                 // yet. The worker carries it over on its head and stows it where it goes: a command.
                 if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && $0.carried == nil && $0.stowing == nil }) {
+                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && !$0.hasLoad && $0.stowing == nil }) {
                     box.opacity = 0
                     let cube = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
                     cube.geometry!.firstMaterial = lit(color)

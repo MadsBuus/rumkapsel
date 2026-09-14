@@ -387,6 +387,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.rocketReady = { [weak self] station in
             self?.rocketActors.values.contains { $0.station == station && ($0.isSteaming || $0.isLaunching) } ?? false
         }
+        simulation.shipOver = { [weak self] order, station in self?.shipStillOver(order: order, station: station) ?? false }
+        simulation.orderShuttle = { [weak self] m, roomKey in self?.startDelivery(m, roomKey: roomKey) }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
@@ -676,7 +678,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
                     dismiss(m)
-                    if let key = carriedRoom(of: m) { reveal(key); m.carried?.removeFromParentNode(); m.carried = nil }
+                    if let key = carriedRoom(of: m) { reveal(key); simulation.loseLoad(m) }
                 } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
                     send(m, to: restPlace)
@@ -695,20 +697,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if layoutDirty {
             flushScene(firstRun: firstRun)
-            for m in minions.values {
-                guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = world.truth.deliveries[id] else { continue }
-                let r = order.roomKey
-                // The floor changed under a delivery: re-plan the walk to where it was going, the crate on
-                // the bay floor or the office's own slot, never somewhere at random.
-                if m.carried == nil {
-                    if let box = boxes[order.key] {
-                        let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
-                        walk(m, to: standCell(station, near: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))))
-                    } else if let spot = m.fetchSpot {
-                        walk(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-                    }
-                } else if let slot = officeCrateSlot(station: station, roomKey: r) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
-            }
+            simulation.replanDeliveries()
         } else {
             flushScene()
         }
@@ -851,7 +840,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func flushDeliveries() {
         let station = fleet.station("work")
         for roomKey in peerDeliveries {
-            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && $0.carried == nil && !$0.busy }
+            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.busy }
                 .min(by: { $0.freeSince > $1.freeSince })
             if let m = free { startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
         }
@@ -975,7 +964,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
             // My own office with a worker in it: the crate does not appear by itself. The worker
             // clears the cones and packs it at the office's package slot.
-            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && $0.carried == nil && !$0.onJob }),
+            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && !$0.hasLoad && !$0.onJob }),
                let st = fleet.stations[m.station], let room = st.rooms[roomKey], let cell = farCells(st, room).first {
                 let key = m.station + "|" + roomKey
                 packing.insert(key)
@@ -1029,8 +1018,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
-            scheduleCarries()
-            reconcileBodies()
+            simulation.scheduleCarries()
+            tickRockets()
+            servicePallets()
+            simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
             simulation.replanBlockedWalks()

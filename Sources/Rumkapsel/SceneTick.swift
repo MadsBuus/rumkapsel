@@ -159,14 +159,6 @@ extension StationController {
         m.carried = nil
     }
 
-    /// Where an office's crate is set down: just inside the doorway of the empty plot, by the hallway.
-    /// The office unfolds from there.
-    func officeCrateSlot(station: Station, roomKey: String) -> Spot? {
-        guard let room = station.rooms[roomKey], let cell = station.doorCell(of: roomKey) ?? room.cells.first else { return nil }
-        return Spot(area: .office, station: station.name, owner: roomKey, label: room.name, cell: cell,
-                    pos: SIMD3(station.offset.x + Double(cell.x), 0.09, station.offset.y + Double(cell.y)))
-    }
-
     /// The airlock doors: a pane drops into the floor for whoever is walking up to it, and stands
     /// again once they are through. Someone waiting inside for the cycle has both doors shut.
     func tickAirlockDoors(dt: Double) {
@@ -186,29 +178,80 @@ extension StationController {
         }
     }
 
-    /// Every worker, once a frame. The simulation walks it and runs the quiet commands; the scene runs
-    /// the commands whose crates are still nodes, then draws the pose the body says it holds.
+    /// Every worker, once a frame. The simulation walks it and runs its commands; the scene runs the
+    /// pallet errands, whose pallet is still a node, keeps the crate on the arms in step with the body's
+    /// load, and draws the pose the body says it holds.
     func tickMinions(dt: Double) {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
             if hovered == "minion:" + m.id { continue }
+            var posed = true
             switch simulation.stepWalk(m, station: station, dt: dt) {
-            case .waking: m.node.opacity = m.opacity; continue
+            case .waking: m.node.opacity = m.opacity; posed = false
             case .walking, .wondering: break
             case .there:
-                if !runSceneCommand(m, station: station, dt: dt) { continue }
-                switch simulation.stepThere(m, station: station, dt: dt) {
-                case .gone: despawn(m); continue
-                case .spent: continue
-                case .posed: break
+                switch m.current?.kind {
+                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
+                    palletStep(m, station: station); posed = false
+                default:
+                    switch simulation.stepThere(m, station: station, dt: dt) {
+                    case .gone: despawn(m); continue
+                    case .spent: posed = false
+                    case .posed: break
+                    }
                 }
             }
+            mirrorLoad(m)
+            guard posed else { continue }
             simulation.stepRest(m, station: station, dt: dt)
             pose(m, station: station, dt: dt)
         }
         for cue in simulation.drainCues() { play(cue) }
+        // A carry that is over or off leaves no node behind: the rows draw what the ledger says.
+        for (id, node) in cargoNodes where simulation.cargo[id] == nil && !crateMoving(node) {
+            node.removeFromParentNode()
+            cargoNodes[id] = nil
+        }
+    }
+
+    /// The node on the arms follows the body's word: lifted when a load appears, sent down its arc when
+    /// the set-down begins, and put where the landing says when the load leaves.
+    func mirrorLoad(_ m: Minion) {
+        if let load = m.load {
+            if m.carried == nil, let node = nodeFor(load, m) { lift(m, node); m.arcStarted = false }
+            if let node = m.carried, m.phaseKind == .setDown, m.phaseUntil > 0, !m.arcStarted, let on = m.settingDownOn {
+                m.arcStarted = true
+                setDown(m, node, to: on.pos, yaw: on.yaw, level: on.level)
+            }
+        } else if let node = m.carried {
+            if let landing = m.landing, landing.dropped {
+                // Set down behind, where the carrier came from: what cannot be carried on stays on the way it was, never in the way ahead.
+                let at = node.worldPosition
+                stopCrate(node)
+                node.removeFromParentNode()
+                node.position = at
+                propRoot.addChildNode(node)
+                moveCrate(node, legs: [MotionLeg(to: landing.pos, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
+            } else if let landing = m.landing {
+                release(m, node, at: landing.pos, yaw: landing.yaw ?? Double(node.eulerAngles.y))
+            } else {
+                stopCrate(node)
+                node.removeFromParentNode()
+            }
+            m.carried = nil
+            m.arcStarted = false
+        }
+        m.landing = nil
+    }
+
+    /// The node for what a body says it holds: the carry's crate, or a new office's crate by key.
+    private func nodeFor(_ load: Body.Load, _ m: Minion) -> SCNNode? {
+        switch load {
+        case .crate: return m.current.flatMap { cargoNodes[$0.id] }
+        case .office(let key): return boxes[key]
+        }
     }
 
     /// What the simulation decided this frame that the scene shows once.
@@ -219,124 +262,31 @@ extension StationController {
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
         case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }
-        }
-    }
-
-    /// The commands whose crates are still the scene's nodes, run when the body has nowhere to walk:
-    /// a stow, an office delivery, the pallet errands, packing, a carry. False when the frame is spent.
-    private func runSceneCommand(_ m: Minion, station: Station, dt: Double) -> Bool {
-        switch m.current?.kind {
-        case .stow:
-            // There: the cube comes off the head and goes down onto its place on the floor,
-            // and the box drawn there takes over as it lands.
-            if m.phaseKind == .walk {
-                advance(m)
-                m.phaseUntil = clock + 0.7
-                if let (cube, box) = m.stowing {
-                    let world = cube.worldPosition
-                    stopCrate(cube)
-                    cube.removeFromParentNode()
-                    cube.position = world
-                    propRoot.addChildNode(cube)
-                    let at = SIMD3(Double(box.position.x), Double(box.position.y), Double(box.position.z))
-                    moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box] in
-                        self?.drone.thud()
-                        box?.opacity = 1
-                        cube.removeFromParentNode()
-                    }
-                }
-                return false
+        case .landed(let job): job.onDone()
+        case .reveal(let key): reveal(key)
+        case .foldCrate(let key):
+            if let crate = boxes.removeValue(forKey: key) {
+                let fold = SCNAction.scale(to: 0.01, duration: 0.35); fold.timingMode = .easeIn
+                crate.runAction(.sequence([fold, .removeFromParentNode()]))
             }
-            if clock < m.phaseUntil { return false }
-            m.stowing = nil
-            finish(m)
-            send(m, to: m.place)
-            return false
-        case .deliverOffice(let id):
-            // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
-            // way any crate is lifted, and set down on the office's own slot before the reveal.
-            // The order is the identity; the room it goes to is whatever the order says now.
-            guard let order = world.truth.deliveries[id] else {
-                // Delivered by someone else, or the office is gone: nothing to fetch.
-                m.carried?.removeFromParentNode(); m.carried = nil
-                finish(m); return false
+        case .stow(let id):
+            // The cube comes off the head and goes down onto its place on the floor, and the box drawn
+            // there takes over as it lands.
+            guard let m = minions[id], let (cube, box) = m.stowing else { return }
+            let world = cube.worldPosition
+            stopCrate(cube)
+            cube.removeFromParentNode()
+            cube.position = world
+            propRoot.addChildNode(cube)
+            let at = SIMD3(Double(box.position.x), Double(box.position.y), Double(box.position.z))
+            moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box, weak m] in
+                self?.drone.thud()
+                box?.opacity = 1
+                cube.removeFromParentNode()
+                m?.stowing = nil
             }
-            let r = order.roomKey
-            let key = order.key
-            let slot = officeCrateSlot(station: station, roomKey: r)
-            switch m.phaseKind {
-            case .walk:
-                advance(m); return false
-            case .approach:
-                // Watching the crate come down, and the shuttle lift off it, before going over.
-                if let spot = m.fetchSpot {
-                    let d = spot - m.pos
-                    if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
-                }
-                if !order.landed { m.waitingOn = "the crate to come down"; return false }
-                if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; return false }
-                if let spot = m.fetchSpot {
-                    m.fetchSpot = nil
-                    m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-                    return false
-                }
-                guard m.path.isEmpty else { return false }
-                // An arm's length from the crate, facing it, then the crouch: the same as any carry.
-                if let box = boxes[key] {
-                    let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
-                    guard atArmsLength(m, of: at, dt: dt) else { return false }
-                    startLift(m, height: Double(box.worldPosition.y))
-                } else {
-                    startLift(m, height: 0)
-                }
-                advance(m); return false
-            case .lift:
-                guard liftDue(m) else { return false }
-                if m.carried == nil, let box = boxes[key] { lift(m, box) }
-                if clock < m.phaseUntil { return false }
-                advance(m)
-                // The office went away while the crate was in the air: nothing to walk it into.
-                // Carried to the corridor outside the doorway and set down just inside it.
-                if let slot { walk(m, to: station.doorOutside(of: r) ?? slot.cell) } else { reveal(key); finish(m) }
-                return false
-            case .haul:
-                advance(m); return false
-            default:
-                guard let slot, let box = m.carried else {
-                    m.carried?.removeFromParentNode()
-                    m.carried = nil
-                    reveal(key)
-                    finish(m)
-                    return false
-                }
-                let spot = SIMD2(slot.pos.x - station.offset.x, slot.pos.z - station.offset.y)
-                if m.phaseUntil == 0 {
-                    guard atArmsLength(m, of: spot, dt: dt) else { return false }
-                    startSetDown(m, level: slot.level)
-                    setDown(m, box, to: slot.pos, yaw: slot.yaw, level: slot.level)
-                    return false
-                }
-                let toSpot = spot - m.pos
-                if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
-                if clock < m.phaseUntil { return false }
-                release(m, box, at: slot.pos, yaw: slot.yaw)
-                reveal(key)   // set down on its slot: the office fades in round it as the crate fades out
-                finish(m)
-                return false
-            }
-        case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet:
-            palletStep(m, station: station)
-            return false
-        case .pack(let office):
-            // At the office's package slot: down on the knees over it for a moment, then the
-            // crate is there, strapped, and the worker straightens up.
-            let key = "\(m.station)|\(office)"
-            if m.phaseKind == .walk {
-                advance(m)
-                m.phaseUntil = clock + 1.8
-                return false
-            }
-            if clock < m.phaseUntil { return false }
+        case .packed(let key):
+            // The crate is there, strapped, as the worker straightens up.
             packing.remove(key)
             if let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) {
                 pkg.opacity = 1
@@ -344,69 +294,7 @@ extension StationController {
                 pkg.scale = SCNVector3(0.05, 0.05, 0.05)
                 moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
             } else { markersDirty = true }
-            finish(m)
-            send(m, to: m.place)
-            return false
-        case .carry(let crate, _, _):
-            guard let id = m.current?.id, let job = cargo[id], let node = cargoNodes[id] else {
-                // The crate went away: put down whatever is on the arms, where it stands.
-                dropWhereStanding(m)
-                finish(m); return false
-            }
-            let to = job.aim   // the place as it is now: asked again at lift, or sent back
-            switch m.phaseKind {
-            case .walk:
-                advance(m); return false
-            case .approach:
-                // Stand an arm's length from the crate, facing it, before taking hold.
-                let boxAt = SIMD2(Double(node.worldPosition.x) - station.offset.x, Double(node.worldPosition.z) - station.offset.y)
-                guard atArmsLength(m, of: boxAt, dt: dt) else { return false }
-                advance(m)
-                startLift(m, height: Double(node.worldPosition.y))
-                return false
-            case .lift:
-                // Take hold at the crate's own height, bring it up and over the head.
-                let boxAt = SIMD2(Double(node.worldPosition.x) - station.offset.x, Double(node.worldPosition.z) - station.offset.y)
-                let toBox = boxAt - m.pos
-                if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
-                guard liftDue(m) else { return false }
-                if m.carried == nil {
-                    lift(m, node)
-                    self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
-                    cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
-                }
-                if clock < m.phaseUntil { return false }
-                advance(m)
-                // Up on the arms: now the slot is asked for, against the stack as it stands this moment.
-                simulation.reaim(id)
-                walk(m, to: standCell(station, near: (cargo[id]?.aim ?? to).cell))
-                return false
-            case .haul:
-                advance(m); return false
-            default:
-                // Set the crate down squarely on its slot, then a beat before straightening up.
-                // A crate is heavy: it stays on the arms all the way there and the hands do the lowering.
-                let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
-                if m.phaseUntil == 0 {
-                    // A step back from the spot so the crate goes down in front, not underfoot.
-                    guard atArmsLength(m, of: spot, dt: dt) else { return false }
-                    startSetDown(m, level: to.level)
-                    setDown(m, node, to: to.pos, yaw: to.yaw, level: to.level)
-                    return false
-                }
-                let toSpot = spot - m.pos
-                if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
-                if clock < m.phaseUntil { return false }
-                release(m, node, at: to.pos, yaw: to.yaw)
-                cargo[id] = nil
-                cargoNodes[id] = nil
-                self.world.setDown(crate, at: to)
-                job.onDone()
-                finish(m)
-                return false
-            }
-        default:
-            return true
+        case .redraw: markersDirty = true
         }
     }
 

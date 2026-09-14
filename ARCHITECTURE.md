@@ -53,14 +53,19 @@ Shapes mean things: a hexagon is a packed office, a cube is a piece of work, a s
 request, a pyramid is a session input. Nothing is round.
 
 The station apart from the picture is `Simulation` (`Simulation.swift`, no SceneKit): the clock, the bodies
-and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands' timing
-and the carries under way (`Cargo`). It is generic over the body: `Simulation<Minion>` in the app,
-`Simulation<Body>` under `--sim-tests`. A frame is three steps per body, `stepWalk`, `stepThere` and
-`stepRest`; the scene runs them itself with its own commands in between, until those have moved in too. What
-the scene shows once, a flush, a fidget, a hop, is a `Cue` the simulation hands back, and what the simulation
-cannot see yet, the ground a ship owns and a steaming rocket, the scene lends as closures. A body's pose is a
-fact on the body, lying, seated, on the bench, and the scene draws it each frame. Where the fixtures stand is
-the station's (`Fixtures.swift`).
+and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands, the
+carries, deliveries, stows and packs (`Carries.swift`) and the body reconciler (`Bodies.swift`). It is
+generic over the body: `Simulation<Minion>` in the app, `Simulation<Body>` under `--sim-tests`. A frame is
+three steps per body, `stepWalk`, `stepThere` and `stepRest`; the scene runs them itself with the pallet
+errands in between, until those have moved in too. What the scene shows once, a flush, a fidget, a hop, a
+landing, a reveal, is a `Cue` the simulation hands back, and what the simulation cannot see yet, the ground a
+ship owns, a ship still over its slot, a steaming rocket, the shuttle a new office is fetched by, the scene
+lends as closures. A body's pose is a fact on the body, lying, seated, on the bench, and so is its load: a
+crate by number or an office's crate by key, with `landing` saying where it left the arms. The scene mirrors
+that each frame (`mirrorLoad`): the node is lifted when the load appears, sent down its arc when the
+set-down phase begins, and put where the landing says when the load goes; a crate under way is a `Cargo` on
+the simulation and a node on the scene, by command id. Where the fixtures stand is the station's
+(`Fixtures.swift`).
 
 The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
 shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`

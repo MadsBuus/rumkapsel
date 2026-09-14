@@ -24,15 +24,13 @@ extension StationController {
     func despawn(_ m: Minion) {
         if let key = carriedRoom(of: m) { reveal(key) }
         // A crate on its arms goes down where it stands, and the carry waits for someone else.
-        if m.current?.crate != nil { dropWhereStanding(m) }
-        for (id, c) in cargo where c.carrier == m.id { cargo[id]?.carrier = nil }
-        world.dropped(by: m.id)
+        simulation.forget(m)
+        mirrorLoad(m)
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
         m.queuedCones.forEach { $0.removeFromParentNode() }
         m.weldLight?.removeFromParentNode()
         m.node.removeFromParentNode()
-        minions[m.id] = nil
     }
 
     func carriedRoom(of m: Minion) -> String? {
@@ -58,30 +56,35 @@ extension StationController {
     func walk(_ m: Minion, to cell: Cell) { simulation.walk(m, to: cell) }
     func route(_ m: Minion, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] { simulation.route(m, to: cell, round: blocker) }
     func standCell(_ st: Station, near cell: Cell) -> Cell { simulation.standCell(st, near: cell) }
-    func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool { simulation.atArmsLength(m, of: spot, dt: dt) }
-    func startLift(_ m: Minion, height: Double) { simulation.startLift(m, height: height) }
-    func liftDue(_ m: Minion) -> Bool { simulation.liftDue(m) }
-    func startSetDown(_ m: Minion, level: Int) { simulation.startSetDown(m, level: level) }
     @discardableResult func visitBath(_ m: Minion, station: Station) -> Bool { simulation.visitBath(m, station: station) }
     @discardableResult func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool { simulation.takeTurnInGym(m, station: station, gym: gym) }
     @discardableResult func startRoam(_ m: Minion, station: Station) -> Bool { simulation.startRoam(m, station: station) }
     func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) { simulation.react(m, activity, place: place, minutes: minutes, words: words) }
     func crewRested(_ m: Minion) { simulation.crewRested(m) }
 
-    /// A command whose target went away, or given up: put down what is on the arms, an arm's length in
-    /// front of where the minion stands, so the body is not left standing over the crate.
-    func dropWhereStanding(_ m: Minion) {
-        guard let held = m.carried else { return }
-        let at = held.worldPosition
-        stopCrate(held)
-        held.removeFromParentNode()
-        held.position = at
-        propRoot.addChildNode(held)
-        // Set down behind, where the carrier came from: what cannot be carried on stays on the way it was, never in the way ahead.
-        let behind = SIMD3(Double(at.x) - sin(m.facing) * Hands.arm, 0.12, Double(at.z) - cos(m.facing) * Hands.arm)
-        moveCrate(held, legs: [MotionLeg(to: behind, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
-        m.carried = nil
-        world.dropped(by: m.id)
+    /// Everything a body is doing, to the log, on request (`kill -USR1`): the way to see the station
+    /// from outside when a picture looks wrong.
+    func dumpState() {
+        StationLog.write("dump", "--- state at station clock \(Int(clock)) ---")
+        for m in minions.values.sorted(by: { $0.home.name < $1.home.name }) {
+            let job = m.current.map { "\($0.words) · \(m.phaseKind)" } ?? "nothing"
+            let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""
+            let more = [m.carried != nil ? "carrying" : nil, m.waitingOn.map { "waiting on \($0)" }, m.pending.map { "pending: \($0.words)" },
+                        m.wakeUntil > 0 ? "waking" : nil, m.busy ? "busy" : nil, m.isCrew ? "crew" : nil, m.wedged ? "wedged" : nil].compactMap { $0 }
+            StationLog.write("dump", "\(m.home.name) [\(m.station)]: \(job) at \(m.cell.x),\(m.cell.y) path \(m.path.count)\(spot) \(more.joined(separator: ", "))")
+        }
+        StationLog.write("dump", "boxes on the floor: \(boxes.keys.sorted().joined(separator: ", "))")
+        StationLog.write("dump", "pending offices: \(world.truth.pendingOffices.sorted().joined(separator: ", "))")
+        for d in world.truth.deliveries.values.sorted(by: { $0.id < $1.id }) {
+            StationLog.write("dump", "delivery \(d.id): \(d.key) slot \(d.slot) \(d.landed ? "on the floor" : "in the air") for \(d.session ?? "-")")
+        }
+        for s in shuttles { StationLog.write("dump", "shuttle: \(s.command.words) phase \(s.phaseKind)") }
+        for st in fleet.stations.values {
+            for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
+                StationLog.write("dump", "crate \(c.repo)#\(c.number): wanted \(c.wanted.map(\.words) ?? "nowhere") placed \(c.placed.map(\.words) ?? "nowhere")\(c.heading.map { " heading \($0.words)" } ?? "")\(c.movedAt != nil ? " moved by hand" : "")")
+            }
+        }
+        for (id, job) in cargo { StationLog.write("dump", "cargo \(id): \(job.command.words) carrier \(job.carrier ?? "none") aim \(job.aim.cell.x),\(job.aim.cell.y) at \(String(format: "%.2f,%.2f", job.aim.pos.x, job.aim.pos.z))") }
     }
 
     /// How many shuttles are over a station's bay right now: the flights in the air, nothing else.
@@ -209,7 +212,7 @@ extension StationController {
     /// Archiving: boxes shrink away, whoever is inside steps out into the hallway, and the room
     /// detaches, sinks and fades. The model drops the room at once; only the visuals linger.
     func archive(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String) {
-        cancelCarries(roomKey: key)
+        simulation.cancelCarries(roomKey: key)
         for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
         stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
         world.forgetOffice(key)
@@ -397,29 +400,12 @@ extension StationController {
 
     // MARK: hauling
 
-    /// Takes a carry command and the crate it moves. The crate is spoken for from here on, so nothing
-    /// else is told to move it and the yard layout leaves its spot alone.
+    /// Takes a carry command and the crate it moves. The simulation speaks for the crate from here on;
+    /// the node is what the scene lifts when the carrier's body says the crate is on its arms.
     func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
-        guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return }
-        world.claim(crate)
-        station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        guard let aim = world.slotNow(for: crate, toward: yard) else { return }
+        guard simulation.carry(command, roomKey: roomKey, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
-    }
-
-    /// Drops every carry tied to a room, freeing whoever was carrying.
-    /// Only carries into the office are dropped with it. A haul out of it, to storage, goes on: the
-    /// crate belongs in storage whatever becomes of the office.
-    private func cancelCarries(roomKey: String) {
-        for (id, c) in cargo where c.roomKey == roomKey {
-            if case .carry(_, _, let to) = c.command.kind, to == .storage { continue }
-            cargoNodes.removeValue(forKey: id)?.removeFromParentNode()
-            if let crate = c.command.crate { world.forgetPlacement(crate); world.unorder(crate) }
-            cargo[id] = nil
-            if let who = c.carrier, let m = minions[who] { m.carried = nil; world.dropped(by: m.id); finish(m) }
-        }
     }
 
     /// The node a crate stands on in the rows, by the name the yard gave it.
@@ -434,7 +420,12 @@ extension StationController {
         guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }),
               let room = station.rooms[key.split(separator: "|", maxSplits: 1).map(String.init).last ?? ""] else { return }
         logEvent("\(roomName): merged, package to storage")
-        let command = world.carryToStorage(station: station, room: room, repo: repo, number: number)
+        // The order names the office; the carry starts from where the package actually stands.
+        let at = pkg.position
+        let exact = Spot(area: .office, station: station.name, owner: room.key, label: room.name,
+                         cell: Cell(x: Int((Double(at.x) - station.offset.x).rounded()), y: Int((Double(at.z) - station.offset.y).rounded())),
+                         pos: SIMD3(Double(at.x), Double(at.y), Double(at.z)))
+        let command = world.carryToStorage(station: station, room: room, repo: repo, number: number).from(exact)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
@@ -469,83 +460,6 @@ extension StationController {
         }
         guard started > 0 else { return }
         logEvent("\(repo): deployed to staging, moving to the test deck")
-    }
-
-    /// Gives waiting carries to free minions on the same station. A carry nobody picked up by its
-    /// deadline lands where it stands, rather than holding the world back.
-    func scheduleCarries() {
-        for (id, job) in cargo where job.carrier == nil {
-            guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
-            // Crates stacked above this one are still on their way: wait, deadline and all.
-            guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            let all = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
-            let fresh = all.filter { !job.gaveUp.contains($0.id) }
-            let free = fresh.isEmpty ? all : fresh
-            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
-                if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
-                continue
-            }
-            assign(m, job.command, announce: true)
-            guard m.current?.id == job.command.id else { continue }
-            cargo[id]?.carrier = m.id
-            cargo[id]?.issuedAt = clock   // a new leg: the walk to the crate and the carry get their own patience
-            m.bed = nil
-            m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = route(m, to: standCell(station, near: from.cell))
-        }
-        // Truth before the picture: a carry that has not landed within its patience, whoever has it,
-        // is set down where its order says and the station catches up in one move.
-        for (id, job) in cargo where job.carrier != nil {
-            if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
-        }
-        // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
-        for (id, job) in cargo where job.carrier != nil && !job.hurry {
-            guard let crate = job.command.crate, case .carry(_, _, let to) = job.command.kind, let m = job.carrier.flatMap({ minions[$0] }) else { continue }
-            let queued = cargo.values.filter { $0.carrier == nil && $0.command.crate?.station == crate.station && $0.command.crate?.repo == crate.repo }.count
-            guard queued > 0 else { continue }
-            cargo[id]?.hurry = true
-            let words = "hurrying \(crate.words) to \(to.words), \(queued) more waiting"
-            if m.current?.id == id { m.current = m.current?.reworded(words) }
-            handle(.log("\(m.home.name): \(words)"))
-        }
-        tickRockets()
-        servicePallets()
-    }
-
-    /// The carry's patience ran out: the crate is down where the order says, whoever was carrying it
-    /// lets go, and the log says the station caught up. The picture takes the snap; the ledger is right.
-    private func setDownLate(_ id: Int, _ job: Cargo) {
-        guard case .carry(let crate, _, let yard) = job.command.kind else { return }
-        cargo[id] = nil
-        let node = cargoNodes.removeValue(forKey: id)
-        let m = job.carrier.flatMap { minions[$0] }
-        if let m, let node, m.carried === node { m.carried = nil }
-        world.setDown(crate, at: job.aim)
-        handle(.log("\(crate.words) set down late in \(yard.words): the station caught up"))
-        job.onDone()
-        if let m, m.current?.id == id { finish(m) }
-    }
-
-    /// The board put a crate back where it stands while a carry was under way: the order is off. On
-    /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
-    func cancelCarry(_ id: Int, backTo from: Spot) {
-        guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
-        if let who = job.carrier, let m = minions[who], let node = cargoNodes[id], m.carried === node {
-            let back = job.command.aimed(at: yard)
-            cargo[id]?.command = back
-            cargo[id]?.aim = from
-            world.unorder(crate)
-            start(m, back)
-            handle(.log("\(crate.words): back where it was, the board changed its mind"))
-            return
-        }
-        if let who = job.carrier, let m = minions[who], m.current?.id == id { finish(m) }
-        cargoNodes.removeValue(forKey: id)?.removeFromParentNode()
-        world.forgetPlacement(crate)
-        world.unorder(crate)
-        cargo[id] = nil
-        markersDirty = true
-        handle(.log("\(crate.words): stays put, the board changed its mind"))
     }
 
     // MARK: crew

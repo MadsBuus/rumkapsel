@@ -31,7 +31,7 @@ extension StationController {
                 if minions.values.contains(where: { palletErrand(of: $0)?.station == station.name && palletErrand(of: $0)?.repo == want.repo }) { continue }
                 let console = station.storageConsole.cell
                 let free = minions.values.filter {
-                    $0.station == station.name && !$0.onJob && $0.carried == nil && !$0.isSubagent
+                    $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent
                         && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
                 }
                 guard let m = free.min(by: { abs($0.cell.x - console.x) + abs($0.cell.y - console.y) < abs($1.cell.x - console.x) + abs($1.cell.y - console.y) }) else { break }
@@ -389,7 +389,7 @@ extension StationController {
     /// The dispatcher went away mid-errand: whoever is free takes the pallet over where it stands.
     private func adopt(_ p: Pallet, station: Station) {
         let free = minions.values.filter {
-            $0.station == station.name && !$0.onJob && $0.carried == nil && !$0.isSubagent
+            $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent
                 && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
         }
         guard let m = free.min(by: { abs($0.cell.x - p.cellUnder.x) + abs($0.cell.y - p.cellUnder.y) < abs($1.cell.x - p.cellUnder.x) + abs($1.cell.y - p.cellUnder.y) }) else { return }

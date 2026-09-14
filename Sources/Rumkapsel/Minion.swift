@@ -5,11 +5,9 @@ import SceneKit
 
 /// One Claude session, walking between the rooms of its station: a `Body` with a figure on it.
 final class Minion: Body {
-    /// The crate on the arms, as the scene draws it; the body only knows it has a load.
-    var carried: SCNNode? {
-        get { load as? SCNNode }
-        set { load = newValue }
-    }
+    /// The node drawn on the arms for the body's load, and whether its set-down arc has begun.
+    var carried: SCNNode?
+    var arcStarted = false
     /// The cube on the head for a stow, and the box on the floor it stands in for.
     var stowing: (cube: SCNNode, box: SCNNode)?
     var weldLight: SCNNode?

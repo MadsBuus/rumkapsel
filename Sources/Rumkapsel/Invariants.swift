@@ -154,7 +154,7 @@ final class Invariants {
             }
             for m in c.minions.values where m.station == a.station && a.pos.y < 0.5 {
                 let dx = abs(m.pos.x - local.x), dz = abs(m.pos.y - local.y)
-                if dx < 0.2 && dz < 0.2 && m.carried == nil {
+                if dx < 0.2 && dz < 0.2 && !m.hasLoad {
                     flag("a crate is never inside a minion", a.name + " / " + m.id,
                          String(format: "%.2f apart in x, %.2f in z · crate at %.2f,%.2f · %@",
                                 dx, dz, local.x, local.y, (m.current?.words ?? "nothing") as NSString))

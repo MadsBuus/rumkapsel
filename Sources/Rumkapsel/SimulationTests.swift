@@ -105,6 +105,58 @@ enum SimulationTests {
             expect(station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell), "inside the airlock or on the bay: \(m.cell.x),\(m.cell.y)")
         }
 
+        test("a carry: the crate is lifted onto the arms, walked to the deck and set down, the ledger keeping step") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            let commands = sim.world.carryToDeck(station: station, repo: "web", numbers: [440])
+            expect(commands.count == 1, "one carry for one crate: \(commands.count)")
+            var landedCalled = false
+            for c in commands { expect(sim.carry(c, onDone: { landedCalled = true }), "the deck had a place for it") }
+            expect(sim.world.isCarried(crate), "spoken for from the order")
+            sim.scheduleCarries()
+            expect(m.current?.crate == crate && !m.path.isEmpty, "handed to the one free body, who sets off: \(m.words)")
+            var lifted = false, arms: String?
+            _ = step(sim, seconds: 60, until: {
+                if m.load == .crate(crate) { lifted = true; arms = sim.world.crate(crate)?.carrier }
+                return m.current?.crate == nil
+            })
+            expect(lifted && arms == m.id, "on the arms, and the ledger says whose: \(String(describing: arms))")
+            expect(!m.hasLoad && m.landing != nil && !m.landing!.dropped, "set down on its slot")
+            expect(sim.world.crate(crate)?.area == .deck && sim.world.crate(crate)?.heading == .deck, "the ledger has it down on the deck, the landing still to be written by what the scene meant to do: \(String(describing: sim.world.crate(crate)?.at))")
+            expect(sim.cargo.isEmpty, "the carry is over")
+            let landed = sim.drainCues().contains { if case .landed = $0 { return true }; return false }
+            expect(landed && !landedCalled, "the landing is a cue for the scene, which runs what it meant to do")
+            expect(m.current?.isRest == true, "and the body is back to rest: \(m.words)")
+        }
+
+        test("a wedged carrier gives up after ten seconds: the crate lies behind it and the carry is queued again") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            for c in sim.world.carryToDeck(station: station, repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
+            sim.scheduleCarries()
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
+            m.wedged = true
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            _ = step(sim, seconds: 12, until: { gaveUp }, beat: { sim.reconcileBodies() })
+            expect(gaveUp, "said so in the log")
+            expect(!m.hasLoad && m.landing?.dropped == true, "the crate is down behind it")
+            expect(sim.world.crate(crate)?.carrier == nil && sim.world.isCarried(crate) == false, "off the arms in the ledger: \(String(describing: sim.world.crate(crate)?.at))")
+            let job = sim.cargo.values.first
+            expect(job?.carrier == nil && job?.gaveUp.contains(m.id) == true, "queued again, this carrier passed over while there is anyone else")
+            if case .carry(_, let from, _)? = job?.command.kind {
+                let behind = SIMD2(m.pos.x - sin(m.facing) * Hands.arm, m.pos.y - cos(m.facing) * Hands.arm)
+                expect(abs(from.pos.x - station.offset.x - behind.x) < 0.01 && abs(from.pos.z - station.offset.y - behind.y) < 0.01, "from where the crate now lies: \(from.cell.x),\(from.cell.y)")
+            } else { expect(false, "the carry is still a carry") }
+        }
+
         say(failures == 0 ? "simulation: all passed" : "simulation: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -123,11 +175,14 @@ enum SimulationTests {
     }
 
     /// Steps station time until the condition holds or the seconds run out; true when it held.
-    private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }) -> Bool {
+    private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }, beat: () -> Void = {}) -> Bool {
         let dt = 1.0 / 30
         var left = seconds
+        var sinceBeat = 0.0
         while left > 0 {
             sim.clock += dt
+            sinceBeat += dt
+            if sinceBeat >= 0.5 { sinceBeat = 0; beat() }   // the half-second pass: the reconcilers
             sim.stepBodies(dt: dt)
             left -= dt
             if done() { return true }

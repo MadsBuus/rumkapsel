@@ -1101,7 +1101,7 @@ extension StationController {
             switch nudge {
             case .bath:
                 // The press says "now": whoever is resting goes for a shower straight away, picked as for the gym.
-                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
@@ -1116,7 +1116,7 @@ extension StationController {
                 // A worker on the couch first; then any worker not working; then a worker whose session is
                 // quiet but still counted busy; then a teammate asleep in the quarters. Only a job, the
                 // bath or a turn already in hand rules someone out.
-                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })

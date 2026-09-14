@@ -33,6 +33,18 @@ enum Cue {
     case hop(String)
     /// A teammate's cones go with the end of their reaction.
     case clearCones(String)
+    /// A carry landed: whatever the scene meant to do when it did.
+    case landed(Cargo)
+    /// A new office's crate is set down on its slot: the office unfolds round it.
+    case reveal(String)
+    /// The office an unfetched crate was for is gone: the crate folds away on the bay.
+    case foldCrate(String)
+    /// The cube on a body's head goes down onto its place on the floor.
+    case stow(String)
+    /// An office's package is packed and strapped, by key.
+    case packed(String)
+    /// The rows are drawn again.
+    case redraw
 }
 
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
@@ -81,6 +93,10 @@ final class Simulation<B: Body> {
     /// move in: the ground a ship owns over a station's bay, and whether a loaded rocket steams on its pad.
     var shipSpots: (String) -> [SIMD2<Double>] = { _ in [] }
     var rocketReady: (String) -> Bool = { _ in false }
+    /// Whether the ship that dropped an order's crate is still over its slot, and the shuttle a new
+    /// office is fetched by: both the scene's until the shuttles move in.
+    var shipOver: (Int, String) -> Bool = { _, _ in false }
+    var orderShuttle: (B, String) -> Void = { _, _ in }
 
     init(world: World) { self.world = world }
 
@@ -360,12 +376,6 @@ final class Simulation<B: Body> {
     /// True once the crouch is over and the hands should be on the crate.
     func liftDue(_ m: B) -> Bool { clock >= m.phaseUntil - Hands.liftArc }
 
-    /// Standing over the slot: the level it goes onto decides the posture, the set-down the clock.
-    func startSetDown(_ m: B, level: Int) {
-        m.handsAt = level
-        m.phaseUntil = clock + Hands.setDownSeconds
-    }
-
     // MARK: the idle life
 
     /// A visit to the bath: the shower or the bowl, whichever is free, walked to and acted for its
@@ -541,11 +551,12 @@ final class Simulation<B: Body> {
         return m.path.isEmpty ? .there : .wondering
     }
 
-    /// One frame of a body with nowhere to walk, once the scene has run the commands that are still
-    /// its own: a reaction's time, the arrival that turns a walk into being there, and the settled
+    /// One frame of a body with nowhere to walk, once the scene has run the pallet errands, which are still
+    /// its own: a crate seen to (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
     /// life — QA's rows, the bath and gym rules, the idle clock, the visits, the wander — or the way
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
+        if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.
             if m.phaseKind == .walk { advance(m); m.phaseUntil = clock + seconds; return .spent }
