@@ -67,6 +67,9 @@ struct Ledger: Codable {
         var movedAt: Date?
         /// Where a carry under way is taking it: its slot there is spoken for from the order.
         var heading: Yard?
+        /// The yard the source wanted when the order was made. A source that changes its mind while the
+        /// crate is on its way has said something newer than the order, and that stands over the landing.
+        var orderedOver: Yard?
         /// Where the station physically has it. Nil while the source alone has placed it: standing
         /// wherever the rows draw it.
         var at: Placement?
@@ -107,6 +110,7 @@ struct Ledger: Codable {
 
     /// Every crate of a repository, by number.
     func crates(of repo: String) -> [Crate] { crates.values.filter { $0.repo == repo }.sorted { $0.number < $1.number } }
+    var allCrates: [Crate] { Array(crates.values) }
 
     /// The crates a yard holds of a repository, or holds a slot for: standing, on the arms, on the
     /// pallet, or on their way in.
@@ -187,6 +191,7 @@ struct Ledger: Codable {
         let k = Ledger.key(repo, number)
         var c = crates[k] ?? Crate(repo: repo, number: number)
         c.heading = yard
+        c.orderedOver = c.wanted
         crates[k] = c
     }
 
@@ -246,8 +251,14 @@ struct Ledger: Codable {
         let k = Ledger.key(repo, number)
         var c = crates[k] ?? Crate(repo: repo, number: number)
         c.placed = yard
+        let ordered = c.heading != nil   // a hand move with no order behind it has no word to be newer than
         c.heading = nil
-        c.movedAt = c.wanted == yard ? nil : at
+        // Down where the source wanted it: agreed. Down elsewhere: the station's word, unless the source
+        // changed its mind while the crate was on its way; that word is newer than the order and stands,
+        // so the disagreement is open and the crate is carried on.
+        let changedMind = ordered && c.wanted != c.orderedOver
+        c.movedAt = (c.wanted == yard || changedMind) ? nil : at
+        c.orderedOver = nil
         // Down: the place spoken for ahead is the place it holds now.
         if let b = c.bound, b.yard == yard { c.slot = b }
         c.bound = nil

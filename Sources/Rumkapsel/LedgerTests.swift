@@ -107,6 +107,21 @@ enum LedgerTests {
             expect(l.disagreements(repo: "web").isEmpty && l["web", 9]?.movedAt == nil, "the source caught up")
         }
 
+        test("the board moves a crate while it is being carried: the landing does not outrank that word") {
+            var l = Ledger()
+            l.adopt(word(storage: [7], updated: [7: at(0)]), repo: "web")     // merged: to storage
+            l.order(repo: "web", number: 7, to: .storage)                     // the office's package is on its way
+            l.adopt(word(deck: [7], updated: [7: at(10)]), repo: "web")       // the board moves it on to the deck meanwhile
+            l.landed(repo: "web", number: 7, in: .storage, at: at(20))        // it lands in storage after that
+            expect(l["web", 7]?.placed == .storage && l["web", 7]?.wanted == .deck, "down in storage, wanted on the deck")
+            expect(l.disagreements(repo: "web").map(\.number) == [7], "a carry to the deck follows")
+            var m = Ledger()
+            m.adopt(word(storage: [8], updated: [8: at(0)]), repo: "web")
+            m.order(repo: "web", number: 8, to: .deck)                        // the station moves it before the board says so
+            m.landed(repo: "web", number: 8, in: .deck, at: at(20))
+            expect(m["web", 8]?.placed == .deck && m.disagreements(repo: "web").isEmpty, "no word since the order: the station's move stands")
+        }
+
         test("every crate is in one yard at most, whatever the order of facts") {
             let words = [word(storage: [1], updated: [1: at(1)]), word(deck: [1], updated: [1: at(2)]), word(storage: [1], updated: [1: at(3)])]
             for order in [[0, 1, 2], [2, 1, 0], [1, 0, 2], [0, 2, 1]] {
