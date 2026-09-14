@@ -155,7 +155,7 @@ extension StationController {
         m.bathDue = 0
         let back = m.place
         send(m, to: .bath)
-        start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? 10 : 6))
+        start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60))   // a shower two to three minutes, the toilet one
         let f = bathFixtures(station: station, bath: bath)
         let cell = m.showering ? f.shower : f.toilet
         m.path = route(m, to: cell)
@@ -212,7 +212,7 @@ extension StationController {
         let others = minions.values.filter { $0.id != m.id && $0.station == m.station }
         let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
         guard let spot = RoamSpots.choose(clear: clear, taken: taken, company: rocketReady) else { return false }
-        start(m, .chore(spot: spot, seconds: Double.random(in: 10...25)))
+        start(m, .chore(spot: spot, seconds: Double.random(in: 120...240)))   // two to four minutes looking round
         guard case .chore = m.current?.kind else { return false }
         m.couch = nil
         m.place = .core
@@ -235,7 +235,7 @@ extension StationController {
         let back = m.place
         m.couch = nil
         send(m, to: .gym)
-        start(m, .exercise(kind, back: back, seconds: Double.random(in: 18...30)), announce: true)
+        start(m, .exercise(kind, back: back, seconds: Double.random(in: 240...480)), announce: true)   // four to eight minutes on a fixture
         let stand = gymStand(station: station, gym: gym, kind)
         m.path = route(m, to: stand.cell)
         m.fetchSpot = stand.spot

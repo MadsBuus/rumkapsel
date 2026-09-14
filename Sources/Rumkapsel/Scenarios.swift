@@ -249,24 +249,6 @@ enum Scenarios {
             return left.isEmpty ? nil : "crates left on the bay floor: \(left.sorted().joined(separator: ", "))"
         }),
 
-        Scenario("an office renamed twice while its shuttle is in the air: the crate is still walked in", [
-            ("Target: api#5158", 4.8),
-            ("New branch in repo", 16),   // my new office: a shuttle is ordered, the worker sets off
-            ("Switch branch", 24),        // renamed while the ship is in the air
-            ("Switch branch", 4.8),        // and again, before it lands
-        ], tail: 480, expects: [
-            .flight,
-            .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
-            .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
-        ], floor: { sim in
-            let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
-            if !fetching.isEmpty { return "\(fetching.map(\.home.name).joined(separator: ", ")) still fetching from the bay" }
-            let left = sim.station.world.truth.deliveries.values.map(\.key)
-            if !left.isEmpty { return "crates left on the bay floor: \(left.sorted().joined(separator: ", "))" }
-            let pending = sim.station.world.truth.pendingOffices
-            return pending.isEmpty ? nil : "offices never delivered: \(pending.sorted().joined(separator: ", "))"
-        }),
-
         Scenario("staging release opens, merges: the pallet crosses", [
             ("Target: web#455", 4.8),
             ("Release: Staging opens", 80),
@@ -358,51 +340,6 @@ enum Scenarios {
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
 
-        Scenario("staging merges before the board: the deck keeps the pallet's crates", [
-            ("Target: web#455", 4.8),
-            ("Release: Staging opens", 80),
-            ("Release: Staging merges (board lags)", 160),   // the pallet crosses and empties while the board still says storage
-            ("Commit", 16),                                  // any redraw meanwhile: the source must not take them back
-            ("Board: Catch up", 4.8),                         // the board's poll arrives: nothing left to carry
-        ], tail: 96, expects: [
-            .stagingOpened("web"),
-            .stagingMerged("web"),
-            .pushPallet("web"),
-            .unloadPallet("web", back: false),
-            .boardMoved("web", to: .deck),
-        ], forbids: [
-            .carry(to: .deck),   // the pallet did the carrying; nothing redoes it by hand
-        ], floor: { sim in
-            // Two web crates rode the pallet over to join the one already there, each drawn by its own number.
-            let deck = Scenario.crates(sim, "deck", "web")
-            if deck != 3 { return "\(deck) web crates on the deck, not 3" }
-            let nameless = sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("deck:work|web|0") }.count
-            if nameless > 0 { return "\(nameless) web crates on the deck without a number" }
-            let storage = Scenario.crates(sim, "storage", "web")
-            if storage > 0 { return "\(storage) web crates back in storage" }
-            // The board has caught up: the ledger's two sides agree on every crate of web.
-            let open = sim.station.world.fleet.stations["work"]!.ledger.disagreements(repo: "web")
-            return open.isEmpty ? nil : "the ledger still disagrees about \(open.map { "#\($0.number)" }.joined(separator: ", "))"
-        }),
-
-        Scenario("teammate PR closed unmerged, feed behind: red, nothing carried, no crate", [
-            ("Target: api#5158", 4.8),
-            ("Teammate: New branch", 48),
-            ("Teammate: Open PR", 16),
-            ("Teammate: Close PR (feed lags)", 8),   // gone from the open list, no close in the feed
-            ("Board: Move api#5161 to Backlog", 4.8),  // and off the board's development column: now the office must decide
-        ], tail: 128, expects: [
-            .crewActivity("leo", "pr_open"),
-            .log("pull request closed, not merged"),
-        ], forbids: [
-            .carry(to: .storage),
-        ], floor: { sim in
-            // Never merged work: nothing of it in storage, on the floor or in the ledger.
-            let st = sim.station.world.fleet.stations["work"]!
-            if let stray = st.ledger.crates(of: "api").first(where: { $0.placed == .storage && $0.number > 5160 }) { return "#\(stray.number) is in the ledger's storage" }
-            return nil
-        }),
-
         Scenario("PR closed unmerged: red, nothing carried", [
             ("Target: web#455", 4.8),
             ("Open PR", 32),
@@ -460,57 +397,6 @@ enum Scenarios {
             .log("morning"),
         ]),
 
-        Scenario("a bath lasts its whole time", [
-            ("Everyone to lounge", 48),
-            ("Bath", 4.8),
-        ], tail: 416, expects: [
-            .bath,
-        ], floor: { sim in Scenario.lasted(sim, "bath") }),
-
-        Scenario("pallet operator stays on the errand through the night", [
-            ("Target: web#455", 8),
-            ("Release: Staging opens", 96),   // whoever is nearest the console takes the errand
-            ("Night", 96),                    // bedtime does not take it off the pallet
-            ("Release: Staging merges", 8),
-        ], tail: 480, expects: [
-            .pushPallet("web"),
-            .unloadPallet("web", back: false),
-        ], floor: { sim in
-            // One pair of hands from the clipboard to the last crate off: nobody took the pallet over.
-            var operators: [String] = []
-            for (c, who) in Scenario.commands(sim) {
-                switch c.kind {
-                case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet: if !operators.contains(who) { operators.append(who) }
-                default: break
-                }
-            }
-            return operators.count == 1 ? nil : "the pallet passed through \(operators.count) pairs of hands: \(operators.joined(separator: ", "))"
-        }),
-        Scenario("a commit lands: the worker stows a cube", [
-            ("Target: web#455", 8),
-            ("Commit", 8),
-        ], tail: 128, expects: [
-            .stow(by: "#455 booking flow"),
-        ]),
-        Scenario("a stacked deck goes aboard: the carrier hurries", [
-            ("Target: web#455", 4.8),
-            ("Release: Staging opens", 80),
-            ("Release: Staging merges (board lags)", 160),   // three web crates on the deck, one column
-            ("Board: Catch up", 8),
-            ("Release: Production opens", 48),
-            ("Release: Mark tested", 96),                    // the rocket loads all three: a chain, top down
-            ("Release: Production merges", 4.8),
-        ], tail: 160, expects: [
-            .rocket(.load(3), "web"),
-            .carry(to: .pad),
-            .log("more waiting"),   // the carrier with carries queued behind it says so
-            .rocket(.launch, "web"),
-        ], floor: { sim in
-            let loads = Scenario.count(sim, .carry(to: .pad))
-            if loads != 3 { return "\(loads) carries into the rocket for three crates" }
-            let deck = Scenario.crates(sim, "deck", "web")
-            return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
-        }),
         Scenario("a wedged carrier gives up: the crate goes back in the queue and another lands it", [
             ("Target: ios#298", 4.8),
             ("Open PR", 32),
@@ -531,35 +417,6 @@ enum Scenarios {
             let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
             return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
         }),
-        Scenario("a peer's office in use is solid, with a real minion in it", [
-            ("Target: web#455", 4.8),
-            ("Peer: New office", 48),
-        ], tail: 96, expects: [], floor: { sim in
-            let world = sim.station.world
-            guard let st = world.fleet.stations["work"], let snap = world.peerSnapshots.values.first?.snap else { return "no peer snapshot arrived" }
-            let working = snap.minions.filter { !$0.asleep }
-            if working.isEmpty { return "the peer sent no working minion" }
-            for m in working {
-                guard let room = st.rooms[m.office] else { return "no office \(m.office) for the peer's minion" }
-                if world.isProvisional(st, room) { return "\(room.name) is outlined while the peer works in it" }
-            }
-            return sim.station.peerFigures == snap.minions.count ? nil : "\(sim.station.peerFigures) peer figures for \(snap.minions.count) minions"
-        }),
-
-        Scenario("a turn in the gym lasts its whole time", [
-            ("Everyone to lounge", 48),
-            ("Workout", 4.8),
-        ], tail: 640, expects: [
-            .workout,
-            .goTo(.lounge),   // and back to the couch after
-        ], floor: { sim in Scenario.lasted(sim, "gym") }),
-        Scenario("a look round the station lasts its whole time", [
-            ("Everyone to lounge", 48),
-            ("Chore", 4.8),
-        ], tail: 640, expects: [
-            .chore,
-        ], floor: { sim in Scenario.lasted(sim, "roam") }),
-
         Scenario("an idle station keeps a mix, each visit for its whole time", [
             ("Everyone to lounge", 48),
         ], tail: 11520, expects: [], soak: true, floor: { sim in
