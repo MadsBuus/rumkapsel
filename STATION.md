@@ -79,18 +79,14 @@ since real stations mandate both.
   not even at the start of the day: they arrive one by one, or spread before they set off.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
-- Two can pass each other on one tile, side by side, but never slide through each other: a body
-  is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
-  Whoever finds someone in the way waits a beat, then goes round. Someone standing idle in a walker's
-  way, with nowhere to be, steps aside to a free spot beside them; nobody settles in a doorway.
-  A walk is planned again at most once a second, however crowded the way.
-- A doorway is one lane: the door tile, and the tile outside it for anyone going in or coming out;
-  walking past along the corridor claims nothing. A walker claims the lane before stepping in; anyone else waits outside, and steps
-  aside if the one coming through needs the spot. A claim lapses a few station seconds after it was last
-  renewed, so a stuck walker cannot lock a door. Every timing on the station runs on the station clock,
-  so holding space speeds all of it up alike. Someone on a couch or in bed is
-  on the furniture, off the walkway, and in nobody's way. Where there is no way round, in a
-  doorway say, the one who yields steps a third of a tile aside and goes on from there.
+- Two never slide through each other: a body is solid at the middle of its tile, standing or lying.
+  A walker who finds someone in its way, standing or coming, drifts a third of a tile to its own
+  right, passes, and drifts back onto its line; the other does the same, so two meeting
+  head-on pass without either stopping or planning again, in a doorway as anywhere. Nobody ever
+  stops for anybody: where the floor leaves no side to step to, two may overlap for a moment. Someone
+  on a couch or in bed is on the furniture, off the walkway, and in nobody's way. Nobody settles in
+  a doorway. Every timing on the station runs on the station clock, so holding space speeds all of
+  it up alike.
 - A chore never stands in a doorway, the yard's or a room's: a body standing there shuts it.
 
 ## Tasks and work
@@ -156,7 +152,9 @@ since real stations mandate both.
 - The dorm, lounge and bath touch each other off the corridor, the gym beside them; the yard blocks
   join by doorways of their own and keep their aisles clear.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
-  with the pixels where they belong. Nobody wanders off mid-shower.
+  with the pixels where they belong. Nobody wanders off mid-shower. A pee is a sit: turn round, down
+  onto the bowl, back to the tank, a shuffle on the seat now and then, up again as the time runs out,
+  and the bowl flushes behind.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
   pace, a stroll a third; getting up from bed is slow, then quicker.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
@@ -175,6 +173,8 @@ since real stations mandate both.
   the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
   Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts
   when the minion arrives, never when it sets off. Roamers keep apart, except to watch a steaming rocket.
+- You may pick a lounger's next thing from its bubble: the gym, bed, a book on the couch, the shower or
+  the bowl, given the way the idle clock gives it. One with a job in hand, or at work, is not for picking.
 
 ## The world and the station
 

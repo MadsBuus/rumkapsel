@@ -99,7 +99,7 @@ extension StationController {
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
-        m.actFor = 0; m.actStartedAt = 0   // a new command's visit length is set by whoever starts it
+        m.actFor = c.visitSeconds ?? 0; m.actStartedAt = 0   // the order carries its visit's length; the clock starts on arrival
         // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
         if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { logEvent(c.words) }
@@ -133,8 +133,9 @@ extension StationController {
         held.removeFromParentNode()
         held.position = at
         propRoot.addChildNode(held)
-        let ahead = SIMD3(Double(at.x) + sin(m.facing) * Hands.arm, 0.12, Double(at.z) + cos(m.facing) * Hands.arm)
-        moveCrate(held, legs: [MotionLeg(to: ahead, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
+        // Set down behind, where the carrier came from: what cannot be carried on stays on the way it was, never in the way ahead.
+        let behind = SIMD3(Double(at.x) - sin(m.facing) * Hands.arm, 0.12, Double(at.z) - cos(m.facing) * Hands.arm)
+        moveCrate(held, legs: [MotionLeg(to: behind, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
         world.dropped(by: m.id)
     }
@@ -190,7 +191,7 @@ extension StationController {
         // panel asking for rest under a command in hand changes nothing.
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if place != .quarters { m.bed = nil }
+        if place != .quarters { m.bed = nil; m.napping = false }
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(minions.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))

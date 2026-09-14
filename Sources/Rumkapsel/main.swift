@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if args.contains("--ledger-tests") { LedgerTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
+        // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
+        if args.contains("--idle-tests") { IdleTests.run() }
+        // The walk step on its own: made-up bodies meeting on a made-up floor.
+        if args.contains("--walk-tests") { WalkTests.run() }
         // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
@@ -357,6 +361,8 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     // A scripted suite has no window and wants no dock icon in the way.
-    app.setActivationPolicy(CommandLine.arguments.contains("--scenarios") ? .accessory : .regular)
+    // Headless runs never take the keyboard: the scenario suite, every model-only test and a snapshot.
+    let headlessRun = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
+    app.setActivationPolicy(headlessRun ? .accessory : .regular)
     app.run()
 }

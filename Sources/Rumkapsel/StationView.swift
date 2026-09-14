@@ -20,6 +20,9 @@ final class StationView: SCNView {
     var onMove: ((SIMD2<Double>, Double) -> Void)?
     private var heldKeys: Set<String> = []
     var onClick: ((SCNNode?) -> Void)?
+    /// The overlay's say on a point first: true when the HUD takes the hover or the click, so the scene under it does not.
+    var hudTakesPoint: ((NSPoint) -> Bool)?
+    var onHUDClick: ((NSPoint) -> Bool)?
     var onContextMenu: ((SCNNode?, NSEvent) -> Void)?
     private var tracking: NSTrackingArea?
     private var downPoint = NSPoint.zero
@@ -109,7 +112,9 @@ final class StationView: SCNView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        onHover?(node(at: convert(event.locationInWindow, from: nil)))
+        let p = convert(event.locationInWindow, from: nil)
+        if hudTakesPoint?(p) == true { return }
+        onHover?(node(at: p))
     }
 
     override func mouseExited(with event: NSEvent) { onHover?(nil) }
@@ -125,7 +130,9 @@ final class StationView: SCNView {
 
     override func mouseUp(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if event.clickCount == 1, hypot(p.x - downPoint.x, p.y - downPoint.y) < 3 { onClick?(node(at: p)) }
+        if event.clickCount == 1, hypot(p.x - downPoint.x, p.y - downPoint.y) < 3 {
+            if onHUDClick?(p) != true { onClick?(node(at: p)) }
+        }
         super.mouseUp(with: event)
     }
 }

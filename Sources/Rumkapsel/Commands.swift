@@ -66,10 +66,11 @@ struct Command {
         case deliverOffice(order: Int)
         /// Somewhere to be: the lounge, the dorm, the hallway.
         case goTo(place: Place)
-        case bath(kind: Bath, back: Place)
+        /// A visit carries its own length in station seconds: it starts on arrival, whoever hands the order over.
+        case bath(kind: Bath, back: Place, seconds: Double)
         /// A turn in the gym on one of its four fixtures, then back to where the minion was.
-        case exercise(kind: Workout, back: Place)
-        case chore(spot: Cell)
+        case exercise(kind: Workout, back: Place, seconds: Double)
+        case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
         /// Packing the office's crate for a pull request just opened, cones cleared first.
         case pack(office: String)
@@ -262,17 +263,25 @@ struct Command {
         Command(kind: .deliverOffice(order: order), words: "fetching \(name) from the bay")
     }
 
-    static func bath(_ kind: Bath, back: Place) -> Command {
-        Command(kind: .bath(kind: kind, back: back),
+    static func bath(_ kind: Bath, back: Place, seconds: Double) -> Command {
+        Command(kind: .bath(kind: kind, back: back, seconds: seconds),
                 words: "off to the bath, back to \(back.words) after")
     }
 
-    static func exercise(_ kind: Workout, back: Place) -> Command {
-        Command(kind: .exercise(kind: kind, back: back), words: "off to the gym for \(kind.words), back to \(back.words) after")
+    static func exercise(_ kind: Workout, back: Place, seconds: Double) -> Command {
+        Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to the gym for \(kind.words), back to \(back.words) after")
     }
 
-    static func chore(spot: Cell) -> Command {
-        Command(kind: .chore(spot: spot), words: "having a look round the station")
+    static func chore(spot: Cell, seconds: Double) -> Command {
+        Command(kind: .chore(spot: spot, seconds: seconds), words: "having a look round the station")
+    }
+
+    /// How long the visit lasts once there, for the orders that are visits; nil for the rest.
+    var visitSeconds: Double? {
+        switch kind {
+        case .bath(_, _, let s), .exercise(_, _, let s), .chore(_, let s): return s
+        default: return nil
+        }
     }
 
     static func stow(office: String) -> Command {

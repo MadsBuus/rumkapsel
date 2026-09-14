@@ -33,11 +33,9 @@ extension StationController {
             let limit = m.waitingOn != nil ? StationController.waitLimit : StationController.giveUpAfter
             guard clock - m.stallSince > limit else { continue }
             m.stallMark = ""
-            let lane = laneMap[m.station]?[m.cell]
-            let laneNote = lane.map { l in " on a doorway held by \(doorClaims[l].flatMap { minions[$0.holder]?.home.name } ?? "nobody")" } ?? ""
-            let blocked = (m.blockedBy.flatMap { minions[$0] }.map { b in
-                ", \(b.home.name) in the way at \(b.cell.x),\(b.cell.y) \(b.waitingOn.map { "waiting on \($0)" } ?? (b.path.isEmpty ? "standing" : "walking")), holding \(b.heldLane == nil ? "no doorway" : "a doorway")"
-            } ?? "") + laneNote + (m.heldLane == nil ? "" : ", holding a doorway")
+            let blocked = m.blockedBy.flatMap { minions[$0] }.map { b in
+                ", \(b.home.name) in the way at \(b.cell.x),\(b.cell.y) \(b.waitingOn.map { "waiting on \($0)" } ?? (b.path.isEmpty ? "standing" : "walking"))"
+            } ?? ""
             let why = m.waitingOn.map { "waited \(Int(limit)) s on \($0)" } ?? "stood \(Int(limit)) s at \(m.cell.x),\(m.cell.y) in \(m.phaseKind)\(blocked)"
             giveUp(m, c, why: why)
         }
@@ -54,12 +52,12 @@ extension StationController {
             guard let job = cargo[c.id] else { finish(m); return }
             var spot = from
             if m.carried === job.node {
-                dropWhereStanding(m)   // the crate lies an arm's length in front: the next carrier starts there
-                let ahead = SIMD2(m.pos.x + sin(m.facing) * Hands.arm, m.pos.y + cos(m.facing) * Hands.arm)
-                let cell = Cell(x: Int(ahead.x.rounded()), y: Int(ahead.y.rounded()))
+                dropWhereStanding(m)   // the crate lies an arm's length behind, on the way it came: the next carrier reaches it without passing the body
+                let behind = SIMD2(m.pos.x - sin(m.facing) * Hands.arm, m.pos.y - cos(m.facing) * Hands.arm)
+                let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
                 if let st = fleet.stations[m.station] {
                     spot = Spot(area: from.area, station: from.station, owner: from.owner, label: from.label, cell: cell,
-                                pos: SIMD3(st.offset.x + ahead.x, 0.12, st.offset.y + ahead.y))
+                                pos: SIMD3(st.offset.x + behind.x, 0.12, st.offset.y + behind.y))
                 }
             }
             cargo[c.id]?.command = c.from(spot)   // the same order, the same id: only where it starts moved

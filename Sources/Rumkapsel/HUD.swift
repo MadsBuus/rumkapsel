@@ -4,6 +4,75 @@ import AppKit
 import SceneKit
 import SpriteKit
 
+/// What you can pick for a lounger from its bubble: the same things its idle clock picks.
+enum LoungeOrder: CaseIterable {
+    case gym, bed, read, shower, toilet
+
+    /// A flat pixel glyph, nine across and seven down: a barbell, a bed, a book, a nozzle, a bowl.
+    var glyph: [String] {
+        switch self {
+        case .gym: return [".#.....#.",
+                           "##.....##",
+                           "##.....##",
+                           "#########",
+                           "##.....##",
+                           "##.....##",
+                           ".#.....#."]
+        case .bed: return ["#........",
+                           "#........",
+                           "#.##.....",
+                           "#########",
+                           "#.......#",
+                           "#.......#",
+                           "#.......#"]
+        case .read: return ["....#....",
+                            ".###.###.",
+                            "#..#.#..#",
+                            "#..#.#..#",
+                            "#..#.#..#",
+                            "#..#.#..#",
+                            ".####.###"]
+        case .shower: return ["....#....",
+                              "....#....",
+                              "..#####..",
+                              ".#######.",
+                              ".........",
+                              ".#..#..#.",
+                              ".#..#..#."]
+        case .toilet: return ["###......",
+                              "#.#......",
+                              "#.#######",
+                              "#.#.....#",
+                              "#.######.",
+                              "#..#..#..",
+                              "####..###"]
+        }
+    }
+
+    /// Each in its own flat colour: steel, the dorm's plum, amber, water, porcelain.
+    var color: NSColor {
+        switch self {
+        case .gym: return Palette.debris
+        case .bed: return NSColor(Colors.quarters).lighter(0.35)
+        case .read: return NSColor(rgb: (0.94, 0.65, 0.10))
+        case .shower: return NSColor(rgb: (0.62, 0.82, 0.95))
+        case .toilet: return NSColor(rgb: (0.92, 0.92, 0.9))
+        }
+    }
+
+    var texture: SKTexture {
+        let rows = glyph
+        let w = rows[0].count, h = rows.count
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        for (y, row) in rows.enumerated() { for (x, ch) in row.enumerated() where ch == "#" { ctx.fill(CGRect(x: x, y: h - 1 - y, width: 1, height: 1)) } }
+        let t = SKTexture(cgImage: ctx.makeImage()!)
+        t.filteringMode = .nearest
+        return t
+    }
+}
+
 extension StationController {
     // MARK: hud
 
@@ -39,24 +108,106 @@ extension StationController {
         bubblePlate.isHidden = true
         hud.addChild(bubblePlate)
         hud.addChild(bubbleLabel)
+        for o in LoungeOrder.allCases {
+            let icon = SKSpriteNode(texture: o.texture, size: Self.iconSize)
+            icon.colorBlendFactor = 1
+            icon.color = o.color
+            icon.zPosition = 2
+            icon.isHidden = true
+            hud.addChild(icon)
+            bubbleIcons.append(icon)
+        }
     }
 
-    /// Hovering a minion holds it still and says what it is doing, above its head.
-    func updateBubble() {
-        guard let h = hovered, h.hasPrefix("minion:"), let m = minions[String(h.dropFirst(7))], m.opacity > 0.2 else {
-            bubbleLabel.isHidden = true; bubblePlate.isHidden = true
-            return
+    static let iconSize = CGSize(width: 18, height: 14)
+    static let iconGap: CGFloat = 8
+
+    /// Nothing but rest in hand, and not at work: only then does a pick from the bubble go through, as with
+    /// the idle clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
+    func canOrder(_ m: Minion) -> Bool {
+        m.state == .settled && !m.busy && m.isResting && m.pending == nil && m.carried == nil
+    }
+
+    /// The bubble's say on a point, from the main thread: over the plate, or on the way up to it from the
+    /// minion, the hover stays where it is, so the mouse can leave the body for the icons.
+    func bubbleTakes(point p: NSPoint) -> Bool {
+        bubbleLock.lock(); defer { bubbleLock.unlock() }
+        bubbleCursor = p
+        return bubbleHits?.hold.contains(p) ?? false
+    }
+
+    /// A click on the plate, from the main thread: an icon gives its order and closes the bubble; between them it does nothing but is spent.
+    func bubbleClick(at p: NSPoint) -> Bool {
+        bubbleLock.lock(); defer { bubbleLock.unlock() }
+        guard let hits = bubbleHits, hits.plate.contains(p) else { return false }
+        if let i = hits.icons.firstIndex(where: { $0.contains(p) }) {
+            let order = LoungeOrder.allCases[i]
+            // The pick closes the bubble: the hover is let go, so the minion is free to set off at once.
+            bubbleHits = nil
+            enqueue { [self] in self.order(minionId: hits.minion, order); self.hovered = nil }
         }
+        return true
+    }
+
+    /// You picked a lounger's next thing: given through the very calls the idle clock makes, then its idle
+    /// clock is put back to nothing, so it starts afresh once the lounger is back on the couch.
+    func order(minionId: String, _ o: LoungeOrder) {
+        guard let m = minions[minionId], let station = fleet.stations[m.station], canOrder(m) else { return }
+        switch o {
+        case .gym:
+            guard let gym = station.rooms["kind:gym"] else { logEvent("\(m.home.name): no gym here"); return }
+            guard takeTurnInGym(m, station: station, gym: gym) else { logEvent("\(m.home.name): every piece of gear is taken"); return }
+        case .shower, .toilet:
+            m.showering = o == .shower
+            guard station.rooms["kind:bath"] != nil else { logEvent("\(m.home.name): no bath here"); return }
+            guard visitBath(m, station: station) else { logEvent("\(m.home.name): the bath is taken"); return }
+        case .read:
+            send(m, to: .lounge)
+        case .bed:
+            send(m, to: .quarters)
+            m.napping = m.place == .quarters   // a bed was found: lie down once there
+        }
+        m.idle = IdleClock()   // a fresh clock: armed again once the lounger is back on the couch
+    }
+
+    /// Hovering a minion holds it still and says what it is doing, above its head, with a row of
+    /// things you may send it to do under the words. The row is dimmed while it is not for picking.
+    func updateBubble() {
+        func hide() {
+            bubbleLabel.isHidden = true; bubblePlate.isHidden = true
+            bubbleIcons.forEach { $0.isHidden = true }
+            bubbleLock.lock(); bubbleHits = nil; bubbleLock.unlock()
+        }
+        guard let h = hovered, h.hasPrefix("minion:"), let m = minions[String(h.dropFirst(7))], m.opacity > 0.2 else { hide(); return }
         let head = v3(Double(m.node.position.x), Double(m.node.position.y) + m.headHeight + 0.35, Double(m.node.position.z))
         let p = view.projectPoint(head)
-        guard p.z > 0, p.z < 1 else { bubbleLabel.isHidden = true; bubblePlate.isHidden = true; return }
+        guard p.z > 0, p.z < 1 else { hide(); return }
+        let iw = Self.iconSize.width, ih = Self.iconSize.height, gap = Self.iconGap
+        let rowWidth = iw * CGFloat(bubbleIcons.count) + gap * CGFloat(bubbleIcons.count - 1)
         bubbleLabel.text = m.words
-        bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))
+        bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) + ih + 8)
         bubbleLabel.isHidden = false
-        let f = bubbleLabel.frame.insetBy(dx: -7, dy: -4)
+        let allowed = canOrder(m)
+        bubbleLock.lock(); let cursor = bubbleCursor; bubbleLock.unlock()
+        var rects: [CGRect] = []
+        for (i, icon) in bubbleIcons.enumerated() {
+            let x = CGFloat(p.x) - rowWidth / 2 + iw / 2 + CGFloat(i) * (iw + gap)
+            icon.position = CGPoint(x: x, y: CGFloat(p.y) + ih / 2)
+            let r = CGRect(x: x - iw / 2 - gap / 2, y: CGFloat(p.y) - 3, width: iw + gap, height: ih + 6)
+            rects.append(r)
+            let under = allowed && cursor.map { r.contains($0) } == true
+            icon.color = under ? LoungeOrder.allCases[i].color.lighter(0.35) : LoungeOrder.allCases[i].color
+            icon.alpha = allowed ? 1 : 0.3
+            icon.isHidden = false
+        }
+        let f = bubbleLabel.frame.union(CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih)).insetBy(dx: -8, dy: -5)
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
         bubblePlate.isHidden = false
+        // The hold: the plate, and a column down to the minion's feet, so the way up to the icons is covered.
+        let feet = view.projectPoint(m.node.position)
+        let column = CGRect(x: CGFloat(p.x) - 28, y: min(CGFloat(feet.y), f.minY) - 6, width: 56, height: max(0, f.minY - CGFloat(feet.y)) + 6)
+        bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), rects); bubbleLock.unlock()
     }
 
     /// Top: repos in their colours with counts. Bottom: jobs with one tiny minion per worker, like the game.

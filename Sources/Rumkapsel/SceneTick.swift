@@ -117,10 +117,27 @@ extension StationController {
         return (tiles[0], tiles[1], corner(tiles[0]), corner(tiles[1]))
     }
 
+    /// Where the bowl stands, in world x/z: into the toilet tile's corner, the tank against the wall behind it.
+    func bowlSpot(station: Station, bath: Room) -> SIMD2<Double> {
+        let f = bathFixtures(station: station, bath: bath)
+        return SIMD2(station.offset.x + Double(f.toilet.x) + 0.22 * f.toiletCorner.x, station.offset.y + Double(f.toilet.y) + 0.22 * f.toiletCorner.y)
+    }
+
+    /// The flush: a beat of water colour flickering in the bowl, then gone.
+    func flush(at bowl: SIMD2<Double>, front: Double) {
+        let water = SCNNode(geometry: SCNBox(width: 0.12, height: 0.012, length: 0.14, chamferRadius: 0))
+        water.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
+        water.position = v3(bowl.x, Minion.seat + 0.006, bowl.y - 0.05 * front)
+        water.opacity = 0
+        propRoot.addChildNode(water)
+        let blink = SCNAction.sequence([.fadeOpacity(to: 1, duration: 0.06), .fadeOpacity(to: 0.3, duration: 0.1)])
+        water.runAction(.sequence([.repeat(blink, count: 5), .fadeOut(duration: 0.2), .removeFromParentNode()]))
+    }
+
     /// Where the shower's water comes from, in world x/z: the nozzle over the shower tile's corner.
     func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
         let f = bathFixtures(station: station, bath: bath)
-        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.18 * f.showerCorner.y)
+        return SIMD2(station.offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, station.offset.y + Double(f.shower.y) + 0.25 * f.showerCorner.y)
     }
 
     /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
@@ -155,8 +172,7 @@ extension StationController {
         m.bathDue = 0
         let back = m.place
         send(m, to: .bath)
-        start(m, .bath(m.showering ? .shower : .quick, back: back))
-        m.actFor = m.showering ? 10 : 6
+        start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60))   // a shower two to three minutes, the toilet one
         let f = bathFixtures(station: station, bath: bath)
         let cell = m.showering ? f.shower : f.toilet
         m.path = route(m, to: cell)
@@ -168,42 +184,25 @@ extension StationController {
         return true
     }
 
-    /// The one-lane sections of every station: each room's door cell, and each yard doorway's pair of cells.
-    func rebuildLanes() {
-        for st in fleet.stations.values {
-            var lanes: [Cell: String] = [:]
-            var approaches: [Cell: (lane: String, room: String)] = [:]
-            for key in st.rooms.keys {
-                guard let door = st.doorCell(of: key) else { continue }
-                let id = lanes[door] ?? "\(st.name)|door:\(key)"
-                lanes[door] = id
-                if let out = st.doorOutside(of: key), approaches[out] == nil { approaches[out] = (lane: id, room: key) }
-            }
-            for (a, b) in st.yardDoorways {
-                let id = "\(st.name)|yard:\(a.x),\(a.y)-\(b.x),\(b.y)"
-                lanes[a] = lanes[a] ?? id; lanes[b] = lanes[b] ?? id
-            }
-            laneMap[st.name] = lanes
-            laneApproaches[st.name] = approaches.filter { lanes[$0.key] == nil }
-        }
-        doorClaims = doorClaims.filter { $0.value.until > clock }   // lapsed claims go
-    }
-
-    /// A lounger's idle clock ran out: one thing to do, by weight. A look round the station most often,
-    /// a turn in the gym by day, the bath, and now and then simply staying on the couch with a book.
+    /// A lounger's idle clock ran out: one thing to do, by weight (`IdlePick`). A look round the station
+    /// most often, a turn in the gym by day, the bath, and now and then simply staying on the couch with a book.
     func pickIdle(_ m: Minion, station: Station) {
-        let roll = Double.random(in: 0..<1)
-        if roll < 0.40 {
+        let gymFree = station.rooms["kind:gym"] != nil && freeGymFixture(m) != nil
+        let pick = IdlePick.pick(roll: Double.random(in: 0..<1), night: isNight(station), crew: m.isCrew,
+                                 gymFree: gymFree, bath: station.rooms["kind:bath"] != nil, shower: Bool.random())
+        switch pick {
+        case .roam:
             startRoam(m, station: station)
-        } else if roll < 0.65 {
-            if !isNight(station), !m.isCrew, let gym = station.rooms["kind:gym"], takeTurnInGym(m, station: station, gym: gym) { return }
+        case .gym:
+            if let gym = station.rooms["kind:gym"], takeTurnInGym(m, station: station, gym: gym) { return }
             startRoam(m, station: station)
-        } else if roll < 0.85 {
-            m.showering = Bool.random()
-            if station.rooms["kind:bath"] != nil, visitBath(m, station: station) { return }
+        case .bath(let shower):
+            m.showering = shower
+            if visitBath(m, station: station) { return }
             startRoam(m, station: station)
+        case .read:
+            break   // reading on the couch: nothing to walk to, and the clock starts again
         }
-        // Otherwise: reading on the couch. Nothing to walk to, and the clock starts again.
     }
 
     /// A look round the station: a clear spot out of every doorway, apart from where others stand and
@@ -217,15 +216,13 @@ extension StationController {
             .filter { !doorways.contains($0) }
             .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
         let others = minions.values.filter { $0.id != m.id && $0.station == m.station }
-        let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot) = o.current?.kind { return spot }; return nil }
-        let apart = clear.filter { c in !taken.contains { abs($0.x - c.x) + abs($0.y - c.y) < 3 } }
-        guard let spot = (rocketReady || apart.isEmpty ? clear : apart).randomElement() else { return false }
-        start(m, .chore(spot: spot))
+        let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
+        guard let spot = RoamSpots.choose(clear: clear, taken: taken, company: rocketReady) else { return false }
+        start(m, .chore(spot: spot, seconds: Double.random(in: 120...240)))   // two to four minutes looking round
         guard case .chore = m.current?.kind else { return false }
         m.couch = nil
         m.place = .core
         m.path = route(m, to: spot)
-        m.actFor = Double.random(in: 10...25)
         m.nextWanderAt = clock + 60   // lingering at the spot, not wandering off it
         return true
     }
@@ -240,18 +237,22 @@ extension StationController {
     /// then back to where the minion came from. False when every fixture is taken.
     @discardableResult
     func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool {
-        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
-        guard let kind = Command.Workout.allCases.filter({ !taken.contains($0) }).randomElement() else { return false }
+        guard let kind = freeGymFixture(m) else { return false }
         let back = m.place
         m.couch = nil
         send(m, to: .gym)
-        start(m, .exercise(kind, back: back), announce: true)
-        m.actFor = Double.random(in: 18...30)
+        start(m, .exercise(kind, back: back, seconds: Double.random(in: 240...480)), announce: true)   // four to eight minutes on a fixture
         let stand = gymStand(station: station, gym: gym, kind)
         m.path = route(m, to: stand.cell)
         m.fetchSpot = stand.spot
         m.facing = stand.facing
         return true
+    }
+
+    /// A gym fixture nobody else on the station is on, at random; nil when every one is taken.
+    func freeGymFixture(_ m: Minion) -> Command.Workout? {
+        let taken = Set(minions.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
+        return Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
     }
 
     func gymStand(station: Station, gym: Room, _ kind: Command.Workout) -> (cell: Cell, spot: SIMD2<Double>, facing: Double) {
@@ -301,10 +302,6 @@ extension StationController {
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
     /// Who holds when two meet: a load first, then a job, then rest; the name breaks a tie. Comparable
     /// as a tuple so the order is total and the same pair always resolves the same way.
-    func rightOfWay(_ m: Minion) -> (Int, Int, String) {
-        (m.carried != nil ? 2 : m.onJob ? 1 : 0, m.current?.isRest == false ? 1 : 0, String(m.id.reversed()))
-    }
-
     func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
@@ -432,7 +429,7 @@ extension StationController {
     }
 
     func tickMinions(dt: Double) {
-        tickAirlockDoors(dt: dt)
+        if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
@@ -456,106 +453,14 @@ extension StationController {
                 if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
             }
             if let target = m.path.first, clock >= m.wonderUntil {
-                let d = target - m.pos
-                let dist = (d.x * d.x + d.y * d.y).squareRoot()
-                let step = speed * dt
-                let next = dist <= step ? target : m.pos + d / dist * step
-                // Solid to each other: someone in the way is waited for a moment, then walked round.
-                // Someone settled on a couch or in bed is on the furniture, not in the way; and someone
-                // already on the same spot is stepped away from, not waited on.
-                // Two who block each other: the one with right of way is not blocked by the one yielding to
-                // it, who is stepping aside; otherwise each waits on the other and neither moves.
-                let ahead = minions.values.first { o in
+                // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
+                // the line. The other does the same, so two head-on pass without either stopping or
+                // planning again. Someone on a couch or in bed is on the furniture, not in the way.
+                let others = minions.values.filter { o in
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                         && !o.lying && !(o.couch != nil && o.path.isEmpty)
-                        && !(o.blockedBy == m.id && rightOfWay(o) < rightOfWay(m))
-                        && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
-                        && (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.y - m.pos.y) * (o.pos.y - m.pos.y) > 0.15 * 0.15
-                        && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
                 }
-                // Doorways are one lane at a time: a walker claims one before stepping into it, and anyone else
-                // waits outside until it is through. Claims run on the station clock and lapse unless renewed.
-                let lanes = laneMap[m.station] ?? [:]
-                let approaches = laneApproaches[m.station] ?? [:]
-                // The tile outside a room's door belongs to its lane only for those going in or coming out:
-                // walking past along the corridor claims nothing and waits for nobody.
-                func laneAt(_ c: Cell) -> String? {
-                    if let id = lanes[c] { return id }
-                    guard let a = approaches[c] else { return nil }
-                    return station.room(at: m.cell)?.key == a.room || m.place == .room(a.room) ? a.lane : nil
-                }
-                let hereLane = laneAt(m.cell)
-                let nextLane = laneAt(Cell(x: Int(next.x.rounded()), y: Int(next.y.rounded())))
-                var laneWait = false
-                if let lane = nextLane, lane != hereLane {
-                    if let claim = doorClaims[lane], claim.holder != m.id, claim.until > clock, minions[claim.holder] != nil {
-                        laneWait = true
-                    } else {
-                        doorClaims[lane] = (holder: m.id, until: clock + 4)
-                        m.heldLane = lane
-                    }
-                }
-                if let lane = hereLane, doorClaims[lane]?.holder == m.id { doorClaims[lane] = (holder: m.id, until: clock + 4) }
-                if hereLane == nil, nextLane == nil, let held = m.heldLane {
-                    if doorClaims[held]?.holder == m.id { doorClaims[held] = nil }
-                    m.heldLane = nil
-                }
-                m.blockedBy = ahead?.id
-                if laneWait {
-                    m.waitingOn = "the doorway"   // a named wait: the reconciler allows it its time
-                    m.facing = atan2(d.x, d.y)
-                } else if let ahead {
-                    // Right of way: of two who meet, one holds and the other goes round, always the same
-                    // one. A load outranks a job, a job outranks rest, and names settle a tie. The one
-                    // who holds still steps round after a while in case the other is not moving at all.
-                    m.blockedFor += dt
-                    m.facing = atan2(d.x, d.y)
-                    // Someone standing idle in the way, with nowhere to be, steps aside to a free spot beside them.
-                    // So does someone waiting outside a doorway, when the one coming through needs that spot.
-                    let doorWaiter = ahead.waitingOn == "the doorway"
-                    if m.blockedFor > 0.6, (ahead.path.isEmpty && (ahead.current?.isRest ?? true)) || doorWaiter, !ahead.lying, ahead.couch == nil,
-                       ahead.carried == nil, clock - ahead.lastReplanAt >= 2, let st = fleet.stations[ahead.station] {
-                        let nextCell = Cell(x: Int(target.x.rounded()), y: Int(target.y.rounded()))
-                        let doors = Set(st.rooms.keys.compactMap { st.doorCell(of: $0) })
-                        let here = st.room(at: ahead.cell)?.key
-                        let options = ahead.cell.neighbours.filter { c in
-                            st.walkable.contains(c) && c != nextCell && c != m.cell && !doors.contains(c) && lanes[c] == nil && approaches[c] == nil && st.room(at: c)?.key == here
-                                && !minions.values.contains { $0.id != ahead.id && $0.station == ahead.station && $0.cell == c }
-                        }
-                        if let aside = options.randomElement() {
-                            ahead.lastReplanAt = clock
-                            if doorWaiter { ahead.path.insert(SIMD2(Double(aside.x), Double(aside.y)), at: 0) }   // out of the way, then on as before
-                            else { ahead.path = route(ahead, to: aside) }
-                            m.blockedFor = 0
-                        }
-                    }
-                    let yields = rightOfWay(m) < rightOfWay(ahead)
-                    if m.blockedFor > (yields ? 0.4 : 3.0), clock - m.lastReplanAt >= 1, let last = m.path.last {
-                        m.blockedFor = 0
-                        m.lastReplanAt = clock
-                        let goal = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
-                        var fresh = route(m, to: goal, round: ahead.id)
-                        // Yielding means moving: where no way round exists, a doorway say, the one who yields
-                        // steps a third of a tile to the side, out of the other's line, and goes on from there.
-                        let stillBlocked = fresh.first.map { (ahead.pos.x - $0.x) * (ahead.pos.x - $0.x) + (ahead.pos.y - $0.y) * (ahead.pos.y - $0.y) < 0.26 * 0.26 } ?? true
-                        if yields, stillBlocked {
-                            let side = SIMD2(-d.y, d.x) / max(dist, 0.001) * 0.34
-                            let options = [m.pos + side, m.pos - side].filter { p in
-                                station.walkable.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) && !station.obstacles.contains(Station.sub(p))
-                            }
-                            if let aside = options.max(by: { a, b in
-                                (a.x - ahead.pos.x) * (a.x - ahead.pos.x) + (a.y - ahead.pos.y) * (a.y - ahead.pos.y)
-                                    < (b.x - ahead.pos.x) * (b.x - ahead.pos.x) + (b.y - ahead.pos.y) * (b.y - ahead.pos.y) }) {
-                                fresh = [aside] + station.path(from: aside, to: goal, avoiding: crowd(around: m, round: ahead.id))
-                            }
-                        }
-                        m.path = fresh
-                    }
-                } else {
-                    m.blockedFor = 0
-                    if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos = next }
-                    m.facing = atan2(d.x, d.y)
-                }
+                m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others, station: station)?.id
             } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
                 switch m.current?.kind {
                 case .stow:
@@ -790,19 +695,24 @@ extension StationController {
                     if m.isChore {
                         if settled, m.phase > 0, clock >= m.phaseUntil { visitDone(m, "roam"); finish(m, to: .lounge) }
                     } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0, m.carried == nil {
-                        // One idle clock per lounger. When it runs out one thing is picked, and the clock starts
-                        // again only once that is done and the lounger is back: leaving does not reset it.
-                        if m.nextIdleAt == 0 { m.nextIdleAt = clock + Double.random(in: 120...300) }
+                        // One idle clock per lounger (`IdleClock`). When it runs out one thing is picked, and the clock
+                        // starts again only once that is done and the lounger is back: leaving does not reset it.
                         // Whatever was picked starts from the next frame: this frame's "settled" is from the couch.
-                        if clock >= m.nextIdleAt { m.nextIdleAt = 0; pickIdle(m, station: station); continue }
+                        if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); continue }
                     }
-                    if m.busy { m.nextIdleAt = 0 }
+                    if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
                     if m.place == .bath {
                         // Once in the cell, shuffle to the fixture itself: under the nozzle, or in front of the bowl.
                         if settled, let spot = m.fetchSpot {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
                             m.fetchSpot = nil
+                            // Squared up to the fixture, the wall or the bowl, for the whole visit.
+                            if let bath = station.rooms["kind:bath"] {
+                                let f = bathFixtures(station: station, bath: bath)
+                                let corner = m.showering ? f.showerCorner : f.toiletCorner
+                                m.facing = atan2(corner.x, corner.y)
+                            }
                         }
                         if settled {
                             m.setStatic(true, frame: Int(clock * 12))
@@ -812,17 +722,39 @@ extension StationController {
                                 let nozzle = showerNozzle(station: station, bath: bath)
                                 let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
                                 drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-                                drop.position = v3(nozzle.x + Double.random(in: -0.05...0.05), 0.56, nozzle.y + Double.random(in: -0.05...0.05))
+                                drop.position = v3(nozzle.x + Double.random(in: -0.04...0.04), 0.66, nozzle.y + Double.random(in: -0.04...0.04))
                                 propRoot.addChildNode(drop)
                                 let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
                             }
+                            if !m.showering, let bath = station.rooms["kind:bath"] {
+                                // The bowl: turn round and sit, a fidget now and then, up again just before the
+                                // visit ends with the flush behind. All on the visit's own clock.
+                                let standAt = m.phaseUntil - 0.7
+                                let bowl = bowlSpot(station: station, bath: bath)
+                                let f = bathFixtures(station: station, bath: bath)
+                                if !m.seated, clock < standAt, m.phaseUntil > 0 {
+                                    // Sat square on the WC, facing straight out from the tank, wherever it stood.
+                                    let to = bowl - station.offset - m.pos
+                                    m.facing = atan2(0, -f.toiletCorner.y)
+                                    let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
+                                    m.setSeated(true, at: SIMD2(across, ahead - 0.02))
+                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3)
+                                } else if m.seated, clock >= standAt {
+                                    m.setSeated(false)
+                                    flush(at: bowl, front: f.toiletCorner.y)
+                                } else if m.seated, clock >= m.nextFidgetAt {
+                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
+                                    m.fidget()
+                                }
+                            }
                         }
                         if clock >= m.phaseUntil && settled {   // done; work waits its turn
+                            m.setSeated(false)
                             m.setStatic(false, frame: 0)
                             m.fixture = nil
                             var back = restPlace(m)
-                            if !m.busy, case .bath(_, let where_) = m.current?.kind { back = where_ }
+                            if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
                             visitDone(m, "bath")
                             finish(m, to: back)   // the visit is over: one order back, to where it came from
                         }
@@ -835,12 +767,13 @@ extension StationController {
                             let d = spot - m.pos
                             if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); continue }
                             m.fetchSpot = nil
+                            if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = gymStand(station: station, gym: gym, kind).facing }
                             if m.workout == .bench { m.setBench(true) }
                         }
                         if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
                             m.setBench(false)
                             var back = restPlace(m)
-                            if !m.busy, case .exercise(_, let where_) = m.current?.kind { back = where_ }
+                            if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
                             visitDone(m, "gym")
                             finish(m, to: back)   // the turn is over: one order back, to where it came from
                         }
@@ -879,14 +812,15 @@ extension StationController {
                 }
             }
             let resting = m.path.isEmpty && m.state == .settled
-            if resting && m.activity == .sleeping && m.place == .quarters { m.setSleeping(true) }
-            let jump = jumping && resting && m.place != .lounge ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0
+            if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.setSleeping(true) }
+            let jump = jumping && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
             m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
-            let wantFacing = inBed ? 0 : (m.path.isEmpty ? Double(rig.eulerAngles.y) : m.facing)
+            let onFixture = (m.bathing || m.exercising) && m.path.isEmpty && m.fetchSpot == nil
+            let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
@@ -989,8 +923,9 @@ extension StationController {
                 switch kind {
                 case .treadmill:   // running on the spot, leaning into the rail
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
-                case .bench:       // on the back, and the bar goes up and down over the chest
+                case .bench:       // on the back along the bench, and the bar goes up and down over the chest
                     tilt = 0; roll = 0
+                    if !m.lying { m.setSleeping(true) }   // the walk step sits it up again when the turn is over
                     props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
                 case .bag:         // jabs: a lean into each, and the bag swings off it
                     let jab = max(0, sin(t * 5.5))

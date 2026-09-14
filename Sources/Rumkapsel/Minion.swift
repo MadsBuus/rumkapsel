@@ -1,71 +1,18 @@
-// One worker: its body, its tools, its poses.
+// One worker: its body, its tools, its poses. The state the simulation runs on is the `Body` it is.
 
 import AppKit
 import SceneKit
 
-/// One Claude session, walking between the rooms of its station.
-final class Minion {
-    enum State { case arriving, settled, leaving }
-
-    var id: String
-    var freeSince = 0.0        // clock when the worker's session went away; 0 while assigned
-    var couch: Int?
-    var nextImpatience = 0.0
-    var station: String
-    var home: Home
-    var state: State = .arriving
-    var busy = false
-    var activity: Activity = .waiting
-    var place: Place = .core
-    /// The one job in hand, and how far into its phases the actor is. Everything a minion does is
-    /// one of these: a carry, a delivery, somewhere to be, the bath, a chore, QA, leaving.
-    var current: Command?
-    var phase = 0
-    /// At most one waits for the next interruptible phase.
-    var pending: Command?
-    /// When the phase in hand runs out: a crouch, a shower, a chore.
-    var phaseUntil = 0.0
-    var carried: SCNNode?
-    var fetchSpot: SIMD2<Double>?
-    /// Which stack the QA walker is inspecting next.
-    var qaStop = 0
-    /// Until then the walk is a stroll, whatever the state: the way out of a closed office is not a hurry.
-    var strollUntil = 0.0
-    /// The simulator's wedge: not another step, whatever the command. For proving the station catches up.
-    var wedged = false
-    /// Prompts that came in before the office had unfolded: their cones land with the reveal.
-    var owedCones = 0
-    /// A carrier, deliverer or pusher walks at one pace whoever it is.
-    var isHauling: Bool {
-        switch current?.kind {
-        case .carry, .deliverOffice, .pushPallet, .loadPallet, .unloadPallet: return true
-        default: return false
-        }
+/// One Claude session, walking between the rooms of its station: a `Body` with a figure on it.
+final class Minion: Body {
+    /// The crate on the arms, as the scene draws it; the body only knows it has a load.
+    var carried: SCNNode? {
+        get { load as? SCNNode }
+        set { load = newValue }
     }
     /// The cube on the head for a stow, and the box on the floor it stands in for.
     var stowing: (cube: SCNNode, box: SCNNode)?
     var weldLight: SCNNode?
-    var hammerUp = false
-    var lying = false
-    var wakeUntil = 0.0
-    /// A change of orders is visible: standing a beat, head up, before going.
-    var wonderUntil = 0.0
-    /// How long someone has stood in the way.
-    var blockedFor = 0.0
-    /// Who stood in the way on the last step, for the log.
-    var blockedBy: String?
-    /// A stall watch: since when the minion has stood still in the same phase of the same command,
-    /// and whether the log has been told. Standing still through a phase that should move is a bug,
-    /// and the log names it rather than leaving a body in a corner.
-    var stallSince = 0.0
-    var stallMark = ""
-    /// The fact the command in hand is waiting on this tick, named by the command's own code; nil
-    /// when it should be moving. Cleared at the top of every tick.
-    var waitingOn: String?
-    /// Which bath fixture is held: 0 the bowl, 1 the shower.
-    var fixture: Int?
-    /// Short stretches of work so far: every other one earns a pee.
-    var shortStretches = 0
     private(set) var shadow: SCNNode!
     /// The hammer's grip end, so the swing pivots in the hand rather than at the handle's middle.
     private(set) var hammerPivot: SCNNode?
@@ -78,57 +25,24 @@ final class Minion {
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
 
-    var promptCount = 0
     var queuedCones: [SCNNode] = []
-    var toolSeed: Int { abs(id.hashValue) % 4 }
     var pyramids: [SCNNode] = []
-    var pyramidCell: Cell?
-    /// On the cone's cell or the one beside it: close enough to work it when its own cell is covered.
-    var nearCone: Bool { pyramidCell.map { abs($0.x - cell.x) + abs($0.y - cell.y) <= 1 } ?? false }
-    var toolCount: Int
-    var title: String?
-    var branch: String?
-    var cwd: String
-    var markers: [StationEvent: String] = [:]
-    let isSubagent: Bool
     let node = SCNNode()
     private let body: SCNNode
     let tilt: SCNNode
     private let bodyHeight: Double
     private let bodyDepth: Double
-    var facing = 0.0
     var smoothFacing = 0.0
-    var isCrew = false
-    var busyUntil = 0.0        // replay seconds, for crew minions
-    var bed: Int?
-    var pos: SIMD2<Double>
-    var path: [SIMD2<Double>] = []
-    var nextWanderAt = 0.0
-    var nextBathAt = 0.0
-    /// When the next turn in the gym is due, on the station clock; 0 until the lounge gets dull.
-    var nextWorkoutAt = 0.0
-    /// How long the visit in hand lasts once the minion is there, and when it got there. The clock starts on
-    /// arrival, never when the walk began: the walk is not the visit.
-    var actFor = 0.0
-    var actStartedAt = 0.0
-    /// A lounger's one idle clock: when it runs out, one thing to do is picked.
-    var nextIdleAt = 0.0
-    /// When this minion's walk was last planned again because something stood in it: at most once a second,
-    /// so a crowded doorway costs a search a second, not one a frame.
-    var lastReplanAt = -10.0
-    /// The doorway this minion has claimed to walk through, while it is on its way through.
-    var heldLane: String?
     private(set) var onBench = false
-    var bathDue = 0.0          // clock when a visit is owed, 0 when none
-    var busySince = 0.0
-    var wasBusy = false
-    var nextChoreAt = 0.0
-    var showering = false
-    var nextDropAt = 0.0
+    private(set) var seated = false
+    private var seatOffset = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
+    private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
+    private let visor: SCNNode
+    var nextFidgetAt = 0.0
     private var staticNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
-        let n = 10
+        let n = 5   // five fat pixels a side: coarse on purpose
         let img = NSImage(size: NSSize(width: n, height: n))
         img.lockFocus()
         for x in 0..<n { for y in 0..<n {
@@ -142,11 +56,11 @@ final class Minion {
         if !on { staticNode?.removeFromParentNode(); staticNode = nil; return }
         if staticNode == nil {
             // A small patch of pixels over the proper place, nothing more.
-            let p = SCNNode(geometry: SCNPlane(width: 0.2, height: 0.15))
+            let p = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.2))   // wider than the body: pixel pants
             p.geometry!.firstMaterial = flat(.white)
             p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
             p.constraints = [SCNBillboardConstraint()]
-            p.position = v3(0, bodyHeight * 0.3, 0)
+            p.position = staticSpot
             // Drawn last and without depth, so the body's own faces never hide it.
             p.renderingOrder = 20
             p.geometry!.firstMaterial?.readsFromDepthBuffer = false
@@ -156,20 +70,11 @@ final class Minion {
         }
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
     }
-    var waitingSince = 0.0
-    let bobPhase = Double.random(in: 0..<6.28)
-    /// Everyone moves at their own pace, so a row of workers never nods in unison.
-    var tempo: Double { 0.82 + bobPhase / 6.28 * 0.42 }
-    /// Which tool is out at the cone right now: the rota runs on the minion's own clock and stint length.
-    func toolSlot(at clock: Double) -> Int { (toolSeed + Int((clock + bobPhase * 4) / (5.5 + Double(toolSeed) * 1.7))) % 4 }
-    /// Solid unless inside a shuttle: the arrival sets it to 0 and back to 1 as the worker steps out.
-    var opacity = 1.0
-
-    init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
-        self.id = id; self.station = station; self.home = home; self.cwd = cwd; self.toolCount = toolCount; self.isSubagent = isSubagent
-        self.isCrew = crew
-        pos = SIMD2(Double(start.x), Double(start.y))
-
+    /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
+    private var staticSpot: SCNVector3 { seated ? v3(seatOffset.x, Minion.seat + bodyDepth * 0.4, seatOffset.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
+    /// The top of the bowl, where a sitter's thighs rest.
+    static let seat = 0.2
+    override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
         let d = isSubagent ? 0.08 : 0.11
@@ -180,8 +85,18 @@ final class Minion {
         visor.geometry!.firstMaterial = flat(Palette.core)
         visor.position = v3(0, h * 0.3, d / 2 + 0.004)
         body.addChildNode(visor)
+        // The legs of a sit: thighs level from the torso's foot forward, shins from their end down to the floor.
+        let thighs = SCNNode(geometry: SCNBox(width: w, height: d, length: d * 2.6, chamferRadius: 0.01))
+        thighs.geometry!.firstMaterial = body.geometry!.firstMaterial
+        thighs.position = v3(0, d / 2, d * 0.8)
+        let shins = SCNNode(geometry: SCNBox(width: w, height: Minion.seat + d, length: d, chamferRadius: 0.01))
+        shins.geometry!.firstMaterial = body.geometry!.firstMaterial
+        shins.position = v3(0, (d - Minion.seat) / 2, d * 1.6)
+        legs.addChildNode(thighs); legs.addChildNode(shins)
+        legs.opacity = 0
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
+        tiltNode.addChildNode(legs)
         node.addChildNode(tiltNode)
         let shadow = SCNNode(geometry: SCNPlane(width: w * 1.6, height: d * 3.2))
         shadow.geometry!.firstMaterial = flat(Palette.void)
@@ -195,48 +110,15 @@ final class Minion {
         self.body = body
         self.bodyHeight = h
         self.bodyDepth = d
+        self.visor = visor
+        super.init(id: id, station: station, home: home, cwd: cwd, toolCount: toolCount, isSubagent: isSubagent, start: start, crew: crew)
         node.name = "minion:" + id
         body.name = node.name
         visor.name = node.name
+        legs.name = node.name; thighs.name = node.name; shins.name = node.name
         node.opacity = 0
     }
 
-    /// The phase in hand.
-    var phaseKind: Command.Phase {
-        guard let c = current else { return .settle }
-        let p = c.phases
-        return p[min(phase, p.count - 1)]
-    }
-    /// Carrying, delivering or leaving: holding something, not free for anything else.
-    var onJob: Bool { current?.isJob ?? false }
-    /// Resting: only then do the couch and the bed pull.
-    var isResting: Bool { current?.isRest ?? true }
-    var isQA: Bool { if case .qa = current?.kind { return true }; return false }
-    var isChore: Bool { if case .chore = current?.kind { return true }; return false }
-    var bathing: Bool { if case .bath = current?.kind { return true }; return false }
-    var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
-    var workout: Command.Workout? { if case .exercise(let k, _) = current?.kind { return k }; return nil }
-    /// How the body is held over a crate, decided by how high the crate is.
-    enum Posture { case none, crouch, waist, reach, jump }
-    /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
-    var handsAt = 0
-    var posture: Posture {
-        switch current?.kind {
-        case .pack, .stow: if phaseKind == .act { return .crouch }   // on the knees over the package or the cube
-        default: break
-        }
-        guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
-        switch handsAt {
-        case 0: return .crouch
-        case 1: return .waist
-        case 2: return .reach
-        default: return .jump
-        }
-    }
-    /// What it would say if you asked.
-    var words: String { current?.words ?? "nothing in particular" }
-
-    var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
     var headHeight: Double { bodyHeight }
 
     /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
@@ -416,6 +298,48 @@ final class Minion {
         } else {
             body.runAction(.group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true), .move(to: v3(0, bodyHeight / 2, 0), duration: 0.4)]))
         }
+    }
+
+    /// Sit down on the bowl, its middle at `offset` in the figure's own frame (x across, z ahead, so
+    /// behind when negative): the body bends into a sit, the torso upright on the seat, thighs out
+    /// in front and shins down to the floor. Or straighten and stand back up onto the spot.
+    func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0)) {
+        guard on != seated else { return }
+        seated = on
+        seatOffset = on ? offset : SIMD2(0, 0)
+        body.removeAllActions()
+        let torso = bodyHeight * 0.62
+        let pose: SCNAction
+        if on {
+            pose = .group([.rotateTo(x: -0.1, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
+                           .move(to: v3(offset.x, Minion.seat + torso / 2, offset.y), duration: 0.5)])
+            legs.position = v3(offset.x, Minion.seat, offset.y)
+        } else {
+            pose = .group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.45, usesShortestUnitArc: true),
+                           .move(to: v3(0, bodyHeight / 2, 0), duration: 0.45)])
+        }
+        pose.timingMode = .easeOut
+        body.runAction(pose)
+        // The face keeps its place on the shorter box: a third of the way up, as on the full one.
+        visor.runAction(.move(to: v3(0, (on ? torso : bodyHeight) * 0.3, bodyDepth / 2 + 0.004), duration: on ? 0.5 : 0.45))
+        // The box itself shortens into a torso as the legs come out, and back to full height as they go.
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = on ? 0.5 : 0.45
+        (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
+        legs.opacity = on ? 1 : 0
+        SCNTransaction.commit()
+        staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
+        // The shadow goes with the body onto the seat, and back to the spot.
+        shadow.runAction(.move(to: v3(0.03 + seatOffset.x, 0.003, 0.02 + seatOffset.y), duration: on ? 0.5 : 0.45))
+    }
+
+    /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
+    func fidget() {
+        guard seated, !body.hasActions else { return }
+        let side = Bool.random() ? 0.08 : -0.08
+        let over = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(side), duration: 0.18); over.timingMode = .easeInEaseOut
+        let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut
+        body.runAction(.sequence([over, .wait(duration: 0.3), back]))
     }
 
     /// Tip over onto the back in the dorm, or stand back up.

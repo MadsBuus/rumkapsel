@@ -222,6 +222,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
+    /// The bubble's row of orders, one glyph each, in `LoungeOrder` order.
+    var bubbleIcons: [SKSpriteNode] = []
+    /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
+    let bubbleLock = NSLock()
+    var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
+    var bubbleCursor: CGPoint?
     let shareDot = SKSpriteNode(color: NSColor(rgb: (0.35, 0.85, 0.5)), size: CGSize(width: 7, height: 7))
     let shareLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     var legendNodes: [SKNode] = []
@@ -235,12 +241,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var liveTimeScale = 1.0
     /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
-    /// Doorways as one-lane sections, per station: the cells of each, by lane id. Rebuilt on the beat.
-    var laneMap: [String: [Cell: String]] = [:]
-    /// The tile outside each room's door, per station: part of that door's lane for anyone going in or coming out.
-    var laneApproaches: [String: [Cell: (lane: String, room: String)]] = [:]
-    /// Who is going through a doorway, and until when on the station clock the claim holds unless renewed.
-    var doorClaims: [String: (holder: String, until: Double)] = [:]
     var clock = 0.0
     var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     var targetFocus = SIMD2<Double>(0, 0)
@@ -262,6 +262,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let demo: Bool
     /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
     var sim: SimHooks?
+    /// A scripted run with no frame ever drawn: the view's own tick and its decorations are skipped, since
+    /// nothing reads them. Everything on the station clock still runs, scene-side logic included.
+    var headless = false
     /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
     /// runs at its own pace and may stall. Everything on the station that judges freshness against
     /// "now" reads this, so a slow frame can never age a session or a landing.
@@ -308,6 +311,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
+        view.hudTakesPoint = { [weak self] p in self?.bubbleTakes(point: p) ?? false }
+        view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node in let n = node?.name; self?.enqueue { self?.open(named: n) } }
         view.onClick = { [weak self] node in
             guard let n = node?.name else { return }
@@ -1000,7 +1005,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             budget -= step
             stepStation(dt: step)
         }
-        tickView(dt: dt)
+        if !headless { tickView(dt: dt) }
     }
 
     /// Everything that happens on the station, by its clock.
@@ -1019,7 +1024,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
-            rebuildLanes()
             replanBlockedWalks()
         }
         tickShuttles()
