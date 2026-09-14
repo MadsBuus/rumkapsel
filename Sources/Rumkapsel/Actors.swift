@@ -113,8 +113,6 @@ final class Rocket {
     var node: SCNNode
     var command: Command
     var phase = 0
-    /// The clock the phase in hand began: a stuck haul may not ground a launch forever.
-    var since = 0.0
     /// When the climb is over and the actor is done.
     var until = 0.0
     var label = ""
@@ -128,8 +126,6 @@ final class Rocket {
     var assigned: Set<String> = []
     /// The carries ordered aboard that have not set their crate down yet, by command id.
     var pending: Set<Int> = []
-    /// The last time the station said out loud that it is still waiting for cargo.
-    var moaned = 0.0
 
     init(station: String, repo: String, node: SCNNode, command: Command) {
         self.station = station; self.repo = repo; self.node = node; self.command = command

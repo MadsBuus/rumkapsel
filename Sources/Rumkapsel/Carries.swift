@@ -68,7 +68,7 @@ extension Simulation {
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim)
         return true
     }
 
@@ -84,8 +84,7 @@ extension Simulation {
         }
     }
 
-    /// Gives waiting carries to free bodies on the same station. A carry nobody picked up by its
-    /// deadline lands where it stands, rather than holding the world back.
+    /// Gives waiting carries to free bodies on the same station.
     func scheduleCarries() {
         for (id, job) in cargo where job.carrier == nil {
             guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
@@ -94,22 +93,13 @@ extension Simulation {
             let all = bodies.values.filter { $0.station == crate.station && !$0.onJob && !$0.hasLoad && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
             let fresh = all.filter { !job.gaveUp.contains($0.id) }
             let free = fresh.isEmpty ? all : fresh
-            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
-                if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
-                continue
-            }
+            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else { continue }
             start(m, job.command, announce: true)
             guard m.current?.id == job.command.id else { continue }
             cargo[id]?.carrier = m.id
-            cargo[id]?.issuedAt = clock   // a new leg: the walk to the crate and the carry get their own patience
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
             m.path = route(m, to: standCell(station, near: from.cell))
-        }
-        // Truth before the picture: a carry that has not landed within its patience, whoever has it,
-        // is set down where its order says and the station catches up in one move.
-        for (id, job) in cargo where job.carrier != nil {
-            if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
         }
         // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
         for (id, job) in cargo where job.carrier != nil && !job.hurry {
@@ -121,19 +111,6 @@ extension Simulation {
             if m.current?.id == id { m.current = m.current?.reworded(words) }
             onEvent(.log("\(m.home.name): \(words)"))
         }
-    }
-
-    /// The carry's patience ran out: the crate is down where the order says, whoever was carrying it
-    /// lets go, and the log says the station caught up. The picture takes the snap; the ledger is right.
-    private func setDownLate(_ id: Int, _ job: Cargo) {
-        guard case .carry(let crate, _, let yard) = job.command.kind else { return }
-        cargo[id] = nil
-        let m = job.carrier.flatMap { bodies[$0] }
-        if let m, m.load == .crate(crate) { loseLoad(m) }
-        world.setDown(crate, at: job.aim)
-        onEvent(.log("\(crate.words) set down late in \(yard.words): the station caught up"))
-        cue(.landed(job))
-        if let m, m.current?.id == id { finish(m) }
     }
 
     /// The board put a crate back where it stands while a carry was under way: the order is off. On
@@ -307,7 +284,6 @@ extension Simulation {
                 if m.load == nil {
                     m.load = .crate(crate)
                     world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
-                    cargo[id]?.issuedAt = clock       // the last leg: the carry itself has its own patience
                 }
                 if clock < m.phaseUntil { return .spent }
                 advance(m)

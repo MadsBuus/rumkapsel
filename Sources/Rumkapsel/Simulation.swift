@@ -15,8 +15,6 @@ struct Cargo {
     /// The place the carry is aimed at: asked for when the order is taken, again with the crate on
     /// the arms, and grounded at set-down. The command itself names only the yard.
     var aim: Spot
-    /// When the current leg began: the order, then the assignment, then the pickup. Patience runs per leg.
-    var issuedAt = 0.0
     /// Carries queued behind this one: the carrier picks up the pace.
     var hurry = false
     /// Who gave this carry up: passed over for it while anyone else is free.
@@ -146,7 +144,7 @@ final class Simulation<B: Body> {
         // from the pending slot after a pack. Somebody else already on it means this one stands down.
         if case .carry = c.kind, let job = cargo[c.id] {
             if let who = job.carrier, who != m.id { m.pending = nil; if m.current == nil { send(m, to: restPlace(m)) }; return }
-            if job.carrier == nil { cargo[c.id]?.carrier = m.id; cargo[c.id]?.issuedAt = clock }
+            if job.carrier == nil { cargo[c.id]?.carrier = m.id }
         }
         issue(c, by: m.home.name)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
@@ -545,7 +543,7 @@ final class Simulation<B: Body> {
                 o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                     && !o.lying && !(o.couch != nil && o.path.isEmpty)
             }
-            m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others, station: station)?.id
+            m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others)?.id
             return .walking
         }
         return m.path.isEmpty ? .there : .wondering

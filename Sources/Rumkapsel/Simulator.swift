@@ -513,7 +513,7 @@ final class SimulatorModel: ObservableObject {
                        openRelease(repo, production: true) == nil ? "no open production release on \(repo)" : nil),
             ]),
             Group(id: "Station", note: nil, buttons: [
-                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Workout"), button("Wedge carrier"),
+                button("Night"), button("Day"), button("Everyone to lounge"), button("Bath"), button("Chore"), button("Workout"), button("Meet in the hall"), button("Wedge carrier"),
             ]),
         ]
     }
@@ -784,6 +784,7 @@ final class SimulatorModel: ObservableObject {
         case "Everyone to lounge": station.simulate(.lounge)
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
+        case "Meet in the hall": station.simulate(.meet)
         case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
 
@@ -1044,7 +1045,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, night(Bool?), wedge, workout }
+enum SimNudge { case bath, chore, lounge, meet, night(Bool?), wedge, workout }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1096,6 +1097,13 @@ extension StationController {
         enqueue { [self] in handle(world.kick(roomKey: key)); flushScene() }
     }
 
+    /// A sim press says "now": whatever a minion was doing that is not a job is dropped so the press can take.
+    private func free(_ m: Minion) {
+        m.busy = false
+        m.activity = .waiting
+        if let c = m.current, !c.isRest { finish(m) }
+    }
+
     func simulate(_ nudge: SimNudge) {
         enqueue { [self] in
             switch nudge {
@@ -1106,9 +1114,11 @@ extension StationController {
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
+                    ?? could.first   // the press says now: a busy worker drops its work for it
                 guard let m, let station = fleet.stations[m.station], station.rooms["kind:bath"] != nil else {
                     handle(.log(could.isEmpty ? "nobody free for the bath" : "no bath on the station")); return
                 }
+                free(m)
                 m.showering = true
                 if !visitBath(m, station: station) { handle(.log("both fixtures in the bath are taken")) }
             case .workout:
@@ -1121,11 +1131,13 @@ extension StationController {
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
+                    ?? could.first   // the press says now: a busy worker drops its work for it
                 guard let m, let station = fleet.stations[m.station], let gym = station.rooms["kind:gym"] else {
                     handle(.log(could.isEmpty ? "nobody free for the gym" : "no gym on the station")); return
                 }
                 m.bathDue = 0
                 m.nextWorkoutAt = 0
+                free(m)
                 if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
             case .wedge:
                 // Whoever is carrying a crate stops dead: the station has to catch up without them.
@@ -1135,11 +1147,32 @@ extension StationController {
                 m.wedged = true
                 handle(.log("\(m.home.name) is wedged: not another step"))
             case .chore:
-                guard let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && !$0.isChore }) else {
-                    handle(.log("nobody free for a chore")); return
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.isChore && !$0.hasLoad }
+                guard let m = could.first(where: { !$0.isCrew && !$0.busy }) ?? could.first(where: { !$0.isCrew }) ?? could.first else {
+                    handle(.log("nobody to send on a chore")); return
                 }
+                free(m)
                 m.bathDue = 0
                 if let st = fleet.stations[m.station], !startRoam(m, station: st) { handle(.log("nowhere clear to roam")) }
+            case .meet:
+                // Two free minions set at the two ends of the hall's east-west arm, facing each other, each
+                // ordered straight along the row to the other's spot: they have to pass, and the walk rule shows how.
+                // The press says "now": any two, whatever they were doing, the way "Everyone to lounge" does it.
+                let any = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.hasLoad }.sorted { $0.isCrew == $1.isCrew ? $0.id < $1.id : !$0.isCrew }
+                guard any.count >= 2, let st = fleet.stations[any[0].station] else { handle(.log("fewer than two minions to meet")); return }
+                let a = any[0], b = any.first { $0.station == a.station && $0.id != a.id } ?? any[1]
+                let half = st.corridorCells.map(\.x).max() ?? 2
+                for (m, from, to) in [(a, -half, half), (b, half, -half)] {
+                    m.busy = false; m.activity = .waiting
+                    m.couch = nil; m.bed = nil
+                    m.lying = false
+                    m.current = nil
+                    send(m, to: .core)
+                    m.pos = SIMD2(Double(from), 0)
+                    m.facing = atan2(Double(to - from), 0)
+                    m.path = stride(from: from, through: to, by: to > from ? 1 : -1).dropFirst().map { SIMD2(Double($0), 0) }
+                }
+                handle(.log("\(a.home.name) and \(b.home.name) meet in the hall"))
             case .lounge:
                 for m in minions.values where !m.isCrew && !m.onJob {
                     m.busy = false

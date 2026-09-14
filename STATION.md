@@ -186,9 +186,6 @@ since real stations mandate both.
   minutes before it goes. Offices are held for those who left before they clear.
 - Counts follow the source through the minions' hands. What cannot be carried is redrawn, once,
   and only if nobody is holding it.
-- Truth before the picture. A carry that has not landed within its patience is set down where its
-  order says, whoever was carrying it, and the log says the station caught up. The ledger is never
-  more than one patience behind the source; the picture is right whenever the floor can manage it.
 
 ## Names
 

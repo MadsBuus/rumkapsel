@@ -319,7 +319,9 @@ extension StationController {
             let resting = m.path.isEmpty && m.state == .settled
             let bunkLift = m.place == .quarters && m.path.isEmpty && m.isResting && m.bed.map { $0 < station.beds.count && station.beds[$0].level == 1 } == true ? 0.36 : 0
             let jump = m.isJumping(at: clock) && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
-            m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
+            // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
+            m.drawnLean += (m.lean - m.drawnLean) * min(1, dt * 8)
+            m.node.position = v3(station.offset.x + m.pos.x + m.drawnLean.x, jump + bunkLift, station.offset.y + m.pos.y + m.drawnLean.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
