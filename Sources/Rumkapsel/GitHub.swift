@@ -834,9 +834,7 @@ final class GitHubResolver {
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
-                    let a = o["author"] as? [String: Any]
-                    let login = a?["login"] as? String ?? ""
-                    if (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]") { continue }
+                    // A bot's merge ships like anyone's: its parcel counts in the yard, grey, and rides the rocket.
                     if m < floor { continue }
                     if let lp = lastProduction, m <= lp { continue }                 // already shipped
                     if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }

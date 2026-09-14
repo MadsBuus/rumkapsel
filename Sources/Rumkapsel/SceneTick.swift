@@ -296,7 +296,8 @@ extension StationController {
         /// An arm's length, and the slack either side of it.
         static let arm = 0.34, near = 0.28, far = 0.42
         /// How long a crate takes to settle down a level when the one under it is taken away.
-        static let settleSeconds = 0.6
+        /// Low gravity in the yard: a crate with nothing under it any more takes its time coming down.
+        static let settleSeconds = 2.0
     }
 
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.

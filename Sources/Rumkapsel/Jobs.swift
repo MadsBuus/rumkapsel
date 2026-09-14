@@ -609,7 +609,32 @@ extension StationController {
     /// The node a crate stands on in the rows, by the name the yard gave it.
     func crateNode(_ crate: CrateRef) -> SCNNode? {
         let tail = ":\(crate.station)|\(crate.repo)|\(crate.number)"
-        return markerRoot.childNodes.first { ($0.name ?? "") == "storage" + tail || ($0.name ?? "") == "deck" + tail }
+        return markerRoot.childNodes.first { ($0.name ?? "") == "storage" + tail || ($0.name ?? "") == "deck" + tail || ($0.name ?? "") == "decon" + tail }
+    }
+
+    /// A bot's pull request merged: the object is cleared, and goes from decon into storage on someone's
+    /// arms, from there like any merged crate. One never drawn, come and gone between two polls, is put
+    /// down in storage by the rows.
+    func haulCleared(station: Station, repo: String, number: Int) {
+        let crate = CrateRef(station: station.name, repo: repo, number: number)
+        logEvent("#\(number) cleared decon, into storage")
+        guard let node = crateNode(crate), let command = world.carryFromDecon(station: station, repo: repo, number: number) else {
+            world.unorder(crate)
+            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
+            rebuildMarkers(); refreshRockets()
+            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
+            return
+        }
+        carry(command, node: node) { [weak self] in
+            guard let self else { return }
+            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
+            node.removeFromParentNode()
+            rebuildMarkers()
+            // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
+            if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
+            refreshRockets()
+            if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
+        }
     }
 
     /// Merged: the office's package is carried to the storage bay in one trip. The model has already
@@ -719,17 +744,17 @@ extension StationController {
 
     // MARK: crew
 
-    /// A teammate's reaction has run its course: back to the quarters, or the bots' room.
+    /// A teammate's reaction has run its course: back to the quarters.
     func crewRested(_ m: Minion) {
         m.busy = false
         m.activity = .sleeping
         clearPyramids(m)
         if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
-        send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
+        send(m, to: .quarters)
     }
 
     /// The crew's minions, brought in line with who the model says is around.
-    func setCrewRoster(_ members: [String: CrewMember], bots: Int) {
+    func setCrewRoster(_ members: [String: CrewMember]) {
         let station = fleet.station("work")
         for (login, member) in members where minions["crew:" + login] == nil {
             let home = Home(key: member.homeKey, name: login, repo: member.repo, issue: nil)
@@ -741,13 +766,7 @@ extension StationController {
             minions[m.id] = m
             send(m, to: .quarters)
         }
-        for m in minions.values where m.isCrew && m.id != "crew:bots" && members[String(m.id.dropFirst(5))] == nil { despawn(m) }
-        if bots > 0, minions["crew:bots"] == nil {
-            let m = Minion(id: "crew:bots", station: station.name, home: Home(key: "kind:bots", name: "bots", repo: "crew", issue: nil), cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter, crew: true)
-            m.title = "dependabot"; m.activity = .sleeping
-            minionRoot.addChildNode(m.node); minions[m.id] = m
-            send(m, to: .room("kind:bots"))
-        }
+        for m in minions.values where m.isCrew && members[String(m.id.dropFirst(5))] == nil { despawn(m) }
     }
 
     /// What a teammate just did, played out on the floor as a command of its own: they walk there,
@@ -805,8 +824,11 @@ extension StationController {
         var cargoOnDeck = station.staged.values.reduce(0, +) > 0
         if ConfigStore.shared.current.project != nil {
             // With a board, QA is done once every crate on the deck is marked ready to ship.
+            // What came through decon is never QA's: on the deck it counts as tested from the start.
             cargoOnDeck = world.repoRoots.contains { root, info in
-                info.station == station.name && (github.cargo(repoRoot: root).map { $0.deckNumbers.count > $0.clearedNumbers.count } ?? false)
+                guard info.station == station.name, let c = github.cargo(repoRoot: root) else { return false }
+                let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
+                return c.deckNumbers.filter { !alien.contains($0) }.count > c.clearedNumbers.filter { !alien.contains($0) }.count
             }
         }
         let cleared = rocketActors.values.contains { $0.station == station.name && $0.isSteaming }

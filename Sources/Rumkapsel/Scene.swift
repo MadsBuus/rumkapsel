@@ -33,6 +33,10 @@ enum Palette {
     static let minion = NSColor(rgb: (0.96, 0.96, 0.94))
     static let pyramid = NSColor(rgb: (0.98, 0.85, 0.35))
     static let debris = NSColor(rgb: (0.55, 0.6, 0.7))
+    /// An object of unknown origin: grey in decon, grey in storage, grey aboard.
+    static let alien = NSColor(rgb: (0.58, 0.6, 0.66))
+    /// The light on decon's hatch and on an unscreened object's plate.
+    static let alienLight = NSColor(rgb: (0.5, 0.95, 0.55))
     static let text = NSColor(rgb: (0.85, 0.87, 0.92))
     static let dim = NSColor(rgb: (0.5, 0.53, 0.6))
 }
@@ -223,6 +227,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
     /// The bubble's row of orders, one glyph each, in `LoungeOrder` order.
     var bubbleIcons: [SKSpriteNode] = []
+    /// Decon's hatch light per station, for the blink and the puff when something comes through.
+    var hatchLights: [String: SCNNode] = [:]
+    /// Objects just through decon's hatch, by marker name: drawn high and floated down onto their pile.
+    var incoming: Set<String> = []
     /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
@@ -316,7 +324,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onClick = { [weak self] node in
             guard let n = node?.name else { return }
             if n.hasPrefix("minion:") { self?.enqueue { self?.poke(minionId: String(n.dropFirst(7))) } }
-            if (n.hasPrefix("storage:") || n.hasPrefix("deck:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
+            if (n.hasPrefix("storage:") || n.hasPrefix("deck:") || n.hasPrefix("decon:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
@@ -915,8 +923,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crateCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             carryAcrossDeck(station: station, repo: repo, number: number)
-        case .crewRoster(let members, let bots):
-            setCrewRoster(members, bots: bots)
+        case .crewRoster(let members):
+            setCrewRoster(members)
+        case .deconArrived(let stationName, let repo, let numbers):
+            hatchBlink(station: stationName)
+            // Just through the hatch: drawn at hatch height, they float down onto their pile.
+            for n in numbers { incoming.insert("decon:\(stationName)|\(repo)|\(n)") }
+        case .deconCleared(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            haulCleared(station: station, repo: repo, number: number)
         case .crewActivity(let a):
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):

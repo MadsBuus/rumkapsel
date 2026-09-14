@@ -159,6 +159,38 @@ extension StationController {
                     addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
                 }
             }
+            if station.hasPad {
+                // Decon: a darker floor at the back of storage, and the hatch in the back wall that
+                // everything from outside comes through, with its light over it.
+                for c in station.deconCells {
+                    addTile(station: station, cell: c, owner: "kind:decon", color: NSColor(rgb: (0.17, 0.24, 0.24)), name: "decon:" + station.name)
+                }
+                let (hp, facing) = station.deconHatch
+                let hatch = SCNNode()
+                let frame = lit(NSColor(rgb: (0.55, 0.6, 0.72)))
+                for side in [-1.0, 1.0] {
+                    let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.7, length: 0.08, chamferRadius: 0))
+                    post.geometry!.firstMaterial = frame
+                    post.position = v3(side * 0.5, 0.35, 0)
+                    hatch.addChildNode(post)
+                }
+                let lintel = SCNNode(geometry: SCNBox(width: 1.08, height: 0.08, length: 0.08, chamferRadius: 0))
+                lintel.geometry!.firstMaterial = frame
+                lintel.position = v3(0, 0.74, 0)
+                hatch.addChildNode(lintel)
+                let pane = SCNNode(geometry: SCNBox(width: 0.92, height: 0.7, length: 0.03, chamferRadius: 0))
+                pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
+                pane.position = v3(0, 0.35, 0)
+                hatch.addChildNode(pane)
+                let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
+                light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
+                light.position = v3(0, 0.84, facing.y * 0.05)
+                hatch.addChildNode(light)
+                hatchLights[station.name] = light
+                hatch.position = v3(station.offset.x + hp.x, 0, station.offset.y + hp.y)
+                hatch.name = "decon:" + station.name
+                staticRoot.addChildNode(hatch)
+            }
             if station.hasPad, !station.storageCells.isEmpty {
                 // The storage console: a small panel on the wall by the doorway, where a pallet is ordered.
                 let (cell, facing) = station.storageConsole
@@ -558,6 +590,11 @@ extension StationController {
                 let sc = station.storageCells
                 let scorner = SIMD2(Double(sc.map(\.x).max()!) + 0.42 - storeLabel.width / 2, Double(sc.map(\.y).max()!) + 0.42 - storeLabel.height / 2)
                 add(storeLabel.node, yaw: 0, center: scorner + SIMD2(ox, oz))
+                let deconLabel = floorSign("decon", color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
+                deconLabel.node.position.y = 0.012
+                let qc = station.deconCells
+                let qcorner = SIMD2(Double(qc.map(\.x).max()!) + 0.42 - deconLabel.width / 2, Double(qc.map(\.y).max()!) + 0.42 - deconLabel.height / 2)
+                add(deconLabel.node, yaw: 0, center: qcorner + SIMD2(ox, oz))
                 let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
                 padLabel.node.position.y = 0.012
                 let pc = station.padCells

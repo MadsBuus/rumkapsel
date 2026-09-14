@@ -16,6 +16,7 @@ import SwiftUI
 ///                Switch branch, Open PR, Approve PR, Checks failing, Merge PR, Close PR
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR
+///     Bots:      Bot: Open PR, Bot: Merge PR, Bot: Close PR
 ///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office
 ///     Board:     Board: Move, Board: Catch up
 ///     Release:   Release: Staging opens, Release: Staging merges, Release: Staging merges (board lags),
@@ -138,6 +139,9 @@ final class SimulatorModel: ObservableObject {
     /// Repositories pressed to have no staging branch: develop to master through a release branch, like android.
     private var noStaging: Set<String> = []
     private var launches: [(repo: String, pr: ReleasePR)] = []
+    /// Dependabot's open pull requests per repository: objects in decon, not offices.
+    private var botPRs: [String: [(number: Int, title: String, branch: String)]] = [:]
+    let bot = "dependabot[bot]"
     private var peerHere = false
     private var peerBeat: Timer?
     /// Issue numbers per repository, continuing each one's own range so a new office reads like its neighbours.
@@ -277,9 +281,13 @@ final class SimulatorModel: ObservableObject {
         defer { github.injectSilently = false; station.simulateGitHub() }
         for r in repos {
             let sent = launches.filter { $0.repo == r }.map(\.pr)
-            let open = offices.filter { $0.repo == r && $0.owner == .teammate && $0.prOpen }.map {
+            var open = offices.filter { $0.repo == r && $0.owner == .teammate && $0.prOpen }.map {
                 OpenPR(number: $0.number, title: $0.title, author: $0.who, isBot: false, branch: $0.branch,
                        url: "https://example.invalid/\(r)/\($0.number)", createdAt: $0.startedAt)
+            }
+            open += (botPRs[r] ?? []).map {
+                OpenPR(number: $0.number, title: $0.title, author: bot, isBot: true, branch: $0.branch,
+                       url: "https://example.invalid/\(r)/\($0.number)", createdAt: station.now)
             }
             github.inject(openPRs: open, for: root(r))
             github.inject(feed: feeds[r] ?? [], for: root(r))
@@ -302,8 +310,8 @@ final class SimulatorModel: ObservableObject {
         station.simulate(peer: snap)
     }
 
-    private func feedEvent(_ kind: String, repo: String, branch: String?, pr: Int?, title: String?, detail: String = "") {
-        let e = FeedEvent(at: station.now, actor: teammate, isBot: false, kind: kind, branch: branch, prNumber: pr,
+    private func feedEvent(_ kind: String, repo: String, branch: String?, pr: Int?, title: String?, detail: String = "", actor: String? = nil) {
+        let e = FeedEvent(at: station.now, actor: actor ?? teammate, isBot: actor == bot, kind: kind, branch: branch, prNumber: pr,
                           title: title, url: "https://example.invalid/\(repo)", detail: detail)
         feeds[repo, default: []].insert(e, at: 0)
         feeds[repo] = Array(feeds[repo]!.prefix(40))
@@ -474,6 +482,11 @@ final class SimulatorModel: ObservableObject {
                 // activity feed has not caught up: the ordering that once carried a closed crate to storage.
                 button("Teammate: Close PR (feed lags)", "Close PR (feed lags)",
                        leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
+            ]),
+            Group(id: "Bots (dependabot)", note: "on \(repo): an object in decon, cleared into storage on merge, ejected on close", buttons: [
+                button("Bot: Open PR", "dependabot opens a PR in \(repo)"),
+                button("Bot: Merge PR", "Merge dependabot's PR", botPRs[repo]?.isEmpty == false ? nil : "dependabot has no open pull request on \(repo)"),
+                button("Bot: Close PR", "Close dependabot's PR (not merged)", botPRs[repo]?.isEmpty == false ? nil : "dependabot has no open pull request on \(repo)"),
             ]),
             Group(id: "Peer (\(peerName))", note: "on the target office when it is \(peerName)'s, else on her newest office", buttons: [
                 button("Peer: Arrive", "Arrive with an office in \(repo)", peerHere ? "\(peerName) is already here" : nil),
@@ -677,6 +690,24 @@ final class SimulatorModel: ObservableObject {
             }
             pushGitHub()
 
+        // Dependabot, through the open pull request list and the activity feed
+        case "Bot: Open PR":
+            let n = nextIssue(repo)
+            let names = ["lodash", "swift-argument-parser", "sentry", "alamofire", "rails"]
+            let title = "bump \(names[n % names.count]) from 1.\(n % 9).0 to 1.\(n % 9 + 1).0"
+            botPRs[repo, default: []].append((n, title, "dependabot/npm_and_yarn/\(names[n % names.count])-\(n)"))
+            feedEvent("pr_open", repo: repo, branch: nil, pr: n, title: title, actor: bot)
+            pushGitHub()
+        case "Bot: Merge PR", "Bot: Close PR":
+            guard let pr = botPRs[repo]?.first else { return }
+            botPRs[repo]?.removeFirst()
+            let fate = name == "Bot: Merge PR" ? "MERGED" : "CLOSED"
+            pullFates["\(repo)#\(pr.number)"] = fate
+            github.inject(pull: PullRequest(number: pr.number, title: pr.title, state: fate, reviewDecision: "", isDraft: false, url: "https://example.invalid/\(repo)/\(pr.number)"),
+                          number: pr.number, repoRoot: root(repo))
+            feedEvent(fate == "MERGED" ? "pr_merge" : "pr_close", repo: repo, branch: pr.branch, pr: pr.number, title: pr.title, actor: bot)
+            pushGitHub()
+
         // The peer, over the network
         case "Peer: Arrive":
             peerHere = true
@@ -835,7 +866,9 @@ final class SimulatorModel: ObservableObject {
         case .officeMerged(_, let key, let repo, let n): return "officeMerged \(key) \(repo)#\(n)"
         case .carryToDeck(_, let repo, let cs): return "carryToDeck \(repo) x\(cs.count)"
         case .crateCleared(_, let repo, let n): return "crateCleared \(repo)#\(n)"
-        case .crewRoster(let m, let bots): return "crewRoster \(m.keys.sorted().joined(separator: ",")) bots \(bots)"
+        case .crewRoster(let m): return "crewRoster \(m.keys.sorted().joined(separator: ","))"
+        case .deconArrived(let st, let repo, let ns): return "deconArrived \(st) \(repo) \(ns.map { "#\($0)" }.joined(separator: ","))"
+        case .deconCleared(_, let repo, let n): return "deconCleared \(repo)#\(n)"
         case .crewActivity(let a): return "crewActivity \(a.login) \(a.kind) \(a.label)"
         case .crewHidden: return "crewHidden"
         case .layoutChanged: return "layoutChanged"

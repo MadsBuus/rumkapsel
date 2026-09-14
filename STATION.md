@@ -50,7 +50,8 @@ since real stations mandate both.
 - A crate that has been set down does not move again until someone picks it up. The layout is
   drawn around what stands there; it never shoves.
 - A crate keeps its slot until it leaves. Stacks are taken from the top and built from the floor. When
-  a lower crate is taken, the ones above settle down one, slowly, not in a blink.
+  a lower crate is taken, the ones above settle down one, slowly, not in a blink: the yard is low
+  gravity, and a crate with nothing under it takes its time coming down.
 - Lifting and setting down take time and a posture: crouch on the floor, a slide at waist height,
   over the head for the third level, a hop above that. The crate stays in the hands until it is on
   its slot.
@@ -106,6 +107,22 @@ since real stations mandate both.
   moves work through the storage and QA columns, or its file says so; otherwise its yard comes from git.
 - Releases are made of pull requests. What git says a release carries is translated to tasks on the
   floor where the link is known, and stays a pull request where it is not.
+
+## Decon
+
+- A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
+  floor. It is an object of unknown origin, and it waits in **decon**, the chamber at the back of
+  storage with a hatch in its back wall. Objects come in through the hatch, never by shuttle and never
+  through the airlock: the hatch light flashes, and that is all the fuss an update gets. They stack
+  by repository like storage does, a dozen at most, small and dark with the unscreened green on the
+  plate, one pile per repository; the rest are counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
+- An object whose pull request merges is cleared: whoever is free pulls it straight out, wherever it
+  is in its stack, and whatever was on top drops; nobody is careful with unscreened things. They carry
+  it through the doorway into storage next door, and from there it is a crate like any other. It waits for the release, rides the
+  pallet and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
+  feature ships seven things. It stays grey wherever it goes, so storage still reads as "two real,
+  five bumps". Nothing from decon is ever QA's business: on the deck it counts as tested from the start.
+- An object whose pull request closes unmerged is ejected and forgotten. Nothing is carried.
 
 ## Bodies
 
