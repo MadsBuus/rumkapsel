@@ -322,7 +322,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onClick = { [weak self] node in
             guard let n = node?.name else { return }
             if n.hasPrefix("minion:") { self?.enqueue { self?.poke(minionId: String(n.dropFirst(7))) } }
-            if (n.hasPrefix("storage:") || n.hasPrefix("deck:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
+            if (n.hasPrefix("storage:") || n.hasPrefix("deck:") || n.hasPrefix("decon:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }

@@ -285,12 +285,15 @@ extension StationController {
                         }
                         continue
                     }
-                    // Of unknown origin: grey wherever it stands, a bot's, not a repository's work.
-                    let c = slot.alien ? Palette.alien : NSColor(fleet.color(forRepo: slot.repo))
+                    // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
+                    // tint of the repository it came for, so a bump for ios still reads as ios.
+                    let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo)).lighter(0.1)
                     // In the yard the light is off, except green with a sticker on a tested crate, and
                     // the unscreened green of decon on what still waits there.
-                    let band = area == "decon" ? Palette.alienLight : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
-                    let pkg = Props.package(color: c.lighter(0.1), band: band, size: 0.38, approved: slot.cleared)
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
+                    // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
+                    // into storage it grows to a crate's size, since a crate is what it is from then on.
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name

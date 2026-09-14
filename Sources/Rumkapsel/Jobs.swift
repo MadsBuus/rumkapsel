@@ -630,6 +630,8 @@ extension StationController {
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             node.removeFromParentNode()
             rebuildMarkers()
+            // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
+            if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
             refreshRockets()
             if world.shipsOnMerge(station: station.name, repo: repo) { launchOnMerge(station: station, repo: repo) }
         }
