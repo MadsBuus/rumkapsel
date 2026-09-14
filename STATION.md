@@ -112,11 +112,12 @@ since real stations mandate both.
 - A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
   floor. It is an object of unknown origin, and it waits in **decon**, the chamber at the back of
   storage with a hatch in its back wall. Objects come in through the hatch, never by shuttle and never
-  through the airlock: the hatch light flashes and a little vapour rolls in, and that is all the fuss
-  an update gets. A dozen show on the floor, grey with the unscreened green on the plate; the rest are
-  counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
-- An object whose pull request merges is cleared: whoever is free carries it through the doorway into
-  storage next door, and from there it is a crate like any other. It waits for the release, rides the
+  through the airlock: the hatch light flashes, and that is all the fuss an update gets. They stack
+  by repository like storage does, a dozen at most, small and dark with the unscreened green on the
+  plate; the rest are counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
+- An object whose pull request merges is cleared: whoever is free pulls it straight out, wherever it
+  is in its stack, and whatever was on top drops; nobody is careful with unscreened things. They carry
+  it through the doorway into storage next door, and from there it is a crate like any other. It waits for the release, rides the
   pallet and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
   feature ships seven things. It stays grey wherever it goes, so storage still reads as "two real,
   five bumps". Nothing from decon is ever QA's business: on the deck it counts as tested from the start.

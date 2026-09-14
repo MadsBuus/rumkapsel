@@ -276,7 +276,8 @@ extension StationController {
                         if abs(heading.x - slot.pos.x) > 0.001 || abs(heading.y - slot.pos.y) > 0.001 || abs(heading.z - slot.pos.z) > 0.001
                             || abs(Double(n.eulerAngles.y) - slot.yaw) > 0.001 {
                             stopCrate(n)
-                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, vacated(at, slot.pos) {
+                            // In decon a whole stack drops together when one is pulled out from under it.
+                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, area == "decon" || vacated(at, slot.pos) {
                                 moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
                             } else {
                                 n.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
@@ -565,22 +566,13 @@ extension StationController {
         emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
     }
 
-    /// Something came through decon's hatch: the light over it flashes and a little vapour rolls in.
+    /// Something came through decon's hatch: the light over it flashes, and that is all the fuss it gets.
     func hatchBlink(station name: String) {
-        guard let light = hatchLights[name], let st = fleet.stations[name] else { return }
+        guard let light = hatchLights[name] else { return }
         light.removeAllActions()
         let on = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.lighter(0.3) }
         let off = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.darker(0.35) }
         light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
-        let (pos, facing) = st.deconHatch
-        for _ in 0..<6 {
-            let p = SCNNode(geometry: SCNBox(width: 0.14, height: 0.14, length: 0.14, chamferRadius: 0))
-            p.geometry!.firstMaterial = flat(NSColor(rgb: (0.8, 0.95, 0.85)))
-            p.opacity = 0.6
-            p.position = v3(st.offset.x + pos.x + Double.random(in: -0.4...0.4), 0.25 + Double.random(in: 0...0.3), st.offset.y + pos.y + facing.y * 0.2)
-            propRoot.addChildNode(p)
-            p.runAction(.sequence([.group([.moveBy(x: CGFloat(Double.random(in: -0.3...0.3)), y: 0.3, z: CGFloat(facing.y * Double.random(in: 0.4...0.9)), duration: 1.8), .scale(to: 2.0, duration: 1.8), .fadeOut(duration: 1.8)]), .removeFromParentNode()]))
-        }
     }
 
     /// Lights flicker on when a dark office gets activity, and dim when it is left alone.

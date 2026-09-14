@@ -309,7 +309,8 @@ struct Ledger: Codable {
         let k = Ledger.key(repo, number)
         var c = crates[k] ?? Crate(repo: repo, number: number)
         // Out of decon for good: from here the yard's word on it is the source's, like any merged crate.
-        if c.alien, c.wanted == .decon { c.wanted = nil; c.orderedOver = nil }
+        // Moved aside within decon it stays decon's.
+        if c.alien, c.wanted == .decon, yard != .decon { c.wanted = nil; c.orderedOver = nil }
         c.placed = yard
         let ordered = c.heading != nil   // a hand move with no order behind it has no word to be newer than
         c.heading = nil

@@ -113,7 +113,9 @@ final class Invariants {
         for s in all { counts[s.name, default: 0] += 1 }
 
         var live: Set<String> = []
-        for s in all where counts[s.name] == 1 {
+        // In decon an object pulled from under a stack lets the rest drop: the one yard where a set-down
+        // thing moves, and where a stack is briefly in the air while it settles.
+        for s in all where counts[s.name] == 1 && !s.name.hasPrefix("decon:") {
             live.insert(s.name)
             let crate = CrateRef(station: s.station, repo: s.repo, number: s.number)
             // On someone's arms, on the pallet or in the air: it is allowed to move.
@@ -172,7 +174,6 @@ final class Invariants {
         // Stacks are built from the floor: no crate with air under it. Columns are half a cell apart
         // and storage nudges each crate by up to a tenth, so a column is a cluster in x along its
         // row rather than a rounding. A level is 0.34 high.
-        // Decon is a grid, not stacks: nothing there settles when something under it leaves.
         var rows: [String: [Standing]] = [:]
         for s in all where !s.name.hasPrefix("decon:") {
             guard let station = c.fleet.stations[s.station] else { continue }

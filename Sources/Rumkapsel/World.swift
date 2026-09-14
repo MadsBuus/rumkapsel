@@ -867,23 +867,8 @@ final class World {
         var held: [(repo: String, slot: Ledger.Slot)] = entries.compactMap { e in e.slot.map { (e.crate.repo, $0) } }
         for i in entries.indices where entries[i].slot == nil {
             let e = entries[i]
-            let slot: Ledger.Slot
-            if area == "decon" {
-                // A grid, not stacks: the first free place along the floor, and up only once the floor is full.
-                // An object keeps its place when the one under it goes: nothing here settles.
-                let columns = max(1, row(0).count * 2)
-                let taken = Set(held.map { "\($0.slot.column)|\($0.slot.order)" })
-                var pick = Ledger.Slot(yard: .decon, group: 0, column: 0, order: 0)
-                search: for level in 0..<3 {
-                    for column in 0..<columns where !taken.contains("\(column)|\(level)") {
-                        pick = Ledger.Slot(yard: .decon, group: 0, column: column, order: level); break search
-                    }
-                }
-                slot = pick
-            } else {
-                slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
+            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
                                     avoiding: aside["\(e.crate.repo)#\(e.crate.number)"])
-            }
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
             if e.carried { station.ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }
@@ -893,8 +878,7 @@ final class World {
         var out: [YardSlot] = []
         for e in entries {
             let s = e.slot!
-            // In decon a place's order is its level; in a stack the level is ranked from the floor.
-            let level = area == "decon" ? s.order : held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
+            let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
             let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
@@ -1021,7 +1005,7 @@ final class World {
         let blockers = standing.filter { $0.group == slot.group && $0.column == slot.column && $0.level > slot.level && !going.contains($0.number) }
             .sorted { $0.level > $1.level }
         guard !blockers.isEmpty else { return [] }
-        let yard: Yard = area == "deck" ? .deck : .storage
+        let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         let moved = yardLayout(station: station, area: area, aside: Dictionary(uniqueKeysWithValues: blockers.map { ("\($0.repo)#\($0.number)", $0.column) }))
         var out: [Command] = []
         for b in blockers {
@@ -1081,8 +1065,9 @@ final class World {
         return .carry(CrateRef(station: station.name, repo: repo, number: number), from: from, to: .storage)
     }
 
-    /// An object cleared from decon, from where it stands to storage next door. Nil when it is not
-    /// standing there: on someone's arms already, or never drawn.
+    /// An object cleared from decon, from where it stands to storage next door. Pulled straight out,
+    /// wherever it is in its stack: nobody is careful with unscreened things, and whatever was on top
+    /// drops. Nil when it is not standing there: on someone's arms already, or never drawn.
     func carryFromDecon(station: Station, repo: String, number: Int) -> Command? {
         guard let here = yardLayout(station: station, area: "decon").first(where: { $0.repo == repo && $0.number == number && !$0.carried }) else { return nil }
         station.ledger.order(repo: repo, number: number, to: .storage)
