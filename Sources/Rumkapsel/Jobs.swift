@@ -133,8 +133,9 @@ extension StationController {
         held.removeFromParentNode()
         held.position = at
         propRoot.addChildNode(held)
-        let ahead = SIMD3(Double(at.x) + sin(m.facing) * Hands.arm, 0.12, Double(at.z) + cos(m.facing) * Hands.arm)
-        moveCrate(held, legs: [MotionLeg(to: ahead, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
+        // Set down behind, where the carrier came from: what cannot be carried on stays on the way it was, never in the way ahead.
+        let behind = SIMD3(Double(at.x) - sin(m.facing) * Hands.arm, 0.12, Double(at.z) - cos(m.facing) * Hands.arm)
+        moveCrate(held, legs: [MotionLeg(to: behind, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
         world.dropped(by: m.id)
     }

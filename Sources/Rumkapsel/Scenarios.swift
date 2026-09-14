@@ -397,6 +397,26 @@ enum Scenarios {
             .log("morning"),
         ]),
 
+        Scenario("a wedged carrier gives up: the crate goes back in the queue and another is sent for it", [
+            ("Target: ios#298", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 9.6),        // the package is ordered to storage and a carrier takes it
+            ("Wedge carrier", 4.8),   // and stops dead on the way
+        ], tail: 448, expects: [       // ten station seconds standing, then the give-up, then the retry
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .press("Wedge carrier"),
+            .log("gives up carrying #298"),
+            .carry(298, to: .storage),
+        ], allowGiveUp: true, floor: { sim in
+            // The retry went to somebody else: a frozen body is not sent for the crate it dropped while
+            // there is anyone else. Whether the crate lands is the walk's business, not this rule's.
+            var carriers: [String] = []
+            for r in sim.model.records {
+                if case .command(let c, let by) = r, case .carry(let crate, _, _) = c.kind, crate.number == 298, !carriers.contains(by) { carriers.append(by) }
+            }
+            return carriers.count >= 2 ? nil : "only \(carriers) carried #298"
+        }),
         Scenario("an idle station keeps a mix, each visit for its whole time", [
             ("Everyone to lounge", 48),
         ], tail: 11520, expects: [], soak: true, floor: { sim in
