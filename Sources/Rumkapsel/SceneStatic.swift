@@ -245,14 +245,29 @@ extension StationController {
                 // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
                 let f = bathFixtures(station: station, bath: bath)
                 let sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
-                let bowl = SCNNode(geometry: faceted(SCNCylinder(radius: 0.13, height: 0.2), 4))
-                bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
+                // A WC, square to the walls: a pedestal, the seat on it at Minion.seat, a dark inset
+                // for the hole, and the tank standing on the back of the seat against the wall.
+                let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
                 let spot = bowlSpot(station: station, bath: bath)
-                bowl.position = v3(spot.x, 0.1, spot.y)
+                let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
+                bowl.geometry!.firstMaterial = porcelain
+                bowl.position = v3(spot.x, (Minion.seat - 0.06) / 2, spot.y)
+                let seat = SCNNode(geometry: SCNBox(width: 0.24, height: 0.06, length: 0.28, chamferRadius: 0.01))
+                seat.geometry!.firstMaterial = porcelain
+                seat.position = v3(0, Minion.seat - 0.03 - bowl.position.y, -0.02 * tk.y)
+                bowl.addChildNode(seat)
+                let hole = SCNNode(geometry: SCNBox(width: 0.12, height: 0.006, length: 0.14, chamferRadius: 0))
+                hole.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.6, 0.66)))
+                hole.position = v3(0, 0.032, -0.03 * tk.y)
+                seat.addChildNode(hole)
                 let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
-                tank.geometry!.firstMaterial = bowl.geometry!.firstMaterial
-                tank.position = v3(0, 0.15, 0.14 * tk.y)
+                tank.geometry!.firstMaterial = porcelain
+                tank.position = v3(0, Minion.seat + 0.15 - bowl.position.y, 0.16 * tk.y)
                 bowl.addChildNode(tank)
+                let button = SCNNode(geometry: SCNBox(width: 0.05, height: 0.012, length: 0.04, chamferRadius: 0))
+                button.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
+                button.position = v3(0.06, 0.156, 0)
+                tank.addChildNode(button)
                 bowl.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(bowl)
                 // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
@@ -265,6 +280,30 @@ extension StationController {
                 arm.addChildNode(nozzle)
                 arm.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(arm)
+                // The pole the arm comes off: a pipe up the corner wall from the floor, a tap at waist height.
+                let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.72, length: 0.04, chamferRadius: 0))
+                pole.geometry!.firstMaterial = arm.geometry!.firstMaterial
+                pole.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.36, station.offset.y + Double(sc2.y) + 0.45 * sk.y)
+                let tap = SCNNode(geometry: SCNBox(width: 0.07, height: 0.03, length: 0.05, chamferRadius: 0))
+                tap.geometry!.firstMaterial = arm.geometry!.firstMaterial
+                tap.position = v3(0, 0.0, -0.04 * sk.y)   // waist height on the pole, out from the wall
+                pole.addChildNode(tap)
+                pole.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(pole)
+                // A towel over a rail on the other wall of the corner, a step along from the shower.
+                let rail = SCNNode(geometry: SCNBox(width: 0.02, height: 0.02, length: 0.24, chamferRadius: 0))
+                rail.geometry!.firstMaterial = arm.geometry!.firstMaterial
+                rail.position = v3(station.offset.x + Double(sc2.x) + 0.46 * sk.x, 0.5, station.offset.y + Double(sc2.y) - 0.05 * sk.y)
+                let towel = SCNNode(geometry: SCNBox(width: 0.035, height: 0.24, length: 0.18, chamferRadius: 0.004))
+                towel.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
+                towel.position = v3(-0.03 * sk.x, -0.09, 0)
+                rail.addChildNode(towel)
+                let stripe = SCNNode(geometry: SCNBox(width: 0.04, height: 0.03, length: 0.18, chamferRadius: 0))
+                stripe.geometry!.firstMaterial = lit(NSColor(rgb: (0.98, 0.9, 0.82)))
+                stripe.position = v3(0, -0.06, 0)
+                towel.addChildNode(stripe)
+                rail.name = "room:" + roomKey(station, bath)
+                staticRoot.addChildNode(rail)
                 let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
                 drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
                 drain.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.01, station.offset.y + Double(sc2.y) + 0.25 * sk.y)

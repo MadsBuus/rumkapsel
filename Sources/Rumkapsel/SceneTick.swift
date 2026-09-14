@@ -124,10 +124,10 @@ extension StationController {
     }
 
     /// The flush: a beat of water colour flickering in the bowl, then gone.
-    func flush(at bowl: SIMD2<Double>) {
-        let water = SCNNode(geometry: SCNBox(width: 0.13, height: 0.012, length: 0.13, chamferRadius: 0))
+    func flush(at bowl: SIMD2<Double>, front: Double) {
+        let water = SCNNode(geometry: SCNBox(width: 0.12, height: 0.012, length: 0.14, chamferRadius: 0))
         water.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-        water.position = v3(bowl.x, 0.205, bowl.y)
+        water.position = v3(bowl.x, Minion.seat + 0.006, bowl.y - 0.05 * front)
         water.opacity = 0
         propRoot.addChildNode(water)
         let blink = SCNAction.sequence([.fadeOpacity(to: 1, duration: 0.06), .fadeOpacity(to: 0.3, duration: 0.1)])
@@ -732,14 +732,17 @@ extension StationController {
                                 // visit ends with the flush behind. All on the visit's own clock.
                                 let standAt = m.phaseUntil - 0.7
                                 let bowl = bowlSpot(station: station, bath: bath)
+                                let f = bathFixtures(station: station, bath: bath)
                                 if !m.seated, clock < standAt, m.phaseUntil > 0 {
+                                    // Sat square on the WC, facing straight out from the tank, wherever it stood.
                                     let to = bowl - station.offset - m.pos
-                                    m.facing = atan2(-to.x, -to.y)   // back to the bowl
-                                    m.setSeated(true, at: SIMD2(0, 0.02 - (to.x * to.x + to.y * to.y).squareRoot()))
+                                    m.facing = atan2(0, -f.toiletCorner.y)
+                                    let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
+                                    m.setSeated(true, at: SIMD2(across, ahead - 0.02))
                                     m.nextFidgetAt = clock + Double.random(in: 1.5...3)
                                 } else if m.seated, clock >= standAt {
                                     m.setSeated(false)
-                                    flush(at: bowl)
+                                    flush(at: bowl, front: f.toiletCorner.y)
                                 } else if m.seated, clock >= m.nextFidgetAt {
                                     m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
                                     m.fidget()
