@@ -552,6 +552,7 @@ final class World {
                 }
             }
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
+                if it.isClosed { continue }   // finished work, whatever column the board left it in
                 let key = "task:\(it.repo)#\(it.number)"
                 guard let login = it.assignees.first, login != me else { continue }
                 if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
