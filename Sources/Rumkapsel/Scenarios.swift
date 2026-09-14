@@ -153,18 +153,22 @@ struct Scenario {
     let forbids: [Expect]
     /// A press the panel refuses is normally a broken script; a few scenarios mean to try one.
     var allowSkips = false
+    /// A minion giving up mid-command is a stall the body reconciler caught: a bug in a scripted run,
+    /// unless the scenario means to provoke one.
+    var allowGiveUp = false
     /// What must stand on the floor when it is over, for the things the run does not record as it
     /// goes. Returns the reason it failed, or nil.
     let floor: (@MainActor (SimulatorController) -> String?)?
 
     init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [Expect], forbids: [Expect] = [],
-         allowSkips: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
+         allowSkips: Bool = false, allowGiveUp: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
         self.tail = tail
         self.expects = expects
         self.forbids = forbids
         self.allowSkips = allowSkips
+        self.allowGiveUp = allowGiveUp
         self.floor = floor
     }
 
@@ -438,19 +442,23 @@ enum Scenarios {
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
-        Scenario("a wedged carrier: the station catches up", [
+        Scenario("a wedged carrier gives up: the crate goes back in the queue and another lands it", [
             ("Target: ios#298", 0.3),
             ("Open PR", 2.0),
             ("Merge PR", 0.6),        // the package is ordered to storage and a carrier takes it
             ("Wedge carrier", 0.3),   // and stops dead on the way
-        ], tail: 9, expects: [        // the carry's patience is ninety station seconds: under six real
+        ], tail: 28, expects: [       // ten station seconds standing, then the give-up, then the retry
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .press("Wedge carrier"),
-            .log("set down late"),
-        ], floor: { sim in
-            // Truth before the picture: the crate is in storage and the ledger says so, carrier or no carrier.
-            guard Scenario.crates(sim, "storage", "ios") > 0 else { return "no ios crate stands in storage" }
+            .log("gives up carrying #298"),
+            .carry(298, to: .storage),
+        ], allowGiveUp: true, floor: { sim in
+            // The crate is in storage and the ledger says so, whoever carried it in the end.
+            guard Scenario.crates(sim, "storage", "ios") > 0 else {
+                let who = sim.station.minions.values.map { "\($0.home.name): \($0.current?.words ?? "nothing") · \($0.phaseKind) at \($0.cell.x),\($0.cell.y) path \($0.path.count) waiting \($0.waitingOn ?? "-")" }
+                return "no ios crate stands in storage · " + who.joined(separator: " | ")
+            }
             let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
             return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
         }),
@@ -543,6 +551,10 @@ final class ScenarioRunner {
         var reason: String?
         let violations = records.compactMap { if case .violation(let t) = $0 { return t }; return nil }
         if let v = violations.first { reason = v }
+        if reason == nil, !s.allowGiveUp, let gaveUp = records.lazy.compactMap({ r -> String? in
+            if case .event(.log(let t)) = r, t.contains(" gives up ") { return t }; return nil }).first {
+            reason = "a minion gave up · " + gaveUp
+        }
         if reason == nil, !s.allowSkips, let skipped = records.lazy.compactMap({ if case .skipped(let why) = $0 { return why }; return nil }).first {
             reason = "a press was refused · " + skipped
         }

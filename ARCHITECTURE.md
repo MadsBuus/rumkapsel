@@ -316,3 +316,22 @@ Done. Two different closes:
 - **A staging release closed without merging.** Those crates are still merged work waiting for a release:
   the loaded pallet unloads back into storage the same slow way it was loaded. `.stagingClosed` sets the
   pallet's wish, and `unloadPallet(back: true)` floats each crate onto the place `slotNow` gives it.
+
+## Bodies
+
+`Bodies.swift` is to minions what the ledger is to crates. Every half second, for every command in
+hand, it asks: is this body moving, or waiting on a fact the command named this tick
+(`Minion.waitingOn`)? A rest that has arrived, a lie-down, an act with time left, QA walking its
+rows and the airlock's cycle are steady by definition. Anything else that keeps the same phase and
+the same spot for ten station seconds is given up: `giveUp` says so in the log, puts down what is on
+the arms an arm's length ahead, and frees the body. A carry keeps its order and its id in `cargo`
+with no carrier, starting from where the crate now lies, and whoever gave it up is passed over
+while anyone else is free. A new office's crate goes back on the bay list, and `queueDeliveries`
+hands it to the next free minion, the session's own worker first; a pending office with no crate,
+no ship and nobody fetching has its shuttle ordered again. The scenario runner fails any run in
+which a minion gives up unless the scenario says it means to provoke one.
+
+Ownership is enforced at one door: `send(_:to:)` refuses a body with anything but rest in hand.
+The refresh, the floor flush and the panel all go through it, so none of them can move a body on
+paper under a job or a visit; a visit's own end finishes it first, then sends the body back.
+

@@ -239,6 +239,12 @@ struct Command {
         return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", patience: patience, after: after)
     }
 
+    /// The same carry from where the crate lies now: after a give-up, the next carrier starts there.
+    func from(_ spot: Spot) -> Command {
+        guard case .carry(let crate, _, let to) = kind else { return self }
+        return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words, patience: patience, after: after)
+    }
+
     /// The same command said differently: for hover and the log when its pace changes.
     func reworded(_ words: String) -> Command {
         Command(id: id, kind: kind, words: words, patience: patience, after: after)

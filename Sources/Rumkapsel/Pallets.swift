@@ -80,6 +80,7 @@ extension StationController {
 
         case .waitPallet(_, let repo):
             guard m.phaseKind != .walk else { advance(m); return }
+            m.waitingOn = m.current?.words   // standing by is the errand: the release, or a pallet, is what it waits on
             if let p = pallets[station.name], p.repo == repo {
                 // Beside a loaded pallet, waiting for the release to go one way or the other.
                 if p.wantsBack { beginUnload(m, station: station, p, back: true) }
@@ -96,7 +97,7 @@ extension StationController {
             guard m.phaseKind != .walk else { advance(m); return }
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return }
             m.setTool(.telekinesis)
-            guard p.isSettled else { return }
+            guard p.isSettled else { m.waitingOn = "the pallet to settle"; return }
             world.truth.setPallet(station: station.name, state: .loaded)
             if p.wantsBack { beginUnload(m, station: station, p, back: true) }
             else if p.wantsPush { beginPush(m, station: station, p) }

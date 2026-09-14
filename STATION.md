@@ -83,6 +83,22 @@ since real stations mandate both.
   is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
   Whoever finds someone in the way waits a beat, then goes round.
 
+## Bodies
+
+- One owner per body. The command in hand owns a minion's place, path and pose. Nothing else
+  writes them: a session's refresh, a floor change or the panel may only ask, and an ask waits
+  its turn behind whatever is in hand.
+- Every command is either moving or waiting on a fact it names: the crate to come down, the ship
+  to lift off, the release to merge. Standing still in the same phase for ten seconds, waiting on
+  nothing named, is a stall.
+- A stall is given up, and said so in the log. Giving up loses nothing, because the work is not
+  kept in the body: a carry goes back into the queue from where the crate now lies, an office's
+  crate stays on the floor for the next free hands, a visit ends. Truth then re-issues what it
+  still wants, to someone else first. What conditions took away is not retried; the body is free.
+- Right of way. Of two who meet, one holds and the other goes round, always the same one: a load
+  before a job, a job before rest, and names settle a tie. The one who holds steps round after a
+  while in case the other is not moving at all.
+
 ## Rooms
 
 - A room opens to the corridor through one doorway: the room tile that touches the hallway. Nothing

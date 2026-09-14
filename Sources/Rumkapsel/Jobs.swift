@@ -120,7 +120,8 @@ extension StationController {
         else { send(m, to: restPlace(m)) }
     }
 
-    /// A command whose target went away: put down what is on the arms, where the minion stands.
+    /// A command whose target went away, or given up: put down what is on the arms, an arm's length in
+    /// front of where the minion stands, so the body is not left standing over the crate.
     func dropWhereStanding(_ m: Minion) {
         guard let held = m.carried else { return }
         let at = held.worldPosition
@@ -128,7 +129,8 @@ extension StationController {
         held.removeFromParentNode()
         held.position = at
         propRoot.addChildNode(held)
-        moveCrate(held, legs: [MotionLeg(to: SIMD3(Double(at.x), 0.12, Double(at.z)), seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
+        let ahead = SIMD3(Double(at.x) + sin(m.facing) * Hands.arm, 0.12, Double(at.z) + cos(m.facing) * Hands.arm)
+        moveCrate(held, legs: [MotionLeg(to: ahead, seconds: 0.35, ease: .easeIn)]) { [weak self] in self?.drone.thud() }
         m.carried = nil
         world.dropped(by: m.id)
     }
@@ -178,11 +180,11 @@ extension StationController {
     }
 
     func send(_ m: Minion, to place: Place) {
-        // A minion on a job goes where the job takes it; rest waits until the job is done. A visit
-        // lasts its whole time too, the bath, the gym, a chore: a session's refresh re-planning rest
-        // does not cut it short or move it on paper. Only the visit's own end, which finishes it
-        // first, sends the minion back.
-        if m.onJob || m.exercising || m.bathing || m.isChore { return }
+        // One owner per body: the command in hand owns place, path and pose. Rest may only be planned
+        // for a minion with nothing but rest in hand; a job or a visit is finished first by its own
+        // end, and only then does the minion go back. A session's refresh, a floor change or the
+        // panel asking for rest under a command in hand changes nothing.
+        if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
         var place = place
@@ -220,13 +222,17 @@ extension StationController {
     func walk(_ m: Minion, to cell: Cell) { m.path = route(m, to: cell) }
 
     /// Spots taken by the other minions on a station, as the pathfinder sees them: solid, like props.
-    func crowd(around m: Minion) -> Set<Cell> {
+    func crowd(around m: Minion, round blocker: String? = nil) -> Set<Cell> {
         var out: Set<Cell> = []
         for o in minions.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
             // A body, standing or lying, is solid at the middle of its tile, like a crate: the way past
             // runs along the tile's edge, a third of a tile off. Two can pass on one tile, never through
             // each other; that is the walk's own rule, which waits on whoever is in the way in step.
-            out.insert(Station.sub(o.pos))
+            // Whoever just stood in the way gets a whole tile's berth, so two walkers meeting head-on
+            // both go round rather than each waiting on the other.
+            let s = Station.sub(o.pos)
+            if o.id == blocker { for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } } }
+            else { out.insert(s) }
         }
         // A ship over its slot, coming down or unloading, owns the ground under it: walks keep half a
         // tile off, so a carrier waiting on a crate stands beside the slot and never under the ship.
@@ -246,9 +252,9 @@ extension StationController {
 
     /// A walk for a minion: round the props and round everyone else. When the only way through is
     /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
-    func route(_ m: Minion, to cell: Cell) -> [SIMD2<Double>] {
+    func route(_ m: Minion, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
-        let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m))
+        let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
         return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
 
@@ -640,7 +646,9 @@ extension StationController {
             guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
             // Crates stacked above this one are still on their way: wait, deadline and all.
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            let free = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
+            let all = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
+            let fresh = all.filter { !job.gaveUp.contains($0.id) }
+            let free = fresh.isEmpty ? all : fresh
             guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
                 if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
                 continue

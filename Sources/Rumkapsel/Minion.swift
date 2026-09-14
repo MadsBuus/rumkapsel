@@ -57,7 +57,9 @@ final class Minion {
     /// and the log names it rather than leaving a body in a corner.
     var stallSince = 0.0
     var stallMark = ""
-    var stallReported = false
+    /// The fact the command in hand is waiting on this tick, named by the command's own code; nil
+    /// when it should be moving. Cleared at the top of every tick.
+    var waitingOn: String?
     /// Which bath fixture is held: 0 the bowl, 1 the shower.
     var fixture: Int?
     /// Short stretches of work so far: every other one earns a pee.

@@ -207,6 +207,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var issuedAt = 0.0
         /// Carries queued behind this one: the carrier picks up the pace.
         var hurry = false
+        /// Who gave this carry up: passed over for it while anyone else is free.
+        var gaveUp: Set<String> = []
     }
     var cargo: [Int: Cargo] = [:]
     private var lastHaulSchedule = 0.0
@@ -780,6 +782,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             rebuildStatic()
             if firstRun, !viewPinned { restoreView() }
             for st in fleet.stations.values { resettle(st) }
+            refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
             markersDirty = false
             rebuildMarkers()
@@ -961,6 +964,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
             scheduleCarries()
+            reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
             replanBlockedWalks()

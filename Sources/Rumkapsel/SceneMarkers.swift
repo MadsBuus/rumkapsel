@@ -326,6 +326,13 @@ extension StationController {
     }
 
     /// The rocket prop itself, on its slot on the pad.
+    /// Where a rocket stands on the pad, by slot, as the pad is now.
+    private func padPosition(station: Station, slot: Int) -> SCNVector3 {
+        let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
+        let pc = station.padCenter + offsets[slot % offsets.count]
+        return v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
+    }
+
     private func rocketNode(station: Station, repo: String, cargo: Int, untested: Bool, tall: Bool, label: String, slot: Int) -> SCNNode {
         let n = Props.rocket(color: NSColor(fleet.color(forRepo: repo)), tall: tall, cargo: cargo)
         if untested {
@@ -333,9 +340,7 @@ extension StationController {
             deco.name = "hold"
             n.addChildNode(deco)
         }
-        let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
-        let pc = station.padCenter + offsets[slot]
-        n.position = v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
+        n.position = padPosition(station: station, slot: slot)
         n.name = label
         n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = label } }
         rocketRoot.addChildNode(n)
@@ -481,6 +486,11 @@ extension StationController {
                 continue
             }
             redraw(r, cargo: world.cargoWaiting(station: st, repo: r.repo), untested: r.untested)
+            // Standing by, a rocket stands where the pad is now: the floor may have grown under it.
+            if !r.isBusy, !r.node.hasActions {
+                let slot = Array(rocketActors.keys).sorted().firstIndex(of: key) ?? 0
+                r.node.position = padPosition(station: st, slot: slot)
+            }
         }
         rebuildDueRings()
     }

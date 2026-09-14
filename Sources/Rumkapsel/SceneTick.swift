@@ -231,6 +231,12 @@ extension StationController {
     }
 
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
+    /// Who holds when two meet: a load first, then a job, then rest; the name breaks a tie. Comparable
+    /// as a tuple so the order is total and the same pair always resolves the same way.
+    func rightOfWay(_ m: Minion) -> (Int, Int, String) {
+        (m.carried != nil ? 2 : m.onJob ? 1 : 0, m.current?.isRest == false ? 1 : 0, String(m.id.reversed()))
+    }
+
     func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
@@ -363,6 +369,7 @@ extension StationController {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
             if hovered == "minion:" + m.id { continue }
+            m.waitingOn = nil
             let waitingAge = m.activity == .waiting ? clock - m.waitingSince : 0
             let jumping = m.activity == .waiting && waitingAge < 60 && !m.onJob
             let pacing = m.activity == .waiting && waitingAge >= 60 && !m.onJob
@@ -383,17 +390,21 @@ extension StationController {
                 let step = speed * dt
                 let next = dist <= step ? target : m.pos + d / dist * step
                 // Solid to each other: someone in the way is waited for a moment, then walked round.
-                let ahead = minions.values.contains { o in
+                let ahead = minions.values.first { o in
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                         && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
                         && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
                 }
-                if ahead {
+                if let ahead {
+                    // Right of way: of two who meet, one holds and the other goes round, always the same
+                    // one. A load outranks a job, a job outranks rest, and names settle a tie. The one
+                    // who holds still steps round after a while in case the other is not moving at all.
                     m.blockedFor += dt
                     m.facing = atan2(d.x, d.y)
-                    if m.blockedFor > 0.8, let last = m.path.last {
+                    let yields = rightOfWay(m) < rightOfWay(ahead)
+                    if m.blockedFor > (yields ? 0.4 : 3.0), let last = m.path.last {
                         m.blockedFor = 0
-                        m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
+                        m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())), round: ahead.id)
                     }
                 } else {
                     m.blockedFor = 0
@@ -442,8 +453,8 @@ extension StationController {
                             let d = spot - m.pos
                             if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
                         }
-                        if boxes[key] != nil, !world.truth.isInBay(key) { continue }   // the shuttle has not set it down yet
-                        if shipStillOver(roomKey: r, station: m.station) { continue }  // and it has not lifted off the slot yet
+                        if boxes[key] != nil, !world.truth.isInBay(key) { m.waitingOn = "the crate to come down"; continue }
+                        if shipStillOver(roomKey: r, station: m.station) { m.waitingOn = "the ship to lift off"; continue }
                         if let spot = m.fetchSpot {
                             m.fetchSpot = nil
                             m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
@@ -583,17 +594,6 @@ extension StationController {
                 default:
                     break
                 }
-                // Standing still in a phase that should move, for ten seconds, is reported once: the
-                // command, the phase, the spot and where it meant to go. A cue for the log, never a decision.
-                if let c = m.current, !c.isRest, m.path.isEmpty, m.wakeUntil == 0, !(m.phaseKind == .act && clock < m.phaseUntil) {
-                    let mark = "\(c.id)|\(m.phase)|\(m.cell.x),\(m.cell.y)"
-                    if mark != m.stallMark { m.stallMark = mark; m.stallSince = clock; m.stallReported = false }
-                    else if !m.stallReported, clock - m.stallSince > 10 {
-                        m.stallReported = true
-                        let toward = m.fetchSpot.map { " toward \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""
-                        handle(.log("\(m.home.name) has stood 10 s at \(m.cell.x),\(m.cell.y) in \(m.phaseKind) of \(c.words)\(toward)"))
-                    }
-                } else { m.stallMark = "" }
                 // There: the quiet commands move on from walking to being there, so truth says so too.
                 if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
                     switch c.kind {
