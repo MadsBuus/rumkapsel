@@ -95,8 +95,8 @@ class Body {
     var napping = false
     /// When this walk was last planned again because the floor changed under it: at most once a second.
     var lastReplanAt = -10.0
-    /// The bearing held for the length of a pass, so the spot beside the waypoint stays one spot; nil when nobody is in the way.
-    var passDir: SIMD2<Double>?
+    /// How far the figure is drawn off the body's line while passing someone: a shoulder to the right. Drawing only.
+    var lean = SIMD2<Double>(0, 0)
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false

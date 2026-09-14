@@ -33,6 +33,8 @@ final class Minion: Body {
     private let bodyHeight: Double
     private let bodyDepth: Double
     var smoothFacing = 0.0
+    /// The lean as drawn, eased toward the body's lean.
+    var drawnLean = SIMD2<Double>(0, 0)
     private(set) var onBench = false
     private(set) var seated = false
     private var seatOffset = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
