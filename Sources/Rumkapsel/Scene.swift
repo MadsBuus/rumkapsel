@@ -1106,6 +1106,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     var knownRepos: [String] { world.knownRepos }
+    /// Each work repository's pipeline as detected, for the settings window.
+    var pipelineRows: [PipelineRow] {
+        var seen = Set<String>()
+        return world.repoRoots.sorted { $0.value.repo < $1.value.repo }.compactMap { root, info in
+            guard info.station == "work", seen.insert(info.repo).inserted else { return nil }
+            let p = github.pipeline(repoRoot: root)
+            let flow = p.production.isEmpty ? "\(p.trunk), no releases" : [p.trunk, p.staging, p.production].filter { !$0.isEmpty }.joined(separator: " → ")
+            return PipelineRow(id: info.repo, flow: flow, why: p.source == "settings" ? "not read yet" : p.why)
+        }
+    }
     var seenLogins: Set<String> { world.seenLogins }
 
     /// Re-asks GitHub about every office, branch and release right now.

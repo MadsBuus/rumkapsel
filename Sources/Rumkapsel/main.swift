@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
         // The crate ledger on its own: facts in every order, no station.
         if args.contains("--ledger-tests") { LedgerTests.run() }
+        // Pipeline detection on its own: histories shaped like the real repositories'.
+        if args.contains("--pipeline-tests") { PipelineTests.run() }
         // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
@@ -278,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     @objc func openSettings() {
         settingsModel.config = ConfigStore.shared.current
         settingsModel.knownRepos = controller.knownRepos
+        settingsModel.pipelines = controller.pipelineRows
         settingsModel.knownLogins = Array(Set(controller.seenLogins).union(settingsModel.config.crewNames.keys)).sorted()
         settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
         settingsModel.musicOn = controller.drone.isEnabled

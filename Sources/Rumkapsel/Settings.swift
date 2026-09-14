@@ -2,11 +2,14 @@ import AppKit
 import SwiftUI
 
 struct Named: Identifiable, Hashable { let id: String }
+/// One repository's detected pipeline, as the Releases tab shows it.
+struct PipelineRow: Identifiable, Hashable { let id: String; let flow: String; let why: String }
 
 /// The settings window: stations, repositories, people and general options.
 final class SettingsModel: ObservableObject {
     @Published var config: AppConfig = ConfigStore.shared.current
     @Published var knownRepos: [String] = []
+    @Published var pipelines: [PipelineRow] = []
     @Published var knownLogins: [String] = []
     @Published var launchAtLogin = false
     @Published var musicOn = UserDefaults.standard.bool(forKey: "music")
@@ -30,7 +33,7 @@ struct SettingsView: View {
             people.tabItem { Label("People", systemImage: "person.2") }
             general.tabItem { Label("General", systemImage: "gear") }
         }
-        .frame(width: 600, height: 500)
+        .frame(width: 600, height: 620)
     }
 
     private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -78,6 +81,22 @@ struct SettingsView: View {
                 GridRow { Text("Staging branch"); TextField("optional", text: $model.config.stagingBranch).frame(width: 200) }
                 GridRow { Text("Production branch"); TextField("production", text: $model.config.productionBranch).frame(width: 200) }
             }
+            Text("Detected per repository").font(.subheadline.bold())
+            ScrollView {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                    ForEach(model.pipelines) { row in
+                        GridRow {
+                            Text(row.id).font(.caption.bold())
+                            Text(row.flow).font(.caption.monospaced())
+                            Text(row.why).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 100)
+            Text("Read from each repository's release history, else its branch names. A repository can say it exactly, for everyone, with .github/rumkapsel.json on its default branch: trunk, staging (\"\" for none), production, releaseBranches such as [\"release/*\"], and boardColumns.")
+                .font(.caption).foregroundStyle(.secondary)
             Divider()
             Text("GitHub project board").font(.headline)
             Text("With a project whose Status field follows issues through the pipeline, the yard is filled from the board instead of git history: one read for every repository. Leave the number empty to go without.")

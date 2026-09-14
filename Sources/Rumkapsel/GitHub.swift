@@ -55,10 +55,20 @@ struct ReleasePR: Equatable {
 /// A repository's own way to production: the branch work merges into, an optional staging branch
 /// between, and the branch releases go into. Read from the branches the repository actually has.
 struct Pipeline: Equatable {
-    let trunk: String
-    let staging: String
-    let production: String
+    var trunk: String
+    var staging: String
+    var production: String
+    /// Head branches a release may come from besides the trunk and staging: "release*" matches release/v9.7.1.
+    var releaseBranches: [String] = PipelineDetection.defaultReleaseBranches
+    /// Whether the board's storage and QA columns fill this repository's yard; nil lets the board decide.
+    var boardColumns: Bool? = nil
+    /// Where this came from, "file", "history", "branches" or "settings", and in a few words why.
+    var source: String = "settings"
+    var why: String = ""
     var hasStaging: Bool { !staging.isEmpty }
+    func isReleaseHead(_ head: String) -> Bool {
+        head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
+    }
     /// The settings' names, for a repository whose branches have not been read yet.
     static var configured: Pipeline {
         let c = ConfigStore.shared.current
@@ -202,6 +212,8 @@ final class GitHubResolver {
     private var cargo: [String: Cargo] = [:]
     /// Each repository's pipeline, as its branches said at the last release read.
     private var pipelines: [String: Pipeline] = [:]
+    /// When each repository's history and file were last read: at most once an hour.
+    private var pipelineCheckedAt: [String: Date] = [:]
     /// Repositories whose work moves through the board's storage and QA columns: their yard is the board's.
     private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
 
@@ -218,11 +230,12 @@ final class GitHubResolver {
             // The board fills a repository's yard only once the repository moves work through the storage and
             // QA columns. One that goes from development straight to shipped is on the board but not in its
             // middle: its yard comes from git, like a repository not on the board at all.
-            if mine.contains(where: { [st.storage, st.deck, st.cleared].contains($0.status) }), !boardYards.contains(repo) {
+            let decided = pipelines[repoRoot]?.boardColumns   // the repository's own file says, when it says
+            if decided == nil, mine.contains(where: { [st.storage, st.deck, st.cleared].contains($0.status) }), !boardYards.contains(repo) {
                 boardYards.insert(repo)
                 if let (all, at) = project { saveBoard(all, at: at) }
             }
-            if !mine.isEmpty, boardYards.contains(repo) {
+            if !mine.isEmpty, decided ?? boardYards.contains(repo) {
             let storage = mine.filter { $0.status == st.storage }.map(\.number).sorted()
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
@@ -707,17 +720,33 @@ final class GitHubResolver {
             if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
                 for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
-            // This repository's own pipeline, from the branches it has, the settings' names looked for first.
-            // Trunk: develop, else main or master. Staging only where the branch exists. Production:
-            // production, else master, else main, never the trunk itself.
-            let trunk = [cfg.trunkBranch, "develop", "main", "master"].first { !$0.isEmpty && remoteBranches.contains($0) } ?? cfg.trunkBranch
-            let stagingBranch = remoteBranches.contains(cfg.stagingBranch) && cfg.stagingBranch != trunk ? cfg.stagingBranch : ""
-            let productionBranch = [cfg.productionBranch, "master", "main"].first { !$0.isEmpty && $0 != trunk && $0 != stagingBranch && remoteBranches.contains($0) } ?? ""
-            let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
-            // A release comes from the trunk, from staging, or from a release or hotfix branch cut for it.
-            func isReleaseHead(_ head: String) -> Bool {
-                head == trunk || (!stagingBranch.isEmpty && head == stagingBranch) || head.hasPrefix("release") || head.hasPrefix("hotfix")
+            // This repository's own pipeline: its file, else its release history, else its branch names.
+            // History and file are asked at most once an hour; the branch list is read every time.
+            lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; lock.unlock()
+            let pipe: Pipeline
+            if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.source != "settings" {
+                pipe = cached
+            } else {
+                var merges: [PipelineDetection.Merge] = []
+                var answered = false
+                if let out = run(["gh", "pr", "list", "--state", "merged", "--limit", "100", "--json", "baseRefName,headRefName"], cwd: repoRoot),
+                   let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                    answered = true
+                    merges = arr.compactMap { o in
+                        guard let b = o["baseRefName"] as? String, let h = o["headRefName"] as? String else { return nil }
+                        return PipelineDetection.Merge(base: b, head: h)
+                    }
+                }
+                // A missing file is a failed call: no file.
+                let file = run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
+                    .flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
+                pipe = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file,
+                                                names: (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch))
+                if answered { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
             }
+            let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
+            let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
+            func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
             for base in bases {
                 guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
                                      "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
@@ -797,13 +826,16 @@ final class GitHubResolver {
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
             }
-            let pipe = Pipeline(trunk: trunk, staging: stagingBranch, production: productionBranch)
-            let changed = previous != found || cargo[repoRoot] != newCargo || pipelines[repoRoot] != pipe
+            let pipelineChanged = pipelines[repoRoot] != pipe
+            let changed = previous != found || cargo[repoRoot] != newCargo || pipelineChanged
             pipelines[repoRoot] = pipe
             cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)
             lock.unlock()
+            if pipelineChanged {
+                trace("pipeline \(repoRoot): \(pipe.trunk) → \(pipe.staging.isEmpty ? "-" : pipe.staging) → \(pipe.production.isEmpty ? "-" : pipe.production) · \(pipe.source): \(pipe.why)")
+            }
             if changed { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
