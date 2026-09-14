@@ -215,6 +215,20 @@ enum Scenarios {
             return flights == 1 ? nil : "\(flights) shuttles flew, not one"
         }),
 
+        Scenario("a late carrier: the crate waits on the bay floor and is still fetched", [
+            ("Target: api#5158", 0.3),
+            ("Teammate: New branch", 2.5),
+            ("Peer: New office", 2.5),        // the floor plan changes while the crate is coming down
+            ("New branch in repo", 0.3),      // and again, with a second delivery under way
+        ], tail: 30, expects: [
+            .deliverOffice(by: "leo"),
+        ], floor: { sim in
+            let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
+            if !fetching.isEmpty { return "\(fetching.map(\.home.name).joined(separator: ", ")) still fetching from the bay" }
+            let left = sim.station.world.truth.bayCrates
+            return left.isEmpty ? nil : "crates left on the bay floor: \(left.sorted().joined(separator: ", "))"
+        }),
+
         Scenario("staging release opens, merges: the pallet crosses", [
             ("Target: web#455", 0.3),
             ("Release: Staging opens", 5.0),

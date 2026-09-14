@@ -17,6 +17,9 @@ final class Shuttle {
     let unloadAt: Double, unloadFor: Double
     /// Setting the cargo down: the worker steps out, or the crate lands in the bay.
     let onUnload: () -> Void
+    /// Whether the cargo may come out yet: a crate waits for its carrier to stand at the slot. The
+    /// ship holds over the slot until this says so; nil unloads on its own clock.
+    var ready: (() -> Bool)?
     var phase = 0
     var until = 0.0
     private var unloaded = false
@@ -92,6 +95,7 @@ final class Shuttle {
     /// One frame of the flight. Returns false once the ship is gone.
     func advance(at clock: Double) -> Bool {
         place(at: clock)
+        if phaseKind == .unload, !unloaded, let ready, !ready() { until = clock + unloadAt + unloadFor; return true }   // holding over the slot
         if phaseKind == .unload, !unloaded, clock >= until - unloadFor { unloaded = true; onUnload() }
         guard clock >= until else { return true }
         guard phase + 1 < command.phases.count else { node.removeFromParentNode(); return false }

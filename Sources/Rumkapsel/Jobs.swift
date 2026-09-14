@@ -178,9 +178,11 @@ extension StationController {
     }
 
     func send(_ m: Minion, to place: Place) {
-        // A minion on a job goes where the job takes it; rest waits until the job is done. A turn in
-        // the gym lasts its whole time too: a session's refresh re-planning rest does not cut it short.
-        if m.onJob || m.exercising { return }
+        // A minion on a job goes where the job takes it; rest waits until the job is done. A visit
+        // lasts its whole time too, the bath, the gym, a chore: a session's refresh re-planning rest
+        // does not cut it short or move it on paper. Only the visit's own end, which finishes it
+        // first, sends the minion back.
+        if m.onJob || m.exercising || m.bathing || m.isChore { return }
         guard let station = fleet.stations[m.station] else { return }
         if place != .quarters { m.bed = nil }
         var place = place
@@ -208,9 +210,7 @@ extension StationController {
         else if let t = cells.randomElement() { target = t }
         else { return }
         m.place = place
-        // A bath or a chore in hand survives a re-plan to where it already is; anything else rests.
-        let keep = (m.bathing && place == .bath) || (m.isChore && place == m.place)
-        if !keep { start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping)) }
+        start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping))
         m.path = route(m, to: target)
         // No way found and far off: walk straight rather than stand still or slide.
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
@@ -227,6 +227,19 @@ extension StationController {
             // runs along the tile's edge, a third of a tile off. Two can pass on one tile, never through
             // each other; that is the walk's own rule, which waits on whoever is in the way in step.
             out.insert(Station.sub(o.pos))
+        }
+        // A ship over its slot, coming down or unloading, owns the ground under it: walks keep half a
+        // tile off, so a carrier waiting on a crate stands beside the slot and never under the ship.
+        if let station = fleet.stations[m.station] {
+            for s in shuttles where s.station == m.station {
+                guard case .flight(_, _, let slot) = s.command.kind, slot < station.hangarSlots.count,
+                      s.phase < (s.command.phases.firstIndex(of: .rise) ?? Int.max) else { continue }
+                let at = station.hangarSlots[slot], c = Station.sub(at)
+                for dx in -2...2 { for dy in -2...2 {
+                    let sub = Cell(x: c.x + dx, y: c.y + dy), p = Station.point(ofSub: sub)
+                    if hypot(p.x - at.x, p.y - at.y) < 0.55 { out.insert(sub) }
+                } }
+            }
         }
         return out
     }
@@ -332,14 +345,25 @@ extension StationController {
         anchor.addChildNode(ship)
         let command = Command.flight(.dropCrate(roomKey: roomKey), station: m.station, slot: slotIndex,
                                      what: "the office for \(room.name)")
-        launch(Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
-                       restYaw: Double.random(in: 0..<(2 * .pi)), drift: Double.random(in: -0.6...0.6),
-                       unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
+        let flight = Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
+                             restYaw: Double.random(in: 0..<(2 * .pi)), drift: Double.random(in: -0.6...0.6),
+                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
             box.opacity = 1
             box.position = v3(slot.x, 0.42, slot.z)
             self?.moveCrate(box, legs: [MotionLeg(to: SIMD3(slot.x, 0.09, slot.z), seconds: 0.5, ease: .easeIn)])
             self?.world.truth.crateInBay(key)   // the crate is on the floor now: a carrier may fetch it
-        })
+        }
+        // A hard sequence: the crate comes out only once its carrier stands at the slot. With no carrier
+        // left for it, the ship unloads anyway and the crate waits on the floor.
+        let spot = station.hangarSlots[slotIndex], stationName = m.station
+        flight.ready = { [weak self] in
+            guard let self, let carrier = self.minions.values.first(where: { o in
+                guard o.station == stationName, case .deliverOffice(let k) = o.current?.kind else { return false }
+                return k == roomKey
+            }) else { return true }
+            return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
+        }
+        launch(flight)
         drone.sweep(up: false)
         assign(m, .deliverOffice(key: roomKey, name: room.name), announce: false)
         m.place = .hangar

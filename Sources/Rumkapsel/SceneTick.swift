@@ -583,6 +583,17 @@ extension StationController {
                 default:
                     break
                 }
+                // Standing still in a phase that should move, for ten seconds, is reported once: the
+                // command, the phase, the spot and where it meant to go. A cue for the log, never a decision.
+                if let c = m.current, !c.isRest, m.path.isEmpty, m.wakeUntil == 0, !(m.phaseKind == .act && clock < m.phaseUntil) {
+                    let mark = "\(c.id)|\(m.phase)|\(m.cell.x),\(m.cell.y)"
+                    if mark != m.stallMark { m.stallMark = mark; m.stallSince = clock; m.stallReported = false }
+                    else if !m.stallReported, clock - m.stallSince > 10 {
+                        m.stallReported = true
+                        let toward = m.fetchSpot.map { " toward \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""
+                        handle(.log("\(m.home.name) has stood 10 s at \(m.cell.x),\(m.cell.y) in \(m.phaseKind) of \(c.words)\(toward)"))
+                    }
+                } else { m.stallMark = "" }
                 // There: the quiet commands move on from walking to being there, so truth says so too.
                 if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
                     switch c.kind {
@@ -630,7 +641,7 @@ extension StationController {
                     // Chores: a lounger with nothing to do wanders off to check on the yard, the bay or the
                     // hallway, lingers a while, and comes back to the couch.
                     if m.isChore {
-                        if settled, clock >= m.phaseUntil { m.nextChoreAt = clock + Double.random(in: 180...480); send(m, to: .lounge) }
+                        if settled, clock >= m.phaseUntil { m.nextChoreAt = clock + Double.random(in: 180...480); finish(m); send(m, to: .lounge) }
                     } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0 {
                         if m.nextChoreAt == 0 { m.nextChoreAt = clock + Double.random(in: 60...240) }
                         if clock >= m.nextChoreAt {
@@ -676,6 +687,7 @@ extension StationController {
                             m.fixture = nil
                             var back = restPlace(m)
                             if !m.busy, case .bath(_, let where_) = m.current?.kind { back = where_ }
+                            finish(m)   // the visit is over: the way back is a rest, which a visit in hand would not let in
                             send(m, to: back)
                         }
                     } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, m.carried == nil, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {

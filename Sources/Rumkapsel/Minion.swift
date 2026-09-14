@@ -52,6 +52,12 @@ final class Minion {
     var wonderUntil = 0.0
     /// How long someone has stood in the way.
     var blockedFor = 0.0
+    /// A stall watch: since when the minion has stood still in the same phase of the same command,
+    /// and whether the log has been told. Standing still through a phase that should move is a bug,
+    /// and the log names it rather than leaving a body in a corner.
+    var stallSince = 0.0
+    var stallMark = ""
+    var stallReported = false
     /// Which bath fixture is held: 0 the bowl, 1 the shower.
     var fixture: Int?
     /// Short stretches of work so far: every other one earns a pee.

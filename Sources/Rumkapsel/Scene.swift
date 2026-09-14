@@ -666,8 +666,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             flushScene(firstRun: firstRun)
             for m in minions.values {
                 guard case .deliverOffice(let r) = m.current?.kind, let station = fleet.stations[m.station] else { continue }
-                if m.carried == nil, let c = station.hangarCells.randomElement() { walk(m, to: c) }
-                else if let slot = officeCrateSlot(station: station, roomKey: r) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
+                // The floor changed under a delivery: re-plan the walk to where it was going, the crate on
+                // the bay floor or the office's own slot, never somewhere at random.
+                if m.carried == nil {
+                    if let box = boxes["\(station.name)|\(r)"] {
+                        let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
+                        walk(m, to: standCell(station, near: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))))
+                    } else if let spot = m.fetchSpot {
+                        walk(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+                    }
+                } else if let slot = officeCrateSlot(station: station, roomKey: r) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
             }
         } else {
             flushScene()
