@@ -284,13 +284,11 @@ final class Invariants {
 
     /// A shuttle leaves before anyone walks under it.
     private func shuttlesOverhead(_ c: StationController) {
-        for s in c.shuttles {
+        for s in c.simulation.flights {
             // Under means under a ship that is down over its slot, coming down or unloading. A ship on its
             // approach is high in the air, crossing over the station on its way in.
             guard s.phaseKind == .descend || s.phaseKind == .unload else { continue }
-            let p = s.node.worldPosition
-            guard let station = c.fleet.stations[s.station] else { continue }
-            let local = SIMD2(Double(p.x) - station.offset.x, Double(p.z) - station.offset.y)
+            let local = SIMD2(s.pos.x, s.pos.z)
             for m in c.minions.values where m.station == s.station {
                 let d = ((m.pos.x - local.x) * (m.pos.x - local.x) + (m.pos.y - local.y) * (m.pos.y - local.y)).squareRoot()
                 if d < 0.5 {
@@ -304,7 +302,7 @@ final class Invariants {
     /// A rocket leaves only with its cargo aboard: nothing of its repository left on the deck or
     /// on anyone's arms when the climb starts.
     private func rockets(_ c: StationController) {
-        for r in c.rocketActors.values {
+        for r in c.simulation.rockets.values {
             // The launch command loads first; the rule is about the moment the climb begins.
             guard case .launch = r.stage, r.phaseKind == .climb else { continue }
             guard launched.insert(r.key).inserted else { continue }
@@ -331,8 +329,8 @@ final class Invariants {
             if case .pushPallet = cur.kind { lastPhase["minion " + m.id] = nil; continue }
             step("minion " + m.id, id: cur.id, phase: m.phase)
         }
-        for s in c.shuttles { step("shuttle " + s.station + " \(s.command.id)", id: s.command.id, phase: s.phase) }
-        for r in c.rocketActors.values { step("rocket " + r.key, id: r.command.id, phase: r.phase) }
+        for s in c.simulation.flights { step("shuttle " + s.station + " \(s.command.id)", id: s.command.id, phase: s.phase) }
+        for r in c.simulation.rockets.values { step("rocket " + r.key, id: r.command.id, phase: r.phase) }
     }
 
     private func step(_ who: String, id: Int, phase: Int) {
