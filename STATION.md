@@ -79,18 +79,14 @@ since real stations mandate both.
   not even at the start of the day: they arrive one by one, or spread before they set off.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
-- Two can pass each other on one tile, side by side, but never slide through each other: a body
-  is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
-  Whoever finds someone in the way waits a beat, then goes round. Someone standing idle in a walker's
-  way, with nowhere to be, steps aside to a free spot beside them; nobody settles in a doorway.
-  A walk is planned again at most once a second, however crowded the way.
-- A doorway is one lane: the door tile, and the tile outside it for anyone going in or coming out;
-  walking past along the corridor claims nothing. A walker claims the lane before stepping in; anyone else waits outside, and steps
-  aside if the one coming through needs the spot. A claim lapses a few station seconds after it was last
-  renewed, so a stuck walker cannot lock a door. Every timing on the station runs on the station clock,
-  so holding space speeds all of it up alike. Someone on a couch or in bed is
-  on the furniture, off the walkway, and in nobody's way. Where there is no way round, in a
-  doorway say, the one who yields steps a third of a tile aside and goes on from there.
+- Two never slide through each other: a body is solid at the middle of its tile, standing or lying.
+  A walker who finds someone in its way, standing or coming, drifts a third of a tile to the side
+  away from them, passes, and drifts back onto its line; the other does the same, so two meeting
+  head-on pass without either stopping or planning again, in a doorway as anywhere. Where there is
+  no room to pass, the walker holds still until there is; standing still is never a fault. Someone
+  on a couch or in bed is on the furniture, off the walkway, and in nobody's way. Nobody settles in
+  a doorway. Every timing on the station runs on the station clock, so holding space speeds all of
+  it up alike.
 - A chore never stands in a doorway, the yard's or a room's: a body standing there shuts it.
 
 ## Tasks and work

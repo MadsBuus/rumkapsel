@@ -397,26 +397,6 @@ enum Scenarios {
             .log("morning"),
         ]),
 
-        Scenario("a wedged carrier gives up: the crate goes back in the queue and another lands it", [
-            ("Target: ios#298", 4.8),
-            ("Open PR", 32),
-            ("Merge PR", 9.6),        // the package is ordered to storage and a carrier takes it
-            ("Wedge carrier", 4.8),   // and stops dead on the way
-        ], tail: 448, expects: [       // ten station seconds standing, then the give-up, then the retry
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
-            .press("Wedge carrier"),
-            .log("gives up carrying #298"),
-            .carry(298, to: .storage),
-        ], allowGiveUp: true, floor: { sim in
-            // The crate is in storage and the ledger says so, whoever carried it in the end.
-            guard Scenario.crates(sim, "storage", "ios") > 0 else {
-                let who = sim.station.minions.values.map { "\($0.home.name): \($0.current?.words ?? "nothing") · \($0.phaseKind) at \($0.cell.x),\($0.cell.y) path \($0.path.count) waiting \($0.waitingOn ?? "-")" }
-                return "no ios crate stands in storage · " + who.joined(separator: " | ")
-            }
-            let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
-            return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
-        }),
         Scenario("an idle station keeps a mix, each visit for its whole time", [
             ("Everyone to lounge", 48),
         ], tail: 11520, expects: [], soak: true, floor: { sim in

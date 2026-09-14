@@ -49,8 +49,6 @@ class Body {
     var wakeUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
-    /// How long someone has stood in the way.
-    var blockedFor = 0.0
     /// Who stood in the way on the last step, for the log.
     var blockedBy: String?
     /// A stall watch: since when the minion has stood still in the same phase of the same command,
@@ -93,11 +91,8 @@ class Body {
     var actStartedAt = 0.0
     /// A lounger's one idle clock: when it runs out, one thing to do is picked.
     var idle = IdleClock()
-    /// When this minion's walk was last planned again because something stood in it: at most once a second,
-    /// so a crowded doorway costs a search a second, not one a frame.
+    /// When this walk was last planned again because the floor changed under it: at most once a second.
     var lastReplanAt = -10.0
-    /// The doorway this minion has claimed to walk through, while it is on its way through.
-    var heldLane: String?
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false

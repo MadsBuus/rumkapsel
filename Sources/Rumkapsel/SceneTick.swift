@@ -167,17 +167,6 @@ extension StationController {
         return true
     }
 
-    /// The one-lane sections of every station: each room's door cell, and each yard doorway's pair of cells.
-    func rebuildLanes() {
-        for st in fleet.stations.values {
-            let doors = st.rooms.keys.sorted().compactMap { key in
-                st.doorCell(of: key).map { DoorLanes.Door(room: key, cell: $0, outside: st.doorOutside(of: key)) }
-            }
-            lanes[st.name] = DoorLanes(station: st.name, doors: doors, yardDoorways: st.yardDoorways)
-        }
-        doorClaims.prune(at: clock)
-    }
-
     /// A lounger's idle clock ran out: one thing to do, by weight (`IdlePick`). A look round the station
     /// most often, a turn in the gym by day, the bath, and now and then simply staying on the couch with a book.
     func pickIdle(_ m: Minion, station: Station) {
@@ -296,10 +285,6 @@ extension StationController {
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
     /// Who holds when two meet: a load first, then a job, then rest; the name breaks a tie. Comparable
     /// as a tuple so the order is total and the same pair always resolves the same way.
-    func rightOfWay(_ m: Minion) -> (Int, Int, String) {
-        (m.carried != nil ? 2 : m.onJob ? 1 : 0, m.current?.isRest == false ? 1 : 0, String(m.id.reversed()))
-    }
-
     func atArmsLength(_ m: Minion, of spot: SIMD2<Double>, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
@@ -451,89 +436,34 @@ extension StationController {
                 if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
             }
             if let target = m.path.first, clock >= m.wonderUntil {
-                let d = target - m.pos
-                let dist = (d.x * d.x + d.y * d.y).squareRoot()
-                let step = speed * dt
-                let next = dist <= step ? target : m.pos + d / dist * step
-                // Solid to each other: someone in the way is waited for a moment, then walked round.
-                // Someone settled on a couch or in bed is on the furniture, not in the way; and someone
-                // already on the same spot is stepped away from, not waited on.
-                // Two who block each other: the one with right of way is not blocked by the one yielding to
-                // it, who is stepping aside; otherwise each waits on the other and neither moves.
-                let ahead = minions.values.first { o in
+                // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
+                // the line. The other does the same, so two head-on pass without either stopping or
+                // planning again. Where there is no room to pass, hold still until there is; standing
+                // still is never a fault. Someone on a couch or in bed is on the furniture, not in the way.
+                let others = minions.values.filter { o in
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                         && !o.lying && !(o.couch != nil && o.path.isEmpty)
-                        && !(o.blockedBy == m.id && rightOfWay(o) < rightOfWay(m))
-                        && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
-                        && (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.y - m.pos.y) * (o.pos.y - m.pos.y) > 0.15 * 0.15
-                        && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
                 }
-                // Doorways are one lane at a time: a walker claims one before stepping into it, and anyone else
-                // waits outside until it is through. Claims run on the station clock and lapse unless renewed.
-                let doorLanes = lanes[m.station] ?? DoorLanes()
-                // The tile outside a room's door belongs to its lane only for those going in or coming out:
-                // walking past along the corridor claims nothing and waits for nobody.
-                let inRoom = station.room(at: m.cell)?.key
-                let headedTo: String? = { if case .room(let r) = m.place { return r }; return nil }()
-                let hereLane = doorLanes.lane(at: m.cell, inRoom: inRoom, headedTo: headedTo)
-                let nextLane = doorLanes.lane(at: Cell(x: Int(next.x.rounded()), y: Int(next.y.rounded())), inRoom: inRoom, headedTo: headedTo)
-                let laneWait = doorClaims.step(walker: m.id, from: hereLane, to: nextLane, held: &m.heldLane, at: clock) { minions[$0] != nil }
-                m.blockedBy = ahead?.id
-                if laneWait {
-                    m.waitingOn = "the doorway"   // a named wait: the reconciler allows it its time
-                    m.facing = atan2(d.x, d.y)
-                } else if let ahead {
-                    // Right of way: of two who meet, one holds and the other goes round, always the same
-                    // one. A load outranks a job, a job outranks rest, and names settle a tie. The one
-                    // who holds still steps round after a while in case the other is not moving at all.
-                    m.blockedFor += dt
-                    m.facing = atan2(d.x, d.y)
-                    // Someone standing idle in the way, with nowhere to be, steps aside to a free spot beside them.
-                    // So does someone waiting outside a doorway, when the one coming through needs that spot.
-                    let doorWaiter = ahead.waitingOn == "the doorway"
-                    if m.blockedFor > 0.6, (ahead.path.isEmpty && (ahead.current?.isRest ?? true)) || doorWaiter, !ahead.lying, ahead.couch == nil,
-                       ahead.carried == nil, clock - ahead.lastReplanAt >= 2, let st = fleet.stations[ahead.station] {
-                        let nextCell = Cell(x: Int(target.x.rounded()), y: Int(target.y.rounded()))
-                        let doors = Set(st.rooms.keys.compactMap { st.doorCell(of: $0) })
-                        let here = st.room(at: ahead.cell)?.key
-                        let options = ahead.cell.neighbours.filter { c in
-                            st.walkable.contains(c) && c != nextCell && c != m.cell && !doors.contains(c) && !doorLanes.touches(c) && st.room(at: c)?.key == here
-                                && !minions.values.contains { $0.id != ahead.id && $0.station == ahead.station && $0.cell == c }
-                        }
-                        if let aside = options.randomElement() {
-                            ahead.lastReplanAt = clock
-                            if doorWaiter { ahead.path.insert(SIMD2(Double(aside.x), Double(aside.y)), at: 0) }   // out of the way, then on as before
-                            else { ahead.path = route(ahead, to: aside) }
-                            m.blockedFor = 0
-                        }
-                    }
-                    let yields = rightOfWay(m) < rightOfWay(ahead)
-                    if m.blockedFor > (yields ? 0.4 : 3.0), clock - m.lastReplanAt >= 1, let last = m.path.last {
-                        m.blockedFor = 0
-                        m.lastReplanAt = clock
-                        let goal = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
-                        var fresh = route(m, to: goal, round: ahead.id)
-                        // Yielding means moving: where no way round exists, a doorway say, the one who yields
-                        // steps a third of a tile to the side, out of the other's line, and goes on from there.
-                        let stillBlocked = fresh.first.map { (ahead.pos.x - $0.x) * (ahead.pos.x - $0.x) + (ahead.pos.y - $0.y) * (ahead.pos.y - $0.y) < 0.26 * 0.26 } ?? true
-                        if yields, stillBlocked {
-                            let side = SIMD2(-d.y, d.x) / max(dist, 0.001) * 0.34
-                            let options = [m.pos + side, m.pos - side].filter { p in
-                                station.walkable.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) && !station.obstacles.contains(Station.sub(p))
-                            }
-                            if let aside = options.max(by: { a, b in
-                                (a.x - ahead.pos.x) * (a.x - ahead.pos.x) + (a.y - ahead.pos.y) * (a.y - ahead.pos.y)
-                                    < (b.x - ahead.pos.x) * (b.x - ahead.pos.x) + (b.y - ahead.pos.y) * (b.y - ahead.pos.y) }) {
-                                fresh = [aside] + station.path(from: aside, to: goal, avoiding: crowd(around: m, round: ahead.id))
-                            }
-                        }
-                        m.path = fresh
-                    }
-                } else {
-                    m.blockedFor = 0
-                    if dist <= step { m.pos = target; m.path.removeFirst() } else { m.pos = next }
-                    m.facing = atan2(d.x, d.y)
+                let step = speed * dt
+                let (aim, near) = Walk.aim(m, target: target, others: others, station: station)
+                let d = aim - m.pos
+                let dist = (d.x * d.x + d.y * d.y).squareRoot()
+                let next = dist <= step ? aim : m.pos + d / dist * step
+                m.blockedBy = near?.id
+                let clear = !others.contains { o in (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < Walk.solid * Walk.solid
+                                                   && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0 }
+                if clear {
+                    m.pos = next
+                    // There, or beside it when someone stands on the spot: on to the next waypoint. A body
+                    // standing on the walk's last spot is passed by an arm's length, not waited for.
+                    let arrived = (aim.x - m.pos.x) * (aim.x - m.pos.x) + (aim.y - m.pos.y) * (aim.y - m.pos.y) < Walk.arrive * Walk.arrive
+                    if arrived { if near == nil { m.pos = target }; m.path.removeFirst() }
+                } else if let near, near.path.isEmpty || near.wedged, m.path.count == 1 {
+                    // Someone standing on the walk's last spot, with no side to pass on: this is as far as
+                    // the walk goes, an arm's length off, and what comes next is done from here.
+                    m.path.removeFirst()
                 }
+                m.facing = atan2(d.x, d.y)
             } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
                 switch m.current?.kind {
                 case .stow:

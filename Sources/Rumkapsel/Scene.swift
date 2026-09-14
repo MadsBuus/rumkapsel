@@ -235,10 +235,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var liveTimeScale = 1.0
     /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
-    /// Doorways as one-lane sections, per station. Rebuilt on the beat.
-    var lanes: [String: DoorLanes] = [:]
-    /// Who is going through a doorway, and until when on the station clock the claim holds unless renewed.
-    var doorClaims = LaneClaims()
     var clock = 0.0
     var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     var targetFocus = SIMD2<Double>(0, 0)
@@ -1020,7 +1016,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
-            rebuildLanes()
             replanBlockedWalks()
         }
         tickShuttles()
