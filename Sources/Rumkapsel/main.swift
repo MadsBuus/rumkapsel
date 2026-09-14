@@ -143,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
                 if galleryMode { gallery?.snapshot(to: path) }
                 else if let sim = simulator {
                     sim.snapshot(to: path)
+                    sim.station.dumpState()   // every body and order at this moment, to station.log beside the picture
                     // The scripted run's whole story, so a check can read it rather than the picture.
                     FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)
                 }

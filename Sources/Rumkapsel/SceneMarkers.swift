@@ -25,6 +25,16 @@ extension StationController {
         for m in minions.values {
             for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
         }
+        // A rocket on its pad is walked round, never through: its hull is an obstacle, the hull alone,
+        // not the fins, the hold's ring or the steam, so its foot stays reachable for loading.
+        for r in rocketActors.values where r.node.parent != nil {
+            guard let st = fleet.stations[r.station] else { continue }
+            let p = SIMD2(Double(r.node.position.x) - st.offset.x, Double(r.node.position.z) - st.offset.y)
+            let hull = 0.3, f = Double(Station.fine)
+            for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
+                for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
+            }
+        }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile.
         for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
             let key = String(n.name!.dropFirst(5))

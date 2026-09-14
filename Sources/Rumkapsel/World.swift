@@ -854,11 +854,20 @@ final class World {
     }
 
     /// On the floor in front of the loading hatch, on the deck side of the hull: an ordinary set-down.
+    /// Where a crate for a rocket goes: at the foot of that repository's own rocket, in front of it,
+    /// and the carrier stands on the tile in front of that. The rocket's place on the pad is the same
+    /// rule the scene draws it by: repositories with a rocket, in name order, on the pad's slots.
+    static let padSlotOffsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
     func padSpot(station: Station, repo: String) -> Spot {
-        let cell = station.padCells.first ?? Cell(x: 0, y: 0)
-        let pc = station.padCenter
+        let slot = padRockets().sorted().firstIndex(of: station.name + "|" + repo) ?? 0
+        let pc = station.padCenter + World.padSlotOffsets[slot % World.padSlotOffsets.count]
+        // The foot: a tile's length before the hull, so the tile it rounds to is clear of the rocket and the
+        // carrier can stand on it, an arm's length back, and the crate goes down between them and the hull.
+        let foot = SIMD2(pc.x, pc.y + 1.05)
+        let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))
+        let cell = station.padCells.contains(stand) ? stand : (station.padCells.first ?? Cell(x: 0, y: 0))
         return Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
-                    pos: SIMD3(station.offset.x + pc.x, 0, station.offset.y + pc.y + 0.5))
+                    pos: SIMD3(station.offset.x + foot.x, 0, station.offset.y + foot.y))
     }
 
     /// Stacks are built from the ground up. If a landing place has come out with air under it, a crate

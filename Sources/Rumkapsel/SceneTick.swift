@@ -412,7 +412,23 @@ extension StationController {
                     let yields = rightOfWay(m) < rightOfWay(ahead)
                     if m.blockedFor > (yields ? 0.4 : 3.0), let last = m.path.last {
                         m.blockedFor = 0
-                        m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())), round: ahead.id)
+                        let goal = Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded()))
+                        var fresh = route(m, to: goal, round: ahead.id)
+                        // Yielding means moving: where no way round exists, a doorway say, the one who yields
+                        // steps a third of a tile to the side, out of the other's line, and goes on from there.
+                        let stillBlocked = fresh.first.map { (ahead.pos.x - $0.x) * (ahead.pos.x - $0.x) + (ahead.pos.y - $0.y) * (ahead.pos.y - $0.y) < 0.26 * 0.26 } ?? true
+                        if yields, stillBlocked {
+                            let side = SIMD2(-d.y, d.x) / max(dist, 0.001) * 0.34
+                            let options = [m.pos + side, m.pos - side].filter { p in
+                                station.walkable.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) && !station.obstacles.contains(Station.sub(p))
+                            }
+                            if let aside = options.max(by: { a, b in
+                                (a.x - ahead.pos.x) * (a.x - ahead.pos.x) + (a.y - ahead.pos.y) * (a.y - ahead.pos.y)
+                                    < (b.x - ahead.pos.x) * (b.x - ahead.pos.x) + (b.y - ahead.pos.y) * (b.y - ahead.pos.y) }) {
+                                fresh = [aside] + station.path(from: aside, to: goal, avoiding: crowd(around: m, round: ahead.id))
+                            }
+                        }
+                        m.path = fresh
                     }
                 } else {
                     m.blockedFor = 0
@@ -661,7 +677,10 @@ extension StationController {
                             let rocketReady = rocketActors.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
                             let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
                             // Somewhere to stand: a cell whose centre is clear, never one buried under crates.
+                            // Never in a doorway, the yard's or a room's: a body standing there shuts it.
+                            let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
                             let spots = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
+                                .filter { !doorways.contains($0) }
                                 .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }   // the whole cell clear
                             if let spot = spots.randomElement() {
                                 start(m, .chore(spot: spot))

@@ -565,6 +565,11 @@ final class ScenarioRunner {
         if verbose {
             say("--- \(s.name) ---")
             for l in sim.model.logLines { say("    " + l) }
+            // Every body at the end, for the failures the records do not explain.
+            for m in sim.station.minions.values.sorted(by: { $0.home.name < $1.home.name }) {
+                let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""
+                say("    body  \(m.home.name): \(m.current?.words ?? "nothing") · \(m.phaseKind) at \(m.cell.x),\(m.cell.y) pos \(String(format: "%.2f,%.2f", m.pos.x, m.pos.y)) path \(m.path.count)\(spot)\(m.waitingOn.map { " waiting on \($0)" } ?? "")\(m.carried != nil ? " carrying" : "")")
+            }
         }
         var reason: String?
         let violations = records.compactMap { if case .violation(let t) = $0 { return t }; return nil }

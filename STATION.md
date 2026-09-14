@@ -82,7 +82,9 @@ since real stations mandate both.
 - Two can pass each other on one tile, side by side, but never slide through each other: a body
   is solid at the middle of its tile, standing or lying, and the way past runs along the tile's edge.
   Whoever finds someone in the way waits a beat, then goes round. Someone on a couch or in bed is
-  on the furniture, off the walkway, and in nobody's way.
+  on the furniture, off the walkway, and in nobody's way. Where there is no way round, in a
+  doorway say, the one who yields steps a third of a tile aside and goes on from there.
+- A chore never stands in a doorway, the yard's or a room's: a body standing there shuts it.
 
 ## Tasks and work
 
@@ -133,6 +135,8 @@ since real stations mandate both.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
 - Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
 - When a rocket stands loaded and steaming, the idle drift toward the pad to watch.
+- A rocket is loaded from the front: the carrier walks straight to the tile before its hatch, sets
+  the crate down at its foot, and the crate goes in. Nobody walks through a rocket.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
   chores when bored, a turn in the gym when the lounge gets dull; leave through the airlock when
