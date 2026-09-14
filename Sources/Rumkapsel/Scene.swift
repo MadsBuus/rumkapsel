@@ -222,6 +222,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
+    /// The bubble's row of orders, one glyph each, in `LoungeOrder` order.
+    var bubbleIcons: [SKSpriteNode] = []
+    /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
+    let bubbleLock = NSLock()
+    var bubbleHits: (minion: String, plate: CGRect, icons: [CGRect])?
+    var bubbleCursor: CGPoint?
     let shareDot = SKSpriteNode(color: NSColor(rgb: (0.35, 0.85, 0.5)), size: CGSize(width: 7, height: 7))
     let shareLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     var legendNodes: [SKNode] = []
@@ -305,6 +311,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
+        view.hudTakesPoint = { [weak self] p in self?.bubbleTakes(point: p) ?? false }
+        view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node in let n = node?.name; self?.enqueue { self?.open(named: n) } }
         view.onClick = { [weak self] node in
             guard let n = node?.name else { return }
