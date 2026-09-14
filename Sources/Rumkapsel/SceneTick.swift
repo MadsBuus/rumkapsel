@@ -117,6 +117,23 @@ extension StationController {
         return (tiles[0], tiles[1], corner(tiles[0]), corner(tiles[1]))
     }
 
+    /// Where the bowl stands, in world x/z: into the toilet tile's corner, the tank against the wall behind it.
+    func bowlSpot(station: Station, bath: Room) -> SIMD2<Double> {
+        let f = bathFixtures(station: station, bath: bath)
+        return SIMD2(station.offset.x + Double(f.toilet.x) + 0.22 * f.toiletCorner.x, station.offset.y + Double(f.toilet.y) + 0.22 * f.toiletCorner.y)
+    }
+
+    /// The flush: a beat of water colour flickering in the bowl, then gone.
+    func flush(at bowl: SIMD2<Double>) {
+        let water = SCNNode(geometry: SCNBox(width: 0.13, height: 0.012, length: 0.13, chamferRadius: 0))
+        water.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
+        water.position = v3(bowl.x, 0.205, bowl.y)
+        water.opacity = 0
+        propRoot.addChildNode(water)
+        let blink = SCNAction.sequence([.fadeOpacity(to: 1, duration: 0.06), .fadeOpacity(to: 0.3, duration: 0.1)])
+        water.runAction(.sequence([.repeat(blink, count: 5), .fadeOut(duration: 0.2), .removeFromParentNode()]))
+    }
+
     /// Where the shower's water comes from, in world x/z: the nozzle over the shower tile's corner.
     func showerNozzle(station: Station, bath: Room) -> SIMD2<Double> {
         let f = bathFixtures(station: station, bath: bath)
@@ -730,8 +747,27 @@ extension StationController {
                                 let fall = SCNAction.move(to: v3(drop.position.x, 0.02, drop.position.z), duration: 0.32); fall.timingMode = .easeIn
                                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
                             }
+                            if !m.showering, let bath = station.rooms["kind:bath"] {
+                                // The bowl: turn round and sit, a fidget now and then, up again just before the
+                                // visit ends with the flush behind. All on the visit's own clock.
+                                let standAt = m.phaseUntil - 0.7
+                                let bowl = bowlSpot(station: station, bath: bath)
+                                if !m.seated, clock < standAt, m.phaseUntil > 0 {
+                                    let to = bowl - station.offset - m.pos
+                                    m.facing = atan2(-to.x, -to.y)   // back to the bowl
+                                    m.setSeated(true, at: SIMD2(0, 0.02 - (to.x * to.x + to.y * to.y).squareRoot()))
+                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3)
+                                } else if m.seated, clock >= standAt {
+                                    m.setSeated(false)
+                                    flush(at: bowl)
+                                } else if m.seated, clock >= m.nextFidgetAt {
+                                    m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
+                                    m.fidget()
+                                }
+                            }
                         }
                         if clock >= m.phaseUntil && settled {   // done; work waits its turn
+                            m.setSeated(false)
                             m.setStatic(false, frame: 0)
                             m.fixture = nil
                             var back = restPlace(m)

@@ -152,7 +152,9 @@ since real stations mandate both.
 - The dorm, lounge and bath touch each other off the corridor, the gym beside them; the yard blocks
   join by doorways of their own and keep their aisles clear.
 - A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
-  with the pixels where they belong. Nobody wanders off mid-shower.
+  with the pixels where they belong. Nobody wanders off mid-shower. A pee is a sit: turn round, down
+  onto the bowl, back to the tank, a shuffle on the seat now and then, up again as the time runs out,
+  and the bowl flushes behind.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
   pace, a stroll a third; getting up from bed is slow, then quicker.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
