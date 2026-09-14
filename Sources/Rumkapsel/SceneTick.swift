@@ -460,7 +460,7 @@ extension StationController {
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                         && !o.lying && !(o.couch != nil && o.path.isEmpty)
                 }
-                m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others, station: station)?.id
+                m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others)?.id
             } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
                 switch m.current?.kind {
                 case .stow:
@@ -614,7 +614,6 @@ extension StationController {
                         if m.carried == nil {
                             lift(m, job.node)
                             self.world.pickedUp(crate, by: m.id)   // truth from the pickup: nobody else may move it
-                            cargo[id]?.issuedAt = clock                   // the last leg: the carry itself has its own patience
                         }
                         if clock < m.phaseUntil { continue }
                         advance(m)
@@ -814,7 +813,9 @@ extension StationController {
             let resting = m.path.isEmpty && m.state == .settled
             if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.setSleeping(true) }
             let jump = jumping && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
-            m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
+            // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
+            m.drawnLean += (m.lean - m.drawnLean) * min(1, dt * 8)
+            m.node.position = v3(station.offset.x + m.pos.x + m.drawnLean.x, jump + bunkLift, station.offset.y + m.pos.y + m.drawnLean.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting

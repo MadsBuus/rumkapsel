@@ -87,7 +87,7 @@ extension StationController {
         // from the pending slot after a pack. Somebody else already on it means this one stands down.
         if case .carry = c.kind, let job = cargo[c.id] {
             if let who = job.carrier, who != m.id { m.pending = nil; if m.current == nil { send(m, to: restPlace(m)) }; return }
-            if job.carrier == nil { cargo[c.id]?.carrier = m.id; cargo[c.id]?.issuedAt = clock }
+            if job.carrier == nil { cargo[c.id]?.carrier = m.id }
         }
         issue(c, by: m.home.name)
         // Redirected mid-carry: keep the crate and walk on to the new spot.
@@ -590,7 +590,7 @@ extension StationController {
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard) else { return }
         node.name = "haul"
-        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, issuedAt: clock)
+        cargo[command.id] = Cargo(command: command, node: node, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim)
     }
 
     /// Drops every carry tied to a room, freeing whoever was carrying.
@@ -665,22 +665,13 @@ extension StationController {
             let all = minions.values.filter { $0.station == crate.station && !$0.onJob && $0.carried == nil && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
             let fresh = all.filter { !job.gaveUp.contains($0.id) }
             let free = fresh.isEmpty ? all : fresh
-            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else {
-                if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
-                continue
-            }
+            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else { continue }
             assign(m, job.command, announce: true)
             guard m.current?.id == job.command.id else { continue }
             cargo[id]?.carrier = m.id
-            cargo[id]?.issuedAt = clock   // a new leg: the walk to the crate and the carry get their own patience
             m.bed = nil
             m.couch = nil   // off the couch: the seat is free for someone else
             m.path = route(m, to: standCell(station, near: from.cell))
-        }
-        // Truth before the picture: a carry that has not landed within its patience, whoever has it,
-        // is set down where its order says and the station catches up in one move.
-        for (id, job) in cargo where job.carrier != nil {
-            if let patience = job.command.patience, clock - job.issuedAt > patience { setDownLate(id, job) }
         }
         // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
         for (id, job) in cargo where job.carrier != nil && !job.hurry {
@@ -694,19 +685,6 @@ extension StationController {
         }
         tickRockets()
         servicePallets()
-    }
-
-    /// The carry's patience ran out: the crate is down where the order says, whoever was carrying it
-    /// lets go, and the log says the station caught up. The picture takes the snap; the ledger is right.
-    private func setDownLate(_ id: Int, _ job: Cargo) {
-        guard case .carry(let crate, _, let yard) = job.command.kind else { return }
-        cargo[id] = nil
-        let m = job.carrier.flatMap { minions[$0] }
-        if let m, m.carried === job.node { m.carried = nil }
-        world.setDown(crate, at: job.aim)
-        handle(.log("\(crate.words) set down late in \(yard.words): the station caught up"))
-        job.onDone()
-        if let m, m.current?.id == id { finish(m) }
     }
 
     /// The board put a crate back where it stands while a carry was under way: the order is off. On

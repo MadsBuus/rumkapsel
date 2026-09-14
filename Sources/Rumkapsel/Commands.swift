@@ -51,10 +51,6 @@ struct Command {
     let kind: Kind
     /// Commands that must finish first: the crates stacked above this one, moved aside.
     let after: [Int]
-    /// Must be true by: after this the reconciler stops waiting for the carry and lets the change
-    /// appear where it stands.
-    /// How long a carry may wait for a carrier, in station seconds, before it is let land where it stands.
-    let patience: Double?
     /// For the log and the speech bubble.
     let words: String
 
@@ -221,42 +217,40 @@ struct Command {
     private static var nextId = 0
     static func nextCommandId() -> Int { nextId += 1; return nextId }
 
-    init(kind: Kind, words: String, patience: Double? = nil, after: [Int] = []) {
+    init(kind: Kind, words: String, after: [Int] = []) {
         self.id = Command.nextCommandId()
         self.kind = kind
         self.words = words
-        self.patience = patience
         self.after = after
     }
 
-    private init(id: Int, kind: Kind, words: String, patience: Double?, after: [Int]) {
-        self.id = id; self.kind = kind; self.words = words; self.patience = patience; self.after = after
+    private init(id: Int, kind: Kind, words: String, after: [Int]) {
+        self.id = id; self.kind = kind; self.words = words; self.after = after
     }
 
     /// The same carry, the same order, bound for another yard: what a carrier is handed when the
     /// board changes its mind and the crate goes back where it came from.
     func aimed(at yard: Yard) -> Command {
         guard case .carry(let crate, let from, _) = kind else { return self }
-        return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", patience: patience, after: after)
+        return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", after: after)
     }
 
     /// The same carry from where the crate lies now: after a give-up, the next carrier starts there.
     func from(_ spot: Spot) -> Command {
         guard case .carry(let crate, _, let to) = kind else { return self }
-        return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words, patience: patience, after: after)
+        return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words, after: after)
     }
 
     /// The same command said differently: for hover and the log when its pace changes.
     func reworded(_ words: String) -> Command {
-        Command(id: id, kind: kind, words: words, patience: patience, after: after)
+        Command(id: id, kind: kind, words: words, after: after)
     }
 
     // MARK: the usual ones
 
-    static func carry(_ crate: CrateRef, from: Spot, to: Yard, within seconds: TimeInterval = 90, after: [Int] = []) -> Command {
+    static func carry(_ crate: CrateRef, from: Spot, to: Yard, after: [Int] = []) -> Command {
         Command(kind: .carry(crate: crate, from: from, to: to),
-                words: "carrying \(crate.words) to \(to.words)",
-                patience: seconds, after: after)
+                words: "carrying \(crate.words) to \(to.words)", after: after)
     }
 
     static func deliverOffice(order: Int, name: String) -> Command {

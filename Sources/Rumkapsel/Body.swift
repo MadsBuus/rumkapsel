@@ -95,6 +95,8 @@ class Body {
     var napping = false
     /// When this walk was last planned again because the floor changed under it: at most once a second.
     var lastReplanAt = -10.0
+    /// How far the figure is drawn off the body's line while passing someone: a shoulder to the right. Drawing only.
+    var lean = SIMD2<Double>(0, 0)
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false
