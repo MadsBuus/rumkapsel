@@ -438,32 +438,12 @@ extension StationController {
             if let target = m.path.first, clock >= m.wonderUntil {
                 // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
                 // the line. The other does the same, so two head-on pass without either stopping or
-                // planning again. Where there is no room to pass, hold still until there is; standing
-                // still is never a fault. Someone on a couch or in bed is on the furniture, not in the way.
+                // planning again. Someone on a couch or in bed is on the furniture, not in the way.
                 let others = minions.values.filter { o in
                     o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
                         && !o.lying && !(o.couch != nil && o.path.isEmpty)
                 }
-                let step = speed * dt
-                let (aim, near) = Walk.aim(m, target: target, others: others, station: station)
-                let d = aim - m.pos
-                let dist = (d.x * d.x + d.y * d.y).squareRoot()
-                let next = dist <= step ? aim : m.pos + d / dist * step
-                m.blockedBy = near?.id
-                let clear = !others.contains { o in (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < Walk.solid * Walk.solid
-                                                   && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0 }
-                if clear {
-                    m.pos = next
-                    // There, or beside it when someone stands on the spot: on to the next waypoint. A body
-                    // standing on the walk's last spot is passed by an arm's length, not waited for.
-                    let arrived = (aim.x - m.pos.x) * (aim.x - m.pos.x) + (aim.y - m.pos.y) * (aim.y - m.pos.y) < Walk.arrive * Walk.arrive
-                    if arrived { if near == nil { m.pos = target }; m.path.removeFirst() }
-                } else if let near, near.path.isEmpty || near.wedged, m.path.count == 1 {
-                    // Someone standing on the walk's last spot, with no side to pass on: this is as far as
-                    // the walk goes, an arm's length off, and what comes next is done from here.
-                    m.path.removeFirst()
-                }
-                m.facing = atan2(d.x, d.y)
+                m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others, station: station)?.id
             } else if m.path.isEmpty {   // a wonder beat with a walk ahead is still a walk: nothing acts yet
                 switch m.current?.kind {
                 case .stow:

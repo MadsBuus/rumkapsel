@@ -80,10 +80,10 @@ since real stations mandate both.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
 - Two never slide through each other: a body is solid at the middle of its tile, standing or lying.
-  A walker who finds someone in its way, standing or coming, drifts a third of a tile to the side
-  away from them, passes, and drifts back onto its line; the other does the same, so two meeting
-  head-on pass without either stopping or planning again, in a doorway as anywhere. Where there is
-  no room to pass, the walker holds still until there is; standing still is never a fault. Someone
+  A walker who finds someone in its way, standing or coming, drifts a third of a tile to its own
+  right, passes, and drifts back onto its line; the other does the same, so two meeting
+  head-on pass without either stopping or planning again, in a doorway as anywhere. Nobody ever
+  stops for anybody: where the floor leaves no side to step to, two may overlap for a moment. Someone
   on a couch or in bed is on the furniture, off the walkway, and in nobody's way. Nobody settles in
   a doorway. Every timing on the station runs on the station clock, so holding space speeds all of
   it up alike.

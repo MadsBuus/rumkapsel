@@ -18,41 +18,70 @@ enum WalkTests {
 
         test("a clear line is walked straight at the waypoint") {
             let m = body("a", 0, 0)
-            let (aim, near) = Walk.aim(m, target: SIMD2(1, 0), others: [], station: station)
-            expect(aim == SIMD2(1, 0) && near == nil, "aimed \(aim)")
+            let (aim, near, side) = Walk.aim(m, target: SIMD2(1, 0), others: [], station: station)
+            expect(aim == SIMD2(1, 0) && near == nil && side == .zero, "aimed \(aim)")
         }
 
-        test("someone on the waypoint is passed a third of a tile to the side, away from them") {
+        test("someone on the waypoint is passed a third of a tile to the walker's own right") {
             let m = body("a", 0, 0)
-            let o = body("b", 1, 0.1)   // a shade to the walker's left
-            let (aim, near) = Walk.aim(m, target: SIMD2(1, 0), others: [o], station: station)
+            let o = body("b", 1, 0)
+            let (aim, near, side) = Walk.aim(m, target: SIMD2(1, 0), others: [o], station: station)
             expect(near?.id == "b", "in the way")
-            expect(abs(aim.x - 1) < 1e-9 && abs(aim.y + Walk.sidestep) < 1e-9, "aimed past on the far side, got \(aim)")
+            expect(abs(aim.x - 1) < 1e-9 && abs(aim.y + Walk.sidestep) < 1e-9, "aimed past on the right, got \(aim)")
+            expect(side.y < 0, "and the sidestep points the same way: \(side)")
         }
 
         test("someone behind is nobody's business") {
             let m = body("a", 0, 0)
             let o = body("b", -0.5, 0)
-            let (aim, near) = Walk.aim(m, target: SIMD2(1, 0), others: [o], station: station)
+            let (aim, near, _) = Walk.aim(m, target: SIMD2(1, 0), others: [o], station: station)
             expect(near == nil && aim == SIMD2(1, 0), "walked on")
         }
 
-        test("two head-on both aim to their own right and pass") {
+        test("two head-on both aim to their own right and so pass on opposite sides of the line") {
             let a = body("a", 0, 0), b = body("b", 1, 0)
-            let (aimA, _) = Walk.aim(a, target: SIMD2(1, 0), others: [b], station: station)
-            let (aimB, _) = Walk.aim(b, target: SIMD2(0, 0), others: [a], station: station)
+            let (aimA, _, _) = Walk.aim(a, target: SIMD2(1, 0), others: [b], station: station)
+            let (aimB, _, _) = Walk.aim(b, target: SIMD2(0, 0), others: [a], station: station)
             expect(aimA.y * aimB.y < 0, "on opposite sides of the line: \(aimA.y) and \(aimB.y)")
         }
 
         test("where no side is walkable the line is kept and the walker holds") {
             let m = body("a", 0, -3)            // the corridor's north arm ends at the core
             let o = body("b", 0, -2.5)
-            var lone = Station(name: "work")
-            _ = lone
-            let (aim, near) = Walk.aim(m, target: SIMD2(0, -2), others: [o], station: station)
+            let (aim, near, _) = Walk.aim(m, target: SIMD2(0, -2), others: [o], station: station)
             expect(near?.id == "b", "in the way")
             let cell = Cell(x: Int(aim.x.rounded()), y: Int(aim.y.rounded()))
             expect(station.walkable.contains(cell), "never aimed off the floor: \(aim)")
+        }
+
+        test("two on one spot heading the same way both get there") {
+            let a = body("a", 0, 0), b = body("b", 0, 0)
+            a.path = [SIMD2(1, 0), SIMD2(2, 0)]; b.path = [SIMD2(1, 0), SIMD2(2, 0)]
+            for _ in 0..<600 {
+                _ = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b], station: station)
+                _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a], station: station)
+            }
+            expect(a.path.isEmpty && b.path.isEmpty, "both arrived: a at \(a.pos) with \(a.path.count) left, b at \(b.pos) with \(b.path.count) left")
+        }
+
+        test("two on one spot heading opposite ways both get there") {
+            let a = body("a", 1, 0), b = body("b", 1, 0)
+            a.path = [SIMD2(2, 0)]; b.path = [SIMD2(0, 0)]
+            for _ in 0..<600 {
+                _ = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b], station: station)
+                _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a], station: station)
+            }
+            expect(a.path.isEmpty && b.path.isEmpty, "both arrived: a at \(a.pos), b at \(b.pos)")
+        }
+
+        test("a walker following another at the same pace still arrives") {
+            let a = body("a", 0, 0), b = body("b", 0.3, 0)
+            a.path = [SIMD2(1, 0), SIMD2(2, 0)]; b.path = [SIMD2(1, 0), SIMD2(2, 0)]
+            for _ in 0..<600 {
+                _ = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b], station: station)
+                _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a], station: station)
+            }
+            expect(a.path.isEmpty && b.path.isEmpty, "both arrived: a at \(a.pos) with \(a.path.count) left, b at \(b.pos) with \(b.path.count) left")
         }
 
         say(failures == 0 ? "walk: all passed" : "walk: \(failures) failed")
