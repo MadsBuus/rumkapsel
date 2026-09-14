@@ -137,6 +137,7 @@ final class World {
     }
 
     func checksFailing(_ room: Room) -> Bool {
+        if room.branch == nil, let po = peerPull("work|" + room.key) { return po.pullState == "OPEN" && po.checks == "failure" }
         guard let b = room.branch, let r = room.repoRoot, let pr = github.pull(branch: b, repoRoot: r) else { return false }
         return pr.state == "OPEN" && pr.checks == "failure"
     }
@@ -154,8 +155,22 @@ final class World {
     /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
     func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
-        return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key)
+        return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
     }
+
+    /// Someone is at work in a peer's office right now: a session awake in it on their machine.
+    func peerLive(_ key: String) -> Bool {
+        peerSnapshots.values.contains { entry in entry.snap.minions.contains { !$0.asleep && "work|" + $0.office == key } }
+    }
+    /// A peer's office in use but not on GitHub yet: drawn solid, with its outline kept as the mark.
+    func isLocalLive(_ station: Station, _ room: Room) -> Bool {
+        let key = roomKey(station, room)
+        return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && peerLive(key)
+    }
+    /// Every peer claiming this office says it is idle.
+    func peerDim(_ key: String) -> Bool { peerOffices[key].map { !$0.isEmpty && $0.values.allSatisfy(\.dim) } ?? false }
+    /// A peer's pull request on this office, as they last said.
+    func peerPull(_ key: String) -> PeerSnapshot.Office? { peerOffices[key]?.values.first { $0.pull != nil } }
 
     /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
     func occupant(of key: String) -> String? {
@@ -659,6 +674,7 @@ final class World {
         let isNewPeer = peerFirstSeen[snap.name] == nil
         if isNewPeer { peerFirstSeen[snap.name] = now; events.append(.peerArrived(snap.name)) }
         let bulk = isNewPeer || now.timeIntervalSince(peerFirstSeen[snap.name]!) < 15
+        let previousSnap = peerSnapshots[snap.name]?.snap
         peerSnapshots[snap.name] = (snap, now)
         let station = fleet.station("work")
         let sk = station.name + "|"
@@ -670,10 +686,14 @@ final class World {
         for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
             let key = sk + o.key
             live.insert(key)
+            let before = peerOffices[key]?[snap.name]
             peerOffices[key, default: [:]][snap.name] = o
+            // What the floor draws from the claim: the power on the tiles, the pull request on the package.
+            if before?.dim != o.dim { changed = true }
+            if before?.pull != o.pull || before?.pullState != o.pullState || before?.checks != o.checks || before?.review != o.review { markers = true }
             if o.pushed, pushedByPeer.insert(key).inserted { changed = true }   // an outline becomes a room
             let boxesBefore = peerBoxes[key]?.count
-            if o.boxes > 0 { peerBoxes[key] = (o.boxes, "NONE", o.color) } else { peerBoxes[key] = nil }
+            if o.boxes > 0 || o.pull != nil { peerBoxes[key] = (max(1, o.boxes), o.pullState ?? "NONE", o.color) } else { peerBoxes[key] = nil }
             if peerBoxes[key]?.count != boxesBefore { markers = true }
             if let r = station.rooms[o.key] {
                 r.lastActive = max(r.lastActive, o.lastActive, now)
@@ -694,6 +714,9 @@ final class World {
             peerOffices[key]?[snap.name] = nil
             if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; if peerBoxes.removeValue(forKey: key) != nil { markers = true } }
         }
+        // Someone starting or stopping work in an office changes whether it is outlined.
+        func working(_ s: PeerSnapshot?) -> Set<String> { Set((s?.minions ?? []).filter { !$0.asleep }.map { sk + $0.office }) }
+        if working(previousSnap) != working(snap) { changed = true }
         if changed { events.append(.layoutChanged) }
         else if markers { events.append(.markersChanged) }
 

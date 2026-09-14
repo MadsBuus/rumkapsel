@@ -500,6 +500,21 @@ enum Scenarios {
             let row = sim.station.world.fleet.stations["work"]!.ledger["ios", 298]
             return row?.placed == .storage && row?.heading == nil ? nil : "the ledger does not have #298 down in storage"
         }),
+        Scenario("a peer's office in use is solid, with a real minion in it", [
+            ("Target: web#455", 0.3),
+            ("Peer: New office", 3.0),
+        ], tail: 6, expects: [], floor: { sim in
+            let world = sim.station.world
+            guard let st = world.fleet.stations["work"], let snap = world.peerSnapshots.values.first?.snap else { return "no peer snapshot arrived" }
+            let working = snap.minions.filter { !$0.asleep }
+            if working.isEmpty { return "the peer sent no working minion" }
+            for m in working {
+                guard let room = st.rooms[m.office] else { return "no office \(m.office) for the peer's minion" }
+                if world.isProvisional(st, room) { return "\(room.name) is outlined while the peer works in it" }
+            }
+            return sim.station.peerFigures == snap.minions.count ? nil : "\(sim.station.peerFigures) peer figures for \(snap.minions.count) minions"
+        }),
+
         Scenario("a turn in the gym lasts its whole time", [
             ("Everyone to lounge", 3.0),
             ("Workout", 0.3),

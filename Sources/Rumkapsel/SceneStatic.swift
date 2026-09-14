@@ -398,7 +398,8 @@ extension StationController {
                 // commits add more, and pushing finishes it.
                 // Dark while it's just a conversation; lit as soon as a branch exists; power cut when left alone.
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
-                let powered = room.key.hasPrefix("kind:") || world.crewRoomInfo[key] != nil || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
+                let powered = (room.key.hasPrefix("kind:") || world.crewRoomInfo[key] != nil || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow)
+                    && !world.peerDim(key)   // a peer who says the office is idle: dimmed like our own idle ones
                 roomPower[key] = powered
                 let failing = world.checksFailing(room)
                 let dusty = world.isDusty(room)
@@ -437,7 +438,8 @@ extension StationController {
                     }
                 }
                 roomTiles[key] = tiles
-                if provisional, !pending {
+                // Outlined while not built; a peer's local office someone works in is solid and keeps the frame as a mark.
+                if provisional || world.isLocalLive(station, room), !pending {
                     // A thin frame round each tile's outer edges: reserved, not built.
                     let cellSet = Set(room.cells)
                     for c in room.cells {

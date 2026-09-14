@@ -109,9 +109,12 @@ extension StationController {
                     if world.haulOrdered(office: key) { continue }   // on its way to storage: drawn once, on the arms
                     count = min(16, max(1, cb.count))
                     // A teammate's pull request is a crate with its sticker; pushes before a PR are cubes.
-                    let prNumber = world.crewRoomInfo[key]?.prNumber
-                    let state = world.isClosed(key) ? "CLOSED" : (prNumber != nil ? "OPEN" : cb.state)
-                    pr = PullRequest(number: prNumber ?? 0, title: "", state: state, reviewDecision: "", isDraft: false, url: "")
+                    // A peer's pull request, as they said it, when GitHub has not told us about it here.
+                    let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
+                    let prNumber = world.crewRoomInfo[key]?.prNumber ?? peer?.pull
+                    let state = world.isClosed(key) ? "CLOSED" : (peer?.pullState ?? (prNumber != nil ? "OPEN" : cb.state))
+                    pr = PullRequest(number: prNumber ?? 0, title: "", state: state, reviewDecision: peer?.review ?? "", isDraft: false, url: "")
+                    pr?.checks = peer?.checks ?? ""
                     packaged = prNumber != nil || world.isClosed(key)
                 } else {
                     let local = world.localState(room)

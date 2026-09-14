@@ -239,6 +239,9 @@ extension StationController {
             if parts.count == 2, let station = fleet.stations[parts[0]], let r = station.rooms[parts[1]] {
                 infoLabel.text = roomInfo(station: station, room: r)
             }
+        } else if h.hasPrefix("minion:peer:") {
+            let who = h.dropFirst("minion:peer:".count).split(separator: "/").first.map(String.init) ?? ""
+            infoLabel.text = "\(who) · working on their own machine · shared on the local network"
         } else if h.hasPrefix("minion:") {
             if let m = minions[String(h.dropFirst(7))] {
                 var parts: [String] = []

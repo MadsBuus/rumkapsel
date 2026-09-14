@@ -194,7 +194,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let peers = PeerHub()
     var fadeIn: Set<String> = []
     private let peerRoot = SCNNode()
-    private var peerMinions: [String: (node: SCNNode, target: SIMD3<Double>)] = [:]
+    private var peerMinions: [String: (minion: Minion, target: SIMD3<Double>)] = [:]
+    /// How many of the peers' figures stand on the station, for the checks.
+    var peerFigures: Int { peerMinions.count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
     /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
@@ -705,15 +707,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let cfg = ConfigStore.shared.current
         guard let station = fleet.stations["work"] else { return nil }
         var offices: [PeerSnapshot.Office] = []
-        for r in station.rooms.values where r.worktree != nil && !r.key.hasPrefix("kind:") && (r.repo.map { cfg.shared(repo: $0) } ?? false) {
+        for r in station.rooms.values where r.worktree != nil && !r.key.hasPrefix("kind:") && (r.repo.map { cfg.shared(repo: $0) } ?? false)
+            && now.timeIntervalSince(r.lastActive) < World.roomsWindow {   // only what was worked in lately: old checkouts stay home
             let key = roomKey(station, r)
+            let pr = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
             offices.append(PeerSnapshot.Office(key: r.key, name: r.name, repo: r.repo ?? "", branch: r.branch, color: r.color, cells: r.cells,
                                                pushed: r.branch != nil && !world.localState(r).local,
                                                startedAt: world.roomCreated[key] ?? .distantPast, lastActive: r.lastActive,
-                                               boxes: lastBoxCount[key] ?? 0, dim: r.key.hasPrefix("proj:") || !(roomPower[key] ?? true)))
+                                               boxes: lastBoxCount[key] ?? 0, dim: r.key.hasPrefix("proj:") || !(roomPower[key] ?? true),
+                                               pull: pr?.number, pullState: pr?.state, review: pr?.reviewDecision, checks: pr?.checks))
         }
         let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
-            PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy)
+            PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy,
+                                activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.pyramids.count + $0.queuedCones.count)
         }
         var knowledge: [GitHubResolver.Knowledge]?
         var board: GitHubResolver.ProjectKnowledge?
@@ -745,24 +751,48 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
             let cell = cells[Int(rnd() * Double(cells.count)) % cells.count]
             let target = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.5, 0, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.5)
+            // A real minion in a teammate's grey, in the office they claim, posed the way their session is:
+            // asleep in the dorm, at work with the tablet out, waiting with empty hands and its cones standing.
+            let figure: Minion
             if let existing = peerMinions[id] {
-                peerMinions[id] = (existing.node, target)
+                figure = existing.minion
             } else {
-                let n = SCNNode(geometry: SCNBox(width: 0.22, height: 0.5, length: 0.11, chamferRadius: 0.01))
-                n.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.62, 0.78)))
-                n.position = v3(target.x, 0.25, target.z)
-                n.name = "peer:" + snap.name
-                peerRoot.addChildNode(n)
-                peerMinions[id] = (n, target)
+                figure = Minion(id: "peer:" + id, station: station.name, home: Home(key: m.office, name: snap.name, repo: "", issue: nil),
+                                cwd: "", toolCount: 0, isSubagent: false, start: cell, crew: true)
+                figure.node.position = v3(target.x, 0, target.z)
+                figure.node.opacity = 1
+                peerRoot.addChildNode(figure.node)
             }
-            peerMinions[id]?.node.eulerAngles.x = m.asleep ? -.pi / 2 : 0
+            peerMinions[id] = (figure, target)
+            figure.setSleeping(m.asleep)
+            figure.setTool(m.asleep || m.waiting == true || !m.busy ? nil : .tablet)
+            let cones = m.asleep ? 0 : (m.cones ?? 0)
+            if figure.pyramids.count + figure.queuedCones.count != cones {
+                clearPyramids(figure)
+                figure.queuedCones.forEach { $0.removeFromParentNode() }
+                figure.queuedCones = []
+                if cones > 0 {
+                    addPyramid(for: figure)
+                    for _ in 1..<max(1, cones) { addPyramid(for: figure, queued: true) }
+                }
+            }
         }
         let liveMinions = Set(snap.minions.map { "\(snap.name)/\($0.id)" })
-        for (id, pm) in peerMinions where id.hasPrefix(snap.name + "/") && !liveMinions.contains(id) { pm.node.removeFromParentNode(); peerMinions[id] = nil }
+        for id in peerMinions.keys where id.hasPrefix(snap.name + "/") && !liveMinions.contains(id) { removePeerFigure(id) }
+    }
+
+    /// A peer's figure leaves: its body and its cones.
+    private func removePeerFigure(_ id: String) {
+        guard let pm = peerMinions[id] else { return }
+        clearPyramids(pm.minion)
+        pm.minion.queuedCones.forEach { $0.removeFromParentNode() }
+        pm.minion.node.removeFromParentNode()
+        peerMinions[id] = nil
     }
 
     /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
     func dropPeer(_ name: String) {
+        for id in peerMinions.keys where id.hasPrefix(name + "/") { removePeerFigure(id) }   // their figures leave with them
         handle(world.dropPeer(name))
         flushScene()
     }
@@ -986,10 +1016,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tickPallets()
         tickCrateMotions()
         for (id, pm) in peerMinions {
-            let p = SIMD3(Double(pm.node.position.x), 0, Double(pm.node.position.z))
+            let p = SIMD3(Double(pm.minion.node.position.x), 0, Double(pm.minion.node.position.z))
             let d = pm.target - p
             let step = min(1, dt * 2)
-            pm.node.position.x += CGFloat(d.x * step); pm.node.position.z += CGFloat(d.z * step)
+            pm.minion.node.position.x += CGFloat(d.x * step); pm.minion.node.position.z += CGFloat(d.z * step)
             _ = id
         }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {

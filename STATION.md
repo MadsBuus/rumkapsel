@@ -123,6 +123,16 @@ since real stations mandate both.
   before a job, a job before rest, and names settle a tie. The one who holds steps round after a
   while in case the other is not moving at all.
 
+## Sharing
+
+- Only offices worked in within the last twelve hours are shared, and only in repositories ticked for it.
+- A shared office carries its life: who is in it and whether they are working, waiting or asleep, their
+  message cones, and its pull request with the checks. A peer's minion is a real minion in a teammate's grey.
+- An office on GitHub is solid. One only on the peer's machine is outlined while idle, and solid with its
+  outline kept as a mark while someone works in it. An office its peer calls idle is dimmed.
+- An office a connected peer stops claiming goes on the next pass; a peer who disconnects has theirs held
+  for a day, so their return does not move it.
+
 ## Rooms
 
 - A room opens to the corridor through one doorway: the room tile that touches the hallway. Nothing

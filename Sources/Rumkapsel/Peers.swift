@@ -10,8 +10,14 @@ struct PeerSnapshot: Codable {
         var startedAt: Date      // when this checkout appeared here: a fresh one earns a shuttle
         var lastActive: Date
         var boxes: Int; var dim: Bool
+        /// The office's pull request, if it has one: number, state, review and checks. Absent from older peers.
+        var pull: Int? = nil; var pullState: String? = nil; var review: String? = nil; var checks: String? = nil
     }
-    struct Minion: Codable { var id: String; var office: String; var asleep: Bool; var busy: Bool }
+    struct Minion: Codable {
+        var id: String; var office: String; var asleep: Bool; var busy: Bool
+        /// What the session is doing, whether it waits on its person, and how many messages stand as cones.
+        var activity: String? = nil; var waiting: Bool? = nil; var cones: Int? = nil
+    }
     var version: Int
     var name: String
     var since: Date              // when this app started sharing
