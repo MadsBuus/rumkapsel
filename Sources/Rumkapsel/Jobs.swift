@@ -36,7 +36,7 @@ extension StationController {
     }
 
     func carriedRoom(of m: Minion) -> String? {
-        if case .deliverOffice(let key) = m.current?.kind { return "\(m.station)|\(key)" }
+        if case .deliverOffice(let id) = m.current?.kind { return world.truth.deliveries[id]?.key }
         return nil
     }
 
@@ -331,7 +331,10 @@ extension StationController {
         guard let station = fleet.stations[m.station], station.hasHangar, let room = station.rooms[roomKey],
               let anchor = hangarAnchors[m.station] else { return }
         let key = "\(station.name)|\(roomKey)"
-        let slotIndex = shipsInFlight(m.station) % station.hangarSlots.count
+        // A slot with nothing on it and no ship bound for it; every slot taken, the least recently ordered.
+        let slotIndex = world.truth.freeSlots(station: station.name, of: station.hangarSlots.count).first
+            ?? shipsInFlight(m.station) % station.hangarSlots.count
+        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m.id)
         let slotLocal = station.hangarSlots[slotIndex] - station.hangarCenter
         let slot = SIMD3(slotLocal.x, 0, slotLocal.y)
 
@@ -351,7 +354,7 @@ extension StationController {
         ship.position = v3(start.x, start.y, start.z)
         ship.look(at: v3(high.x, high.y, high.z), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
         anchor.addChildNode(ship)
-        let command = Command.flight(.dropCrate(roomKey: roomKey), station: m.station, slot: slotIndex,
+        let command = Command.flight(.dropCrate(order: order), station: m.station, slot: slotIndex,
                                      what: "the office for \(room.name)")
         let flight = Shuttle(node: ship, station: m.station, command: command, high: high, down: down, exit: exit,
                              restYaw: Double.random(in: 0..<(2 * .pi)), drift: Double.random(in: -0.6...0.6),
@@ -359,7 +362,7 @@ extension StationController {
             box.opacity = 1
             box.position = v3(slot.x, 0.42, slot.z)
             self?.moveCrate(box, legs: [MotionLeg(to: SIMD3(slot.x, 0.09, slot.z), seconds: 0.5, ease: .easeIn)])
-            self?.world.truth.crateInBay(key)   // the crate is on the floor now: a carrier may fetch it
+            self?.world.truth.crateLanded(order: order)   // on the floor now: it will be fetched, by whoever is free
         }
         // A hard sequence: the crate comes out only once its carrier stands at the slot. With no carrier
         // left for it, the ship unloads anyway and the crate waits on the floor.
@@ -367,13 +370,13 @@ extension StationController {
         flight.ready = { [weak self] in
             guard let self, let carrier = self.minions.values.first(where: { o in
                 guard o.station == stationName, case .deliverOffice(let k) = o.current?.kind else { return false }
-                return k == roomKey
+                return k == order
             }) else { return true }
             return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
         }
         launch(flight)
         drone.sweep(up: false)
-        assign(m, .deliverOffice(key: roomKey, name: room.name), announce: false)
+        assign(m, .deliverOffice(order: order, name: room.name), announce: false)
         m.place = .hangar
         m.fetchSpot = station.hangarSlots[slotIndex]
         walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])

@@ -63,7 +63,7 @@ struct Command {
         /// deck, either to the rocket. The yard alone: the slot is asked for with the crate on the arms.
         case carry(crate: CrateRef, from: Spot, to: Yard)
         /// Fetch a new office's crate from the bay and walk it in.
-        case deliverOffice(key: String)
+        case deliverOffice(order: Int)
         /// Somewhere to be: the lounge, the dorm, the hallway.
         case goTo(place: Place)
         case bath(kind: Bath, back: Place)
@@ -114,7 +114,7 @@ struct Command {
     /// What a shuttle is carrying in.
     enum Flight: Equatable {
         case bringWorker(String)
-        case dropCrate(roomKey: String)
+        case dropCrate(order: Int)
     }
 
     /// A rocket's stages, in the order they can only ever go.
@@ -258,8 +258,8 @@ struct Command {
                 patience: seconds, after: after)
     }
 
-    static func deliverOffice(key: String, name: String) -> Command {
-        Command(kind: .deliverOffice(key: key), words: "fetching \(name) from the bay")
+    static func deliverOffice(order: Int, name: String) -> Command {
+        Command(kind: .deliverOffice(order: order), words: "fetching \(name) from the bay")
     }
 
     static func bath(_ kind: Bath, back: Place) -> Command {
@@ -387,8 +387,24 @@ struct StationTruth {
 
     /// Offices on the floor whose crate has not been walked in yet, by "station|roomKey".
     private(set) var pendingOffices: Set<String> = []
-    /// Office crates a shuttle has set down in the bay, waiting to be fetched, by "station|roomKey".
-    private(set) var bayCrates: Set<String> = []
+    /// A new office's crate on its way in, by order number: the one identity the shuttle, the crate
+    /// on the floor and the carrier share, whatever the office is called by the time it lands. The
+    /// room key follows every rename; the order is done only when the crate is walked in.
+    struct DeliveryOrder: Equatable {
+        let id: Int
+        let station: String
+        var roomKey: String
+        let slot: Int
+        /// The session it was ordered for: its own worker fetches it when free.
+        let session: String?
+        /// Set down on the bay floor by the shuttle: from here it must be fetched, by anyone.
+        var landed = false
+        /// Who gave the fetch up: passed over while anyone else is free.
+        var gaveUp: Set<String> = []
+        var key: String { station + "|" + roomKey }
+    }
+    private(set) var deliveries: [Int: DeliveryOrder] = [:]
+    private var nextDelivery = 1
     /// One pallet per station at a time, by station name.
     private(set) var pallets: [String: Pallet] = [:]
     /// Pallets asked for while one is out, in the order they were asked for.
@@ -430,18 +446,35 @@ struct StationTruth {
     // MARK: offices
 
     mutating func officeOrdered(_ key: String) { pendingOffices.insert(key) }
+    /// The office is on the floor, or gone: nothing is owed to it any more, its order included.
     @discardableResult
-    mutating func officeDelivered(_ key: String) -> Bool { bayCrates.remove(key); return pendingOffices.remove(key) != nil }
+    mutating func officeDelivered(_ key: String) -> Bool {
+        for (id, d) in deliveries where d.key == key { deliveries[id] = nil }
+        return pendingOffices.remove(key) != nil
+    }
     func isPending(_ key: String) -> Bool { pendingOffices.contains(key) }
     mutating func renameOffice(from old: String, to new: String) {
         if pendingOffices.remove(old) != nil { pendingOffices.insert(new) }
-        if bayCrates.remove(old) != nil { bayCrates.insert(new) }
+        let parts = new.split(separator: "|", maxSplits: 1).map(String.init)
+        for (id, d) in deliveries where d.key == old && parts.count == 2 { deliveries[id]?.roomKey = parts[1] }
     }
 
-    /// A shuttle has set an office's crate down in the bay: from here a carrier may pick it up.
-    mutating func crateInBay(_ key: String) { bayCrates.insert(key) }
-    func isInBay(_ key: String) -> Bool { bayCrates.contains(key) }
-    mutating func tookFromBay(_ key: String) { bayCrates.remove(key) }
+    // MARK: deliveries
+
+    mutating func orderDelivery(station: String, roomKey: String, slot: Int, session: String?) -> Int {
+        let id = nextDelivery; nextDelivery += 1
+        deliveries[id] = DeliveryOrder(id: id, station: station, roomKey: roomKey, slot: slot, session: session)
+        return id
+    }
+    /// The shuttle has set the crate down: on the floor until somebody walks it in.
+    mutating func crateLanded(order id: Int) { deliveries[id]?.landed = true }
+    mutating func fetchGivenUp(order id: Int, by who: String) { deliveries[id]?.gaveUp.insert(who) }
+    func delivery(for key: String) -> DeliveryOrder? { deliveries.values.first { $0.key == key } }
+    /// Slots in a station's bay with nothing lying on them and no ship bound for them.
+    func freeSlots(station: String, of count: Int) -> [Int] {
+        let held = Set(deliveries.values.filter { $0.station == station }.map(\.slot))
+        return (0..<count).filter { !held.contains($0) }
+    }
 
 
 }

@@ -92,9 +92,9 @@ extension StationController {
 
     /// Every worker, once a frame: its walk, its pose, its props.
     /// A shuttle that dropped this office's crate and has not risen from the slot yet.
-    func shipStillOver(roomKey: String, station: String) -> Bool {
+    func shipStillOver(order: Int, station: String) -> Bool {
         shuttles.contains { s in
-            guard s.station == station, case .flight(let kind, _, _) = s.command.kind, case .dropCrate(let key) = kind, key == roomKey else { return false }
+            guard s.station == station, case .flight(let kind, _, _) = s.command.kind, case .dropCrate(let id) = kind, id == order else { return false }
             return s.phase < 3   // approach, descend, unload
         }
     }
@@ -398,6 +398,7 @@ extension StationController {
                         && (o.pos.x - next.x) * (o.pos.x - next.x) + (o.pos.y - next.y) * (o.pos.y - next.y) < 0.26 * 0.26
                         && ((o.pos.x - m.pos.x) * d.x + (o.pos.y - m.pos.y) * d.y) > 0   // in front, not behind
                 }
+                m.blockedBy = ahead?.id
                 if let ahead {
                     // Right of way: of two who meet, one holds and the other goes round, always the same
                     // one. A load outranks a job, a job outranks rest, and names settle a tie. The one
@@ -442,10 +443,17 @@ extension StationController {
                     finish(m)
                     send(m, to: m.place)
                     continue
-                case .deliverOffice(let r):
+                case .deliverOffice(let id):
                     // Off the shuttle and into the office: the crate is fetched from the bay, lifted the
                     // way any crate is lifted, and set down on the office's own slot before the reveal.
-                    let key = "\(m.station)|\(r)"
+                    // The order is the identity; the room it goes to is whatever the order says now.
+                    guard let order = world.truth.deliveries[id] else {
+                        // Delivered by someone else, or the office is gone: nothing to fetch.
+                        m.carried?.removeFromParentNode(); m.carried = nil
+                        finish(m); continue
+                    }
+                    let r = order.roomKey
+                    let key = order.key
                     let slot = officeCrateSlot(station: station, roomKey: r)
                     switch m.phaseKind {
                     case .walk:
@@ -456,8 +464,8 @@ extension StationController {
                             let d = spot - m.pos
                             if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
                         }
-                        if boxes[key] != nil, !world.truth.isInBay(key) { m.waitingOn = "the crate to come down"; continue }
-                        if shipStillOver(roomKey: r, station: m.station) { m.waitingOn = "the ship to lift off"; continue }
+                        if !order.landed { m.waitingOn = "the crate to come down"; continue }
+                        if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; continue }
                         if let spot = m.fetchSpot {
                             m.fetchSpot = nil
                             m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
@@ -475,10 +483,7 @@ extension StationController {
                         advance(m); continue
                     case .lift:
                         guard liftDue(m) else { continue }
-                        if m.carried == nil, let box = boxes[key] {
-                            world.truth.tookFromBay(key)
-                            lift(m, box)
-                        }
+                        if m.carried == nil, let box = boxes[key] { lift(m, box) }
                         if clock < m.phaseUntil { continue }
                         advance(m)
                         // The office went away while the crate was in the air: nothing to walk it into.

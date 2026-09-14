@@ -656,9 +656,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             assignTester(station: station, free: free)
         }
-        // Offices that appeared without a minion to deliver them just show up.
-        let pending = Set(minions.values.compactMap { m in carriedRoom(of: m) ?? newRooms[m.id].map { "\(m.station)|\($0)" } })
-        for key in undelivered where !pending.contains(key) {
+        // Offices that appeared without a shuttle ever ordered for them just show up. One with an order
+        // out, in the air or on the floor, is the delivery queue's: it is walked in, never conjured.
+        let pending = Set(minions.values.compactMap { m in newRooms[m.id].map { "\(m.station)|\($0)" } })
+        for key in undelivered where !pending.contains(key) && world.truth.delivery(for: key) == nil {
             layoutDirty = true
             world.truth.officeDelivered(key)
             outlines.removeValue(forKey: key)?.removeFromParentNode()
@@ -667,11 +668,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if layoutDirty {
             flushScene(firstRun: firstRun)
             for m in minions.values {
-                guard case .deliverOffice(let r) = m.current?.kind, let station = fleet.stations[m.station] else { continue }
+                guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = world.truth.deliveries[id] else { continue }
+                let r = order.roomKey
                 // The floor changed under a delivery: re-plan the walk to where it was going, the crate on
                 // the bay floor or the office's own slot, never somewhere at random.
                 if m.carried == nil {
-                    if let box = boxes["\(station.name)|\(r)"] {
+                    if let box = boxes[order.key] {
                         let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
                         walk(m, to: standCell(station, near: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))))
                     } else if let spot = m.fetchSpot {
@@ -855,13 +857,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             world.truth.renameOffice(from: oldKey, to: newKey)
             if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
             if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
-            if let m = minions[session] {
-                // The office kept its floor under a new name: the delivery follows it.
-                if case .deliverOffice = m.current?.kind, let old = m.current {
-                    m.current = Command(kind: .deliverOffice(key: to), words: old.words)
-                }
-                if m.place == .room(from) { m.place = .room(to) }
-            }
+            if let m = minions[session], m.place == .room(from) { m.place = .room(to) }   // a delivery under way follows by its order
         case .officeArchived(let station, let key, let roomKey, let name, let hall, let announce, let reason):
             archive(station: station, key: key, roomKey: roomKey, name: name, hall: hall, announce: announce, reason: reason)
         case .officeMerged(let stationName, let key, let repo, let number):

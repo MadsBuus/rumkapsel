@@ -7,6 +7,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var window: NSWindow!
     var controller: StationController!
+    private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
     var updater: SPUStandardUpdaterController!
@@ -51,6 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
         buildMenu()
         ConfigStore.shared.onChange = { [weak self] _ in self?.controller.applyConfigChange() }
+        // `kill -USR1 <pid>` writes everything the station is doing to station.log.
+        signal(SIGUSR1, SIG_IGN)
+        dumpSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        dumpSignal?.setEventHandler { [weak self] in self?.controller.dumpState() }
+        dumpSignal?.resume()
 
         let size = NSSize(width: 640, height: 440)
         window = NSWindow(contentRect: NSRect(origin: .zero, size: size),

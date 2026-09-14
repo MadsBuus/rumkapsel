@@ -52,6 +52,8 @@ final class Minion {
     var wonderUntil = 0.0
     /// How long someone has stood in the way.
     var blockedFor = 0.0
+    /// Who stood in the way on the last step, for the log.
+    var blockedBy: String?
     /// A stall watch: since when the minion has stood still in the same phase of the same command,
     /// and whether the log has been told. Standing still through a phase that should move is a bug,
     /// and the log names it rather than leaving a body in a corner.
@@ -149,7 +151,8 @@ final class Minion {
     var tempo: Double { 0.82 + bobPhase / 6.28 * 0.42 }
     /// Which tool is out at the cone right now: the rota runs on the minion's own clock and stint length.
     func toolSlot(at clock: Double) -> Int { (toolSeed + Int((clock + bobPhase * 4) / (5.5 + Double(toolSeed) * 1.7))) % 4 }
-    var opacity = 0.0
+    /// Solid unless inside a shuttle: the arrival sets it to 0 and back to 1 as the worker steps out.
+    var opacity = 1.0
 
     init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         self.id = id; self.station = station; self.home = home; self.cwd = cwd; self.toolCount = toolCount; self.isSubagent = isSubagent

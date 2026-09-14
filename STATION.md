@@ -95,6 +95,14 @@ since real stations mandate both.
   kept in the body: a carry goes back into the queue from where the crate now lies, an office's
   crate stays on the floor for the next free hands, a visit ends. Truth then re-issues what it
   still wants, to someone else first. What conditions took away is not retried; the body is free.
+- A wait on a named fact has its time, not forever: ninety station seconds without the fact and it
+  is given up like any stall. Standing by a pallet for a release is the errand itself and exempt.
+- A delivery is picked up. Period. A new office's crate is an order with a number that the shuttle,
+  the crate on the floor and the carrier all share, whatever the office is called by the time it
+  lands. A crate on the bay floor with nobody fetching it goes to the next free hands, its own
+  session's worker first; it goes into whatever room its order names now; if that room is gone it
+  folds away where it lies. It is never left standing. A bay slot is free only when nothing lies on
+  it and no ship is bound for it.
 - Right of way. Of two who meet, one holds and the other goes round, always the same one: a load
   before a job, a job before rest, and names settle a tie. The one who holds steps round after a
   while in case the other is not moving at all.

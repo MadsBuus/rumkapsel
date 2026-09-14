@@ -229,8 +229,26 @@ enum Scenarios {
         ], floor: { sim in
             let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
             if !fetching.isEmpty { return "\(fetching.map(\.home.name).joined(separator: ", ")) still fetching from the bay" }
-            let left = sim.station.world.truth.bayCrates
+            let left = sim.station.world.truth.deliveries.values.map(\.key)
             return left.isEmpty ? nil : "crates left on the bay floor: \(left.sorted().joined(separator: ", "))"
+        }),
+
+        Scenario("an office renamed twice while its shuttle is in the air: the crate is still walked in", [
+            ("Target: api#5158", 0.3),
+            ("New branch in repo", 1.0),   // my new office: a shuttle is ordered, the worker sets off
+            ("Switch branch", 1.5),        // renamed while the ship is in the air
+            ("Switch branch", 0.3),        // and again, before it lands
+        ], tail: 30, expects: [
+            .flight,
+            .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
+            .event("officeRenamed") { if case .officeRenamed = $0 { return true }; return false },
+        ], floor: { sim in
+            let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
+            if !fetching.isEmpty { return "\(fetching.map(\.home.name).joined(separator: ", ")) still fetching from the bay" }
+            let left = sim.station.world.truth.deliveries.values.map(\.key)
+            if !left.isEmpty { return "crates left on the bay floor: \(left.sorted().joined(separator: ", "))" }
+            let pending = sim.station.world.truth.pendingOffices
+            return pending.isEmpty ? nil : "offices never delivered: \(pending.sorted().joined(separator: ", "))"
         }),
 
         Scenario("staging release opens, merges: the pallet crosses", [
