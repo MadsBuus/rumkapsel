@@ -160,7 +160,7 @@ extension StationController {
                 }
             }
             if station.hasPad {
-                // Decon: a darker floor off storage's outer wall, and the hatch in the far wall that
+                // Decon: a darker floor at the back of storage, and the hatch in the back wall that
                 // everything from outside comes through, with its light over it.
                 for c in station.deconCells {
                     addTile(station: station, cell: c, owner: "kind:decon", color: NSColor(rgb: (0.17, 0.24, 0.24)), name: "decon:" + station.name)
@@ -171,20 +171,20 @@ extension StationController {
                 for side in [-1.0, 1.0] {
                     let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.7, length: 0.08, chamferRadius: 0))
                     post.geometry!.firstMaterial = frame
-                    post.position = v3(0, 0.35, side * 0.5)
+                    post.position = v3(side * 0.5, 0.35, 0)
                     hatch.addChildNode(post)
                 }
-                let lintel = SCNNode(geometry: SCNBox(width: 0.08, height: 0.08, length: 1.08, chamferRadius: 0))
+                let lintel = SCNNode(geometry: SCNBox(width: 1.08, height: 0.08, length: 0.08, chamferRadius: 0))
                 lintel.geometry!.firstMaterial = frame
                 lintel.position = v3(0, 0.74, 0)
                 hatch.addChildNode(lintel)
-                let pane = SCNNode(geometry: SCNBox(width: 0.03, height: 0.7, length: 0.92, chamferRadius: 0))
+                let pane = SCNNode(geometry: SCNBox(width: 0.92, height: 0.7, length: 0.03, chamferRadius: 0))
                 pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
                 pane.position = v3(0, 0.35, 0)
                 hatch.addChildNode(pane)
-                let light = SCNNode(geometry: SCNBox(width: 0.06, height: 0.06, length: 0.2, chamferRadius: 0))
+                let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
                 light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
-                light.position = v3(facing.x * 0.05, 0.84, 0)
+                light.position = v3(0, 0.84, facing.y * 0.05)
                 hatch.addChildNode(light)
                 hatchLights[station.name] = light
                 hatch.position = v3(station.offset.x + hp.x, 0, station.offset.y + hp.y)

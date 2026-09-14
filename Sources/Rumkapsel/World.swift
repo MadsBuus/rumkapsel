@@ -838,8 +838,9 @@ final class World {
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         guard !cells.isEmpty else { return [] }
         let rows = Set(cells.map(\.y)).sorted()
-        // Every other row holds crates with aisles between, decon included: a carrier reaches every crate from an aisle.
-        let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
+        // Every other row holds crates with aisles between. In decon the objects stand along the back
+        // wall by the hatch, and the row by storage is the aisle a carrier reaches them from.
+        let crateRows = area == "decon" ? Set(rows.suffix(1)) : Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
         let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let rowList = crateRows.sorted()
         let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }

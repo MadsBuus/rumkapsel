@@ -162,16 +162,17 @@ final class Station {
         (Cell(x: -spineHalfLength - 1, y: storageNearRow), SIMD2(0, -1))
     }
 
-    /// Decon: a chamber two cells deep on storage's outer wall, the yard's fourth block. Anything from
-    /// outside waits in it until someone clears it into storage next door. Its hatch is on the far wall.
+    /// Decon: a chamber two cells deep at the back of storage, on its south side, the yard's fourth
+    /// block. Anything from outside waits in it until someone clears it into storage. Its hatch is in
+    /// the back wall, the row nearest it is where the objects stand, and the row by storage is the aisle.
     var deconCells: [Cell] {
         guard hasPad else { return [] }
         let x0 = -spineHalfLength - 1, r = yardRow(0)
-        return (4..<6).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
+        return (3..<5).flatMap { d in (0..<4).map { x in Cell(x: x0 - x, y: r + d) } }
     }
-    var deconCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 5.5, 0.5 + Double(yardRow(0))) }
-    /// The hatch in decon's outer wall, and which way it faces: into the chamber.
-    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(-spineHalfLength) - 6.46, 0.5 + Double(yardRow(0))), SIMD2(1, 0)) }
+    var deconCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 3.5) }
+    /// The hatch in decon's back wall, and which way it faces: into the chamber.
+    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
 
     /// Every crate this station knows: the source's word and the station's, per crate. The counts
     /// below are read off it and kept nowhere.
@@ -365,7 +366,7 @@ final class Station {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
             out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
         }
-        for y in [4, 5] { out.append((Cell(x: x0 - 3, y: y), Cell(x: x0 - 4, y: y))) }   // storage into decon
+        for x in [x0 - 1, x0 - 2] { out.append((Cell(x: x, y: 6), Cell(x: x, y: 7))) }   // storage back into decon
         return out
     }
 

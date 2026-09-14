@@ -110,8 +110,8 @@ since real stations mandate both.
 ## Decon
 
 - A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
-  floor. It is an object of unknown origin, and it waits in **decon**, the chamber on storage's outer
-  wall with a hatch in its far wall. Objects come in through the hatch, never by shuttle and never
+  floor. It is an object of unknown origin, and it waits in **decon**, the chamber at the back of
+  storage with a hatch in its back wall. Objects come in through the hatch, never by shuttle and never
   through the airlock: the hatch light flashes and a little vapour rolls in, and that is all the fuss
   an update gets. A dozen show on the floor, grey with the unscreened green on the plate; the rest are
   counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.

@@ -574,9 +574,9 @@ extension StationController {
             let p = SCNNode(geometry: SCNBox(width: 0.14, height: 0.14, length: 0.14, chamferRadius: 0))
             p.geometry!.firstMaterial = flat(NSColor(rgb: (0.8, 0.95, 0.85)))
             p.opacity = 0.6
-            p.position = v3(st.offset.x + pos.x + facing.x * 0.2, 0.25 + Double.random(in: 0...0.3), st.offset.y + pos.y + Double.random(in: -0.4...0.4))
+            p.position = v3(st.offset.x + pos.x + Double.random(in: -0.4...0.4), 0.25 + Double.random(in: 0...0.3), st.offset.y + pos.y + facing.y * 0.2)
             propRoot.addChildNode(p)
-            p.runAction(.sequence([.group([.moveBy(x: CGFloat(facing.x * Double.random(in: 0.4...0.9)), y: 0.3, z: CGFloat(Double.random(in: -0.3...0.3)), duration: 1.8), .scale(to: 2.0, duration: 1.8), .fadeOut(duration: 1.8)]), .removeFromParentNode()]))
+            p.runAction(.sequence([.group([.moveBy(x: CGFloat(Double.random(in: -0.3...0.3)), y: 0.3, z: CGFloat(facing.y * Double.random(in: 0.4...0.9)), duration: 1.8), .scale(to: 2.0, duration: 1.8), .fadeOut(duration: 1.8)]), .removeFromParentNode()]))
         }
     }
 
