@@ -8,12 +8,17 @@
 import Foundation
 
 enum Walk {
-    /// Someone within this of the walker, and not behind it, is being passed.
-    static let reach = 0.5
+    /// Someone within this of the walker, and not behind it, is being passed: far enough for the awkward moment.
+    static let reach = 0.8
     /// How far the figure leans off its line while passing: a shoulder's width.
     static let sidestep = 0.24
     /// Within this of a waypoint counts as there.
     static let arrive = 0.08
+    /// The pass is driven by the gap to the other, no clock: from `reach` in, slow down and turn to face them;
+    /// from `leanFrom` in, lean out and wriggle past; behind, straighten up and stride on.
+    static let leanFrom = 0.5
+    /// The pace while passing, of the walk's own.
+    static let slowTo = 0.4
 
     /// The body being passed this tick, if any: close and not behind.
     static func passing(_ m: Body, target: SIMD2<Double>, others: [Body]) -> Body? {
@@ -28,20 +33,28 @@ enum Walk {
     }
 
     /// One tick of one walker toward the first waypoint of its path: moves it along its line, pops the
-    /// waypoint on arrival, sets its facing and its lean, and says who was being passed.
+    /// waypoint on arrival, plays the pass on its clock, and says who was being passed.
     static func step(_ m: Body, speed: Double, dt: Double, others: [Body]) -> Body? {
         guard let target = m.path.first else { m.lean = .zero; return nil }
         let d = target - m.pos
         let dist = (d.x * d.x + d.y * d.y).squareRoot()
-        let stride = speed * dt
+        let near = passing(m, target: target, others: others)
+        let gap = near.map { dist2($0.pos, m.pos).squareRoot() } ?? reach
+        // 1. Slow down as the gap closes: an awkward moment.
+        let closing = min(1, max(0, (reach - gap) / (reach - leanFrom)))
+        let pace = 1 - (1 - slowTo) * closing
+        let stride = speed * pace * dt
         m.pos = dist <= stride ? target : m.pos + d / dist * stride
         if dist2(target, m.pos) < arrive * arrive { m.pos = target; m.path.removeFirst() }
-        let near = passing(m, target: target, others: others)
         if let near, dist > 1e-9 {
             let dir = d / dist
-            m.lean = SIMD2(dir.y, -dir.x) * sidestep   // a shoulder to the walker's own right
+            // 2. Turn to face the other, 3. then, closer, lean a shoulder to the walker's own right and wriggle past.
             m.facing = atan2(near.pos.x - m.pos.x, near.pos.y - m.pos.y)
+            let out = min(1, max(0, (leanFrom - gap) / (leanFrom - sidestep)))
+            let wriggle = out > 0 ? sin(gap * 40) * 0.03 : 0
+            m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out) + dir * wriggle
         } else {
+            // 4. Face the way again and 5. stride on; the scene eases the lean away.
             m.lean = .zero
             if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
         }

@@ -24,8 +24,9 @@ enum WalkTests {
 
         test("someone close ahead is passed with a lean to the walker's own right, facing them; behind is nobody's business") {
             let m = body("a", 0.6, 0), o = body("b", 1, 0); m.path = [SIMD2(1, 0), SIMD2(2, 0)]
-            let near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o])
-            expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) == Walk.sidestep, "leaning right: \(m.lean)")
+            var near: Body?
+            for _ in 0..<12 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }   // closer than the lean gap now
+            expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) > Walk.sidestep * 0.5, "leaning right after the turn: \(m.lean)")
             expect(abs(m.facing - atan2(o.pos.x - m.pos.x, o.pos.y - m.pos.y)) < 1e-9, "facing the one passed")
             let back = body("c", 0, 0); back.path = [SIMD2(1, 0)]
             expect(Walk.step(back, speed: 1.4, dt: 1.0 / 30, others: [body("d", -0.3, 0)]) == nil && back.lean == .zero, "behind: no lean")
@@ -34,7 +35,7 @@ enum WalkTests {
         test("the pass never moves the body off its line: two head-on both arrive exactly") {
             let a = body("a", 0, 0), b = body("b", 2, 0); a.path = [SIMD2(1, 0), SIMD2(2, 0)]; b.path = [SIMD2(1, 0), SIMD2(0, 0)]
             var leaned = false
-            for _ in 0..<200 {
+            for _ in 0..<300 {
                 _ = Walk.step(a, speed: 1.4, dt: 1.0 / 30, others: [b]); _ = Walk.step(b, speed: 1.4, dt: 1.0 / 30, others: [a])
                 if a.lean != .zero && b.lean != .zero && a.lean.y * b.lean.y < 0 { leaned = true }
                 expect(a.pos.y == 0 && b.pos.y == 0, "on the line")
