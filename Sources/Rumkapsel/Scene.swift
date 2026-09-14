@@ -133,7 +133,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let view: StationView
     let scene = SCNScene()
     let hud: SKScene
-    let world: World
+    /// The station itself: its bodies, orders, walks and clock. The scene draws it and decides nothing.
+    let simulation: Simulation<Minion>
+    var world: World { simulation.world }
     let drone = Drone()
     private let scanner = TranscriptScanner()
     private let scanQueue = DispatchQueue(label: "rumkapsel.scan")
@@ -141,7 +143,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var fleet: Fleet { world.fleet }
     var github: GitHubResolver { world.github }
 
-    var minions: [String: Minion] = [:]
+    var minions: [String: Minion] {
+        get { simulation.bodies }
+        set { simulation.bodies = newValue }
+    }
     let staticRoot = SCNNode()
     let labelRoot = SCNNode()
     let minionRoot = SCNNode()
@@ -203,19 +208,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var peerFigures: Int { peerMinions.count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
-    /// A crate in motion: the command that moves it, the node on the floor, and what to do when it lands.
-    struct Cargo {
-        var command: Command; let node: SCNNode; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""
-        /// The place the carry is aimed at: asked for when the order is taken, again with the crate on
-        /// the arms, and grounded at set-down. The command itself names only the yard.
-        var aim: Spot
-        /// When the current leg began: the order, then the assignment, then the pickup. Patience runs per leg.
-        /// Carries queued behind this one: the carrier picks up the pace.
-        var hurry = false
-        /// Who gave this carry up: passed over for it while anyone else is free.
-        var gaveUp: Set<String> = []
+    /// Crates under way are the simulation's (`Cargo`); the node each one is drawn as is kept here, by command id.
+    var cargo: [Int: Cargo] {
+        get { simulation.cargo }
+        set { simulation.cargo = newValue }
     }
-    var cargo: [Int: Cargo] = [:]
+    var cargoNodes: [Int: SCNNode] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -246,9 +244,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var lastTick = 0.0
     /// How fast station time runs in the live app: 1, or 4 while space is held.
     var liveTimeScale = 1.0
-    /// Visits that ran their course in a simulated run: kind, how long from arrival, and how long planned.
-    var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
-    var clock = 0.0
+    /// Visits that ran their course in a simulated run, and station time: both the simulation's.
+    var visitLog: [(kind: String, lasted: Double, planned: Double)] { simulation.visitLog }
+    var clock: Double {
+        get { simulation.clock }
+        set { simulation.clock = newValue }
+    }
     var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
     var targetFocus = SIMD2<Double>(0, 0)
     var userZoom = 1.0
@@ -268,7 +269,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var viewSize = CGSize(width: 640, height: 440)
     let demo: Bool
     /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
-    var sim: SimHooks?
+    var sim: SimHooks? {
+        get { simulation.hooks }
+        set { simulation.hooks = newValue }
+    }
     /// A scripted run with no frame ever drawn: the view's own tick and its decorations are skipped, since
     /// nothing reads them. Everything on the station clock still runs, scene-side logic included.
     var headless = false
@@ -299,11 +303,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     init(frame: NSRect, demo: Bool, simulated: Bool = false) {
         self.demo = demo
-        if simulated { sim = SimHooks() }
-        world = World(demo: demo || simulated)
+        let world = World(demo: demo || simulated)
         world.simulated = simulated
         world.fleet.persists = !simulated
         world.github.frozen = simulated
+        simulation = Simulation(world: world)
+        if simulated { simulation.hooks = SimHooks() }
         view = StationView(frame: frame, options: [SCNView.Option.preferredRenderingAPI.rawValue: SCNRenderingAPI.metal.rawValue])
         hud = SKScene(size: frame.size)
         super.init()
@@ -383,6 +388,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // What the model cannot see for itself: a crate already on someone's arms, or a rocket mid-load.
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
         world.rocketBusy = { [weak self] key in self?.rocketActors[key]?.isBusy ?? false }
+        // The scene's ears on the simulation, and what it lends the simulation until the ships and rockets move in.
+        simulation.onEvent = { [weak self] event in self?.handle(event) }
+        simulation.onLog = { [weak self] text in self?.logEvent(text) }
+        simulation.shipSpots = { [weak self] station in self?.groundHeldByShips(station) ?? [] }
+        simulation.rocketReady = { [weak self] station in
+            self?.rocketActors.values.contains { $0.station == station && ($0.isSteaming || $0.isLaunching) } ?? false
+        }
+        simulation.shipOver = { [weak self] order, station in self?.shipStillOver(order: order, station: station) ?? false }
+        simulation.orderShuttle = { [weak self] m, roomKey in self?.startDelivery(m, roomKey: roomKey) }
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
@@ -487,15 +501,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
-    /// The floor changed under a walk, a crate or a pallet arrived in the way: the walk is planned again
-    /// from where the minion stands to where it was going.
-    func replanBlockedWalks() {
-        for m in minions.values where !m.path.isEmpty {
-            guard let station = fleet.stations[m.station] else { continue }
-            let blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
-            guard blocked, clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
-            m.lastReplanAt = clock
-            m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
+    /// The ground a ship owns over a station's bay: the slot under every ship coming down or unloading.
+    func groundHeldByShips(_ stationName: String) -> [SIMD2<Double>] {
+        guard let station = fleet.stations[stationName] else { return [] }
+        return shuttles.compactMap { s in
+            guard s.station == stationName, case .flight(_, _, let slot) = s.command.kind, slot < station.hangarSlots.count,
+                  s.phase < (s.command.phases.firstIndex(of: .rise) ?? Int.max) else { return nil }
+            return station.hangarSlots[slot]
         }
     }
 
@@ -674,7 +686,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
                     dismiss(m)
-                    if let key = carriedRoom(of: m) { reveal(key); m.carried?.removeFromParentNode(); m.carried = nil }
+                    if let key = carriedRoom(of: m) { reveal(key); simulation.loseLoad(m) }
                 } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
                     send(m, to: restPlace)
@@ -693,20 +705,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if layoutDirty {
             flushScene(firstRun: firstRun)
-            for m in minions.values {
-                guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = world.truth.deliveries[id] else { continue }
-                let r = order.roomKey
-                // The floor changed under a delivery: re-plan the walk to where it was going, the crate on
-                // the bay floor or the office's own slot, never somewhere at random.
-                if m.carried == nil {
-                    if let box = boxes[order.key] {
-                        let at = SIMD2(Double(box.worldPosition.x) - station.offset.x, Double(box.worldPosition.z) - station.offset.y)
-                        walk(m, to: standCell(station, near: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))))
-                    } else if let spot = m.fetchSpot {
-                        walk(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-                    }
-                } else if let slot = officeCrateSlot(station: station, roomKey: r) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
-            }
+            simulation.replanDeliveries()
         } else {
             flushScene()
         }
@@ -849,7 +848,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func flushDeliveries() {
         let station = fleet.station("work")
         for roomKey in peerDeliveries {
-            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && $0.carried == nil && !$0.busy }
+            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.busy }
                 .min(by: { $0.freeSince > $1.freeSince })
             if let m = free { startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
         }
@@ -980,7 +979,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
             // My own office with a worker in it: the crate does not appear by itself. The worker
             // clears the cones and packs it at the office's package slot.
-            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && $0.carried == nil && !$0.onJob }),
+            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && !$0.hasLoad && !$0.onJob }),
                let st = fleet.stations[m.station], let room = st.rooms[roomKey], let cell = farCells(st, room).first {
                 let key = m.station + "|" + roomKey
                 packing.insert(key)
@@ -1034,11 +1033,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
-            scheduleCarries()
-            reconcileBodies()
+            simulation.scheduleCarries()
+            tickRockets()
+            servicePallets()
+            simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             refreshObstacles()
-            replanBlockedWalks()
+            simulation.replanBlockedWalks()
         }
         tickShuttles()
         tickPallets()

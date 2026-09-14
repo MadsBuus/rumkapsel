@@ -25,9 +25,26 @@ class Body {
     var pending: Command?
     /// When the phase in hand runs out: a crouch, a shower, a chore.
     var phaseUntil = 0.0
-    /// What is on the arms, if anything: the scene knows it as a node, the simulation only as a load.
-    var load: AnyObject?
+    /// What is on the arms, if anything: a crate by its number, or a new office's crate by its key.
+    /// The scene draws it as a node on the figure from the moment it is set until `landing` says
+    /// where it went.
+    enum Load: Equatable {
+        case crate(CrateRef)
+        case office(String)
+    }
+    var load: Load?
     var hasLoad: Bool { load != nil }
+    /// Where the load left the arms this frame: squarely on its slot, or on the floor behind after a
+    /// drop. Nil when it simply went away. The scene puts the node there and clears it.
+    struct Landing {
+        var pos: SIMD3<Double>
+        var yaw: Double?
+        var dropped = false
+    }
+    var landing: Landing?
+    /// The slot the load is going down onto, from the moment the set-down begins: the scene draws the
+    /// arc from it. Nil while nothing is being set down.
+    var settingDownOn: Spot?
     var fetchSpot: SIMD2<Double>?
     /// Which stack the QA walker is inspecting next.
     var qaStop = 0
@@ -45,7 +62,13 @@ class Body {
         }
     }
     var hammerUp = false
+    /// The poses the simulation decides and the scene draws: flat on the back in bed or on the bench,
+    /// sat on the bowl (its middle at `seatOffset` in the body's own frame), or on the bench itself.
     var lying = false
+    var seated = false
+    var seatOffset = SIMD2<Double>(0, 0)
+    var onBench = false
+    var nextFidgetAt = 0.0
     var wakeUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
@@ -154,4 +177,8 @@ class Body {
     var words: String { current?.words ?? "nothing in particular" }
 
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
+
+    /// Waiting on you: hopping for the first minute, pacing after that. Not while on a job.
+    func isJumping(at clock: Double) -> Bool { activity == .waiting && clock - waitingSince < 60 && !onJob }
+    func isPacing(at clock: Double) -> Bool { activity == .waiting && clock - waitingSince >= 60 && !onJob }
 }

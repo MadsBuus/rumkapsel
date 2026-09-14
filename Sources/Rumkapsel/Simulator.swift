@@ -1142,7 +1142,7 @@ extension StationController {
             switch nudge {
             case .bath:
                 // The press says "now": whoever is resting goes for a shower straight away, picked as for the gym.
-                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
@@ -1159,7 +1159,7 @@ extension StationController {
                 // A worker on the couch first; then any worker not working; then a worker whose session is
                 // quiet but still counted busy; then a teammate asleep in the quarters. Only a job, the
                 // bath or a turn already in hand rules someone out.
-                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && $0.carried == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
@@ -1180,7 +1180,7 @@ extension StationController {
                 m.wedged = true
                 handle(.log("\(m.home.name) is wedged: not another step"))
             case .chore:
-                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.isChore && $0.carried == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.isChore && !$0.hasLoad }
                 guard let m = could.first(where: { !$0.isCrew && !$0.busy }) ?? could.first(where: { !$0.isCrew }) ?? could.first else {
                     handle(.log("nobody to send on a chore")); return
                 }
@@ -1191,14 +1191,14 @@ extension StationController {
                 // Two free minions set at the two ends of the hall's east-west arm, facing each other, each
                 // ordered straight along the row to the other's spot: they have to pass, and the walk rule shows how.
                 // The press says "now": any two, whatever they were doing, the way "Everyone to lounge" does it.
-                let any = minions.values.filter { !$0.isSubagent && !$0.onJob && $0.carried == nil }.sorted { $0.isCrew == $1.isCrew ? $0.id < $1.id : !$0.isCrew }
+                let any = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.hasLoad }.sorted { $0.isCrew == $1.isCrew ? $0.id < $1.id : !$0.isCrew }
                 guard any.count >= 2, let st = fleet.stations[any[0].station] else { handle(.log("fewer than two minions to meet")); return }
                 let a = any[0], b = any.first { $0.station == a.station && $0.id != a.id } ?? any[1]
                 let half = st.corridorCells.map(\.x).max() ?? 2
                 for (m, from, to) in [(a, -half, half), (b, half, -half)] {
                     m.busy = false; m.activity = .waiting
                     m.couch = nil; m.bed = nil
-                    if m.lying { m.setSleeping(false) }
+                    m.lying = false
                     m.current = nil
                     send(m, to: .core)
                     m.pos = SIMD2(Double(from), 0)

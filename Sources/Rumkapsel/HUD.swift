@@ -125,7 +125,7 @@ extension StationController {
     /// Nothing but rest in hand, and not at work: only then does a pick from the bubble go through, as with
     /// the idle clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
     func canOrder(_ m: Minion) -> Bool {
-        m.state == .settled && !m.busy && m.isResting && m.pending == nil && m.carried == nil
+        m.state == .settled && !m.busy && m.isResting && m.pending == nil && !m.hasLoad
     }
 
     /// The bubble's say on a point, from the main thread: over the plate, or on the way up to it from the
