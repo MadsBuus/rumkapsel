@@ -736,6 +736,7 @@ extension StationController {
         m.busy = false
         m.activity = .sleeping
         clearPyramids(m)
+        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
         send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
     }
 
@@ -791,6 +792,8 @@ extension StationController {
     func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) {
         m.activity = activity
         m.busy = true
+        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
+        if m.lying { m.setSleeping(false); m.bed = nil }
         if m.place != place || m.path.isEmpty { send(m, to: place) }
         start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
