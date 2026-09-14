@@ -244,10 +244,11 @@ extension StationController {
             if let bath = station.rooms["kind:bath"] {
                 // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
                 let f = bathFixtures(station: station, bath: bath)
-                let tc = f.toilet, sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
+                let sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
                 let bowl = SCNNode(geometry: faceted(SCNCylinder(radius: 0.13, height: 0.2), 4))
                 bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
-                bowl.position = v3(station.offset.x + Double(tc.x) + 0.22 * tk.x, 0.1, station.offset.y + Double(tc.y) + 0.22 * tk.y)
+                let spot = bowlSpot(station: station, bath: bath)
+                bowl.position = v3(spot.x, 0.1, spot.y)
                 let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
                 tank.geometry!.firstMaterial = bowl.geometry!.firstMaterial
                 tank.position = v3(0, 0.15, 0.14 * tk.y)

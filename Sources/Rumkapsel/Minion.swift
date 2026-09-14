@@ -34,6 +34,11 @@ final class Minion: Body {
     private let bodyDepth: Double
     var smoothFacing = 0.0
     private(set) var onBench = false
+    private(set) var seated = false
+    private var seatOffset = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
+    private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
+    private let visor: SCNNode
+    var nextFidgetAt = 0.0
     private var staticNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
@@ -55,7 +60,7 @@ final class Minion: Body {
             p.geometry!.firstMaterial = flat(.white)
             p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
             p.constraints = [SCNBillboardConstraint()]
-            p.position = v3(0, bodyHeight * 0.3, 0)
+            p.position = staticSpot
             // Drawn last and without depth, so the body's own faces never hide it.
             p.renderingOrder = 20
             p.geometry!.firstMaterial?.readsFromDepthBuffer = false
@@ -65,6 +70,10 @@ final class Minion: Body {
         }
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
     }
+    /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
+    private var staticSpot: SCNVector3 { seated ? v3(seatOffset.x, Minion.seat + bodyDepth * 0.4, seatOffset.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
+    /// The top of the bowl, where a sitter's thighs rest.
+    static let seat = 0.2
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
@@ -76,8 +85,18 @@ final class Minion: Body {
         visor.geometry!.firstMaterial = flat(Palette.core)
         visor.position = v3(0, h * 0.3, d / 2 + 0.004)
         body.addChildNode(visor)
+        // The legs of a sit: thighs level from the torso's foot forward, shins from their end down to the floor.
+        let thighs = SCNNode(geometry: SCNBox(width: w, height: d, length: d * 2.6, chamferRadius: 0.01))
+        thighs.geometry!.firstMaterial = body.geometry!.firstMaterial
+        thighs.position = v3(0, d / 2, d * 0.8)
+        let shins = SCNNode(geometry: SCNBox(width: w, height: Minion.seat + d, length: d, chamferRadius: 0.01))
+        shins.geometry!.firstMaterial = body.geometry!.firstMaterial
+        shins.position = v3(0, (d - Minion.seat) / 2, d * 1.6)
+        legs.addChildNode(thighs); legs.addChildNode(shins)
+        legs.opacity = 0
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
+        tiltNode.addChildNode(legs)
         node.addChildNode(tiltNode)
         let shadow = SCNNode(geometry: SCNPlane(width: w * 1.6, height: d * 3.2))
         shadow.geometry!.firstMaterial = flat(Palette.void)
@@ -91,10 +110,12 @@ final class Minion: Body {
         self.body = body
         self.bodyHeight = h
         self.bodyDepth = d
+        self.visor = visor
         super.init(id: id, station: station, home: home, cwd: cwd, toolCount: toolCount, isSubagent: isSubagent, start: start, crew: crew)
         node.name = "minion:" + id
         body.name = node.name
         visor.name = node.name
+        legs.name = node.name; thighs.name = node.name; shins.name = node.name
         node.opacity = 0
     }
 
@@ -277,6 +298,46 @@ final class Minion: Body {
         } else {
             body.runAction(.group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true), .move(to: v3(0, bodyHeight / 2, 0), duration: 0.4)]))
         }
+    }
+
+    /// Sit down on the bowl, its middle at `offset` in the figure's own frame (x across, z ahead, so
+    /// behind when negative): the body bends into a sit, the torso upright on the seat, thighs out
+    /// in front and shins down to the floor. Or straighten and stand back up onto the spot.
+    func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0)) {
+        guard on != seated else { return }
+        seated = on
+        seatOffset = on ? offset : SIMD2(0, 0)
+        body.removeAllActions()
+        let torso = bodyHeight * 0.62
+        let pose: SCNAction
+        if on {
+            pose = .group([.rotateTo(x: -0.1, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
+                           .move(to: v3(offset.x, Minion.seat + torso / 2, offset.y), duration: 0.5)])
+            legs.position = v3(offset.x, Minion.seat, offset.y)
+        } else {
+            pose = .group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.45, usesShortestUnitArc: true),
+                           .move(to: v3(0, bodyHeight / 2, 0), duration: 0.45)])
+        }
+        pose.timingMode = .easeOut
+        body.runAction(pose)
+        // The face keeps its place on the shorter box: a third of the way up, as on the full one.
+        visor.runAction(.move(to: v3(0, (on ? torso : bodyHeight) * 0.3, bodyDepth / 2 + 0.004), duration: on ? 0.5 : 0.45))
+        // The box itself shortens into a torso as the legs come out, and back to full height as they go.
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = on ? 0.5 : 0.45
+        (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
+        legs.opacity = on ? 1 : 0
+        SCNTransaction.commit()
+        staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
+    }
+
+    /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
+    func fidget() {
+        guard seated, !body.hasActions else { return }
+        let side = Bool.random() ? 0.08 : -0.08
+        let over = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(side), duration: 0.18); over.timingMode = .easeInEaseOut
+        let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut
+        body.runAction(.sequence([over, .wait(duration: 0.3), back]))
     }
 
     /// Tip over onto the back in the dorm, or stand back up.
