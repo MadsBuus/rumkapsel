@@ -1144,12 +1144,16 @@ extension StationController {
             case .meet:
                 // Two free minions set at the two ends of the hall's east-west arm, facing each other, each
                 // ordered straight along the row to the other's spot: they have to pass, and the walk rule shows how.
-                let free = minions.values.filter { !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.busy && $0.carried == nil && !$0.lying }
-                guard free.count >= 2, let st = fleet.stations[free[0].station] else { handle(.log("nobody free to meet")); return }
-                let a = free[0], b = free.first { $0.station == a.station && $0.id != a.id } ?? free[1]
+                // The press says "now": any two, whatever they were doing, the way "Everyone to lounge" does it.
+                let any = minions.values.filter { !$0.isSubagent && !$0.onJob && $0.carried == nil }.sorted { $0.isCrew == $1.isCrew ? $0.id < $1.id : !$0.isCrew }
+                guard any.count >= 2, let st = fleet.stations[any[0].station] else { handle(.log("fewer than two minions to meet")); return }
+                let a = any[0], b = any.first { $0.station == a.station && $0.id != a.id } ?? any[1]
                 let half = st.corridorCells.map(\.x).max() ?? 2
                 for (m, from, to) in [(a, -half, half), (b, half, -half)] {
+                    m.busy = false; m.activity = .waiting
                     m.couch = nil; m.bed = nil
+                    if m.lying { m.setSleeping(false) }
+                    m.current = nil
                     send(m, to: .core)
                     m.pos = SIMD2(Double(from), 0)
                     m.facing = atan2(Double(to - from), 0)
