@@ -33,7 +33,7 @@ extension StationController {
             let limit = m.waitingOn != nil ? StationController.waitLimit : StationController.giveUpAfter
             guard clock - m.stallSince > limit else { continue }
             m.stallMark = ""
-            let lane = laneMap[m.station]?[m.cell]
+            let lane = lanes[m.station]?.lanes[m.cell]
             let laneNote = lane.map { l in " on a doorway held by \(doorClaims[l].flatMap { minions[$0.holder]?.home.name } ?? "nobody")" } ?? ""
             let blocked = (m.blockedBy.flatMap { minions[$0] }.map { b in
                 ", \(b.home.name) in the way at \(b.cell.x),\(b.cell.y) \(b.waitingOn.map { "waiting on \($0)" } ?? (b.path.isEmpty ? "standing" : "walking")), holding \(b.heldLane == nil ? "no doorway" : "a doorway")"

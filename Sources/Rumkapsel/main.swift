@@ -38,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if args.contains("--ledger-tests") { LedgerTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
+        // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
+        if args.contains("--idle-tests") { IdleTests.run() }
+        // The doorway lanes on their own: made-up doors and walkers, claims on a hand-stepped clock.
+        if args.contains("--lane-tests") { LaneTests.run() }
         // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120

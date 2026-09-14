@@ -112,7 +112,7 @@ final class Minion {
     var actFor = 0.0
     var actStartedAt = 0.0
     /// A lounger's one idle clock: when it runs out, one thing to do is picked.
-    var nextIdleAt = 0.0
+    var idle = IdleClock()
     /// When this minion's walk was last planned again because something stood in it: at most once a second,
     /// so a crowded doorway costs a search a second, not one a frame.
     var lastReplanAt = -10.0
