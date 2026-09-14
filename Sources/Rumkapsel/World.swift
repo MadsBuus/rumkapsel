@@ -693,7 +693,7 @@ final class World {
             let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }
             let (arrived, gone) = station.ledger.adoptDecon(open: bots.map(\.pr.number), repo: info.repo)
             if !arrived.isEmpty { moved = true }
-            if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name)) }
+            if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name, repo: info.repo, numbers: arrived)) }
             for n in arrived where isReady(info.repo) {
                 let title = bots.first { $0.pr.number == n }?.pr.title ?? ""
                 events.append(.log("unidentified object #\(n) in decon · \(title.prefix(48))"))

@@ -57,7 +57,7 @@ enum WorldEvent {
     /// Who is on the crew right now.
     case crewRoster(members: [String: CrewMember])
     /// Something of unknown origin came in through decon's hatch: a bot's pull request. The hatch says so.
-    case deconArrived(station: String)
+    case deconArrived(station: String, repo: String, numbers: [Int])
     /// A bot's pull request merged: the object in decon is cleared, and belongs in storage. The scene carries it.
     case deconCleared(station: String, repo: String, number: Int)
     /// Something a teammate just did, fresh enough to move their minion.

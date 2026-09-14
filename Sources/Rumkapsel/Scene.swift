@@ -229,6 +229,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var bubbleIcons: [SKSpriteNode] = []
     /// Decon's hatch light per station, for the blink and the puff when something comes through.
     var hatchLights: [String: SCNNode] = [:]
+    /// Objects just through decon's hatch, by marker name: drawn high and floated down onto their pile.
+    var incoming: Set<String> = []
     /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
@@ -923,8 +925,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             carryAcrossDeck(station: station, repo: repo, number: number)
         case .crewRoster(let members):
             setCrewRoster(members)
-        case .deconArrived(let stationName):
+        case .deconArrived(let stationName, let repo, let numbers):
             hatchBlink(station: stationName)
+            // Just through the hatch: drawn at hatch height, they float down onto their pile.
+            for n in numbers { incoming.insert("decon:\(stationName)|\(repo)|\(n)") }
         case .deconCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             haulCleared(station: station, repo: repo, number: number)

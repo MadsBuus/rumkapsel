@@ -300,6 +300,11 @@ extension StationController {
                     pkg.name = name
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
+                    // Fresh through the hatch: it starts at hatch height and floats down onto its pile, low gravity.
+                    if incoming.remove(name) != nil {
+                        pkg.position.y = CGFloat(slot.pos.y + 1.2)
+                        moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds * 1.5, ease: .easeIn)])
+                    }
                     keep.insert(ObjectIdentifier(pkg))
                     signatures[name] = spec
                 }

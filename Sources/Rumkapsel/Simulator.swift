@@ -867,7 +867,7 @@ final class SimulatorModel: ObservableObject {
         case .carryToDeck(_, let repo, let cs): return "carryToDeck \(repo) x\(cs.count)"
         case .crateCleared(_, let repo, let n): return "crateCleared \(repo)#\(n)"
         case .crewRoster(let m): return "crewRoster \(m.keys.sorted().joined(separator: ","))"
-        case .deconArrived(let st): return "deconArrived \(st)"
+        case .deconArrived(let st, let repo, let ns): return "deconArrived \(st) \(repo) \(ns.map { "#\($0)" }.joined(separator: ","))"
         case .deconCleared(_, let repo, let n): return "deconCleared \(repo)#\(n)"
         case .crewActivity(let a): return "crewActivity \(a.login) \(a.kind) \(a.label)"
         case .crewHidden: return "crewHidden"
