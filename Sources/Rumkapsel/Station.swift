@@ -162,6 +162,18 @@ final class Station {
         (Cell(x: -spineHalfLength - 1, y: storageNearRow), SIMD2(0, -1))
     }
 
+    /// Decon: a chamber two cells deep at the back of storage, on its south side, the yard's fourth
+    /// block. Anything from outside waits in it until someone clears it into storage. Its hatch is in
+    /// the back wall, the row nearest it is where the objects stand, and the row by storage is the aisle.
+    var deconCells: [Cell] {
+        guard hasPad else { return [] }
+        let x0 = -spineHalfLength - 1, r = yardRow(0)
+        return (3..<5).flatMap { d in (0..<4).map { x in Cell(x: x0 - x, y: r + d) } }
+    }
+    var deconCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 3.5) }
+    /// The hatch in decon's back wall, and which way it faces: into the chamber.
+    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
+
     /// Every crate this station knows: the source's word and the station's, per crate. The counts
     /// below are read off it and kept nowhere.
     var ledger = Ledger()
@@ -216,7 +228,7 @@ final class Station {
             out.insert(Cell(x: i, y: 0)); out.insert(Cell(x: i, y: 1))
             out.insert(Cell(x: 0, y: i)); out.insert(Cell(x: 1, y: i))
         }
-        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) && !deckCells.contains($0) }
+        return out.filter { !coreCells.contains($0) && !hangarCells.contains($0) && !padCells.contains($0) && !storageCells.contains($0) && !deckCells.contains($0) && !deconCells.contains($0) }
     }
 
     /// The corridor axes are never built on, however far they extend.
@@ -239,6 +251,7 @@ final class Station {
         w.formUnion(padCells)
         w.formUnion(storageCells)
         w.formUnion(deckCells)
+        w.formUnion(deconCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -327,7 +340,7 @@ final class Station {
         if let areas = yardAreaCache { return areas[c] }
         var areas: [Cell: String] = [:]
         for (name, cells) in [("corridor", corridorCells + coreCells), ("pad", padCells), ("deck", deckCells),
-                              ("storage", storageCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
+                              ("storage", storageCells), ("decon", deconCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
             for cell in cells { areas[cell] = name }   // later names win, so the blocks outrank the corridor
         }
         yardAreaCache = areas
@@ -353,6 +366,7 @@ final class Station {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
             out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
         }
+        for x in [x0 - 1, x0 - 2] { out.append((Cell(x: x, y: 6), Cell(x: x, y: 7))) }   // storage back into decon
         return out
     }
 
@@ -403,7 +417,7 @@ final class Station {
     }
 
     private func isReserved(_ c: Cell) -> Bool {
-        isSpineLine(c) || coreCells.contains(c) || airlockCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c)
+        isSpineLine(c) || coreCells.contains(c) || airlockCells.contains(c) || hangarCells.contains(c) || padCells.contains(c) || storageCells.contains(c) || deckCells.contains(c) || deconCells.contains(c)
     }
 
     private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
@@ -636,7 +650,7 @@ final class Station {
         spineHalfLength = s.spine
         ledger = s.ledger ?? Ledger()
         ledger.forgetTransit()   // nobody was carrying anything when this launched
-        for (key, r) in s.rooms where key != "kind:hangar" && !key.hasPrefix("crew:") {
+        for (key, r) in s.rooms where key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
             room.worktree = r.worktree; room.branch = r.branch; room.repoRoot = r.repoRoot

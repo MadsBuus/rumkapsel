@@ -67,7 +67,8 @@ enum Hands {
     /// An arm's length, and the slack either side of it.
     static let arm = 0.34, near = 0.28, far = 0.42
     /// How long a crate takes to settle down a level when the one under it is taken away.
-    static let settleSeconds = 0.6
+    /// Low gravity in the yard: a crate with nothing under it any more takes its time coming down.
+    static let settleSeconds = 2.0
 }
 
 final class Simulation<B: Body> {
@@ -484,14 +485,14 @@ final class Simulation<B: Body> {
         start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
 
-    /// A teammate's reaction has run its course: back to the quarters, or the bots' room.
+    /// A teammate's reaction has run its course: back to the quarters.
     func crewRested(_ m: B) {
         m.busy = false
         m.activity = .sleeping
         m.pyramidCell = nil
         cue(.clearCones(m.id))
         if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
-        send(m, to: m.id == "crew:bots" ? .room("kind:bots") : .quarters)
+        send(m, to: .quarters)
     }
 
     // MARK: the step

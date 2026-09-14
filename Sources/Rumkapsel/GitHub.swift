@@ -102,6 +102,9 @@ struct ProjectItem: Equatable, Codable {
     let prURLs: [String]
     let url: String
     var updatedAt: Date? = nil
+    /// The issue's own state, OPEN or CLOSED: a closed issue is finished work, whatever column it sits in.
+    var state: String = "OPEN"
+    var isClosed: Bool { state == "CLOSED" }
 }
 
 struct OpenPR: Equatable, Codable {
@@ -363,7 +366,7 @@ final class GitHubResolver {
                   pageInfo { hasNextPage endCursor }
                   nodes { updatedAt
                     fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-                    content { ... on Issue { number title url repository { name } assignees(first: 5) { nodes { login } }
+                    content { ... on Issue { number title url state repository { name } assignees(first: 5) { nodes { login } }
                       closedByPullRequestsReferences(first: 5) { nodes { url state } } } } } } } } }
                 """
                 guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
@@ -378,7 +381,7 @@ final class GitHubResolver {
                     let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
                         .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
                     items.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
-                                             prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:))))
+                                             prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:)), state: content["state"] as? String ?? "OPEN"))
                 }
                 let page = itemsObj["pageInfo"] as? [String: Any]
                 guard page?["hasNextPage"] as? Bool == true, let end = page?["endCursor"] as? String else { break }
@@ -417,7 +420,7 @@ final class GitHubResolver {
             defer { lock.lock(); inFlight.remove("projectDelta"); lock.unlock() }
             let query = """
             { search(query: "project:\(owner)/\(number) updated:>=\(iso.string(from: since))", type: ISSUE, first: 50) { nodes { ... on Issue {
-              number title url repository { name } assignees(first: 5) { nodes { login } }
+              number title url state repository { name } assignees(first: 5) { nodes { login } }
               closedByPullRequestsReferences(first: 5) { nodes { url state } }
               projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
             """
@@ -459,7 +462,7 @@ final class GitHubResolver {
                 let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
                     .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
                 fresh.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
-                                         prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (mine["updatedAt"] as? String).flatMap(iso.date(from:))))
+                                         prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (mine["updatedAt"] as? String).flatMap(iso.date(from:)), state: content["state"] as? String ?? "OPEN"))
             }
             lock.lock()
             guard let (current, _) = project else { lock.unlock(); return }
@@ -834,9 +837,7 @@ final class GitHubResolver {
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
-                    let a = o["author"] as? [String: Any]
-                    let login = a?["login"] as? String ?? ""
-                    if (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]") { continue }
+                    // A bot's merge ships like anyone's: its parcel counts in the yard, grey, and rides the rocket.
                     if m < floor { continue }
                     if let lp = lastProduction, m <= lp { continue }                 // already shipped
                     if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }

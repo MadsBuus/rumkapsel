@@ -37,7 +37,8 @@ Rules that keep the place steady:
   lets walkers keep their destination.
 - The yard layout is drawn from the ledger's rows (`yardLayout`): every crate keeps the place its row records,
   so a carrier is sent to the place its crate will occupy and nothing jumps when the layout redraws.
-- Offices exist because of a checkout, a pushed branch, or a pull request. The board column only says how
+- Offices exist because of a checkout, a pushed branch, or a pull request. A closed issue never makes one,
+  whatever column the board left it in. The board column only says how
   solid an office is. Unclaimed offices clear once their repository has answered; a peer's are held a day.
 - A merged office that clears while its session lingers is retired for the day; the minion waits in the lounge.
 

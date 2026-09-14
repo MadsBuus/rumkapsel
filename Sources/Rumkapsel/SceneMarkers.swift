@@ -245,7 +245,7 @@ extension StationController {
             }
             // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
             // the hands, for as long as the carry lasts.
-            for area in ["storage", "deck"] where station.hasPad {
+            for area in ["storage", "deck", "decon"] where station.hasPad {
                 let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
@@ -264,7 +264,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = slot.cleared ? "tested" : "untested"
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -276,8 +276,9 @@ extension StationController {
                         if abs(heading.x - slot.pos.x) > 0.001 || abs(heading.y - slot.pos.y) > 0.001 || abs(heading.z - slot.pos.z) > 0.001
                             || abs(Double(n.eulerAngles.y) - slot.yaw) > 0.001 {
                             stopCrate(n)
-                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, vacated(at, slot.pos) {
-                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
+                            // In decon a whole stack drops together when one is pulled out from under it.
+                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, area == "decon" || vacated(at, slot.pos) {
+                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds, ease: .easeIn)])
                             } else {
                                 n.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                                 n.eulerAngles.y = slot.yaw
@@ -285,14 +286,25 @@ extension StationController {
                         }
                         continue
                     }
-                    let c = NSColor(fleet.color(forRepo: slot.repo))
-                    // In the yard the light is off, except green with a sticker on a tested crate.
-                    let pkg = Props.package(color: c.lighter(0.1), band: slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38, approved: slot.cleared)
+                    // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
+                    // tint of the repository it came for, so a bump for ios still reads as ios.
+                    let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo)).lighter(0.1)
+                    // In the yard the light is off, except green with a sticker on a tested crate, and
+                    // the unscreened green of decon on what still waits there.
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
+                    // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
+                    // into storage it grows to a crate's size, since a crate is what it is from then on.
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
+                    // Fresh through the hatch: it starts at hatch height and floats down onto its pile, low gravity.
+                    if incoming.remove(name) != nil {
+                        pkg.position.y = CGFloat(slot.pos.y + 1.2)
+                        moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds * 1.5, ease: .easeIn)])
+                    }
                     keep.insert(ObjectIdentifier(pkg))
                     signatures[name] = spec
                 }
@@ -557,6 +569,15 @@ extension StationController {
             }
         }
         emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
+    }
+
+    /// Something came through decon's hatch: the light over it flashes, and that is all the fuss it gets.
+    func hatchBlink(station name: String) {
+        guard let light = hatchLights[name] else { return }
+        light.removeAllActions()
+        let on = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.lighter(0.3) }
+        let off = SCNAction.run { n in n.geometry?.firstMaterial?.diffuse.contents = Palette.alienLight.darker(0.35) }
+        light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
     }
 
     /// Lights flicker on when a dark office gets activity, and dim when it is left alone.

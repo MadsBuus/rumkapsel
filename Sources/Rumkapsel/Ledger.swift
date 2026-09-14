@@ -1,9 +1,9 @@
 import Foundation
 
-/// A yard a crate can belong to: storage, the deck (both its rows), or the pad, meaning aboard the
-/// rocket standing there.
+/// A yard a crate can belong to: storage, the deck (both its rows), the pad, meaning aboard the
+/// rocket standing there, or decon, where a bot's pull request waits to be cleared or ejected.
 enum Yard: String, Codable {
-    case storage, deck, pad
+    case storage, deck, pad, decon
 
     /// What to call it out loud.
     var words: String {
@@ -11,6 +11,7 @@ enum Yard: String, Codable {
         case .storage: return "storage"
         case .deck: return "the deck"
         case .pad: return "the rocket"
+        case .decon: return "decon"
         }
     }
 
@@ -19,6 +20,7 @@ enum Yard: String, Codable {
         case .storage: self = .storage
         case .deck, .tested: self = .deck
         case .pad: self = .pad
+        case .decon: self = .decon
         default: return nil
         }
     }
@@ -77,6 +79,39 @@ struct Ledger: Codable {
         var slot: Slot?
         /// The place spoken for ahead of it in the yard it is bound for, from the order until set-down.
         var bound: Slot?
+        /// Of unknown origin: a bot's pull request, come in through decon. Grey wherever it goes, and never QA's business.
+        var alien = false
+
+        init(repo: String, number: Int) { self.repo = repo; self.number = number }
+
+        // Rows saved before there was decon have no such key: read as ours.
+        private enum Keys: String, CodingKey { case repo, number, wanted, wantedAt, cleared, placed, movedAt, heading, orderedOver, at, slot, bound, alien }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            repo = try c.decode(String.self, forKey: .repo)
+            number = try c.decode(Int.self, forKey: .number)
+            wanted = try c.decodeIfPresent(Yard.self, forKey: .wanted)
+            wantedAt = try c.decodeIfPresent(Date.self, forKey: .wantedAt)
+            cleared = try c.decodeIfPresent(Bool.self, forKey: .cleared) ?? false
+            placed = try c.decodeIfPresent(Yard.self, forKey: .placed)
+            movedAt = try c.decodeIfPresent(Date.self, forKey: .movedAt)
+            heading = try c.decodeIfPresent(Yard.self, forKey: .heading)
+            orderedOver = try c.decodeIfPresent(Yard.self, forKey: .orderedOver)
+            at = try c.decodeIfPresent(Placement.self, forKey: .at)
+            slot = try c.decodeIfPresent(Slot.self, forKey: .slot)
+            bound = try c.decodeIfPresent(Slot.self, forKey: .bound)
+            alien = try c.decodeIfPresent(Bool.self, forKey: .alien) ?? false
+        }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: Keys.self)
+            try c.encode(repo, forKey: .repo); try c.encode(number, forKey: .number)
+            try c.encodeIfPresent(wanted, forKey: .wanted); try c.encodeIfPresent(wantedAt, forKey: .wantedAt)
+            try c.encode(cleared, forKey: .cleared); try c.encodeIfPresent(placed, forKey: .placed)
+            try c.encodeIfPresent(movedAt, forKey: .movedAt); try c.encodeIfPresent(heading, forKey: .heading)
+            try c.encodeIfPresent(orderedOver, forKey: .orderedOver); try c.encodeIfPresent(at, forKey: .at)
+            try c.encodeIfPresent(slot, forKey: .slot); try c.encodeIfPresent(bound, forKey: .bound)
+            try c.encode(alien, forKey: .alien)
+        }
 
         var key: String { "\(repo)|\(number)" }
         /// On someone's arms, spoken for, or on the pallet: not standing on its row.
@@ -150,7 +185,10 @@ struct Ledger: Codable {
             let k = Ledger.key(repo, number)
             let yard = said[number]
             var c = crates[k] ?? Crate(repo: repo, number: number)
-            c.cleared = word.cleared.contains(number)
+            // What is in decon is decon's business, on its way to storage included: the yard's word
+            // has nothing to say about it until it is down in storage.
+            if c.alien, c.placed == .decon { continue }
+            c.cleared = word.cleared.contains(number) || c.alien   // of unknown origin, never QA's: it counts as tested
             let at = word.updated[number]
             var news: Bool
             if let moved = c.movedAt {
@@ -182,6 +220,21 @@ struct Ledger: Codable {
             if c.isEmpty { crates[k] = nil; continue }
             crates[k] = c
         }
+    }
+
+    /// Decon's side of the source: which bot pull requests are open. A number new here is an object
+    /// in decon. One whose number is gone is left standing and named: whoever asks the source what
+    /// became of it orders the carry into storage, or ejects it.
+    mutating func adoptDecon(open: [Int], repo: String) -> (arrived: [Int], gone: [Int]) {
+        var arrived: [Int] = []
+        for number in open where crates[Ledger.key(repo, number)] == nil {
+            var c = Crate(repo: repo, number: number)
+            c.alien = true; c.wanted = .decon; c.placed = .decon; c.cleared = true
+            crates[c.key] = c
+            arrived.append(number)
+        }
+        let gone = crates(of: repo).filter { $0.alien && $0.placed == .decon && $0.heading == nil && !open.contains($0.number) }.map(\.number)
+        return (arrived, gone)
     }
 
     // MARK: the station's side
@@ -255,6 +308,9 @@ struct Ledger: Codable {
     mutating func landed(repo: String, number: Int, in yard: Yard, at: Date) {
         let k = Ledger.key(repo, number)
         var c = crates[k] ?? Crate(repo: repo, number: number)
+        // Out of decon for good: from here the yard's word on it is the source's, like any merged crate.
+        // Moved aside within decon it stays decon's.
+        if c.alien, c.wanted == .decon, yard != .decon { c.wanted = nil; c.orderedOver = nil }
         c.placed = yard
         let ordered = c.heading != nil   // a hand move with no order behind it has no word to be newer than
         c.heading = nil
@@ -284,12 +340,13 @@ struct Ledger: Codable {
     /// A place in a yard for one more crate, among the places already held there: the lowest free
     /// rank on one of the repository's own columns, else the lowest column nobody holds, else the
     /// repository's shortest column, never one tower. `avoiding` is a column it may not go back to.
-    static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil) -> Slot {
+    /// `tall` lets a repository pile up in one column: decon, where nobody stacks with care.
+    static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil, tall: Bool = false) -> Slot {
         let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
         func height(_ column: Int) -> Int { here.filter { $0.slot.column == column }.count }
         func next(_ column: Int) -> Slot { Slot(yard: yard, group: group, column: column, order: (here.filter { $0.slot.column == column }.map(\.slot.order).max() ?? -1) + 1) }
         let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted()
-        for column in mine where column != avoiding && height(column) < 3 { return next(column) }
+        for column in mine where column != avoiding && height(column) < (tall ? 12 : 3) { return next(column) }
         let owned = Set(here.map(\.slot.column))
         if let free = (0..<max(cap, 1)).first(where: { !owned.contains($0) && $0 != avoiding }) { return next(free) }
         if let column = mine.filter({ $0 != avoiding }).min(by: { height($0) < height($1) }) { return next(column) }
