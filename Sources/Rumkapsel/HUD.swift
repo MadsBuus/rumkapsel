@@ -128,20 +128,23 @@ extension StationController {
         m.state == .settled && !m.busy && m.isResting && m.pending == nil && m.carried == nil
     }
 
-    /// The bubble's say on a point, from the main thread: over the plate, the hover stays where it is.
+    /// The bubble's say on a point, from the main thread: over the plate, or on the way up to it from the
+    /// minion, the hover stays where it is, so the mouse can leave the body for the icons.
     func bubbleTakes(point p: NSPoint) -> Bool {
         bubbleLock.lock(); defer { bubbleLock.unlock() }
         bubbleCursor = p
-        return bubbleHits?.plate.contains(p) ?? false
+        return bubbleHits?.hold.contains(p) ?? false
     }
 
-    /// A click on the plate, from the main thread: an icon gives its order; between them it does nothing but is spent.
+    /// A click on the plate, from the main thread: an icon gives its order and closes the bubble; between them it does nothing but is spent.
     func bubbleClick(at p: NSPoint) -> Bool {
         bubbleLock.lock(); defer { bubbleLock.unlock() }
         guard let hits = bubbleHits, hits.plate.contains(p) else { return false }
         if let i = hits.icons.firstIndex(where: { $0.contains(p) }) {
             let order = LoungeOrder.allCases[i]
-            enqueue { [self] in self.order(minionId: hits.minion, order) }
+            // The pick closes the bubble: the hover is let go, so the minion is free to set off at once.
+            bubbleHits = nil
+            enqueue { [self] in self.order(minionId: hits.minion, order); self.hovered = nil }
         }
         return true
     }
@@ -162,6 +165,7 @@ extension StationController {
             send(m, to: .lounge)
         case .bed:
             send(m, to: .quarters)
+            m.napping = m.place == .quarters   // a bed was found: lie down once there
         }
         m.idle = IdleClock()   // a fresh clock: armed again once the lounger is back on the couch
     }
@@ -200,7 +204,10 @@ extension StationController {
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
         bubblePlate.isHidden = false
-        bubbleLock.lock(); bubbleHits = (m.id, f, rects); bubbleLock.unlock()
+        // The hold: the plate, and a column down to the minion's feet, so the way up to the icons is covered.
+        let feet = view.projectPoint(m.node.position)
+        let column = CGRect(x: CGFloat(p.x) - 28, y: min(CGFloat(feet.y), f.minY) - 6, width: 56, height: max(0, f.minY - CGFloat(feet.y)) + 6)
+        bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), rects); bubbleLock.unlock()
     }
 
     /// Top: repos in their colours with counts. Bottom: jobs with one tiny minion per worker, like the game.

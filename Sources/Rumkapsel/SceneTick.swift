@@ -809,7 +809,7 @@ extension StationController {
                 }
             }
             let resting = m.path.isEmpty && m.state == .settled
-            if resting && m.activity == .sleeping && m.place == .quarters { m.setSleeping(true) }
+            if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.setSleeping(true) }
             let jump = jumping && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
             m.node.position = v3(station.offset.x + m.pos.x, jump + bunkLift, station.offset.y + m.pos.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
