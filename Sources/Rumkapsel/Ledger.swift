@@ -340,12 +340,13 @@ struct Ledger: Codable {
     /// A place in a yard for one more crate, among the places already held there: the lowest free
     /// rank on one of the repository's own columns, else the lowest column nobody holds, else the
     /// repository's shortest column, never one tower. `avoiding` is a column it may not go back to.
-    static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil) -> Slot {
+    /// `tall` lets a repository pile up in one column: decon, where nobody stacks with care.
+    static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil, tall: Bool = false) -> Slot {
         let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
         func height(_ column: Int) -> Int { here.filter { $0.slot.column == column }.count }
         func next(_ column: Int) -> Slot { Slot(yard: yard, group: group, column: column, order: (here.filter { $0.slot.column == column }.map(\.slot.order).max() ?? -1) + 1) }
         let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted()
-        for column in mine where column != avoiding && height(column) < 3 { return next(column) }
+        for column in mine where column != avoiding && height(column) < (tall ? 12 : 3) { return next(column) }
         let owned = Set(here.map(\.slot.column))
         if let free = (0..<max(cap, 1)).first(where: { !owned.contains($0) && $0 != avoiding }) { return next(free) }
         if let column = mine.filter({ $0 != avoiding }).min(by: { height($0) < height($1) }) { return next(column) }

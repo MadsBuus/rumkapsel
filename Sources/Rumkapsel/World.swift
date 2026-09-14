@@ -868,7 +868,7 @@ final class World {
         for i in entries.indices where entries[i].slot == nil {
             let e = entries[i]
             let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
-                                    avoiding: aside["\(e.crate.repo)#\(e.crate.number)"])
+                                    avoiding: aside["\(e.crate.repo)#\(e.crate.number)"], tall: area == "decon")
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
             if e.carried { station.ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }

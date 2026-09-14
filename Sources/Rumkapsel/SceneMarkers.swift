@@ -278,7 +278,7 @@ extension StationController {
                             stopCrate(n)
                             // In decon a whole stack drops together when one is pulled out from under it.
                             if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, area == "decon" || vacated(at, slot.pos) {
-                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds)])
+                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds, ease: .easeIn)])
                             } else {
                                 n.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                                 n.eulerAngles.y = slot.yaw
