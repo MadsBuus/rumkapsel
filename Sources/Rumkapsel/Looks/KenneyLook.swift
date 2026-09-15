@@ -123,6 +123,8 @@ struct KenneyLook: Look {
 
     func shuttle(color: NSColor) -> SCNNode { Kit.craft(color: color) ?? classic.shuttle(color: color) }
 
+    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         Kit.rocketProp(color: color, tall: tall, cargo: cargo) ?? classic.rocket(color: color, tall: tall, cargo: cargo)
     }

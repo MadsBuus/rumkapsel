@@ -42,6 +42,12 @@ extension StationController {
                 return v
             }()
             let hc = station.hangarCenter
+            let leg = ShipLeg(phase: f.phaseKind, progress: f.progress(at: clock), slot: SIMD2(f.down.x, f.down.z), side: f.exit.x >= f.down.x ? 1 : -1)
+            if let pose = Looks.current.shipPose(leg) {
+                v.node.position = v3(pose.pos.x - hc.x, pose.pos.y, pose.pos.z - hc.y)
+                v.node.eulerAngles = SCNVector3(0, pose.yaw, 0)
+                continue
+            }
             v.node.position = v3(f.pos.x - hc.x, f.pos.y, f.pos.z - hc.y)
             if f.phaseKind == .leave, f.restYaw != nil, !v.leaving {
                 v.leaving = true
