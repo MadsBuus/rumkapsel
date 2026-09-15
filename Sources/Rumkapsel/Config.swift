@@ -31,6 +31,9 @@ struct AppConfig: Codable, Equatable {
     var showRepoTitles: Bool?
     var showPrivate: Bool { showPrivateStation ?? true }
     var showTitles: Bool { showRepoTitles ?? true }
+    /// The look the station is drawn in, by `Theme` name; classic when unset or unknown.
+    var themeName: String?
+    var theme: Theme { Theme(rawValue: themeName ?? "") ?? .classic }
     var trunkBranch: String = "develop"        // where feature branches merge
     var stagingBranch: String = "staging"      // optional: a test deck between trunk and production
     var productionBranch: String = "production"

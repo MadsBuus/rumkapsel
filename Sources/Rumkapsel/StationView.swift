@@ -172,7 +172,7 @@ extension StationController {
         viewPinned = true
         enqueue { [self] in
             userYaw = yawDegrees * .pi / 180; userPitch = pitchDegrees * .pi / 180; userZoom = zoom
-            rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
+            rig.eulerAngles.y = viewYaw + userYaw; pitchNode.eulerAngles.x = userPitch
         }
     }
 
@@ -202,7 +202,7 @@ extension StationController {
         focused = nil
         following = nil
         userDriving = 0.5
-        let yaw = Double.pi / 4 + userYaw
+        let yaw = viewYaw + userYaw
         let unitsPerPixel = 2 * cameraNode.camera!.orthographicScale / Double(max(1, viewSize.height))
         let right = SIMD2(cos(yaw), -sin(yaw))
         let forward = SIMD2(-sin(yaw), -cos(yaw))
@@ -224,7 +224,7 @@ extension StationController {
     /// they cover on screen (in ground units across, and along the view before the tilt foreshortens it).
     /// Each station's own footprint is projected, so an L-shaped fleet isn't framed by its empty corner.
     func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
-        let yaw = Double.pi / 4
+        let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
         for st in stations {
             let b = st.bounds
@@ -321,7 +321,7 @@ extension StationController {
             d.set(21, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
-        rig.eulerAngles.y = .pi / 4 + userYaw; pitchNode.eulerAngles.x = userPitch
+        rig.eulerAngles.y = viewYaw + userYaw; pitchNode.eulerAngles.x = userPitch
         let f = d.string(forKey: "view.focus") ?? ""
         if !f.isEmpty, fleet.stations[f] != nil {
             focusNow(on: f)
