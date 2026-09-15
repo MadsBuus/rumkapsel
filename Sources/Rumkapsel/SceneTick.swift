@@ -32,6 +32,16 @@ extension StationController {
             m.branch = a.3
             m.place = Place.forActivity(a.2, home: h.key, isSubagent: m.isSubagent)
         }
+        // RK_DEMO_OFFICES adds that many more offices to the demo's work station, to see a theme under load.
+        if let n = ProcessInfo.processInfo.environment["RK_DEMO_OFFICES"].flatMap(Int.init), n > 0 {
+            let repos = ["api-node-nest", "tattoodo-web", "app-ios"]
+            let work = fleet.station("work")
+            for i in 0..<n {
+                let repo = repos[i % repos.count]
+                let h = Home.from(repo: repo, branch: "gh-\(900 + i)/demo-office-\(i)", cwd: "\(home)/conductor/workspaces/\(repo)/demo\(i)")
+                work.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
+            }
+        }
         rebuildStatic()
         for m in minions.values { send(m, to: m.place) }
         logEvent("#450 opened a pull request")

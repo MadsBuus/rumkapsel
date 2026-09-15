@@ -36,6 +36,9 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Whether each station is a world of its own, shown one at a time, rather than the fleet laid out together.
+    var separateWorlds: Bool { self == .kingdom }
+
     /// The words the station's parts and doings are called by in this theme.
     var vocabulary: Vocabulary {
         var v = Vocabulary()

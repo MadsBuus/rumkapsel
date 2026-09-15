@@ -170,10 +170,7 @@ extension StationController {
     func liftOff(_ node: SCNNode) {
         drone.sweep(up: true)
         node.childNode(withName: "flame", recursively: false)?.opacity = 1
-        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
-        rise.timingMode = .easeIn
-        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
-        node.runAction(.sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])]), .removeFromParentNode()]))
+        node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
     }
 
     /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the due rings redrawn.

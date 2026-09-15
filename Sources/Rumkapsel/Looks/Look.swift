@@ -1,68 +1,56 @@
-// How the station is drawn. The scene owns where everything stands, what it is named, what the walks
-// go round and how things move; a look only says what a thing is drawn as. Every piece comes back as a
-// node with its origin where the scene expects it, and the scene places it, names it and fades it.
-// A new theme is a new `Look` and a case in `Theme`; nothing in the scene branches on which one is on.
+// How a place is drawn. Every theme draws the same six layers (THEMES.md): the world round the station,
+// the input, the output, the center, the idle areas and the growth zone. The scene owns where everything
+// stands, what it is named, what the walks go round and how things move; a look only says what a thing is
+// drawn as. Every requirement has a default, the classic station's, so a look overrides only what it changes.
 
 import AppKit
 import SceneKit
 
-/// What a floor tile is, for a look that draws kinds of floor apart.
-/// `room` is an office; `fixed` the rooms every station has, the lounge, the dorm, the bath and the gym.
-enum Floor { case hallway, room, fixed, yard, bay, airlock }
-
-/// Where a ship is in its flight, for a look that draws the path itself: the phase and how far through it,
-/// the slot it serves in the station's own coordinates, and the side it leaves toward, 1 or -1.
-struct ShipLeg {
-    let phase: Command.Phase
-    let progress: Double
-    let slot: SIMD2<Double>
-    let side: Double
-}
-
 protocol Look {
+    // MARK: the world
+
     /// The colour past the edge of everything.
     var background: NSColor { get }
     /// The view's turn about the vertical before the user turns it.
     var viewYaw: Double { get }
-    /// How far the floor's top stands over a tile's plane: flat marks on the floor go above it.
-    var floorTop: Double { get }
-    /// Whether the hallway gets its small dark dots.
-    var dotsHallway: Bool { get }
-    /// Whether floors of different owners are parted by a dark line.
-    var drawsBorders: Bool { get }
-
-    /// What lies beyond the fleet, into `root`; returns what drifts, each with its velocity.
+    /// What lies beyond the stations, into `root`; returns what drifts, each with its velocity.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)]
-    /// The ground under the fleet, into `root`; rebuilt with the floor, since the fleet's extent moves.
+    /// The ground round `stations`, into `root`, rebuilt with the floor. Under a theme of separate worlds it
+    /// is asked once for each station.
     func ground(under stations: [Station], into root: SCNNode)
 
-    /// The colour a tile's plane is drawn in, from the colour the scene gives that floor.
-    func floorColor(_ color: NSColor, floor: Floor) -> NSColor
-    /// Hung under a floor tile's plane, in the plane's frame. Edges are numbered round the tile z-, x-, z+, x+:
-    /// `open` holds those with no floor beyond; `walled` those with another owner's floor and no doorway, and what floor that is.
-    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode?
-    /// Recolour a floor tile and whatever the look hung on it.
-    func tint(tile: SCNNode, _ color: NSColor)
+    // MARK: the input: the bay and the airlock
 
+    /// The bay and the airlock drawn whole, in world coordinates, or nil for tiles. The scene keeps the doors,
+    /// the landing slots and the carriers' stands where they are, whatever is drawn round them.
+    func input(_ station: Station) -> SetPiece?
     /// The frame over the airlock's doorway, `width` across, with a tile under each of `spans` (x from its
     /// middle). The posts are the scene's, since the walks go between them; `showsPosts` says if they are drawn.
     func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool)
-    /// The decon hatch's frame for a hatch facing along `facing`, and the height its light hangs at.
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
-    /// The monolith, standing on the origin.
-    func monolith() -> SCNNode
-
-    /// A figure to stand in a minion's box, or nil to draw the box; `id` is the minion's, for a look that varies them.
-    func figure(id: String, crew: Bool, height: Double) -> SCNNode?
-    /// Pose that figure `torso` tall, hung from the middle of a box `height` tall: the full height standing.
-    func pose(figure: SCNNode, height: Double, torso: Double)
     /// A shuttle, nose along +x, its hull's middle at the origin.
     func shuttle(color: NSColor) -> SCNNode
     /// A ship's position and heading along its flight, in the station's own coordinates; nil keeps the
     /// simulation's path, down from the sky onto the slot. The simulation still says when, and which slot.
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)?
+
+    // MARK: the output: decon, storage, the deck and the pad
+
+    /// Decon, storage, the deck and the pad drawn whole, in world coordinates, or nil for tiles. The scene
+    /// keeps the decon hatch, the storage console and every crate's spot where they are.
+    func output(_ station: Station, deckInUse: Bool) -> SetPiece?
+    /// The decon hatch's frame for a hatch facing along `facing`, and the height its light hangs at.
+    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
     /// A rocket standing on the origin, with children named "hatch" and "flame" the scene reaches for.
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode
+    /// How a rocket leaves once its release merges; the scene lights the flame first and takes it away after.
+    func launch(_ rocket: SCNNode) -> SCNAction
+
+    // MARK: the center
+
+    /// The monolith, standing on the origin: the landmark that says what kind of place this is.
+    func monolith() -> SCNNode
+
+    // MARK: the idle areas
 
     /// The fixed rooms' furniture, placed in the world as the room stands: the lounge, the bath and the gym.
     func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing
@@ -71,41 +59,108 @@ protocol Look {
     /// A bed, `level` 0 on the floor and 1 the upper bunk, centred on the origin at its own height.
     func bed(level: Int) -> SCNNode
 
-    /// Props for a station, in the station's own cells, in spots nobody stands on.
-    func dress(station: Station) -> [SCNNode]
+    // MARK: the growth zone: offices, fixed rooms' floors and the hallway
+
+    /// How far the floor's top stands over a tile's plane: flat marks on the floor go above it.
+    var floorTop: Double { get }
+    /// Whether the hallway gets its small dark dots.
+    var dotsHallway: Bool { get }
+    /// Whether floors of different owners are parted by a dark line.
+    var drawsBorders: Bool { get }
+    /// Whether a floor's square plane is drawn. Hidden, the tile still names, dims and unfolds its detail.
+    func drawsPlane(_ floor: Floor) -> Bool
+    /// The colour a tile's plane is drawn in, from the colour the scene gives that floor.
+    func floorColor(_ color: NSColor, floor: Floor) -> NSColor
+    /// Hung under a floor tile's plane, in the plane's frame.
+    func tileDetail(_ tile: Tile) -> SCNNode?
+    /// Recolour a floor tile and whatever the look hung on it.
+    func tint(tile: SCNNode, _ color: NSColor)
     /// A prop for an office, in the station's own cells.
     func dress(office room: Room, in station: Station) -> SCNNode?
+
+    // MARK: people, and anything else
+
+    /// A figure to stand in a minion's box, or nil to draw the box; `id` is the minion's, for a look that varies them.
+    func figure(id: String, crew: Bool, height: Double) -> SCNNode?
+    /// Pose that figure `torso` tall, hung from the middle of a box `height` tall: the full height standing.
+    func pose(figure: SCNNode, height: Double, torso: Double)
+    /// Props for a station, in the station's own cells, in spots nobody stands on.
+    func dress(station: Station) -> [SCNNode]
 }
 
-/// What every look gets unless it draws its own: the classic station, adrift in space. A look overrides
-/// only what it changes; where its own model is missing it can fall back on the `Classic` piece.
+/// What every look gets unless it draws its own: the classic station, adrift in space.
 extension Look {
     var background: NSColor { Palette.void }
     var viewYaw: Double { .pi / 4 }
-    var floorTop: Double { 0 }
-    var dotsHallway: Bool { true }
-    var drawsBorders: Bool { true }
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { Classic.backdrop(into: root) }
     func ground(under stations: [Station], into root: SCNNode) {}
-    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
-    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? { nil }
-    func tint(tile: SCNNode, _ color: NSColor) { tile.geometry?.firstMaterial?.diffuse.contents = color }
+
+    func input(_ station: Station) -> SetPiece? { nil }
     func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
         Classic.airlockFrame(width: width, spans: spans, tint: tint)
     }
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }
-    func monolith() -> SCNNode { Classic.monolith() }
-    func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
-    func pose(figure: SCNNode, height: Double, torso: Double) {}
     func shuttle(color: NSColor) -> SCNNode { Classic.shuttle(color: color) }
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+
+    func output(_ station: Station, deckInUse: Bool) -> SetPiece? { nil }
+    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode { Classic.rocket(color: color, tall: tall, cargo: cargo) }
+    func launch(_ rocket: SCNNode) -> SCNAction { Classic.launch() }
+
+    func monolith() -> SCNNode { Classic.monolith() }
+
     func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing { Classic.lounge(lounge, in: station) }
     func furnishBath(_ bath: Room, in station: Station) -> Furnishing { Classic.bath(bath, in: station) }
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing { Classic.gym(gym, in: station) }
     func bed(level: Int) -> SCNNode { Classic.bed(level: level, floorTop: floorTop) }
-    func dress(station: Station) -> [SCNNode] { [] }
+
+    var floorTop: Double { 0 }
+    var dotsHallway: Bool { true }
+    var drawsBorders: Bool { true }
+    func drawsPlane(_ floor: Floor) -> Bool { true }
+    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
+    func tileDetail(_ tile: Tile) -> SCNNode? { nil }
+    func tint(tile: SCNNode, _ color: NSColor) { tile.geometry?.firstMaterial?.diffuse.contents = color }
     func dress(office room: Room, in station: Station) -> SCNNode? { nil }
+
+    func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
+    func pose(figure: SCNNode, height: Double, torso: Double) {}
+    func dress(station: Station) -> [SCNNode] { [] }
+}
+
+/// What a floor tile is: `room` an office, `fixed` the lounge, the dorm, the bath or the gym.
+enum Floor { case hallway, room, fixed, yard, bay, airlock }
+
+/// A floor tile as a look sees it.
+struct Tile {
+    let floor: Floor
+    let color: NSColor
+    /// Edges with no floor beyond, numbered round the tile z-, x-, z+, x+.
+    let open: Set<Int>
+    /// Edges with another owner's floor beyond and no doorway, and what floor that is.
+    let walled: [Int: Floor]
+    /// Which of the eight neighbours are this owner's floor too: bit k for `Tile.around[k]`.
+    let same: UInt8
+    /// The eight neighbours in turn from z- round by x+: (dx, dz).
+    static let around: [(Int, Int)] = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
+}
+
+/// A fixed area of the station, by the name the scene gives its nodes for the pointer and the clicks.
+enum Area: String { case bay = "hangar", airlock, storage, deck, pad, decon }
+
+/// A fixed area drawn whole: nodes in world coordinates, each under the area it stands for.
+struct SetPiece {
+    var parts: [Area: [SCNNode]] = [:]
+    mutating func add(_ node: SCNNode, as area: Area) { parts[area, default: []].append(node) }
+}
+
+/// Where a ship is in its flight, for a look that draws the path itself: the phase and how far through it,
+/// the slot it serves in the station's own coordinates, and the side it leaves toward, 1 or -1.
+struct ShipLeg {
+    let phase: Command.Phase
+    let progress: Double
+    let slot: SIMD2<Double>
+    let side: Double
 }
 
 /// The look the scene draws with, swapped when the theme changes.

@@ -39,6 +39,7 @@ extension StationController {
         let floor = floorKind(key)
         let plane = SCNPlane(width: 1.0, height: 1.0)
         plane.firstMaterial = flat(look.floorColor(color, floor: floor))
+        if !look.drawsPlane(floor) { plane.firstMaterial?.transparency = 0; plane.firstMaterial?.writesToDepthBuffer = false }
         let n = SCNNode(geometry: plane)
         n.eulerAngles.x = -.pi / 2
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
@@ -68,11 +69,20 @@ extension StationController {
         }
         // Whatever the look hangs under the plane; the plane keeps the name, the colour and the place
         // the scene reads.
-        if let detail = look.tileDetail(floor: floor, open: open, walled: walled, color: color) {
+        var same: UInt8 = 0
+        for (k, (dx, dz)) in Tile.around.enumerated() where owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == key { same |= 1 << k }
+        if let detail = look.tileDetail(Tile(floor: floor, color: color, open: open, walled: walled, same: same)) {
             detail.name = name
             n.addChildNode(detail)
         }
         return n
+    }
+
+    /// A look's set piece into the scene, each part named for its area so the pointer and the clicks find it.
+    private func addSetPiece(_ piece: SetPiece, _ station: Station) {
+        for (area, nodes) in piece.parts {
+            for n in nodes { n.name = area.rawValue + ":" + station.name; staticRoot.addChildNode(n) }
+        }
     }
 
     /// Dashed outline around a room's footprint, the game's look for a room under construction.
@@ -138,12 +148,18 @@ extension StationController {
                     t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
-            for c in station.hangarCells {
-                addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+            // The input and the output: a look's set pieces, or tiles.
+            let input = Looks.current.input(station)
+            if let input { addSetPiece(input, station) } else {
+                for c in station.hangarCells {
+                    addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+                }
+                for c in station.airlockCells {
+                    addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
+                }
             }
-            for c in station.airlockCells {
-                addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
-            }
+            let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
+            if let output { addSetPiece(output, station) }
             if station.hasHangar, !station.airlockCells.isEmpty {
                 // Two rectangular door frames across the chamber's full width: the inner door on the
                 // corridor side, the hatch on the bay side. Posts and a lintel, a dark pane between.
@@ -174,13 +190,13 @@ extension StationController {
                     staticRoot.addChildNode(door)
                 }
             }
-            for c in station.padCells {
+            for c in station.padCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
             }
-            for c in station.storageCells {
+            for c in station.storageCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
             }
-            if world.deckInUse(station: station.name) {
+            if output == nil, world.deckInUse(station: station.name) {
                 for c in station.deckCells {
                     addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
                 }
@@ -188,7 +204,7 @@ extension StationController {
             if station.hasPad {
                 // Decon: a darker floor at the back of storage, and the hatch in the back wall that
                 // everything from outside comes through, with its light over it.
-                for c in station.deconCells {
+                for c in station.deconCells where output == nil {
                     addTile(station: station, cell: c, owner: "kind:decon", color: NSColor(rgb: (0.17, 0.24, 0.24)), name: "decon:" + station.name)
                 }
                 let (hp, facing) = station.deconHatch
@@ -218,7 +234,7 @@ extension StationController {
                 staticRoot.addChildNode(console)
                 consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
             }
-            if station.hasPad {
+            if station.hasPad, output == nil {
                 let pc = station.padCenter
                 let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01)))
                 ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
@@ -252,7 +268,7 @@ extension StationController {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
                 anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
-                for slot in station.hangarSlots {
+                for slot in station.hangarSlots where input == nil {
                     let mark = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
                     mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
                     mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
@@ -351,7 +367,11 @@ extension StationController {
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
         groundRoot.childNodes.forEach { $0.removeFromParentNode() }
-        Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
+        if Looks.theme.separateWorlds {
+            for station in fleet.stations.values { Looks.current.ground(under: [station], into: groundRoot) }
+        } else {
+            Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
+        }
         rebuildLabels()
         rebuildMarkers()
         for key in fadeIn {
@@ -360,7 +380,7 @@ extension StationController {
         }
         fadeIn = []
 
-        (targetFocus, targetHalf) = frame(for: Array(fleet.stations.values))
+        (targetFocus, targetHalf) = frame(for: shownStations)
         if let f = focused { focusNow(on: f) }
         fleet.save()
     }

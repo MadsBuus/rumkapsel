@@ -206,11 +206,11 @@ struct KingdomLook: Look {
 
     /// Offices are worked plots. A low hedge runs only round the outside of the yard, where it ends on
     /// nothing; between floors there is nothing at all.
-    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? {
-        if floor == .room { return plot(color) }
-        guard floor == .yard else { return nil }
+    func tileDetail(_ tile: Tile) -> SCNNode? {
+        if tile.floor == .room { return plot(tile.color) }
+        guard tile.floor == .yard else { return nil }
         let model = "hedge"
-        let edges = open
+        let edges = tile.open
         guard !edges.isEmpty else { return nil }
         let n = SCNNode()
         for e in edges.sorted() {

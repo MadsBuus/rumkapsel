@@ -77,8 +77,8 @@ struct KenneyLook: Look {
     }
 
     /// One of the kit's platforms, kerbed on the open edges, the dark line between owners kept as it is.
-    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? {
-        guard let plate = Kit.platform(open: open, color: color) else { return nil }
+    func tileDetail(_ tile: Tile) -> SCNNode? {
+        guard let plate = Kit.platform(open: tile.open, color: tile.color) else { return nil }
         // Under a plane tilted flat: the plate set a hair above the plane, under the text on the floor.
         plate.eulerAngles.x = .pi / 2
         plate.position = SCNVector3(0, 0, Kit.plateTop - 0.05)

@@ -133,6 +133,14 @@ enum Classic {
         return ship
     }
 
+    /// A flicker on the pad, then a slow climb out of the frame, fading as it goes.
+    static func launch() -> SCNAction {
+        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
+        rise.timingMode = .easeIn
+        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
+        return .sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])])])
+    }
+
     static func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         Props.rocket(color: color, tall: tall, cargo: cargo)
     }

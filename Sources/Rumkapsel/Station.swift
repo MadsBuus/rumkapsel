@@ -1033,8 +1033,19 @@ final class Fleet {
 
     var ordered: [Station] { Fleet.order.compactMap { stations[$0] } }
 
+    /// How far apart stations are laid when each is a world of its own: far enough that one never shows beside another.
+    static let worldGap = 400.0
+
     /// Work sits on the top row; private sits below work, keeping the whole fleet squarish rather than a long strip.
+    /// Under a theme of separate worlds each station stands alone instead, a world's gap from the next.
     func arrange() {
+        if Theme.forPlan.separateWorlds {
+            for (i, s) in ordered.enumerated() {
+                let b = s.bounds
+                s.offset = SIMD2(Double(i) * Fleet.worldGap - Double(b.min.x), -Double(b.min.y))
+            }
+            return
+        }
         var x = 0.0
         var rowMaxY = 0.0
         for s in ordered where s.name != "private" {
