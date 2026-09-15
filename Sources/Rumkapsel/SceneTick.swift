@@ -16,7 +16,7 @@ extension StationController {
             ("tattoodo-web", "\(home)/conductor/workspaces/tattoodo-web/oslo", .shipping, "gh-450/hero"),
             ("app-ios", "\(home)/conductor/workspaces/app-ios/lima", .waiting, "gh-298/onboarding"),
             ("app-ios", "\(home)/conductor/workspaces/app-ios/quito", .sleeping, "gh-290/crash-fix"),
-            ("rymdkapsel", "\(home)/dev/rymdkapsel", .researching, "main"),
+            ("rumkapsel", "\(home)/dev/rumkapsel", .researching, "main"),
             ("madplan", "\(home)/dev/madplan", .thinking, "main"),
         ]
         for (i, a) in acts.enumerated() {
