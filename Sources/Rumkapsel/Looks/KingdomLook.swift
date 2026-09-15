@@ -297,31 +297,204 @@ struct KingdomLook: Look {
         return f
     }
 
-    /// A well corner: a barrel to sit on where the bowl was, the rest in wood, the towel a linen cloth.
+    /// A washing corner: a bucket turned over to sit on where the bowl was, a wooden tub under the spout,
+    /// the pipes in timber, and a linen cloth on the rail.
     func furnishBath(_ bath: Room, in station: Station) -> Furnishing {
         var f = Classic.bath(bath, in: station)
         rustic(f.props)
         f.towel?.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.93, 0.9, 0.8))
-        if let bowl = f.props.first, let barrel = Kit.node("barrel", from: .survival) {
-            barrel.scale = SCNVector3(0.62, 0.62, 0.62)
-            barrel.position = v3(Double(bowl.position.x), 0, Double(bowl.position.z))
-            f.props[0] = barrel
+        if f.props.count > 4 {
+            if let bucket = Kit.node("bucket", from: .survival) {
+                bucket.scale = SCNVector3(1.1, 1.1, 1.1)
+                bucket.position = v3(Double(f.props[0].position.x), 0, Double(f.props[0].position.z))
+                f.props[0] = bucket
+            }
+            let drain = f.props[4]
+            let tub = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: 0.14), 8))
+            tub.geometry!.firstMaterial = lit(Self.planks)
+            tub.position = v3(Double(drain.position.x), 0.07, Double(drain.position.z))
+            let water = SCNNode(geometry: faceted(SCNCylinder(radius: 0.21, height: 0.01), 8))
+            water.geometry!.firstMaterial = flat(Self.shallows)
+            water.position = v3(0, 0.07, 0)
+            tub.addChildNode(water)
+            f.props[4] = tub
         }
         return f
     }
 
-    /// A training yard: the gym's pieces in timber and straw.
+    /// A training yard: a hay bale where the treadmill was, a log to lift on timber uprights, a straw sack on a
+    /// post, all in timber and straw.
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing {
-        let f = Classic.gym(gym, in: station)
+        var f = Classic.gym(gym, in: station)
         rustic(f.fixtures)
+        if let tread = f.fixtures.first {
+            let bale = SCNNode(geometry: SCNBox(width: 0.42, height: 0.26, length: 0.6, chamferRadius: 0.03))
+            bale.geometry!.firstMaterial = lit(Self.straw)
+            bale.position = v3(Double(tread.position.x), 0.13, Double(tread.position.z))
+            for z in [-0.18, 0.18] {
+                let band = SCNNode(geometry: SCNBox(width: 0.44, height: 0.27, length: 0.03, chamferRadius: 0))
+                band.geometry!.firstMaterial = lit(Self.wood)
+                band.position = v3(0, 0, z)
+                bale.addChildNode(band)
+            }
+            f.fixtures[0] = bale
+        }
+        if let bar = f.bar {
+            bar.childNodes.forEach { $0.removeFromParentNode() }
+            let log = SCNNode(geometry: faceted(SCNCylinder(radius: 0.05, height: 0.86), 6))
+            log.geometry!.firstMaterial = lit(Self.wood)
+            log.eulerAngles.z = .pi / 2
+            bar.geometry = nil
+            bar.addChildNode(log)
+        }
         return f
     }
 
-    /// Straw bedrolls on the floor, timber bunks above.
+    /// Straw bedrolls on the floor; above, a timber bunk with a bedroll on it.
     func bed(level: Int) -> SCNNode {
-        let b = Classic.bed(level: level, floorTop: floorTop)
-        rustic([b])
-        return b
+        guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(level: level, floorTop: floorTop) }
+        roll.scale = SCNVector3(0.85, 0.85, 0.85)
+        roll.geometry?.materials.forEach { $0.multiply.contents = NSColor(rgb: (0.95, 0.85, 0.62)) }
+        if level == 0 {
+            let n = SCNNode()
+            roll.position = v3(0, 0.06, 0)
+            n.addChildNode(roll)
+            return n
+        }
+        let bunk = Classic.bed(level: level, floorTop: floorTop)
+        rustic([bunk])
+        roll.position = v3(0, 0.06, 0)
+        bunk.addChildNode(roll)
+        return bunk
+    }
+
+    // MARK: work in the village
+
+    /// No welding at a field: working a message is digging, hoeing, reaping and looking it over by lantern.
+    var workSparks: Bool { false }
+
+    /// Village tools for the station's: a hoe to swing for the hammer, a spade for the goggles, a sickle-like axe
+    /// for the scanner, a hanging lantern for the torch, a scroll for the tablet, a ledger for the clipboard and a
+    /// wooden staff for the wand.
+    func tool(_ tool: Minion.Tool, height h: Double, depth d: Double) -> SCNNode? {
+        let n = SCNNode()
+        /// A kit tool lying along the body's facing: its handle's foot at the grip, its head outward.
+        func held(_ name: String, _ scale: Double) -> SCNNode? {
+            guard let m = Kit.node(name, from: .survival) else { return nil }
+            m.scale = SCNVector3(scale, scale, scale)
+            m.eulerAngles.x = .pi / 2
+            return m
+        }
+        switch tool {
+        case .hammer:
+            guard let hoe = held("tool-hoe", 1.5) else { return nil }
+            let pivot = SCNNode()
+            pivot.name = "swing"
+            pivot.position = v3(0.07, h * 0.42, d / 2 + 0.04)
+            pivot.eulerAngles.x = Minion.hammerRest
+            pivot.addChildNode(hoe)
+            n.addChildNode(pivot)
+        case .goggles:
+            guard let spade = held("tool-shovel", 1.3) else { return nil }
+            let grip = SCNNode()
+            grip.position = v3(0.08, h * 0.34, d / 2 + 0.04)
+            grip.eulerAngles.x = 0.7   // blade down into the soil ahead
+            grip.addChildNode(spade)
+            n.addChildNode(grip)
+        case .scanner:
+            guard let axe = held("tool-axe", 1.3) else { return nil }
+            let grip = SCNNode()
+            grip.position = v3(0.08, h * 0.3, d / 2 + 0.06)
+            grip.eulerAngles.x = 0.25
+            grip.addChildNode(axe)
+            n.addChildNode(grip)
+        case .flashlight:
+            guard let lantern = Kit.node("lantern", from: .town) else { return nil }
+            let pivot = SCNNode()
+            pivot.name = "aim"
+            pivot.position = v3(0.07, h * 0.36, d / 2 + 0.05)
+            lantern.scale = SCNVector3(0.1, 0.1, 0.1)
+            lantern.position = v3(0, -0.16, 0.06)
+            pivot.addChildNode(lantern)
+            let light = SCNNode()
+            light.light = SCNLight()
+            light.light!.type = .omni
+            light.light!.color = NSColor(rgb: (1.0, 0.82, 0.5))
+            light.light!.intensity = 380
+            light.light!.attenuationEndDistance = 1.4
+            light.position = v3(0, -0.08, 0.06)
+            pivot.addChildNode(light)
+            n.addChildNode(pivot)
+        case .tablet:
+            let scroll = SCNNode(geometry: SCNBox(width: 0.17, height: 0.006, length: 0.12, chamferRadius: 0))
+            scroll.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.9, 0.76)))
+            scroll.position = v3(0, h * 0.28, d / 2 + 0.09)
+            scroll.eulerAngles.x = 0.35
+            for z in [-0.065, 0.065] {
+                let rod = SCNNode(geometry: faceted(SCNCylinder(radius: 0.014, height: 0.21), 6))
+                rod.geometry!.firstMaterial = lit(Self.wood)
+                rod.eulerAngles.z = .pi / 2
+                rod.position = v3(0, 0.008, z)
+                scroll.addChildNode(rod)
+            }
+            let ink = SCNNode(geometry: SCNBox(width: 0.11, height: 0.002, length: 0.05, chamferRadius: 0))
+            ink.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.36, 0.28)))
+            ink.position = v3(0, 0.005, 0)
+            scroll.addChildNode(ink)
+            n.addChildNode(scroll)
+        case .clipboard:
+            let book = SCNNode(geometry: SCNBox(width: 0.13, height: 0.17, length: 0.035, chamferRadius: 0.005))
+            book.geometry!.firstMaterial = lit(NSColor(rgb: (0.45, 0.24, 0.18)))
+            book.position = v3(0.16, h * 0.24, d / 2 + 0.02)
+            book.eulerAngles = SCNVector3(0.25, -0.5, 0.15)
+            let pages = SCNNode(geometry: SCNBox(width: 0.115, height: 0.15, length: 0.037, chamferRadius: 0))
+            pages.geometry!.firstMaterial = flat(NSColor(rgb: (0.94, 0.9, 0.8)))
+            pages.position = v3(0.01, 0, 0)
+            book.addChildNode(pages)
+            n.addChildNode(book)
+        case .telekinesis:
+            let pivot = SCNNode()
+            pivot.position = v3(0.07, h * 0.36, d / 2 + 0.04)
+            pivot.eulerAngles.x = -0.5
+            let staff = SCNNode(geometry: faceted(SCNCylinder(radius: 0.018, height: 0.34), 6))
+            staff.geometry!.firstMaterial = lit(Self.wood)
+            staff.eulerAngles.x = .pi / 2
+            staff.position = v3(0, 0, 0.1)
+            pivot.addChildNode(staff)
+            let tip = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: 0.035, height: 0.08), 5))
+            tip.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.86, 0.45)))
+            tip.eulerAngles.x = .pi / 2
+            tip.position = v3(0, 0, 0.3)
+            tip.opacity = 0.45
+            tip.name = "wandTip"
+            pivot.addChildNode(tip)
+            let light = SCNNode()
+            light.light = SCNLight()
+            light.light!.type = .omni
+            light.light!.color = NSColor(rgb: (1.0, 0.86, 0.45))
+            light.light!.intensity = 0
+            light.light!.attenuationEndDistance = 2.0
+            light.position = v3(0, 0, 0.31)
+            light.name = "wandLight"
+            pivot.addChildNode(light)
+            n.addChildNode(pivot)
+        case .hands:
+            return nil
+        }
+        return n
+    }
+
+    /// A message as a sheaf of wheat tied with a ribbon in the office's colour.
+    func message(color: NSColor, floor: NSColor) -> SCNNode? {
+        guard let wheat = Kit.node("crops_wheatStageB", from: .nature, tint: Self.cropTint) else { return nil }
+        let n = SCNNode()
+        wheat.scale = SCNVector3(0.75, 0.75, 0.75)
+        n.addChildNode(wheat)
+        let ribbon = SCNNode(geometry: faceted(SCNCylinder(radius: 0.09, height: 0.05), 8))
+        ribbon.geometry!.firstMaterial = flat(color)
+        ribbon.position = v3(0, 0.14, 0)
+        n.addChildNode(ribbon)
+        return n
     }
 
     /// Recolour classic furniture: its greys become timber, its colours straw.

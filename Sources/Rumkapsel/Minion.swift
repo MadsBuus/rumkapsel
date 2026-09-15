@@ -155,6 +155,17 @@ final class Minion: Body {
         let n = SCNNode()
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         let w = 0.22, h = bodyHeight, d = bodyDepth
+        if let own = Looks.current.tool(t, height: h, depth: d) {
+            n.addChildNode(own)
+            hammerPivot = own.childNode(withName: "swing", recursively: true)
+            lightPivot = own.childNode(withName: "aim", recursively: true)
+            wandTip = own.childNode(withName: "wandTip", recursively: true)
+            wandLight = own.childNode(withName: "wandLight", recursively: true)
+            n.name = node.name
+            body.addChildNode(n)
+            toolNode = n
+            return
+        }
         switch t {
         case .goggles:
             let band = SCNNode(geometry: SCNBox(width: w * 0.9, height: h * 0.12, length: 0.025, chamferRadius: 0))
