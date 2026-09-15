@@ -10,6 +10,7 @@ enum LayoutTests {
     private static var failures = 0
 
     static func run() -> Never {
+        Theme.pinnedForPlan = .classic   // the plan as Classic lays it out, whatever the config says
         let keys = ["task:web#455", "task:api#5158", "task:ios#298", "branch:web/feature-x", "task:web#460", "task:api#5140"]
 
         test("two stations given the same rooms in the same order lay them out cell for cell the same") {
@@ -88,6 +89,23 @@ enum LayoutTests {
             draw(a)
         }
 
+        test("Classic's pad stands right north of the deck, as it always has") {
+            let a = fresh()
+            expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
+        }
+
+        for theme in Theme.allCases {
+            Theme.pinnedForPlan = theme
+            test("\(theme.title): forty rooms keep off the yard, and no hallway is dug through it") {
+                let a = fresh()
+                for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+                let yard = Set(a.padCells + a.deckCells + a.storageCells + a.deconCells)
+                for (k, r) in a.rooms { expect(!r.cells.contains(where: yard.contains), "\(k) keeps off the yard") }
+                expect(yard.isDisjoint(with: a.corridorCells), "the hallway keeps off the yard")
+            }
+        }
+        Theme.pinnedForPlan = .classic
+
         if ProcessInfo.processInfo.environment["RK_FILL"] != nil {
             for n in [40, 80] {
                 let a = fresh()
@@ -146,6 +164,8 @@ enum LayoutTests {
     private static func place(_ key: String, on s: Station) {
         _ = s.ensureRoom(key: key, name: key, repo: "r", color: Colors.repos[0], lastActive: Date(timeIntervalSince1970: 0))
     }
+
+    private static func cells(_ list: [Cell]) -> String { list.map { "\($0.x),\($0.y)" }.joined(separator: " ") }
 
     private static func cells(_ s: Station, _ key: String) -> String {
         (s.rooms[key]?.cells ?? []).map { "\($0.x),\($0.y)" }.joined(separator: " ")

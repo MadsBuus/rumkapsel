@@ -40,8 +40,10 @@ final class Minion: Body {
     private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
-    /// Kenney's astronaut in the body's place, feet at the body's foot, when that theme is on; else nil.
+    /// The look's own figure in the box's place, when it has one; the box and its visor are then not drawn.
     private let figure: SCNNode?
+    /// The look the figure came from, which poses it on a seat.
+    private let look: Look
     private var staticNode: SCNNode?
     private var towelNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
@@ -98,14 +100,15 @@ final class Minion: Body {
         shins.position = v3(0, (d - Minion.seat) / 2, d * 1.6)
         legs.addChildNode(thighs); legs.addChildNode(shins)
         legs.opacity = 0
-        // Kenney's theme: the astronaut stands in for the box, hung from the box's middle so every
-        // pose that turns or moves the body carries it along; the box and its visor are not drawn.
-        let figure = Theme.isKenney ? Kit.astronaut(crew: crew, height: h) : nil
+        // A look's own figure stands in for the box, hung from the box's middle so every pose that
+        // turns or moves the body carries it along.
+        let look = Looks.current
+        let figure = look.figure(crew: crew, height: h)
         if let figure {
             body.geometry = nil
             visor.isHidden = true
-            figure.position = v3(0, -h / 2, -0.03)
             body.addChildNode(figure)
+            look.pose(figure: figure, height: h, torso: h)
         }
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
@@ -125,6 +128,7 @@ final class Minion: Body {
         self.bodyDepth = d
         self.visor = visor
         self.figure = figure
+        self.look = look
         super.init(id: id, station: station, home: home, cwd: cwd, toolCount: toolCount, isSubagent: isSubagent, start: start, crew: crew)
         node.name = "minion:" + id
         body.name = node.name
@@ -341,10 +345,7 @@ final class Minion: Body {
         SCNTransaction.begin()
         SCNTransaction.animationDuration = on ? 0.5 : 0.45
         if let figure {
-            // The astronaut has legs of its own: it shortens onto the seat, feet at the box's new foot.
-            let s = bodyHeight / 0.79
-            figure.scale = SCNVector3(s, s * (on ? torso : bodyHeight) / bodyHeight, s)
-            figure.position = v3(0, -(on ? torso : bodyHeight) / 2, -0.03)
+            look.pose(figure: figure, height: bodyHeight, torso: on ? torso : bodyHeight)   // legs of its own
         } else {
             (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
             legs.opacity = on ? 1 : 0

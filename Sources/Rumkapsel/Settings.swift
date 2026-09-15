@@ -178,8 +178,9 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: 220)
             }
-            Text("Kenney Space Center draws the station with the Space Kit and the Modular Space Kit by Kenney (kenney.nl, CC0).")
-                .font(.caption).foregroundStyle(.secondary)
+            if let credit = model.config.theme.credit {
+                Text(credit).font(.caption).foregroundStyle(.secondary)
+            }
             Divider()
             Toggle("Music", isOn: $model.musicOn).onChange(of: model.musicOn) { onMusic($0) }
             Toggle("Float on top of other windows", isOn: $model.floatOn).onChange(of: model.floatOn) { onFloat($0) }

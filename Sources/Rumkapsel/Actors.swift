@@ -23,31 +23,8 @@ final class RocketView {
 extension StationController {
     // MARK: shuttles
 
-    /// The shuttle body, wings in a repo colour.
-    private func shuttle(color: NSColor) -> SCNNode {
-        if Theme.isKenney, let craft = Kit.craft(color: color) { return craft }
-        let ship = SCNNode()
-        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
-        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
-        ship.addChildNode(hull)
-        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
-        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
-        cockpit.position = v3(0.16, 0.11, 0)
-        ship.addChildNode(cockpit)
-        for side in [-1.0, 1.0] {
-            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
-            wing.geometry!.firstMaterial = lit(color)
-            wing.position = v3(-0.14, 0, side * 0.34)
-            ship.addChildNode(wing)
-        }
-        for side in [-1.0, 1.0] {
-            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
-            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            skid.position = v3(0, -0.14, side * 0.16)
-            ship.addChildNode(skid)
-        }
-        return ship
-    }
+    /// The shuttle body, wings in a repo colour: the look's.
+    private func shuttle(color: NSColor) -> SCNNode { Looks.current.shuttle(color: color) }
 
     /// Every ship in the air, where the simulation has it. Everything is parented to the hangar
     /// anchor, so a station shifting underneath does not misalign it; a flight that is over loses its node.
@@ -114,7 +91,7 @@ extension StationController {
 
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
-        let n = (Theme.isKenney ? Kit.rocketProp(color: color, tall: r.tall, cargo: r.cargo) : nil) ?? Props.rocket(color: color, tall: r.tall, cargo: r.cargo)
+        let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
         if r.untested {
             let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
             deco.name = "hold"
