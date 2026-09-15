@@ -48,6 +48,8 @@ signs and publishes but says so, and the app is not notarised.
 | R | reset view |
 | M | music (off by default) |
 | F | float on top |
+| click a minion | follow it: the camera goes with it, its order written along the bottom; Esc, a pan or a click on the floor lets go |
+| double-click a minion | ask GitHub again about its repo |
 | click a box | open the pull request or issue |
 | right-click an office | kick it off the station (offices put there by peers or GitHub) |
 

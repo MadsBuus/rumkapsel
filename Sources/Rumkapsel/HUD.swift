@@ -93,6 +93,11 @@ extension StationController {
         shareLabel.verticalAlignmentMode = .top
         hud.addChild(shareDot)
         hud.addChild(shareLabel)
+        followLabel.fontSize = 13
+        followLabel.fontColor = Palette.text
+        followLabel.horizontalAlignmentMode = .center
+        followLabel.verticalAlignmentMode = .bottom
+        hud.addChild(followLabel)
         statusLabel.fontSize = 10
         statusLabel.fontColor = Palette.dim
         statusLabel.horizontalAlignmentMode = .right
@@ -342,6 +347,11 @@ extension StationController {
         statusLabel.fontColor = Palette.pyramid
         statusLabel.position = CGPoint(x: hud.size.width / 2, y: 12)
         infoLabel.position = CGPoint(x: 14, y: 12)
+        // Following: who, and their order in their own words, live. Esc lets go.
+        if let id = following, let m = minions[id] {
+            followLabel.text = "following \(m.home.name) · \(m.words) · esc to let go"
+            followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)   // above the legend's line
+        } else { followLabel.text = "" }
 
         if clock - hudClock > 0.5 {
             hudClock = clock

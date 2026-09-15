@@ -41,6 +41,7 @@ final class Minion: Body {
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
     private var staticNode: SCNNode?
+    private var towelNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
         let n = 5   // five fat pixels a side: coarse on purpose
@@ -335,6 +336,21 @@ final class Minion: Body {
     }
 
     /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
+    /// A towel over the shoulders, draped across the top of the body, or none.
+    func setTowel(_ on: Bool) {
+        if !on { towelNode?.removeFromParentNode(); towelNode = nil; return }
+        guard towelNode == nil else { return }
+        let t = SCNNode(geometry: SCNBox(width: 0.3, height: 0.05, length: bodyDepth + 0.1, chamferRadius: 0.004))
+        t.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
+        t.position = v3(0, bodyHeight / 2 - 0.01, 0)
+        let stripe = SCNNode(geometry: SCNBox(width: 0.31, height: 0.02, length: 0.05, chamferRadius: 0))
+        stripe.geometry!.firstMaterial = flat(NSColor(rgb: (0.98, 0.9, 0.82)))
+        stripe.position = v3(0, 0.02, 0)
+        t.addChildNode(stripe)
+        body.addChildNode(t)
+        towelNode = t
+    }
+
     func fidget() {
         guard posedSeated, !body.hasActions else { return }
         let side = Bool.random() ? 0.08 : -0.08

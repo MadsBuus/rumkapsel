@@ -322,13 +322,16 @@ extension StationController {
                 pole.addChildNode(tap)
                 pole.name = "room:" + roomKey(station, bath)
                 staticRoot.addChildNode(pole)
-                // A towel over a rail on the other wall of the corner, a step along from the shower.
+                // A towel over a rail on the other wall of the corner, at the far end of the tile from the shower
+                // so it never lines up with the nozzle in the picture. Named, so the scene can take it off the rail.
+                let railAt = station.towelRail(bath: bath)
                 let rail = SCNNode(geometry: SCNBox(width: 0.02, height: 0.02, length: 0.24, chamferRadius: 0))
                 rail.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                rail.position = v3(station.offset.x + Double(sc2.x) + 0.46 * sk.x, 0.5, station.offset.y + Double(sc2.y) - 0.05 * sk.y)
+                rail.position = v3(railAt.x, 0.46, railAt.y)
                 let towel = SCNNode(geometry: SCNBox(width: 0.035, height: 0.24, length: 0.18, chamferRadius: 0.004))
                 towel.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
                 towel.position = v3(-0.03 * sk.x, -0.09, 0)
+                towel.name = "towel:" + station.name
                 rail.addChildNode(towel)
                 let stripe = SCNNode(geometry: SCNBox(width: 0.04, height: 0.03, length: 0.18, chamferRadius: 0))
                 stripe.geometry!.firstMaterial = lit(NSColor(rgb: (0.98, 0.9, 0.82)))

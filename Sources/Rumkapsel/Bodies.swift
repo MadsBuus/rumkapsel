@@ -75,6 +75,7 @@ extension Simulation {
                 m.seated = false
                 m.onBench = false
                 m.fixture = nil
+                m.drying = false
                 finish(m)
             }
         }
