@@ -10,6 +10,7 @@ extension StationController {
         if station.storageCells.contains(c) { return "kind:storage" }
         if station.deckCells.contains(c) && world.deckInUse(station: station.name) { return "kind:deck" }
         if station.padCells.contains(c) { return "kind:pad" }
+        if station.deconCells.contains(c) { return "kind:decon" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
     }
@@ -18,13 +19,25 @@ extension StationController {
         owner(station, b) == key || openEdges.contains("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
     }
 
+    /// What kind of floor an owner's tile is, for the look.
+    private func floorKind(_ key: String) -> Floor {
+        switch key {
+        case "corridor": return .hallway
+        case "kind:hangar": return .bay
+        case "kind:airlock": return .airlock
+        case "kind:pad", "kind:storage", "kind:deck", "kind:decon": return .yard
+        default: return .room
+        }
+    }
+
     /// Full-size floor tile; borders are drawn separately as strips so corners meet cleanly.
     @discardableResult
     private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into parent: SCNNode? = nil) -> SCNNode {
         let root = parent ?? staticRoot
         let look = Looks.current
+        let floor = floorKind(key)
         let plane = SCNPlane(width: 1.0, height: 1.0)
-        plane.firstMaterial = flat(color)
+        plane.firstMaterial = flat(look.floorColor(color, floor: floor))
         let n = SCNNode(geometry: plane)
         n.eulerAngles.x = -.pi / 2
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
@@ -37,10 +50,12 @@ extension StationController {
             (Cell(x: cell.x - 1, y: cell.y), SIMD2(-0.5, 0), true, 1), (Cell(x: cell.x + 1, y: cell.y), SIMD2(0.5, 0), true, 3),
             (Cell(x: cell.x, y: cell.y - 1), SIMD2(0, -0.5), false, 0), (Cell(x: cell.x, y: cell.y + 1), SIMD2(0, 0.5), false, 2),
         ]
-        var open = Set<Int>()
+        var open = Set<Int>(), walled: [Int: Floor] = [:]
         for (nb, off, vertical, edge) in sides {
             guard let other = owner(station, nb) else { open.insert(edge); continue }   // the void: a kerb, no border
             guard other != key, !joined(station, cell, nb, key) else { continue }
+            walled[edge] = floorKind(other)
+            guard look.drawsBorders else { continue }
             let strip = SCNPlane(width: vertical ? g * 2 : 1 + g * 2, height: vertical ? 1 + g * 2 : g * 2)
             strip.firstMaterial = flat(Palette.void)
             let b = SCNNode(geometry: strip)
@@ -52,7 +67,7 @@ extension StationController {
         }
         // Whatever the look hangs under the plane; the plane keeps the name, the colour and the place
         // the scene reads.
-        if let detail = look.tileDetail(open: open, color: color) {
+        if let detail = look.tileDetail(floor: floor, open: open, walled: walled, color: color) {
             detail.name = name
             n.addChildNode(detail)
         }

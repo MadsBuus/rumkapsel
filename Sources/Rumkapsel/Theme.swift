@@ -7,12 +7,14 @@ import Foundation
 enum Theme: String, CaseIterable, Identifiable {
     case classic
     case kenney
+    case kingdom
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .classic: return "Classic"
         case .kenney: return "Kenney Space Center"
+        case .kingdom: return "Kenney Kingdom"
         }
     }
 
@@ -21,6 +23,7 @@ enum Theme: String, CaseIterable, Identifiable {
         switch self {
         case .classic: return nil
         case .kenney: return "Kenney Space Center draws the station with the Space Kit, the Modular Space Kit and the Nature Kit by Kenney (kenney.nl, CC0)."
+        case .kingdom: return "Kenney Kingdom draws the station with the Castle Kit, the Fantasy Town Kit, Mini Characters and the Hexagon Kit by Kenney (kenney.nl, CC0)."
         }
     }
 
@@ -28,7 +31,7 @@ enum Theme: String, CaseIterable, Identifiable {
     /// the ground. The only way a theme reaches the floor plan.
     var padGap: Int {
         switch self {
-        case .classic: return 0
+        case .classic, .kingdom: return 0
         case .kenney: return 5
         }
     }

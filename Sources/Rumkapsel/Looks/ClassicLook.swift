@@ -9,6 +9,7 @@ struct ClassicLook: Look {
     var viewYaw: Double { .pi / 4 }
     var floorTop: Double { 0 }
     var dotsHallway: Bool { true }
+    var drawsBorders: Bool { true }
 
     /// Flakes of debris drifting, a far star field and a few nebulae.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] {
@@ -73,7 +74,9 @@ struct ClassicLook: Look {
 
     func ground(under stations: [Station], into root: SCNNode) {}
 
-    func tileDetail(open: Set<Int>, color: NSColor) -> SCNNode? { nil }
+    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
+
+    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? { nil }
 
     func tint(tile: SCNNode, _ color: NSColor) {
         tile.geometry?.firstMaterial?.diffuse.contents = color
@@ -118,7 +121,7 @@ struct ClassicLook: Look {
         return n
     }
 
-    func figure(crew: Bool, height: Double) -> SCNNode? { nil }
+    func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
 
     func pose(figure: SCNNode, height: Double, torso: Double) {}
 
