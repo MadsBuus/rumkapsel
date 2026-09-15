@@ -153,11 +153,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let propRoot = SCNNode()
     let markerRoot = SCNNode()
     private let debrisRoot = SCNNode()
-    /// The lawn, the sea and the shore of the Kenney theme; empty in the classic one.
+    /// Whatever the look lays under the fleet; rebuilt with the floor.
     let groundRoot = SCNNode()
-    /// Where the view starts from: the classic quarter turn, or, on the ground, turned about so the yard
-    /// and its pad face right, toward the sea, as at the Cape.
-    var viewYaw: Double { Theme.isKenney ? .pi / 4 + .pi : .pi / 4 }
+    /// Where the view starts from before the user turns it: the look's.
+    var viewYaw: Double { Looks.current.viewYaw }
     let rig = SCNNode()
     let pitchNode = SCNNode()
     let cameraNode = SCNNode()
@@ -423,8 +422,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     // MARK: scene
 
     private func buildScene() {
-        Theme.active = ConfigStore.shared.current.theme
-        scene.background.contents = Theme.isKenney ? Kit.sky : Palette.void
+        Looks.use(ConfigStore.shared.current.theme)
         for n in [groundRoot, staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot, peerRoot] { scene.rootNode.addChildNode(n) }
 
         let camera = SCNCamera()
@@ -455,70 +453,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rebuildStatic()
     }
 
-    /// What lies under the station in the classic theme: flakes of debris drifting, a far star field
-    /// and a few nebulae. On the ground there is nothing to drift; the lawn is `rebuildGround`'s.
+    /// What lies past the fleet, from the look: the colour beyond everything and whatever drifts there.
     private func buildBackdrop() {
         debrisRoot.childNodes.forEach { $0.removeFromParentNode() }
-        debris = []
-        scene.background.contents = Theme.isKenney ? Kit.sky : Palette.void
-        if Theme.isKenney { return }
-        do {
-            for _ in 0..<110 {
-                let size = Double.random(in: 0.05...0.13)
-                let n = SCNNode(geometry: SCNPlane(width: size, height: size))
-                n.geometry!.firstMaterial = flat(Palette.debris)
-                n.opacity = Double.random(in: 0.25...0.7)
-                n.eulerAngles.x = -.pi / 2
-                n.eulerAngles.z = Double.random(in: 0..<6.28)
-                let p = SIMD2(Double.random(in: -40...40), Double.random(in: -40...40))
-                n.position = v3(p.x, -0.6, p.y)
-                debrisRoot.addChildNode(n)
-                debris.append((n, SIMD2(Double.random(in: -0.12...0.12), Double.random(in: -0.12...0.12))))
-            }
-        }
-        // A far, still star field: one point-cloud geometry, faint and small.
-        var stars: [SCNVector3] = []
-        var starColors: [SCNVector4] = []
-        for _ in 0..<700 {
-            stars.append(v3(Double.random(in: -90...90), -12, Double.random(in: -90...90)))
-            let b = Double.random(in: 0.25...0.7)
-            starColors.append(SCNVector4(0.8 * b, 0.85 * b, 1.0 * b, 1))
-        }
-        let starSource = SCNGeometrySource(vertices: stars)
-        let colorData = Data(bytes: starColors, count: starColors.count * MemoryLayout<SCNVector4>.stride)
-        let colorSource = SCNGeometrySource(data: colorData, semantic: .color, vectorCount: starColors.count, usesFloatComponents: true,
-                                            componentsPerVector: 4, bytesPerComponent: MemoryLayout<CGFloat>.size, dataOffset: 0, dataStride: MemoryLayout<SCNVector4>.stride)
-        let indices = (0..<stars.count).map { Int32($0) }
-        let element = SCNGeometryElement(indices: indices, primitiveType: .point)
-        element.pointSize = 1.2
-        element.minimumPointScreenSpaceRadius = 0.6
-        element.maximumPointScreenSpaceRadius = 1.6
-        let starGeometry = SCNGeometry(sources: [starSource, colorSource], elements: [element])
-        let starMaterial = SCNMaterial()
-        starMaterial.lightingModel = .constant
-        starMaterial.diffuse.contents = NSColor.white
-        starMaterial.blendMode = .add
-        starGeometry.firstMaterial = starMaterial
-        debrisRoot.addChildNode(SCNNode(geometry: starGeometry))
-
-        for _ in 0..<4 {
-            let cluster = SCNNode()
-            let count = Int.random(in: 12...20)
-            for _ in 0..<count {
-                let size = Double.random(in: 0.25...0.4)
-                let n = SCNNode(geometry: SCNPlane(width: size, height: size))
-                let shade = Double.random(in: 0...1)
-                n.geometry!.firstMaterial = flat(NSColor(rgb: (0.55 + 0.25 * shade, 0.22 + 0.15 * shade, 0.40 + 0.15 * shade)))
-                n.eulerAngles.x = -.pi / 2
-                let a = Double.random(in: 0..<6.28), r = Double.random(in: 0...1.3)
-                n.position = v3(cos(a) * r, Double.random(in: -0.15...0.15), sin(a) * r)
-                cluster.addChildNode(n)
-            }
-            let p = SIMD2(Double.random(in: -30...30), Double.random(in: -30...30))
-            cluster.position = v3(p.x, -0.4, p.y)
-            debrisRoot.addChildNode(cluster)
-            debris.append((cluster, SIMD2(Double.random(in: -0.08...0.08), Double.random(in: -0.08...0.08))))
-        }
+        scene.background.contents = Looks.current.background
+        debris = Looks.current.backdrop(into: debrisRoot)
     }
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
@@ -1155,10 +1094,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         applySharing()
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
-            if Theme.active != cfg.theme {
+            if Looks.theme != cfg.theme {
                 // A new look: the backdrop, the ships and the rockets are drawn again; the floor is
                 // rebuilt below and the minions come back with the rescan in their new figures.
-                Theme.active = cfg.theme
+                Looks.use(cfg.theme)
                 buildBackdrop()
                 for v in rocketViews.values { v.node.removeFromParentNode() }
                 rocketViews = [:]

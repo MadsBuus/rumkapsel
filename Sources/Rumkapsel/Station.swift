@@ -223,7 +223,7 @@ final class Station {
     private var yardX0: Int { (plan.west.last?.x ?? -2) - 1 }
     /// How far the pad stands off the deck: hard by it in the classic plan, a causeway's length away on
     /// the ground, as a launch complex keeps its distance from the buildings.
-    private var padGap: Int { ConfigStore.shared.current.theme == .kenney ? 5 : 0 }
+    private var padGap: Int { Theme.forPlan.padGap }
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
     /// The pad block's east column and top row: north of the deck in the classic plan; on the ground,
     /// west of it out toward the sea, with the causeway between.
