@@ -186,9 +186,10 @@ extension Simulation {
         let command = Command.flight(.bringWorker(m.id), station: m.station, slot: slotIndex,
                                      what: "a new worker for \(m.home.name)")
         launch(Flight(station: m.station, repo: m.home.repo, command: command, start: at + skyCorner(), high: at + SIMD3(0, 5, 0), down: at + SIMD3(0, 0.55, 0),
-                      exit: at + skyCorner(), restYaw: nil, drift: 0, unloadAt: 0.6, unloadFor: 1.0) { [weak m] in
+                      exit: at + skyCorner(), restYaw: nil, drift: 0, unloadAt: 0.6, unloadFor: 1.0) { [weak m, weak self] in
+            // Out of the ship, and standing by it for the second it takes to lift off: nobody walks out from under a shuttle.
             m?.opacity = 1
-            m?.wakeUntil = 0
+            m?.wakeUntil = (self?.clock ?? 0) + 1.0
         })
     }
 

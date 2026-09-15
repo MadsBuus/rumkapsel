@@ -282,7 +282,10 @@ final class Invariants {
             // approach is high in the air, crossing over the station on its way in.
             guard s.phaseKind == .descend || s.phaseKind == .unload else { continue }
             let local = SIMD2(s.pos.x, s.pos.z)
-            for m in c.minions.values where m.station == s.station {
+            // The ship's own passenger is under it by nature until it steps out; everyone else keeps clear.
+            var passenger: String?
+            if case .flight(.bringWorker(let id), _, _) = s.command.kind { passenger = id }
+            for m in c.minions.values where m.station == s.station && m.id != passenger {
                 let d = ((m.pos.x - local.x) * (m.pos.x - local.x) + (m.pos.y - local.y) * (m.pos.y - local.y)).squareRoot()
                 if d < 0.5 {
                     flag("nobody walks under a shuttle", s.station + " / " + m.id,

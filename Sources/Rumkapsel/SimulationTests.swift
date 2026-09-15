@@ -70,6 +70,21 @@ enum SimulationTests {
             expect(!m.drying && hung && m.place == .lounge, "the towel back on the rail, and back to the lounge")
         }
 
+        test("a reaction that arrives mid-shower waits, then walks to its place once the visit is over") {
+            let (sim, station, m) = fixture()
+            m.isCrew = true
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            m.showering = true
+            expect(sim.visitBath(m, station: station), "off to the shower")
+            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            sim.react(m, .coding("src"), place: .quarters, minutes: 2, words: "johan is shipping")
+            expect(m.bathing && m.pending != nil, "the reaction waits behind the shower: \(m.words)")
+            _ = step(sim, seconds: m.actFor + 10, until: { !m.bathing })
+            expect(m.current.map { if case .react = $0.kind { return true }; return false } == true, "then the reaction is in hand: \(m.words)")
+            expect(m.place == .quarters && (!m.path.isEmpty || station.cells(of: .quarters).contains(m.cell)), "and the body is on its way to its place, not standing in the bath: place \(m.place.words), path \(m.path.count)")
+        }
+
         test("the shower and the bowl are each one body's for the whole visit: a third visitor is turned away") {
             let (sim, station, a) = fixture()
             let b = body("b", sim: sim, station: station), c = body("c", sim: sim, station: station)

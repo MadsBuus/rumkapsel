@@ -7,7 +7,8 @@ read against. If a behaviour is not allowed here, it is a bug, however pretty.
 
 A station is a hallway one tile wide with rooms snapped against it, like the game's: a plaza three by
 three round the **monolith**, four arms out of it, the two long ones wandering in runs and jogs with
-short alleys off them, and rooms on both sides of every stretch. The hallway is drawn whole from the
+short alleys off them, every other alley looping back into its arm so there is a way round as well as a
+way out, and rooms on both sides of every stretch. The hallway is drawn whole from the
 station's name and built outward as rooms need it, so it never re-plans and two machines that share a
 station draw the same one. The monolith is the ancient artefact the game's minions researched for new
 skills. Here it stands for the outside world: sessions that search the web or talk to other systems send

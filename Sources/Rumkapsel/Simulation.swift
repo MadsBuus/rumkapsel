@@ -203,8 +203,13 @@ final class Simulation<B: Body> {
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
-        if let next = m.pending { m.pending = nil; begin(m, next, announce: next.isJob) }
-        else { send(m, to: place ?? restPlace(m)) }
+        if let next = m.pending {
+            m.pending = nil
+            // A reaction that waited behind a visit has its walk still to plan: nothing but rest moved the
+            // body while the visit lasted, so it is planned now, with nothing in hand for a moment.
+            if case .react(_, let where_, _) = next.kind, m.place != where_ { send(m, to: where_) }
+            begin(m, next, announce: next.isJob)
+        } else { send(m, to: place ?? restPlace(m)) }
     }
 
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it

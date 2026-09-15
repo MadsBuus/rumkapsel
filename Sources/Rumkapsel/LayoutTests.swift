@@ -48,10 +48,21 @@ enum LayoutTests {
             expect(!armsTouch, "the north and east arms never touch")
             for al in p.alleys {
                 let others = p.everyHallwayCell.subtracting(al.cells)
-                let base = al.arm == 0 ? p.north[al.step] : p.east[al.step]
-                let crowded = al.cells.contains { c in others.contains { o in o != base && abs(o.x - c.x) <= 1 && abs(o.y - c.y) <= 1 } }
-                expect(!crowded, "alley at step \(al.step) of arm \(al.arm) keeps a tile clear of other hallway")
+                let base = al.base
+                let body = al.joins ? Array(al.cells.dropLast()) : al.cells
+                let crowded = body.contains { c in others.contains { o in o != base && abs(o.x - c.x) + abs(o.y - c.y) <= 1 } }
+                expect(!crowded, "alley at step \(al.step) of arm \(al.arm) keeps clear of other hallway along its length")
             }
+        }
+
+        test("the hallway is a web, not a tree: shortcuts join it into loops") {
+            let a = fresh()
+            let p = a.plan
+            expect(p.alleys.contains { $0.joins }, "at least one alley runs on to meet other hallway")
+            let all = p.everyHallwayCell.union(p.plaza).subtracting([p.monolith])
+            var edges = 0
+            for c in all { for n in c.neighbours where all.contains(n) && (n.x, n.y) > (c.x, c.y) { edges += 1 } }
+            expect(edges >= all.count, "more ways than cells, so there are loops: \(edges) edges over \(all.count) cells")
         }
 
         test("forty rooms: the station builds outward along the hallway, every room on it, none on the plan") {

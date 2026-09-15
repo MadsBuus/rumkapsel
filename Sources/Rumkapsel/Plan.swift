@@ -18,7 +18,12 @@ struct Plan {
     let north: [Cell]
     let east: [Cell]
     /// The alleys: each hangs off one arm at one step and runs one tile wide to a dead end.
-    struct Alley { let arm: Int; let step: Int; let cells: [Cell] }
+    struct Alley {
+        /// Which arm it hangs off, the arm cell it leaves from, and the built length at which it appears.
+        let arm: Int; let base: Cell; let step: Int; let cells: [Cell]
+        /// A shortcut: it runs on until it meets other hallway, so the way round is a loop, not a tree.
+        var joins = false
+    }
     let alleys: [Alley]
     /// How many steps the long arms are drawn: no room stands there, built or not.
     var horizon: Int { min(north.count, east.count) }
@@ -55,11 +60,12 @@ struct Plan {
         // Then the alleys: off every other run or so, two or three tiles, on the side away from the last
         // jog, and never within a tile of any other hallway, so a room fits on both sides of each.
         var alleys: [Alley] = []
-        func clear(_ cells: [Cell], base: Cell) -> Bool {
+        func clear(_ cells: [Cell], base: Cell, dir: Cell) -> Bool {
             for c in cells {
                 for dx in -1...1 { for dy in -1...1 {
                     let n = Cell(x: c.x + dx, y: c.y + dy)
-                    if n == base || cells.contains(n) { continue }
+                    // The base and the arm's straight run through it are a tile away by nature; they do not count.
+                    if cells.contains(n) || n == base || n == base + dir || n == base + (dir * -1) { continue }
                     if taken.contains(n) { return false }
                 } }
             }
@@ -76,26 +82,74 @@ struct Plan {
                 if straight, sinceAlley >= 4 {
                     // Off this cell, on the side the line last jogged away from.
                     let prevJog = (1...i).reversed().first { cells[$0] != cells[$0 - 1] + dir }.map { cells[$0].x - cells[$0 - 1].x + cells[$0].y - cells[$0 - 1].y } ?? 1
-                    let s = -(prevJog == 0 ? 1 : prevJog.signum())
+                    let preferred = -(prevJog == 0 ? 1 : prevJog.signum())
                     let len = 2 + Int(rng.next() % 2)
-                    let alley = (1...len).map { here + side * (s * $0) }
-                    if clear(alley, base: here) {
-                        alleys.append(Alley(arm: index, step: i, cells: alley))
+                    for s in [preferred, -preferred] {
+                        let alley = (1...len).map { here + side * (s * $0) }
+                        guard clear(alley, base: here, dir: dir) else { continue }
+                        alleys.append(Alley(arm: index, base: here, step: i, cells: alley))
                         taken.formUnion(alley)
                         sinceAlley = 0
+                        break
                     }
                 }
                 sinceAlley += 1
                 i += 1
             }
         }
-        self.north = north; self.east = east; self.alleys = alleys
-        var every = Set(west + south + north + east)
         var stepOf: [Cell: Int] = [:]
         for c in west + south { stepOf[c] = 0 }
         for (i, c) in north.enumerated() { stepOf[c] = i + 1 }
         for (i, c) in east.enumerated() { stepOf[c] = i + 1 }
-        for a in alleys { every.formUnion(a.cells); for c in a.cells { stepOf[c] = a.step + 2 } }
+        for a in alleys { for c in a.cells { stepOf[c] = a.step + 2 } }
+        // Shortcuts: every other alley becomes a loop rather than a dead end. Out three tiles, along the
+        // arm's own direction for four to six, and back in to meet the arm further on, so the way round
+        // encloses a two-wide strip with room frontage on both sides, and the station is a web of ways
+        // round rather than a tree. Never touching the yard or the bay, never brushing other hallway on
+        // the way; a loop that cannot close stays the plain alley it was.
+        let x0 = west.last!.x - 1, se = south.last!
+        var avoid = Set<Cell>()
+        for x in (x0 - 3)...x0 { for y in -5...8 { avoid.insert(Cell(x: x, y: y)) } }
+        for y in (se.y + 1)...(se.y + 4) { for x in (se.x - 1)...(se.x + 1) { avoid.insert(Cell(x: x, y: y)) } }
+        let armCells = [Set(north), Set(east)]
+        for i in stride(from: 1, to: alleys.count, by: 2) {
+            let a = alleys[i]
+            let base = a.base
+            let armDir = a.arm == 0 ? Cell(x: 0, y: -1) : Cell(x: 1, y: 0)
+            let out = a.cells[0] + (base * -1)
+            var cells = a.cells
+            func free(_ p: Cell) -> Bool {
+                guard !taken.contains(p), !avoid.contains(p) else { return false }
+                let here = Set(cells)
+                return !p.neighbours.contains { (taken.contains($0) && !here.contains($0) && $0 != base) || avoid.contains($0) }
+            }
+            var ok = true
+            while cells.count < 3 { let c = cells.last! + out; guard free(c) else { ok = false; break }; cells.append(c) }
+            guard ok else { continue }
+            let along = 4 + Int(rng.next() % 3)
+            var p = cells.last! + armDir
+            for _ in 0..<along { guard free(p) else { ok = false; break }; cells.append(p); p = p + armDir }
+            guard ok else { continue }
+            var met: Cell?
+            p = cells.last! + (out * -1)
+            for _ in 0..<5 {
+                guard !taken.contains(p), !avoid.contains(p) else { break }
+                let here = Set(cells)
+                let hits = p.neighbours.filter { taken.contains($0) && !here.contains($0) }
+                cells.append(p)
+                if let h = hits.first(where: { armCells[a.arm].contains($0) }) { met = h; break }
+                if !hits.isEmpty { break }   // brushed something that is not the arm: no loop here
+                p = p + (out * -1)
+            }
+            guard let met else { continue }
+            let step = max(a.step, (stepOf[met] ?? 0) - 1)
+            alleys[i] = Alley(arm: a.arm, base: base, step: step, cells: cells, joins: true)
+            taken.formUnion(cells)
+            for c in cells { stepOf[c] = step + 2 }
+        }
+        self.north = north; self.east = east; self.alleys = alleys
+        var every = Set(west + south + north + east)
+        for a in alleys { every.formUnion(a.cells) }
         self.everyHallwayCell = every
         self.stepOf = stepOf
     }

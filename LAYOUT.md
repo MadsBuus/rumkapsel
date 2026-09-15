@@ -156,7 +156,8 @@ Each step keeps the gate green on its own. Steps 1 and 2 touch no picture; the f
 ## Where it stands
 
 Done on 2026-09-15, steps 2 to 4 of the order below in one pass: the plan generator (`Plan.swift`), the
-plaza, the one-wide arms with alleys, the fixed west and south arms to the yard and the bay, placement by
+plaza, the one-wide arms with alleys, every other alley a loop back into its arm (a shortcut, so the hallway
+is a web rather than a tree), the fixed west and south arms to the yard and the bay, placement by
 hallway distance, `--layout-tests` with the forty-room fill drawn as text, and the scenario suite green on
 the new floor without a change to any scenario. Not yet: the smaller shape set, the minion scale switch,
 the palette switch, the peer tie-break, the name on the plaza.

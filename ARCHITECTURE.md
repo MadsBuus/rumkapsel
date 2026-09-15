@@ -21,7 +21,7 @@ already existed. `readyRepos` tracks which repositories have answered; only chan
 `Station.swift` holds the floor plan: rooms keyed by branch (`task:repo#N` for `gh-N/...` branches), fixed
 rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway
 itself is a `Plan` (`Plan.swift`): drawn once from the station's name, a plaza round the monolith and four
-one-wide arms with alleys, the west and south ones fixed so the yard and the bay never move, the north and
+one-wide arms with alleys, every other alley a loop back into its arm, the west and south ones fixed so the yard and the bay never move, the north and
 east ones built outward (`spineHalfLength`, in steps) as rooms need frontage. Every cell of the plan is
 reserved, built or not, so no room ever stands where hallway will run. A room goes on the free frontage
 fewest hallway steps from the plaza (`placeShape`), alleys before the next stretch of arm. `Fleet` arranges
