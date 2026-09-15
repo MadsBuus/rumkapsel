@@ -63,6 +63,13 @@ protocol Look {
     /// A rocket standing on the origin, with children named "hatch" and "flame" the scene reaches for.
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode
 
+    /// The fixed rooms' furniture, placed in the world as the room stands: the lounge, the bath and the gym.
+    func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing
+    func furnishBath(_ bath: Room, in station: Station) -> Furnishing
+    func furnishGym(_ gym: Room, in station: Station) -> Furnishing
+    /// A bed, `level` 0 on the floor and 1 the upper bunk, centred on the origin at its own height.
+    func bed(level: Int) -> SCNNode
+
     /// Props for a station, in the station's own cells, in spots nobody stands on.
     func dress(station: Station) -> [SCNNode]
     /// A prop for an office, in the station's own cells.
@@ -92,6 +99,10 @@ extension Look {
     func shuttle(color: NSColor) -> SCNNode { Classic.shuttle(color: color) }
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode { Classic.rocket(color: color, tall: tall, cargo: cargo) }
+    func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing { Classic.lounge(lounge, in: station) }
+    func furnishBath(_ bath: Room, in station: Station) -> Furnishing { Classic.bath(bath, in: station) }
+    func furnishGym(_ gym: Room, in station: Station) -> Furnishing { Classic.gym(gym, in: station) }
+    func bed(level: Int) -> SCNNode { Classic.bed(level: level, floorTop: floorTop) }
     func dress(station: Station) -> [SCNNode] { [] }
     func dress(office room: Room, in station: Station) -> SCNNode? { nil }
 }
