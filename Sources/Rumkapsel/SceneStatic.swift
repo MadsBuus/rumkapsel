@@ -109,7 +109,7 @@ extension StationController {
                 let order = station.digOrder(of: c)
                 if order > oldDug {   // the plaza and the fixed arms are order 0; they are never new
                     t.opacity = 0
-                    t.runAction(.sequence([.wait(duration: 0.3 * Double(order - oldDug)), .fadeIn(duration: 0.5)]))
+                    t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
             for c in station.hangarCells {

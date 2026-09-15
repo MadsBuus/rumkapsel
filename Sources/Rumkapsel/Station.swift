@@ -159,6 +159,7 @@ final class Station {
         var reserved = Set(core)
         for cells in [airlock, hangar, storage, deck, pad, decon] { reserved.formUnion(cells) }
         reserved.formUnion(plan.everyHallwayCell)
+        reserved.formUnion(dug)   // hallway once dug is hallway for good
         let built = Set(plan.west + plan.south).union(dug)
         var hallway = Set(core)
         hallway.formUnion(built)

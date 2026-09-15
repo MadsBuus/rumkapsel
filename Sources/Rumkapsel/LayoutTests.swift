@@ -57,6 +57,8 @@ enum LayoutTests {
                 expect(!r.cells.contains { a.isReserved($0) }, "\(k) keeps off the hallway and the yard")
             }
             expect(a.dugCount > before, "hallway was dug for them: \(a.dugCount) cells")
+            let hallway = Set(a.corridorCells + a.coreCells)
+            for (k, r) in a.rooms { expect(!r.cells.contains(where: hallway.contains), "\(k) does not stand on the hallway") }
             let far = Cell(x: (a.plan.east.last?.x ?? 0) + 3, y: 2)
             expect(!a.rooms.values.contains { $0.cells.contains(far) }, "nothing was parked unplaced")
             let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
