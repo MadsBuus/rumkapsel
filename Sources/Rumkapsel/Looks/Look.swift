@@ -7,7 +7,8 @@ import AppKit
 import SceneKit
 
 /// What a floor tile is, for a look that draws kinds of floor apart.
-enum Floor { case hallway, room, yard, bay, airlock }
+/// `room` is an office; `fixed` the rooms every station has, the lounge, the dorm, the bath and the gym.
+enum Floor { case hallway, room, fixed, yard, bay, airlock }
 
 /// Where a ship is in its flight, for a look that draws the path itself: the phase and how far through it,
 /// the slot it serves in the station's own coordinates, and the side it leaves toward, 1 or -1.
