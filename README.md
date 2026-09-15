@@ -44,6 +44,8 @@ tiles for every floor, arches on the airlock and the decon hatch, a comms tower 
 rockets and speeders, a desk in every office, fuel by the pad and a rover in the bay. The view starts turned
 about so the pad faces right. The models used live in `Resources/Kenney`.
 
+THEMES.md is the guide to designing one: the layers of a place, designing for change, and how theme work is judged.
+
 ## Controls
 
 | Key / gesture | Action |
