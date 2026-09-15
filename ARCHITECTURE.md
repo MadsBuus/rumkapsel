@@ -46,6 +46,9 @@ Rules that keep the place steady:
   lets walkers keep their destination.
 - The yard layout is drawn from the ledger's rows (`yardLayout`): every crate keeps the place its row records,
   so a carrier is sent to the place its crate will occupy and nothing jumps when the layout redraws.
+- A peer's office is adopted where the peer put it, with a dig to reach it if need be. When both machines
+  placed the same room before hearing each other, the lower peer name's cells stand and the other side
+  takes them, hallway dug under them given back, so a shared station converges within one round.
 - Offices exist because of a checkout, a pushed branch, or a pull request. A closed issue never makes one,
   whatever column the board left it in. The board column only says how
   solid an office is. Unclaimed offices clear once their repository has answered; a peer's are held a day.

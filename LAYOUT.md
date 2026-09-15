@@ -172,8 +172,14 @@ passage bonus changed nothing, so those knobs (`Station.armEasyReach`, `armDearS
 are left at their defaults: passages are rare because a straight grid gives them nothing to save, not
 because they are priced wrong.
 
-Not yet: the smaller shape set, the minion scale switch, the palette switch, the peer tie-break, the name on
-the plaza.
+The peer tie-break is done (2026-09-15): when a peer's snapshot carries different cells for a room we hold,
+and the peer's name sorts lower than ours, all such rooms are cleared at once and the peer's cells adopted;
+hallway we dug under their floor is given back if what remains is one piece with every door kept, and a
+room that has no hallway beside it here gets the shortest dig to reach it (`Station.adopt`,
+`replaceRooms`, `World.applyPeer`). A room whose floor is taken here by something else is placed afresh,
+which is the one case left where two stations can differ.
+
+Not yet: the smaller shape set, the minion scale switch, the palette switch, the name on the plaza.
 
 ## Decisions taken (2026-09-15)
 
