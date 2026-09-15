@@ -325,7 +325,8 @@ extension StationController {
             m.node.position = v3(station.offset.x + m.pos.x + m.drawnLean.x, jump + bunkLift, station.offset.y + m.pos.y + m.drawnLean.y)
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
-            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
+            // A visit outranks the day's work in the picture: someone on the treadmill is not also testing.
+            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let onFixture = (m.bathing || m.exercising) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
@@ -427,6 +428,7 @@ extension StationController {
                 }
             }
             if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
+                m.setTool(nil)   // nothing in the hands on a fixture
                 let props = gymProps[station.name]
                 switch kind {
                 case .treadmill:   // running on the spot, leaning into the rail

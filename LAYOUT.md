@@ -59,8 +59,8 @@ replaces it and in what order.
 The compass: **south** to the airlock and bay, **west** to the yard, **north and east** free for rooms and
 alleys. Same roles as today, so the sources, the ledger and the scenarios keep their meaning.
 
-- **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: 3 wide
-  by 2 deep beyond it, three shuttle slots on cell centres instead of tile boundaries.
+- **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: five wide
+  by three deep beyond it, three shuttle slots two tiles apart on the back row, a standing row for carriers, the front row the way in.
 - **Yard**: pad, deck, storage and decon keep their 4x4 (decon 4x2) and their order along the west arm, and
   the yard's internal aisle stays **two wide**: the pallet is 1.8 by 1.4 and is pushed from storage across
   the deck, and that route never touches the hallway. The one place the hallway meets the yard, the deck

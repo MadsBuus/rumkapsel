@@ -194,28 +194,28 @@ final class Station {
     var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
     /// The hatch: where the chamber's outer cell opens onto the bay.
     var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
-    /// The bay: three wide and three deep across the end of the airlock. The ships land on the back row;
-    /// the middle row is where a carrier stands to wait for its crate, a full tile from every ship that is
-    /// down; the front row is the way in from the hatch.
+    /// The bay: five wide and three deep across the end of the airlock. The ships land on the back row,
+    /// two tiles apart, so nobody at one slot is ever within a tile of the next; the middle row is where
+    /// a carrier stands to wait for its crate; the front row is the way in from the hatch.
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
         let y = end.y + 3   // past the airlock
-        return (-1...1).flatMap { dx in (0..<3).map { d in Cell(x: end.x + dx, y: y + d) } }
+        return (-2...2).flatMap { dx in (0..<3).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
     var hangarCenter: SIMD2<Double> {
         guard let end = plan.south.last else { return .zero }
         return SIMD2(Double(end.x), Double(end.y) + 4)
     }
-    /// Landing slots across the bay's back row, one per column.
+    /// Landing slots across the bay's back row, two tiles apart.
     var hangarSlots: [SIMD2<Double>] {
         guard let end = plan.south.last else { return [] }
-        return (-1...1).map { SIMD2(Double(end.x + $0), Double(end.y) + 5) }
+        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y) + 5) }
     }
     /// Where a carrier stands to wait for a slot's crate: the middle row, a tile in front of the slot.
     func bayStand(slot: Int) -> Cell {
         guard let end = plan.south.last else { return coreCenter }
-        return Cell(x: end.x + min(2, max(0, slot)) - 1, y: end.y + 4)
+        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + 4)
     }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
