@@ -67,6 +67,8 @@ class Body {
     var lying = false
     var seated = false
     var seatOffset = SIMD2<Double>(0, 0)
+    /// The shower's last beat: over at the rail with the towel before going.
+    var drying = false
     var onBench = false
     var nextFidgetAt = 0.0
     var wakeUntil = 0.0

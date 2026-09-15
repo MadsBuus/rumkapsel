@@ -178,7 +178,7 @@ extension StationController {
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
-            if hovered == "minion:" + m.id { continue }
+            if !headless, hovered == "minion:" + m.id { continue }   // a cursor left over a headless run's window freezes nobody
             var posed = true
             switch simulation.stepWalk(m, station: station, dt: dt) {
             case .waking: m.node.opacity = m.opacity; posed = false
@@ -250,6 +250,9 @@ extension StationController {
         switch cue {
         case .flush(_, let bowl, let front): flush(at: bowl, front: front)
         case .fidget(let id): minions[id]?.fidget()
+        case .towel(let id, let station, let taken):
+            minions[id]?.setTowel(taken)
+            staticRoot.childNode(withName: "towel:" + station, recursively: true)?.isHidden = taken
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
         case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }
@@ -303,7 +306,7 @@ extension StationController {
             m.setSeated(m.seated, at: m.seatOffset)
             m.setBench(m.onBench)
             m.setStatic(m.place == .bath && m.path.isEmpty, frame: Int(clock * 12))
-            if m.place == .bath, m.path.isEmpty, m.showering, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
+            if m.place == .bath, m.path.isEmpty, m.showering, !m.drying, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
                 // Pixel water from the nozzle, falling past the shoulders onto the drain.
                 m.nextDropAt = clock + 0.05
                 let nozzle = station.showerNozzle(bath: bath)

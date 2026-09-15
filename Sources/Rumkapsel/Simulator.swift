@@ -573,7 +573,7 @@ final class SimulatorModel: ObservableObject {
         case "Resume": paused = false; station.sim?.paused = false
         case "Step": station.sim?.steps += 6
         default:
-            speed = ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1
+            speed = SimulatorPanel.speedValue(name)
             station.sim?.timeScale = speed
         }
     }
@@ -955,6 +955,9 @@ final class SimLog: @unchecked Sendable {
 // MARK: the panel
 
 struct SimulatorPanel: View {
+    /// The clock rate a speed button stands for.
+    static func speedValue(_ name: String) -> Double { ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1 }
+
     @ObservedObject var model: SimulatorModel
 
     var body: some View {
@@ -1021,16 +1024,23 @@ struct SimulatorPanel: View {
         VStack(alignment: .leading, spacing: 5) {
             header("Time")
             HStack(spacing: 6) {
-                Button(model.paused ? "Resume" : "Pause") { model.press(model.paused ? "Resume" : "Pause") }
-                Button("Step") { model.press("Step") }
+                Button { model.press(model.paused ? "Resume" : "Pause") } label: {
+                    Image(systemName: model.paused ? "play.fill" : "pause.fill").frame(width: 22)
+                }
+                .help(model.paused ? "Resume" : "Pause")
+                Button { model.press("Step") } label: { Image(systemName: "forward.frame.fill").frame(width: 22) }
+                    .help("Step: a fifth of a second")
+                Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org")
+            }
+            .controlSize(.small)
+            HStack(spacing: 6) {
                 ForEach(["¼x", "½x", "1x", "4x", "16x"], id: \.self) { s in
                     Button(s) { model.press(s) }
                         .buttonStyle(.borderedProminent)
-                        .tint(model.speed == (Double(s.dropLast()) ?? 1) ? .accentColor : .gray)
+                        .tint(model.speed == Self.speedValue(s) ? .accentColor : .gray)
                 }
             }
             .controlSize(.small)
-            Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org").controlSize(.small)
         }
     }
 

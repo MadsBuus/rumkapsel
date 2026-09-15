@@ -219,6 +219,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
     let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
+    /// Who the camera is with and what they are doing, bottom centre while following.
+    let followLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
     /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
@@ -240,6 +242,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
     var hovered: String?
+    /// The minion the camera goes with, until a pan, Esc or a click on the floor.
+    var following: String?
     private var lastTick = 0.0
     /// How fast station time runs in the live app: 1, or 4 while space is held.
     var liveTimeScale = 1.0
@@ -323,10 +327,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
         view.hudTakesPoint = { [weak self] p in self?.bubbleTakes(point: p) ?? false }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
-        view.onDoubleClick = { [weak self] node in let n = node?.name; self?.enqueue { self?.open(named: n) } }
+        view.onDoubleClick = { [weak self] node in
+            let n = node?.name
+            self?.enqueue {
+                if let n, n.hasPrefix("minion:") { self?.poke(minionId: String(n.dropFirst(7))) } else { self?.open(named: n) }
+            }
+        }
         view.onClick = { [weak self] node in
-            guard let n = node?.name else { return }
-            if n.hasPrefix("minion:") { self?.enqueue { self?.poke(minionId: String(n.dropFirst(7))) } }
+            // A click on a minion follows it; a click anywhere else lets go.
+            let n = node?.name ?? ""
+            if n.hasPrefix("minion:") { self?.enqueue { self?.follow(minionId: String(n.dropFirst(7))) }; return }
+            self?.enqueue { self?.following = nil }
+            guard !n.isEmpty else { return }
             if (n.hasPrefix("storage:") || n.hasPrefix("deck:") || n.hasPrefix("decon:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
             guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
@@ -373,9 +385,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
-            case "0": focus(on: nil)
-            case "1", "2", "3", "4": focus(onIndex: Int(key)! - 1)
-            case "r": resetView()
+            case "0": following = nil; focus(on: nil)
+            case "1", "2", "3", "4": following = nil; focus(onIndex: Int(key)! - 1)
+            case "r": following = nil; resetView()
+            case "\u{1b}": following = nil
             case "g": refreshGitHub()
             default: return false
             }
@@ -1062,6 +1075,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             userZoomChanged = true
         }
 
+        if let id = following {
+            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours.
+            if let m = minions[id], m.opacity > 0.05 {
+                userPan = SIMD2(Double(m.node.position.x), Double(m.node.position.z)) - targetFocus
+            } else { following = nil }
+        }
         let k = 1 - exp(-dt * 2)
         let focus = targetFocus + userPan
         let kp = userDriving > 0 ? 1 - exp(-dt * 25) : k

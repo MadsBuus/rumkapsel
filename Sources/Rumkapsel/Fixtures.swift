@@ -34,6 +34,19 @@ extension Station {
         return SIMD2(offset.x + Double(f.shower.x) + 0.3 * f.showerCorner.x, offset.y + Double(f.shower.y) + 0.25 * f.showerCorner.y)
     }
 
+    /// The towel rail, in world x/z: on the shower tile's other wall, at the far end from the nozzle so the
+    /// two never read as one in the picture.
+    func towelRail(bath: Room) -> SIMD2<Double> {
+        let f = bathFixtures(bath: bath)
+        return SIMD2(offset.x + Double(f.shower.x) + 0.46 * f.showerCorner.x, offset.y + Double(f.shower.y) - 0.3 * f.showerCorner.y)
+    }
+
+    /// Where a body stands to dry off: a step in from the rail, facing the wall.
+    func towelStand(bath: Room) -> SIMD2<Double> {
+        let f = bathFixtures(bath: bath)
+        return SIMD2(offset.x + Double(f.shower.x) + 0.16 * f.showerCorner.x, offset.y + Double(f.shower.y) - 0.3 * f.showerCorner.y)
+    }
+
     /// Where the gym's four fixtures stand, in world coordinates: treadmill, bench, bag, mat, on the
     /// tiles that are neither the doorway nor the far corner the room's name is cut into.
     func gymSpots(gym: Room) -> [SIMD2<Double>] {

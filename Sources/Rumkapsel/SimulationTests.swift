@@ -30,12 +30,14 @@ enum SimulationTests {
             m.showering = false
             expect(sim.visitBath(m, station: station), "the bowl was free")
             expect(m.bathing && m.place == .bath && m.fixture == 0, "off to the bowl")
-            var arrivedAt = 0.0, sat = false, flushed = false
+            var arrivedAt = 0.0, satAt = 0.0, sat = false, flushed = false
             _ = step(sim, seconds: 30, until: {
                 if m.phaseKind == .act, arrivedAt == 0 { arrivedAt = sim.clock }
-                return arrivedAt > 0 && m.fetchSpot == nil
+                if m.seated, satAt == 0 { satAt = sim.clock }
+                return arrivedAt > 0 && m.fetchSpot == nil && satAt > 0
             })
             expect(arrivedAt > 0, "the visit began on arrival")
+            expect(satAt > 0 && satAt - arrivedAt < 1.5, "sat down within a moment of arriving: \(satAt - arrivedAt) s")
             expect(abs(m.phaseUntil - (arrivedAt + 60)) < 0.05, "and lasts sixty seconds from then: until \(m.phaseUntil), arrived \(arrivedAt)")
             _ = step(sim, seconds: 70, until: {
                 if m.seated { sat = true }
@@ -48,6 +50,43 @@ enum SimulationTests {
             expect(sim.clock - arrivedAt >= 60 - 0.05, "lasted its whole time: \(sim.clock - arrivedAt) s")
             expect(m.place == .lounge, "back to where it came from: \(m.place.words)")
             expect(sim.visitLog.count == 1 && sim.visitLog[0].kind == "bath" && sim.visitLog[0].lasted >= 59.9, "logged: \(sim.visitLog)")
+        }
+
+        test("a shower ends at the towel rail: a beat drying off, the towel taken and hung back") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            m.showering = true
+            expect(sim.visitBath(m, station: station) && m.fixture == 1, "the shower was free")
+            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            let planned = m.actFor
+            expect(planned >= 120 && planned <= 180, "two to three minutes: \(planned)")
+            var taken = false, hung = false
+            func drain() { for c in sim.drainCues() { if case .towel(_, _, let t) = c { if t { taken = true } else { hung = true } } } }
+            _ = step(sim, seconds: planned + 1, until: { drain(); return m.drying })
+            expect(m.drying && taken, "out from under the water and over to the rail with the towel")
+            expect(m.fixture == 1 && m.bathing, "the shower is still held while drying")
+            _ = step(sim, seconds: 8, until: { drain(); return !m.bathing })
+            expect(!m.drying && hung && m.place == .lounge, "the towel back on the rail, and back to the lounge")
+        }
+
+        test("the shower and the bowl are each one body's for the whole visit: a third visitor is turned away") {
+            let (sim, station, a) = fixture()
+            let b = body("b", sim: sim, station: station), c = body("c", sim: sim, station: station)
+            for m in [a, b, c] { sim.send(m, to: .lounge) }
+            _ = step(sim, seconds: 30, until: { [a, b, c].allSatisfy { $0.path.isEmpty } })
+            a.showering = true
+            expect(sim.visitBath(a, station: station) && a.fixture == 1, "the first takes the shower")
+            b.showering = true
+            expect(sim.visitBath(b, station: station) && b.fixture == 0 && !b.showering, "the second wanted it too and gets the bowl instead")
+            expect(!sim.visitBath(c, station: station) && !c.bathing, "the third finds both taken, while the first two are still walking")
+            _ = step(sim, seconds: 30, until: { a.phaseKind == .act && b.phaseKind == .act })
+            expect(a.fetchSpot != b.fetchSpot, "on different fixtures: \(String(describing: a.fetchSpot)) and \(String(describing: b.fetchSpot))")
+            expect(!sim.visitBath(c, station: station), "still turned away with both in use")
+            _ = step(sim, seconds: 70, until: { !b.bathing })
+            expect(b.fixture == nil, "the bowl is given back when the visit ends")
+            c.showering = false
+            expect(sim.visitBath(c, station: station) && c.fixture == 0, "and the next visitor gets it")
         }
 
         test("a turn in the gym lasts its time on the fixture and ends back where the body was") {
@@ -197,6 +236,16 @@ enum SimulationTests {
         m.activity = .waiting
         sim.bodies[m.id] = m
         return (sim, station, m)
+    }
+
+    /// Another body on the same station, settled and waiting like the fixture's.
+    private static func body(_ id: String, sim: Simulation<Body>, station: Station) -> Body {
+        let m = Body(id: id, station: "work", home: Home(key: "kind:lounge", name: id, repo: "r", issue: nil), cwd: "",
+                     toolCount: 0, isSubagent: false, start: station.coreCenter)
+        m.state = .settled
+        m.activity = .waiting
+        sim.bodies[m.id] = m
+        return m
     }
 
     /// Steps station time until the condition holds or the seconds run out; true when it held.

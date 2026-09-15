@@ -27,6 +27,8 @@ enum Cue {
     case flush(station: String, bowl: SIMD2<Double>, front: Double)
     /// A sitter shuffles on the seat.
     case fidget(String)
+    /// The towel comes off the rail onto a body's shoulders, or goes back.
+    case towel(String, station: String, taken: Bool)
     /// The QA walker hops with impatience.
     case hop(String)
     /// A teammate's cones go with the end of their reaction.
@@ -647,7 +649,7 @@ final class Simulation<B: Body> {
                     if let bath = station.rooms["kind:bath"] {
                         let f = station.bathFixtures(bath: bath)
                         let corner = m.showering ? f.showerCorner : f.toiletCorner
-                        m.facing = atan2(corner.x, corner.y)
+                        m.facing = m.drying ? atan2(f.showerCorner.x, 0) : atan2(corner.x, corner.y)   // drying: square to the rail's wall
                     }
                 }
                 if settled, !m.showering, let bath = station.rooms["kind:bath"] {
@@ -673,12 +675,21 @@ final class Simulation<B: Body> {
                     }
                 }
                 if clock >= m.phaseUntil && settled {   // done; work waits its turn
-                    m.seated = false
-                    m.fixture = nil
-                    var back = restPlace(m)
-                    if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
-                    visitDone(m, "bath")
-                    finish(m, to: back)   // the visit is over: one order back, to where it came from
+                    if m.showering, !m.drying, let bath = station.rooms["kind:bath"] {
+                        // Out from under the water and over to the rail: a few seconds with the towel before going.
+                        m.drying = true
+                        m.phaseUntil = clock + 4
+                        m.fetchSpot = station.towelStand(bath: bath) - station.offset
+                        cue(.towel(m.id, station: station.name, taken: true))
+                    } else {
+                        if m.drying { m.drying = false; cue(.towel(m.id, station: station.name, taken: false)) }
+                        m.seated = false
+                        m.fixture = nil
+                        var back = restPlace(m)
+                        if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
+                        visitDone(m, "bath")
+                        finish(m, to: back)   // the visit is over: one order back, to where it came from
+                    }
                 }
             } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                 if !visitBath(m, station: station) { return .spent }   // both fixtures taken: wait

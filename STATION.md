@@ -168,8 +168,8 @@ since real stations mandate both.
 - The middle of a room stays clear to walk through; a room holds as many as it has free tiles.
 - The dorm, lounge and bath touch each other off the corridor, the gym beside them; the yard blocks
   join by doorways of their own and keep their aisles clear.
-- A visit lasts its whole time: a shower is ten seconds of water from the nozzle over the shoulders,
-  with the pixels where they belong. Nobody wanders off mid-shower. A pee is a sit: turn round, down
+- A visit lasts its whole time: a shower is two to three minutes of water from the nozzle over the shoulders,
+  with the pixels where they belong, then a few seconds at the rail with the towel over the shoulders before going. Nobody wanders off mid-shower. A pee is a sit: turn round, down
   onto the bowl, back to the tank, a shuffle on the seat now and then, up again as the time runs out,
   and the bowl flushes behind.
 - Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another

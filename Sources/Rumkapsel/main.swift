@@ -132,6 +132,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sim.station.focus(on: name) }
             }
         }
+        // `--look bath` (with `--focus` naming the station) pans onto that room after the focus has settled.
+        if let i = args.firstIndex(of: "--look"), args.count > i + 1, let f = args.firstIndex(of: "--focus"), args.count > f + 1 {
+            let room = args[i + 1], stationName = args[f + 1], zoom = num("--zoom") ?? 3
+            // Once after the focus has settled, and again shortly before the picture in case anything moved the view.
+            for at in [1.0, max(1.5, (num("--delay") ?? 4) - 3)] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                    (self?.simulator?.station ?? self?.controller)?.look(at: room, in: stationName, zoom: zoom)
+                }
+            }
+        }
+        // `--follow leo`: the camera goes with that minion, applied after the focus and again before the picture.
+        if let i = args.firstIndex(of: "--follow"), args.count > i + 1 {
+            let who = args[i + 1]
+            for at in [1.0, max(1.5, (num("--delay") ?? 4) - 3)] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                    (self?.simulator?.station ?? self?.controller)?.follow(named: who, zoom: num("--zoom"))
+                }
+            }
+        }
         // A scripted run: presses the named buttons in order, two seconds apart.
         if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
             if !simulatorOnly { openSimulator() }
@@ -147,17 +166,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             frameBeat = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { _ = (self?.simulator?.station.view ?? self?.controller.view)?.snapshot() }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4)) { [self] in
-                if galleryMode { gallery?.snapshot(to: path) }
-                else if let sim = simulator {
-                    sim.snapshot(to: path)
+            // `--frames N --every S` takes N pictures S seconds apart from the delay on, numbered before
+            // the extension, for a strip or a gif; one picture otherwise.
+            let frames = max(1, Int(num("--frames") ?? 1)), every = num("--every") ?? 0.5
+            func shot(_ k: Int) {
+                let url = URL(fileURLWithPath: path)
+                let name = frames == 1 ? path : url.deletingPathExtension().path + String(format: "-%03d.", k) + url.pathExtension
+                if galleryMode { gallery?.snapshot(to: name) }
+                else if let sim = simulator { sim.snapshot(to: name) }
+                else { controller.snapshot(to: name) }
+                guard k + 1 == frames else { return }
+                if let sim = simulator {
                     sim.station.dumpState()   // every body and order at this moment, to station.log beside the picture
                     // The scripted run's whole story, so a check can read it rather than the picture.
                     FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)
                 }
-                else { controller.snapshot(to: path) }
                 FileHandle.standardError.write("snapshot written\n".data(using: .utf8)!)
                 NSApp.terminate(nil)
+            }
+            for k in 0..<frames {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (num("--delay") ?? 4) + Double(k) * every) { shot(k) }
             }
         }
     }

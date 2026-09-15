@@ -200,6 +200,7 @@ extension StationController {
     /// Slides the view by a screen offset: dx to the right, dy down (as drags and scrolls report it).
     func pan(byPixels dx: Double, _ dy: Double) {
         focused = nil
+        following = nil
         userDriving = 0.5
         let yaw = Double.pi / 4 + userYaw
         let unitsPerPixel = 2 * cameraNode.camera!.orthographicScale / Double(max(1, viewSize.height))
@@ -269,6 +270,41 @@ extension StationController {
         userPan = center - targetFocus
         userZoom = min(6, max(0.4, fitScale(half: targetHalf) / fitScale(half: half)))
         userZoomChanged = true
+    }
+
+    /// Pans onto one room of one station and holds a zoom there: for a picture of the bath, say.
+    /// The room is named by key (`kind:bath`) or by the word after `kind:`.
+    func look(at roomName: String, in stationName: String, zoom: Double) {
+        enqueue { [self] in
+            guard let station = fleet.stations[stationName],
+                  let room = station.rooms[roomName] ?? station.rooms["kind:" + roomName] else { return }
+            let cx = room.cells.map { Double($0.x) + 0.5 }.reduce(0, +) / Double(room.cells.count)
+            let cz = room.cells.map { Double($0.y) + 0.5 }.reduce(0, +) / Double(room.cells.count)
+            focused = nil
+            userPan = SIMD2(cx + station.offset.x, cz + station.offset.y) - targetFocus
+            userZoom = zoom
+            userZoomChanged = true
+        }
+    }
+
+    /// The camera goes with one minion: near enough to see what it is up to, not on top of it. Zooming
+    /// and turning still work while it does; a pan, Esc or a click on the floor lets go.
+    func follow(minionId id: String, zoom: Double? = nil) {
+        guard minions[id] != nil else { return }
+        following = id
+        focused = nil
+        if let zoom { userZoom = zoom; userZoomChanged = true }
+        else if userZoom < 2.5 { userZoom = 3; userZoomChanged = true }
+    }
+
+    /// Follow by name, for the command line: the minion's id, the word after its colon, or its home's name.
+    func follow(named name: String, zoom: Double? = nil) {
+        enqueue { [self] in
+            let want = name.lowercased()
+            let exact = minions.values.first { $0.id == name || $0.id.hasSuffix(":" + name) || $0.home.name == name }
+            let loose = minions.values.sorted { $0.id < $1.id }.first { $0.id.lowercased().contains(want) || $0.home.name.lowercased().contains(want) }
+            if let m = exact ?? loose { follow(minionId: m.id, zoom: zoom) }
+        }
     }
 
     func saveView() {
