@@ -53,14 +53,14 @@ extension StationController {
         let span = Int(reach / 2)
         let midZ = mid.y.rounded()
         for k in -span...span {
-            guard let bank = Kit.node("ground_riverSide", from: .nature, tint: Kit.greens) else { break }
+            guard let bank = Kit.node("ground_riverSide", from: .nature, tint: Kit.shoreTint) else { break }
             bank.eulerAngles.y = .pi / 2
             bank.position = v3(shore + 0.5, -0.03, midZ + Double(k))
             groundRoot.addChildNode(bank)
         }
         var rng = Scatter(seed: 7)
         func plant(_ name: String, at p: SIMD2<Double>, scale: Double) {
-            guard let n = Kit.node(name, from: .nature, tint: Kit.greens) else { return }
+            guard let n = Kit.node(name, from: .nature, tint: Kit.scrubTint) else { return }
             n.scale = SCNVector3(scale, scale, scale)
             n.eulerAngles.y = rng.between(0, 2 * .pi)
             n.position = v3(p.x, -0.03, p.y)

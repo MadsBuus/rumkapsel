@@ -127,6 +127,9 @@ enum Kit {
     static let leaves = NSColor(rgb: (0.33, 0.58, 0.31))
     static let water = NSColor(rgb: (0.55, 0.82, 0.92))
     static var greens: [String: NSColor] { ["grass": grass, "leafsGreen": leaves] }
+    /// The kit's earth is an orange that reads as a prop from afar: sand on the shore, stone on the rocks.
+    static var shoreTint: [String: NSColor] { greens.merging(["dirt": NSColor(rgb: (0.86, 0.8, 0.62)), "dirtDark": NSColor(rgb: (0.74, 0.68, 0.5))]) { a, _ in a } }
+    static var scrubTint: [String: NSColor] { greens.merging(["dirt": NSColor(rgb: (0.6, 0.6, 0.58)), "dirtDark": NSColor(rgb: (0.46, 0.46, 0.45))]) { a, _ in a } }
     /// The sky past the edge of the ground.
     static let sky = NSColor(rgb: (0.47, 0.66, 0.84))
 
