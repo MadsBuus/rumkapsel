@@ -349,6 +349,9 @@ final class Station {
         }
     }
 
+    /// Tuning of the digging (`placeShape`): how far an arm is cheap to build on, and what a step of it costs after.
+    static var armEasyReach = 6, armDearStep = 2, passageBonus = 16
+
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
     /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
@@ -570,11 +573,20 @@ final class Station {
             guard let base, let c0 = cost(base) else { continue }
             var cells: [Cell] = []
             var costs: [Cell: Int] = [:]
+            // Past six steps an arm costs more to build on than an alley: growth turns inward before it runs out.
+            let dear = built >= Station.armEasyReach ? Station.armDearStep : 2
             for i in built..<min(arm.count, built + 8) {
                 guard occupied[arm[i]] == nil else { break }
-                cells.append(arm[i]); costs[arm[i]] = c0 + 2 * (i - built + 1)
+                cells.append(arm[i]); costs[arm[i]] = c0 + dear * (i - built + 1)
                 digs.append(dig(cells, costs, saves: 0))
             }
+        }
+        // The plan's own alleys, off a built arm cell: dug whole, at the arm's price.
+        for a in plan.alleys where hall.contains(a.base) && !hall.contains(a.cells[0]) {
+            guard let c0 = cost(a.base), a.cells.allSatisfy({ occupied[$0] == nil }) else { continue }
+            var costs: [Cell: Int] = [:]
+            for (j, c) in a.cells.enumerated() { costs[c] = c0 + 2 * (j + 1) }
+            digs.append(dig(a.cells, costs, saves: 0))
         }
         // Alleys off every hallway cell: straight, one to six tiles into free floor, or straight then a
         // turn, on until they meet other hallway and so link two parts of it without the plaza. An alley
@@ -603,7 +615,7 @@ final class Station {
             for (j, c) in cells.enumerated() { costs[c] = min(c0 + 2 * (j + 1), cm + 2 * (cells.count - j)) }
             // A second way round is worth having in itself: four steps' worth, plus whatever walk it cuts out.
             let there = toPlaza[h] ?? 0, back = toPlaza[met] ?? 0
-            return dig(cells, costs, saves: 8 + 2 * max(0, there + back - cells.count))
+            return dig(cells, costs, saves: Station.passageBonus + 2 * max(0, there + back - cells.count))
         }
         for h in hallInOrder where h != plan.monolith {
             guard let c0 = cost(h) else { continue }

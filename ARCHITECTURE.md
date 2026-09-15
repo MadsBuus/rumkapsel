@@ -22,8 +22,8 @@ already existed. `readyRepos` tracks which repositories have answered; only chan
 rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway's
 skeleton is a `Plan` (`Plan.swift`): drawn once from the station's name, a plaza round the monolith and four
 one-wide arms, the west and south ones fixed so the yard and the bay never move, the north and east ones
-wandering to a horizon. Every arm cell is reserved for hallway, built or not, so no room ever stands where
-an arm will run. The rest of the hallway is **dug** as rooms arrive (`dug`, saved with the station):
+wandering to a horizon. The plan also draws dead-end alleys off the long arms every few runs. Every arm and alley cell is
+reserved for hallway, built or not, so no room ever stands where hallway will run. The rest of the hallway is **dug** as rooms arrive (`dug`, saved with the station):
 `placeShape` weighs every place a new room could go against the hallway as built plus one dig, the next
 cells of an arm, a dead-end alley off any hallway cell, or a passage through free floor to hallway that is
 far away by walking, and scores each by the room's walk to the bay and the deck, half a step per cell dug,

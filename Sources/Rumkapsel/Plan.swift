@@ -18,6 +18,11 @@ struct Plan {
     /// The long arms, in order from the plaza, drawn to the horizon.
     let north: [Cell]
     let east: [Cell]
+    /// The alleys drawn off the long arms: each hangs off one arm cell and runs two or three tiles to a
+    /// dead end, on the side the arm last jogged away from, a tile clear of all other hallway. Reserved
+    /// like the arms, and dug when a room wants the frontage; the passages between arms are not drawn.
+    struct Alley { let arm: Int; let base: Cell; let step: Int; let cells: [Cell] }
+    let alleys: [Alley]
     /// How many steps the long arms are drawn: no room stands there, built or not.
     var horizon: Int { min(north.count, east.count) }
     /// Every hallway cell of the plan, built or not, plaza aside.
@@ -47,8 +52,47 @@ struct Plan {
         }
         let north = arm(from: Cell(x: 0, y: -2), dir: Cell(x: 0, y: -1), side: Cell(x: 1, y: 0))
         let east = arm(from: Cell(x: 2, y: 0), dir: Cell(x: 1, y: 0), side: Cell(x: 0, y: 1))
-        self.north = north; self.east = east
-        self.everyHallwayCell = Set(west + south + north + east)
+        var taken = Set(plaza + west + south + north + east)
+        var alleys: [Alley] = []
+        func clear(_ cells: [Cell], base: Cell, dir: Cell) -> Bool {
+            for c in cells {
+                for dx in -1...1 { for dy in -1...1 {
+                    let n = Cell(x: c.x + dx, y: c.y + dy)
+                    // The base and the arm's straight run through it are a tile away by nature; they do not count.
+                    if cells.contains(n) || n == base || n == base + dir || n == base + (dir * -1) { continue }
+                    if taken.contains(n) { return false }
+                } }
+            }
+            return true
+        }
+        for (index, cells) in [north, east].enumerated() {
+            let dir = index == 0 ? Cell(x: 0, y: -1) : Cell(x: 1, y: 0)
+            let side = index == 0 ? Cell(x: 1, y: 0) : Cell(x: 0, y: 1)
+            var sinceAlley = 2
+            var i = 3   // the first run is the plaza's own approach; nothing hangs off it
+            while i < cells.count - 1 {
+                let here = cells[i], next = cells[i + 1]
+                if next == here + dir, sinceAlley >= 3 {
+                    let prevJog = (1...i).reversed().first { cells[$0] != cells[$0 - 1] + dir }.map { cells[$0].x - cells[$0 - 1].x + cells[$0].y - cells[$0 - 1].y } ?? 1
+                    let preferred = -(prevJog == 0 ? 1 : prevJog.signum())
+                    let len = 2 + Int(rng.next() % 2)
+                    for s in [preferred, -preferred] {
+                        let alley = (1...len).map { here + side * (s * $0) }
+                        guard clear(alley, base: here, dir: dir) else { continue }
+                        alleys.append(Alley(arm: index, base: here, step: i, cells: alley))
+                        taken.formUnion(alley)
+                        sinceAlley = 0
+                        break
+                    }
+                }
+                sinceAlley += 1
+                i += 1
+            }
+        }
+        self.north = north; self.east = east; self.alleys = alleys
+        var every = Set(west + south + north + east)
+        for a in alleys { every.formUnion(a.cells) }
+        self.everyHallwayCell = every
     }
 }
 
