@@ -23,7 +23,7 @@ enum Theme: String, CaseIterable, Identifiable {
         switch self {
         case .classic: return nil
         case .kenney: return "Kenney Space Center draws the station with the Space Kit, the Modular Space Kit and the Nature Kit by Kenney (kenney.nl, CC0)."
-        case .kingdom: return "Kenney Kingdom draws the station with the Castle Kit, the Fantasy Town Kit, Mini Characters and the Hexagon Kit by Kenney (kenney.nl, CC0)."
+        case .kingdom: return "Kenney Kingdom draws each station as a harbour village with the Castle, Fantasy Town, Nature, Pirate, Survival, Hexagon and Mini Characters kits and Cube Pets by Kenney (kenney.nl, CC0)."
         }
     }
 
