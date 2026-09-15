@@ -210,6 +210,20 @@ enum SimulationTests {
             } else { expect(false, "the carry is still a carry") }
         }
 
+        test("a pallet ordered mid-workout waits for the turn to end: nobody runs on the spot by the console") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
+            expect(sim.takeTurnInGym(m, station: station, gym: gym), "off to the gym")
+            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            sim.orderPallet(station: station, repo: "web", number: 9001)
+            expect(m.exercising && m.path.isEmpty && sim.palletErrand(of: m) == nil, "the one body is mid-turn and is left to it: \(m.words), path \(m.path.count)")
+            _ = step(sim, seconds: m.actFor + 30, until: { sim.palletErrand(of: m) != nil }, beat: { sim.servicePallets() })   // the half-second pass asks again
+            expect(sim.palletErrand(of: m) != nil && !m.exercising, "once the turn is over it takes the errand: \(m.words)")
+        }
+
         test("a staging release: the pallet is ordered, loaded, pushed to the deck on the merge and unloaded there") {
             let (sim, station, m) = fixture()
             sim.hooks = SimHooks()

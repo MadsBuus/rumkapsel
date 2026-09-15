@@ -101,15 +101,15 @@ extension StationController {
         for station in fleet.stations.values {
             let anchor = stationAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); stationAnchors[station.name] = n; return n }()
             anchor.position = v3(station.offset.x, 0, station.offset.y)
-            let oldSpine = knownSpine[station.name] ?? station.spineHalfLength
-            knownSpine[station.name] = station.spineHalfLength
+            let oldDug = knownSpine[station.name] ?? station.dugCount
+            knownSpine[station.name] = station.dugCount
             for c in station.corridorCells + station.coreCells {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
-                // New corridor beyond the old length is built tile by tile, outward.
-                let reach = station.revealStep(of: c)
-                if reach > oldSpine {   // the plaza and the fixed arms are step 0; they are never new
+                // Hallway dug since the last redraw is built tile by tile, in the order it was dug.
+                let order = station.digOrder(of: c)
+                if order > oldDug {   // the plaza and the fixed arms are order 0; they are never new
                     t.opacity = 0
-                    t.runAction(.sequence([.wait(duration: 0.3 * Double(reach - oldSpine)), .fadeIn(duration: 0.5)]))
+                    t.runAction(.sequence([.wait(duration: 0.3 * Double(order - oldDug)), .fadeIn(duration: 0.5)]))
                 }
             }
             for c in station.hangarCells {

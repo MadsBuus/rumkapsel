@@ -18,7 +18,7 @@ enum LayoutTests {
             for k in keys + ["kind:lounge", "kind:quarters", "kind:bath", "kind:gym"] {
                 expect(a.rooms[k]?.cells == b.rooms[k]?.cells && a.rooms[k] != nil, "\(k): \(cells(a, k)) against \(cells(b, k))")
             }
-            expect(a.spineHalfLength == b.spineHalfLength, "and the arms are the same length: \(a.spineHalfLength) and \(b.spineHalfLength)")
+            expect(a.dug == b.dug, "and the same hallway was dug: \(a.dugCount) and \(b.dugCount) cells")
         }
 
         test("a room's shape follows its key, not the launch: the same key on an empty station takes the same cells twice") {
@@ -46,36 +46,27 @@ enum LayoutTests {
             let p = a.plan
             let armsTouch = p.north.contains { n in p.east.contains { e in abs(n.x - e.x) <= 1 && abs(n.y - e.y) <= 1 } }
             expect(!armsTouch, "the north and east arms never touch")
-            for al in p.alleys {
-                let others = p.everyHallwayCell.subtracting(al.cells)
-                let base = al.base
-                let body = al.joins ? Array(al.cells.dropLast()) : al.cells
-                let crowded = body.contains { c in others.contains { o in o != base && abs(o.x - c.x) + abs(o.y - c.y) <= 1 } }
-                expect(!crowded, "alley at step \(al.step) of arm \(al.arm) keeps clear of other hallway along its length")
-            }
-        }
-
-        test("the hallway is a web, not a tree: shortcuts join it into loops") {
-            let a = fresh()
-            let p = a.plan
-            expect(p.alleys.contains { $0.joins }, "at least one alley runs on to meet other hallway")
-            let all = p.everyHallwayCell.union(p.plaza).subtracting([p.monolith])
-            var edges = 0
-            for c in all { for n in c.neighbours where all.contains(n) && (n.x, n.y) > (c.x, c.y) { edges += 1 } }
-            expect(edges >= all.count, "more ways than cells, so there are loops: \(edges) edges over \(all.count) cells")
         }
 
         test("forty rooms: the station builds outward along the hallway, every room on it, none on the plan") {
             let a = fresh()
-            let before = a.spineHalfLength
+            let before = a.dugCount
             for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
             for (k, r) in a.rooms {
                 expect(r.cells.contains { c in c.neighbours.contains { a.isCorridor($0) } }, "\(k) has a door on the hallway")
                 expect(!r.cells.contains { a.isReserved($0) }, "\(k) keeps off the hallway and the yard")
             }
-            expect(a.spineHalfLength > before && a.spineHalfLength < a.plan.horizon, "the arms were built on: \(before) to \(a.spineHalfLength) of \(a.plan.horizon)")
+            expect(a.dugCount > before, "hallway was dug for them: \(a.dugCount) cells")
             let far = Cell(x: (a.plan.east.last?.x ?? 0) + 3, y: 2)
             expect(!a.rooms.values.contains { $0.cells.contains(far) }, "nothing was parked unplaced")
+            let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
+            let unreached = hall.filter { a.hallDistance(of: $0) == nil }
+            expect(unreached.isEmpty, "and every dug cell is reached from the plaza: \(unreached.count) are not")
+            var edges = 0
+            for c in hall { for n in c.neighbours where hall.contains(n) && (n.x, n.y) > (c.x, c.y) { edges += 1 } }
+            expect(edges >= hall.count, "the hallway has links, so there are ways round: \(edges) edges over \(hall.count) cells")
+            let walks = a.rooms.values.compactMap { r in r.cells.flatMap(\.neighbours).compactMap { a.hallDistance(of: $0) }.min() }
+            FileHandle.standardError.write("mean steps from a door to the plaza: \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0)\n".data(using: .utf8)!)
             draw(a)
         }
 

@@ -155,12 +155,21 @@ Each step keeps the gate green on its own. Steps 1 and 2 touch no picture; the f
 
 ## Where it stands
 
-Done on 2026-09-15, steps 2 to 4 of the order below in one pass: the plan generator (`Plan.swift`), the
-plaza, the one-wide arms with alleys, every other alley a loop back into its arm (a shortcut, so the hallway
-is a web rather than a tree), the fixed west and south arms to the yard and the bay, placement by
-hallway distance, `--layout-tests` with the forty-room fill drawn as text, and the scenario suite green on
-the new floor without a change to any scenario. Not yet: the smaller shape set, the minion scale switch,
-the palette switch, the peer tie-break, the name on the plaza.
+Done on 2026-09-15: the skeleton (`Plan.swift`: plaza, four one-wide arms, the fixed west and south ones to
+the yard and the bay, the wandering north and east ones to a horizon), and **digging on demand**: the
+alleys and the passages between arms are not planned but dug as rooms arrive, each new room weighed
+against extending an arm, a dead-end alley or a passage to far-away hallway, by its walk to the bay and
+the deck (`Station.placeShape`; ARCHITECTURE.md has the scoring). `--layout-tests` draws a forty-room fill
+as text and prints the mean walk from a door to the plaza, twelve steps as of this writing. The scenario
+suite is green on the new floor without a change to any scenario.
+
+Levers still to tune, all in `placeShape`: the half step per dug cell, the half step back per tile of
+frontage opened, the passage bonus, and the clearance alleys keep (two tiles for a dead end, one for a
+passage). At forty rooms the web is still thin, because frontage near the plaza stays cheaper than a passage
+until it is used up; a bigger fill, or a lower dig cost, gives more passages sooner.
+
+Not yet: the smaller shape set, the minion scale switch, the palette switch, the peer tie-break, the name on
+the plaza.
 
 ## Decisions taken (2026-09-15)
 
