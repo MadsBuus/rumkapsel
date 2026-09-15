@@ -9,6 +9,15 @@ import SceneKit
 /// What a floor tile is, for a look that draws kinds of floor apart.
 enum Floor { case hallway, room, yard, bay, airlock }
 
+/// Where a ship is in its flight, for a look that draws the path itself: the phase and how far through it,
+/// the slot it serves in the station's own coordinates, and the side it leaves toward, 1 or -1.
+struct ShipLeg {
+    let phase: Command.Phase
+    let progress: Double
+    let slot: SIMD2<Double>
+    let side: Double
+}
+
 protocol Look {
     /// The colour past the edge of everything.
     var background: NSColor { get }
@@ -48,6 +57,9 @@ protocol Look {
     func pose(figure: SCNNode, height: Double, torso: Double)
     /// A shuttle, nose along +x, its hull's middle at the origin.
     func shuttle(color: NSColor) -> SCNNode
+    /// A ship's position and heading along its flight, in the station's own coordinates; nil keeps the
+    /// simulation's path, down from the sky onto the slot. The simulation still says when, and which slot.
+    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)?
     /// A rocket standing on the origin, with children named "hatch" and "flame" the scene reaches for.
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode
 

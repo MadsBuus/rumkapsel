@@ -154,6 +154,8 @@ struct ClassicLook: Look {
         Props.rocket(color: color, tall: tall, cargo: cargo)
     }
 
+    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+
     func dress(station: Station) -> [SCNNode] { [] }
 
     func dress(office room: Room, in station: Station) -> SCNNode? { nil }

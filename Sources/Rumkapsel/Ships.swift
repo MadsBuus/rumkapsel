@@ -57,6 +57,12 @@ final class Flight {
         }
     }
 
+    /// How far through the phase in hand, from 0 to 1: held at 1 while the ship waits for its slot.
+    func progress(at clock: Double) -> Double {
+        guard duration > 0 else { return 1 }
+        return min(1, max(0, (clock - startedAt) / duration))
+    }
+
     /// Starts the phase in hand.
     func begin(at clock: Double) {
         until = clock + duration
