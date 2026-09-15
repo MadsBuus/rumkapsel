@@ -304,12 +304,16 @@ final class Station {
 
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
+    /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
+    /// on every launch and on every machine.
+    static func shape(forKey key: String) -> [Cell] { baseShapes[Int(stableHash(key) % UInt64(baseShapes.count))] }
+
     func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count], near: near)
+        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.shape(forKey: key), near: near)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
@@ -446,7 +450,7 @@ final class Station {
             && cells.contains { $0.neighbours.contains(where: isCorridor) }
     }
 
-    private func isReserved(_ c: Cell) -> Bool { isSpineLine(c) || blocks.reserved.contains(c) }
+    func isReserved(_ c: Cell) -> Bool { isSpineLine(c) || blocks.reserved.contains(c) }
 
     private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
         let variants = rotations(of: shape)
