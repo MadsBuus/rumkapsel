@@ -26,6 +26,7 @@ extension StationController {
         case "kind:hangar": return .bay
         case "kind:airlock": return .airlock
         case "kind:pad", "kind:storage", "kind:deck", "kind:decon": return .yard
+        case let k where k.hasPrefix("kind:"): return .fixed
         default: return .room
         }
     }

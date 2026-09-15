@@ -22,6 +22,7 @@ enum Kit {
     enum Pack: String {
         case space = "space-kit", modular = "modular-space-kit", nature = "nature-kit"
         case castle = "castle-kit", town = "fantasy-town-kit", mini = "mini-characters", hexagon = "hexagon-kit"
+        case pirate = "pirate-kit", survival = "survival-kit"
     }
 
     private static var prototypes: [String: SCNNode] = [:]
