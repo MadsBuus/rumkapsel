@@ -72,6 +72,19 @@ enum LayoutTests {
             draw(a)
         }
 
+        if ProcessInfo.processInfo.environment["RK_FILL"] != nil {
+            for n in [40, 80] {
+                let a = fresh()
+                for i in 0..<n { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+                let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
+                var edges = 0
+                for c in hall { for nb in c.neighbours where hall.contains(nb) && (nb.x, nb.y) > (c.x, c.y) { edges += 1 } }
+                let walks = a.rooms.values.compactMap { r in r.cells.flatMap(\.neighbours).compactMap { a.hallDistance(of: $0) }.min() }
+                let b = a.bounds
+                FileHandle.standardError.write("--- \(n) rooms: mean walk \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0), loops \(edges - hall.count + 1), hallway \(hall.count) cells, footprint \(b.max.x - b.min.x + 1)x\(b.max.y - b.min.y + 1)\n".data(using: .utf8)!)
+                draw(a)
+            }
+        }
         if failures > 0 { print("layout: \(failures) failed"); exit(1) }
         print("layout: all passed")
         exit(0)

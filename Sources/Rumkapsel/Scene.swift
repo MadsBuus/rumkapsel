@@ -258,6 +258,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var userZoom = 1.0
     var userZoomChanged = false
     var userDriving = 0.0          // seconds left of snappy camera response after a gesture
+    private var fpsFrames = 0, fpsMark = 0.0   // the frame counter behind RK_FPS
     private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up
     private var keyZoom = 0.0                    // E/Q held: +1 zooms in, -1 out
     var userYaw = 0.0
@@ -1069,6 +1070,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
         let want = !seen || (!NSApp.isActive && userDriving <= 0) ? 8 : (userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
         if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
+        if ProcessInfo.processInfo.environment["RK_FPS"] != nil {
+            fpsFrames += 1
+            if clock - fpsMark >= 5 { FileHandle.standardError.write("fps \(Int(Double(fpsFrames) / max(0.1, clock - fpsMark))) want \(want) seen \(seen) active \(NSApp.isActive)\n".data(using: .utf8)!); fpsFrames = 0; fpsMark = clock }
+        }
         if keyMove != .zero {
             // Held WASD: a steady slide, a bit under the view's height per second.
             let speed = Double(viewSize.height) * 0.7 * dt

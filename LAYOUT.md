@@ -163,10 +163,14 @@ the deck (`Station.placeShape`; ARCHITECTURE.md has the scoring). `--layout-test
 as text and prints the mean walk from a door to the plaza, twelve steps as of this writing. The scenario
 suite is green on the new floor without a change to any scenario.
 
-Levers still to tune, all in `placeShape`: the half step per dug cell, the half step back per tile of
-frontage opened, the passage bonus, and the clearance alleys keep (two tiles for a dead end, one for a
-passage). At forty rooms the web is still thin, because frontage near the plaza stays cheaper than a passage
-until it is used up; a bigger fill, or a lower dig cost, gives more passages sooner.
+Tuned on 2026-09-15 with the forty and eighty room fills as the judge (`RK_FILL=1 --layout-tests` prints
+both, with mean walk, loops and footprint): the plan draws its dead-end alleys off the arms again, every
+few runs, two or three tiles, reserved like the arms and dug whole when a room wants the frontage; the
+passages between arms stay demand-dug. That gave the crinkle back and a tighter footprint (30x35 for
+forty rooms, was 31x40) at the same mean walk. Charging the arms more past six steps and doubling the
+passage bonus changed nothing, so those knobs (`Station.armEasyReach`, `armDearStep`, `passageBonus`)
+are left at their defaults: passages are rare because a straight grid gives them nothing to save, not
+because they are priced wrong.
 
 Not yet: the smaller shape set, the minion scale switch, the palette switch, the peer tie-break, the name on
 the plaza.

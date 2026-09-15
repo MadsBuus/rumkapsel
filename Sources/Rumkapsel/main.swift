@@ -182,7 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
                     // The scripted run's whole story, so a check can read it rather than the picture.
                     FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)
                 }
-                FileHandle.standardError.write("snapshot written\n".data(using: .utf8)!)
+                let nodes = (self.simulator?.station ?? self.controller).scene.rootNode.childNodes(passingTest: { n, _ in n.geometry != nil }).count
+                FileHandle.standardError.write("snapshot written; \(nodes) nodes with geometry in the scene\n".data(using: .utf8)!)
                 NSApp.terminate(nil)
             }
             for k in 0..<frames {
