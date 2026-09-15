@@ -8,10 +8,10 @@ enum Yard: String, Codable {
     /// What to call it out loud.
     var words: String {
         switch self {
-        case .storage: return "storage"
-        case .deck: return "the deck"
-        case .pad: return "the rocket"
-        case .decon: return "decon"
+        case .storage: return Words.current.inStorage
+        case .deck: return Words.current.theDeck
+        case .pad: return Words.current.theRocket
+        case .decon: return Words.current.inDecon
         }
     }
 

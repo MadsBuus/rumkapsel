@@ -209,7 +209,7 @@ final class World {
         var k = kicked; k[key] = Date(); kicked = k
         crewRoomInfo[key] = nil; crewBoxes[key] = nil; peerOffices[key] = nil; peerBoxes[key] = nil; pushedByPeer.remove(key)
         var events: [WorldEvent] = [drop(station: station, room: room, announce: false, reason: "kicked")]
-        events.append(.log("kicked \(room.name) off the station"))
+        events.append(.log("\(Words.current.kicked) \(room.name) \(Words.current.kickedOff)"))
         events.append(.layoutChanged)
         return events
     }
@@ -420,7 +420,7 @@ final class World {
 
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
-        let status = pr.untested ? " · untested, holding on the pad" : " · cleared for launch"
+        let status = " · " + (pr.untested ? Words.current.holding : Words.current.cleared)
         let label = "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
         return .rocketCommand(station: station.name, repo: repo, label: label, untested: pr.untested,
                               tall: pr.isProduction, cargo: cargoWaiting(station: station, repo: repo),
@@ -446,7 +446,7 @@ final class World {
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
-            events.append(.log("\(info.repo) launched to \(pr.base): \(pr.title)"))
+            events.append(.log("\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
             events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
         }
         for (root, info) in repoRoots {
@@ -462,7 +462,7 @@ final class World {
                 announcedReleases.insert(mark)
                 events.append(.releaseOpened(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
                                              untested: pr.untested, isProduction: pr.isProduction))
-                events.append(.log("\(info.repo): release to \(pr.base) on the pad" + (pr.untested ? " (untested)" : "")))
+                events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
             // Untested, or not for production: the rocket only stands there. Cleared: it takes the cargo aboard.
             let cleared = pr.isProduction && !pr.untested
@@ -697,7 +697,7 @@ final class World {
             if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name, repo: info.repo, numbers: arrived)) }
             for n in arrived where isReady(info.repo) {
                 let title = bots.first { $0.pr.number == n }?.pr.title ?? ""
-                events.append(.log("unidentified object #\(n) in decon · \(title.prefix(48))"))
+                events.append(.log("\(Words.current.unidentified) #\(n) in \(Words.current.inDecon) · \(title.prefix(48))"))
             }
             for n in gone {
                 var state: String?
@@ -714,7 +714,7 @@ final class World {
                     events.append(.deconCleared(station: station.name, repo: info.repo, number: n))
                 } else {
                     station.ledger.forget(repo: info.repo, number: n)
-                    events.append(.log("#\(n) ejected from decon" + (state == "MERGED" ? "" : ", never cleared")))
+                    events.append(.log("#\(n) \(Words.current.ejected)" + (state == "MERGED" ? "" : ", never cleared")))
                 }
             }
         }

@@ -418,11 +418,11 @@ extension StationController {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("decon:"), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let repo = String(h.split(separator: "|")[1])
-            infoLabel.text = "\(repo) · unidentified object · PR #\(n) · merge clears it into storage, closing ejects it · click to open"
+            infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click to open"
         } else if h.hasPrefix("decon:") {
             let name = String(h.dropFirst(6))
             let waiting = fleet.stations[name]?.ledger.allCrates.filter { $0.alien && $0.placed == .decon }.count ?? 0
-            infoLabel.text = "decon · dependabot and friends wait here · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
+            infoLabel.text = Words.current.deconHover + " · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let parts = h.split(separator: "|")
             let repo = String(parts[1])
@@ -432,15 +432,15 @@ extension StationController {
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
-            infoLabel.text = "storage · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
+            infoLabel.text = Words.current.storage + " · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
         } else if h.hasPrefix("peer:") {
             infoLabel.text = "\(h.dropFirst(5))'s station · shared on the local network"
         } else if h.hasPrefix("deck:") {
             let qa = minions.values.filter { $0.activity == .qa && $0.state != .leaving }.map { $0.home.name }
-            if !qa.isEmpty { infoLabel.text = "test deck · QA in progress: " + qa.joined(separator: ", "); return }
+            if !qa.isEmpty { infoLabel.text = Words.current.testDeck + " · QA in progress: " + qa.joined(separator: ", "); return }
             let name = String(h.dropFirst(5).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.staged ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
-            infoLabel.text = "test deck · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
+            infoLabel.text = Words.current.testDeck + " · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
         } else if h.hasPrefix("pad:") {
             let name = String(h.dropFirst(4))
             let due = fleet.stations[name].map { st in
@@ -449,11 +449,11 @@ extension StationController {
                     return n > 0 ? "\(n) \(repo)" : nil
                 }.sorted()
             } ?? []
-            infoLabel.text = "launch pad · release pull requests wait here; merging launches" + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
+            infoLabel.text = Words.current.padHover + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
         } else if h.hasPrefix("hangar:") {
-            infoLabel.text = "hangar · new offices arrive here by ship"
+            infoLabel.text = Words.current.bayHover
         } else if h.hasPrefix("station:") {
-            infoLabel.text = String(h.dropFirst(8)) + " · the monolith: web research and subagents"
+            infoLabel.text = String(h.dropFirst(8)) + " · " + Words.current.monolithHover
         } else {
             infoLabel.text = ""
         }

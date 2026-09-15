@@ -396,7 +396,7 @@ extension StationController {
                     let flicker = SCNAction.sequence([.fadeOpacity(to: 0.35, duration: 0.05), .fadeOpacity(to: 1, duration: 0.08), .fadeOpacity(to: 0.5, duration: 0.05), .fadeOpacity(to: 1, duration: 0.12), .fadeOpacity(to: 0.7, duration: 0.05), .fadeOpacity(to: 1, duration: 0.1)])
                     t.runAction(flicker)
                 }
-                if powered { logEvent("\(room.name): lights on") }
+                if powered { logEvent("\(room.name): \(Words.current.lightsOn)") }
             }
         }
     }
