@@ -235,7 +235,7 @@ extension StationController {
         let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queuedCones.count : 0)]
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
-        let n = Props.pyramid(color: tint, size: 0.32, floor: floorColor)
+        let n = Looks.current.message(color: tint, floor: floorColor) ?? Props.pyramid(color: tint, size: 0.32, floor: floorColor)
         let ox = 0.0, oz = 0.0
         n.position = v3(Double(cell.x) + ox, -0.35, Double(cell.y) + oz)
         let rise = SCNAction.move(to: v3(Double(cell.x) + ox, 0, Double(cell.y) + oz), duration: 0.5)

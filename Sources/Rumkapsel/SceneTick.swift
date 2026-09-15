@@ -372,7 +372,7 @@ extension StationController {
                 switch tool {
                 case 0:
                     tilt = 0.32
-                    if m.weldLight == nil {
+                    if Looks.current.workSparks, m.weldLight == nil {
                         let l = SCNNode()
                         l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
                         let spark = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))

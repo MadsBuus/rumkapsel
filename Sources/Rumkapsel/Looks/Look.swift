@@ -86,6 +86,14 @@ protocol Look {
     func pose(figure: SCNNode, height: Double, torso: Double)
     /// Props for a station, in the station's own cells, in spots nobody stands on.
     func dress(station: Station) -> [SCNNode]
+    /// What a minion holds for `tool`, in its body's frame (`height` tall, `depth` deep), or nil for the classic
+    /// piece. The scene swings a child named "swing" as it swings the hammer, turns one named "aim" as it turns
+    /// the torch, blinks one named "tip", and lights "wandTip" and "wandLight" while a crate is in the air.
+    func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode?
+    /// Whether working a message throws welding sparks.
+    var workSparks: Bool { get }
+    /// A message waiting to be worked, standing on the origin, or nil for the classic pyramid.
+    func message(color: NSColor, floor: NSColor) -> SCNNode?
 }
 
 /// What every look gets unless it draws its own: the classic station, adrift in space.
@@ -126,6 +134,9 @@ extension Look {
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
     func pose(figure: SCNNode, height: Double, torso: Double) {}
     func dress(station: Station) -> [SCNNode] { [] }
+    func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
+    var workSparks: Bool { true }
+    func message(color: NSColor, floor: NSColor) -> SCNNode? { nil }
 }
 
 /// What a floor tile is: `room` an office, `fixed` the lounge, the dorm, the bath or the gym.
