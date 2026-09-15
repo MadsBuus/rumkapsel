@@ -87,36 +87,47 @@ The pointer over the window shows its hover panel in a snapshot; keep it off the
 
 ## Where a theme lives
 
-- **`Theme.swift`**: the case, its title and credit for the picker, `padGap`, and its `vocabulary`, the
-  words for floor signs, hover text, orders and log lines. A theme overrides only the words it redraws.
-- **`Looks/Look.swift`**: the `Look` protocol. Every requirement has a default, the classic piece, so a
-  look overrides only what it changes:
-  - the ground: `background`, `viewYaw`, `backdrop`, `ground`
-  - floors: `floorColor`, `tileDetail`, `tint`, `floorTop`, `dotsHallway`, `drawsBorders`, with `Floor`
-    telling a hallway, an office, a fixed room, the yard, the bay and the airlock apart
-  - doors and the center: `airlockFrame`, `hatchFrame`, `monolith`
-  - people and craft: `figure`, `pose`, `shuttle`, `shipPose`, `rocket`
-  - idle areas: `furnishLounge`, `furnishBath`, `furnishGym`, `bed`, handing back a `Furnishing` whose
+- **`Theme.swift`**: the case, its title and credit for the picker, `padGap`, `separateWorlds`, and its
+  `vocabulary`, the words for floor signs, hover text, orders and log lines. A theme overrides only the words
+  it redraws.
+- **`Looks/Look.swift`**: the `Look` protocol, ordered by the layers. Every requirement has a default, the
+  classic piece, so a look overrides only what it changes:
+  - the world: `background`, `viewYaw`, `backdrop`, `ground` (asked once per station under separate worlds)
+  - the input: `input` (the bay and the airlock drawn whole as a `SetPiece`), `airlockFrame`, `shuttle`,
+    `shipPose`
+  - the output: `output` (decon, storage, the deck and the pad as a `SetPiece`), `hatchFrame`, `rocket`,
+    `launch`
+  - the center: `monolith`
+  - the idle areas: `furnishLounge`, `furnishBath`, `furnishGym`, `bed`, handing back a `Furnishing` whose
     towel, bar and bag the scene still moves by name
-  - set dressing: `dress(station:)`, `dress(office:in:)`, with `Dressing` finding spots clear of what moves
+  - the growth zone: `drawsPlane`, `floorColor`, `tileDetail` (given a `Tile`: its floor, its open and walled
+    edges, and which of its eight neighbours share its owner), `tint`, `floorTop`, `dotsHallway`,
+    `drawsBorders`, `dress(office:in:)`
+  - people and the rest: `figure`, `pose`, `dress(station:)`
+- **`Looks/Shapes.swift`**: flat organic shapes. `Shapes.sample` and `Shapes.fill` turn a field into one mesh
+  wherever it is at or over a level, so coastlines, clearings, yards and roads are soft; sample a field once
+  and cut several bands from it. `Shapes.patch` is a tile's soft patch that runs on into its owner's
+  neighbours. `Noise` is keyed to position, so a world stays where it was as the growth zone moves.
 - **`Looks/ClassicLook.swift` and `Looks/ClassicFurniture.swift`**: the defaults, as `Classic`, which a look
   can fall back on when its own model is missing.
+- **`Looks/KingdomLook.swift`**: the worked example of every layer, with a `Site` that reads a station's plan
+  (its floor, the bay's centre, the shoreline, the road) and builds its world once per floor.
 - **`Looks/Kit.swift`**: the Kenney model loader. A model is loaded once and cloned with its own materials;
-  kits with named materials are tinted by name, atlas-textured kits through `multiply`.
+  kits with named materials are tinted by name, atlas-textured kits through `multiply`. Merge many props into
+  one node with `flattenedClone()` once they are placed.
 - **`Resources/Kenney/<kit>`**: only the models a theme uses, as OBJ with their MTL, the kit's colour atlas
   if it has one, and the kit's licence. Every asset is CC0 or generated for the theme; say where it came from.
 
+A world is not drawn in a run with no window (the scenarios, the tests), so its cost never slows the gate.
+The HUD reads the look's background and inks itself dark on a light ground.
+
 ## What a look cannot do yet
 
-- **Replace a fixed area whole.** The bay and the yard are drawn as tiles with detail on top; a set piece
-  that keeps the simulation's spots and draws everything else is the next hook.
-- **Draw the growth zone organically.** Offices and paths are drawn tile by tile.
-- **Key the world to position.** Today's ground scatters from one seed over the whole fleet.
-- **Own the lift-off and the work tools.** The launch animation and the tools minions hold (scanner,
-  tablet, torch, hammer) are still the scene's.
-- **Show one world at a time.** Stations are still laid out side by side in one scene.
+- **Own the work tools.** The scanner, tablet, torch and hammer minions hold are still the scene's.
 - **Place the idle areas.** Their rooms are placed by the plan; a look only furnishes them.
-- **Keep HUD text legible on a light ground.** The HUD's greys were tuned for space.
+- **Draw the office overlays.** Failing checks, dust and the provisional frame are still square.
+- **Move between worlds by a control of its own.** The station keys and the menu switch worlds; there is no
+  on-screen switcher yet.
 
 ## What the first medieval attempts taught
 
