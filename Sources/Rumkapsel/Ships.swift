@@ -89,9 +89,14 @@ final class Flight {
         if turning { yaw = yawFrom + (yawTo - yawFrom) * e }
     }
 
+    /// Whether the slot is clear to come down onto: nothing of an earlier order on it, no other ship over it.
+    /// Until it is, the ship holds high over the bay.
+    var clear: (() -> Bool)?
+
     /// One frame of the flight. Returns false once the ship is gone.
     func advance(at clock: Double) -> Bool {
         place(at: clock)
+        if phaseKind == .approach, clock >= until, let clear, !clear() { until = clock + 0.5; return true }   // holding high: the slot is taken
         if phaseKind == .unload, !unloaded, let ready, !ready() { until = clock + unloadAt + unloadFor; return true }   // holding over the slot
         if phaseKind == .unload, !unloaded, clock >= until - unloadFor { unloaded = true; onUnload() }
         guard clock >= until else { return true }
@@ -195,6 +200,35 @@ extension Simulation {
 
     /// Hands a flight to a new shuttle: the log and the panel see the command, the tick flies it.
     private func launch(_ ship: Flight) {
+        // Two ships never come down on one slot: the later holds high until the earlier has left it, and
+        // an office's crate ship waits for any earlier order still on that slot to be fetched.
+        guard case .flight(let job, _, let slot) = ship.command.kind else { return }
+        let stationName = ship.station
+        ship.clear = { [weak self, weak ship] in
+            guard let self, let ship else { return true }
+            if self.flights.contains(where: { o in
+                guard o !== ship, o.station == stationName, case .flight(_, _, let s) = o.command.kind, s == slot else { return false }
+                if o.phaseKind == .descend || o.phaseKind == .unload { return true }
+                // Two approaching the same slot: the one launched first goes first.
+                guard o.phaseKind == .approach, let i = self.flights.firstIndex(where: { $0 === o }), let j = self.flights.firstIndex(where: { $0 === ship }) else { return false }
+                return i < j
+            }) { return false }
+            if case .dropCrate(let order) = job,
+               self.world.truth.deliveries.values.contains(where: { $0.station == stationName && $0.slot == slot && $0.id < order }) { return false }
+            // Nobody within a tile of the slot but this ship's own carrier or passenger: a neighbour's carrier
+            // lifting a crate, say, is left to finish before the next ship comes down beside it.
+            guard let station = self.fleet.stations[stationName], slot < station.hangarSlots.count else { return true }
+            let at = station.hangarSlots[slot]
+            for b in self.bodies.values where b.station == stationName && hypot(b.pos.x - at.x, b.pos.y - at.y) < 1.0 {
+                switch job {
+                case .bringWorker(let id) where id == b.id: continue
+                case .dropCrate(let order): if case .deliverOffice(let k) = b.current?.kind, k == order { continue }
+                default: break
+                }
+                return false
+            }
+            return true
+        }
         issue(ship.command, by: "shuttle", announce: true)
         ship.begin(at: clock)
         flights.append(ship)
@@ -203,7 +237,10 @@ extension Simulation {
 
     /// One frame of every flight in the air.
     func stepShuttles() {
-        flights.removeAll { !$0.advance(at: clock) }
+        // Each ship steps with the list untouched (a ship's `clear` reads the others), then the gone ones go.
+        var gone: [Flight] = []
+        for s in flights where !s.advance(at: clock) { gone.append(s) }
+        if !gone.isEmpty { flights.removeAll { f in gone.contains { $0 === f } } }
     }
 
     /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away. The crate is
@@ -241,7 +278,7 @@ extension Simulation {
         start(m, .deliverOffice(order: order, name: room.name), announce: false)
         m.place = .hangar
         m.fetchSpot = spot
-        walk(m, to: station.hangarCells[min(station.hangarCells.count - 1, slotIndex * 2)])
+        walk(m, to: station.bayStand(slot: slotIndex))
     }
 
     // MARK: rockets
