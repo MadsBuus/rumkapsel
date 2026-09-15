@@ -103,7 +103,7 @@ final class Minion: Body {
         // A look's own figure stands in for the box, hung from the box's middle so every pose that
         // turns or moves the body carries it along.
         let look = Looks.current
-        let figure = look.figure(crew: crew, height: h)
+        let figure = look.figure(id: id, crew: crew, height: h)
         if let figure {
             body.geometry = nil
             visor.isHidden = true
