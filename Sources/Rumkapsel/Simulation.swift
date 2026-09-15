@@ -560,6 +560,16 @@ final class Simulation<B: Body> {
         let pacing = m.isPacing(at: clock)
         let speed = m.wedged ? 0 : m.isHauling ? (hurried ? 1.7 : 1.1) : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
         if m.lying, !m.path.isEmpty, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.lying = false; m.bed = nil }
+        // A worker out of one shuttle stands by it while another shuttle with a worker is coming down or
+        // unloading on the next slot, then walks in. A carrier on a job has its own wait for its crate's ship.
+        if !m.onJob, station.hangarCells.contains(m.cell), flights.contains(where: { f in
+            guard f.station == m.station, f.phaseKind == .descend || f.phaseKind == .unload,
+                  case .flight(.bringWorker(let id), _, _) = f.command.kind else { return false }
+            return id != m.id
+        }) {
+            m.waitingOn = "a ship coming down beside"
+            return .waking
+        }
         if m.wakeUntil > 0 {
             if clock < m.wakeUntil { return .waking }
             m.wakeUntil = 0
