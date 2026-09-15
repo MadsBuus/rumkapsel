@@ -183,39 +183,41 @@ final class Station {
     var monolithCell: Cell { plan.monolith }
     /// Where a body stands when sent to the monolith: the tile south of it.
     var coreCenter: Cell { Cell(x: plan.monolith.x, y: plan.monolith.y + 1) }
-    /// The airlock: a chamber one wide and two deep that carries the south arm's line on past its end,
-    /// before the bay. The inner door is on its hallway side, the hatch on its bay side.
+    /// The airlock: a passage one wide that carries the south arm's line on through the hull, the bay
+    /// hanging outside its far end. The inner door is on its hallway side, the hatch on its bay side.
     var airlockCells: [Cell] { blocks.airlock }
+    /// How many tiles the airlock runs, so the bay stands off the station rather than against it.
+    static let airlockLength = 5
     private func makeAirlockCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
-        return [Cell(x: end.x, y: end.y + 1), Cell(x: end.x, y: end.y + 2)]
+        return (1...Station.airlockLength).map { Cell(x: end.x, y: end.y + $0) }
     }
     /// The chamber's inner cell, just past the inner door: where a leaver waits for the cycle.
     var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
     /// The hatch: where the chamber's outer cell opens onto the bay.
     var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
-    /// The bay: five wide and three deep across the end of the airlock. The ships land on the back row,
+    /// The bay: five wide and three deep across the far end of the airlock. The ships land on the back row,
     /// two tiles apart, so nobody at one slot is ever within a tile of the next; the middle row is where
     /// a carrier stands to wait for its crate; the front row is the way in from the hatch.
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
-        let y = end.y + 3   // past the airlock
+        let y = end.y + Station.airlockLength + 1   // past the airlock's hatch
         return (-2...2).flatMap { dx in (0..<3).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
     var hangarCenter: SIMD2<Double> {
         guard let end = plan.south.last else { return .zero }
-        return SIMD2(Double(end.x), Double(end.y) + 4)
+        return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2)
     }
     /// Landing slots across the bay's back row, two tiles apart.
     var hangarSlots: [SIMD2<Double>] {
         guard let end = plan.south.last else { return [] }
-        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y) + 5) }
+        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 3) }
     }
     /// Where a carrier stands to wait for a slot's crate: the middle row, a tile in front of the slot.
     func bayStand(slot: Int) -> Cell {
         guard let end = plan.south.last else { return coreCenter }
-        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + 4)
+        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 2)
     }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
@@ -986,7 +988,7 @@ final class Fleet {
         let dir = AppSupport.root
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v21.json")
+        return dir.appendingPathComponent("fleet-v22.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
