@@ -38,9 +38,71 @@ enum LayoutTests {
             }
         }
 
+        test("the hallway is one piece: every built cell is reached from the plaza, and the arms keep apart") {
+            let a = fresh()
+            let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
+            let unreached = hall.filter { a.hallDistance(of: $0) == nil }
+            expect(unreached.isEmpty, "unreached hallway: \(unreached.map { "\($0.x),\($0.y)" })")
+            let p = a.plan
+            let armsTouch = p.north.contains { n in p.east.contains { e in abs(n.x - e.x) <= 1 && abs(n.y - e.y) <= 1 } }
+            expect(!armsTouch, "the north and east arms never touch")
+            for al in p.alleys {
+                let others = p.everyHallwayCell.subtracting(al.cells)
+                let base = al.arm == 0 ? p.north[al.step] : p.east[al.step]
+                let crowded = al.cells.contains { c in others.contains { o in o != base && abs(o.x - c.x) <= 1 && abs(o.y - c.y) <= 1 } }
+                expect(!crowded, "alley at step \(al.step) of arm \(al.arm) keeps a tile clear of other hallway")
+            }
+        }
+
+        test("forty rooms: the station builds outward along the hallway, every room on it, none on the plan") {
+            let a = fresh()
+            let before = a.spineHalfLength
+            for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+            for (k, r) in a.rooms {
+                expect(r.cells.contains { c in c.neighbours.contains { a.isCorridor($0) } }, "\(k) has a door on the hallway")
+                expect(!r.cells.contains { a.isReserved($0) }, "\(k) keeps off the hallway and the yard")
+            }
+            expect(a.spineHalfLength > before && a.spineHalfLength < a.plan.horizon, "the arms were built on: \(before) to \(a.spineHalfLength) of \(a.plan.horizon)")
+            let far = Cell(x: (a.plan.east.last?.x ?? 0) + 3, y: 2)
+            expect(!a.rooms.values.contains { $0.cells.contains(far) }, "nothing was parked unplaced")
+            draw(a)
+        }
+
         if failures > 0 { print("layout: \(failures) failed"); exit(1) }
         print("layout: all passed")
         exit(0)
+    }
+
+    /// The floor as text, one character a cell, for a look without a window: `#` the monolith, `.` hallway,
+    /// letters the rooms, `L D B G` the lounge, dorm, bath and gym, `=` yard, `~` bay, `^` airlock.
+    static func draw(_ s: Station) {
+        var chars: [Cell: Character] = [:]
+        for c in s.corridorCells + s.coreCells { chars[c] = "." }
+        chars[s.monolithCell] = "#"
+        for c in s.padCells + s.deckCells + s.storageCells + s.deconCells { chars[c] = "=" }
+        for c in s.hangarCells { chars[c] = "~" }
+        for c in s.airlockCells { chars[c] = "^" }
+        let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
+        var next = 0
+        for key in s.rooms.keys.sorted() {
+            let ch: Character
+            switch key {
+            case "kind:lounge": ch = "L"
+            case "kind:quarters": ch = "D"
+            case "kind:bath": ch = "B"
+            case "kind:gym": ch = "G"
+            default: ch = letters[next % letters.count]; next += 1
+            }
+            for c in s.rooms[key]!.cells { chars[c] = ch }
+        }
+        let b = s.bounds
+        var out = ""
+        for y in b.min.y...b.max.y {
+            var line = ""
+            for x in b.min.x...b.max.x { line.append(chars[Cell(x: x, y: y)] ?? " ") }
+            out += line + "\n"
+        }
+        FileHandle.standardError.write(out.data(using: .utf8)!)
     }
 
     private static func fresh() -> Station {

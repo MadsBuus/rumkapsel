@@ -106,8 +106,8 @@ extension StationController {
             for c in station.corridorCells + station.coreCells {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
                 // New corridor beyond the old length is built tile by tile, outward.
-                let reach = max(abs(c.x), abs(c.y))
-                if reach > oldSpine, station.isCorridor(c) {   // the core sits past the spine's end; it is never new
+                let reach = station.revealStep(of: c)
+                if reach > oldSpine {   // the plaza and the fixed arms are step 0; they are never new
                     t.opacity = 0
                     t.runAction(.sequence([.wait(duration: 0.3 * Double(reach - oldSpine)), .fadeIn(duration: 0.5)]))
                 }
@@ -613,7 +613,7 @@ extension StationController {
                 let airlockLabel = floorSign("airlock", color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
                 airlockLabel.node.position.y = 0.012
                 if let a = station.airlockInner.first {
-                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x) + 0.5, oz + Double(a.y)))
+                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x), oz + Double(a.y)))
                 }
             }
             let occupied: (Cell) -> Bool = { c in

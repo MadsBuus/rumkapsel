@@ -153,6 +153,14 @@ A model-only suite, `--layout-tests`, in the shape of the ledger tests:
 
 Each step keeps the gate green on its own. Steps 1 and 2 touch no picture; the first visible change is step 3.
 
+## Where it stands
+
+Done on 2026-09-15, steps 2 to 4 of the order below in one pass: the plan generator (`Plan.swift`), the
+plaza, the one-wide arms with alleys, the fixed west and south arms to the yard and the bay, placement by
+hallway distance, `--layout-tests` with the forty-room fill drawn as text, and the scenario suite green on
+the new floor without a change to any scenario. Not yet: the smaller shape set, the minion scale switch,
+the palette switch, the peer tie-break, the name on the plaza.
+
 ## Decisions taken (2026-09-15)
 
 - **Palette**: try the game's floor greys and its six hues; keep ours in the code as a second palette,
