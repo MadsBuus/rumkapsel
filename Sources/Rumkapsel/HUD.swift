@@ -76,6 +76,14 @@ enum LoungeOrder: CaseIterable {
 extension StationController {
     // MARK: hud
 
+    /// The HUD's ink for the ground under it: light text over a dark look, dark text over a light one, read off
+    /// the look's background so a theme needs to say nothing.
+    var ink: (text: NSColor, dim: NSColor, onLight: Bool) {
+        let bg = Looks.current.background.usingColorSpace(.deviceRGB) ?? Palette.void
+        let light = bg.redComponent * 0.3 + bg.greenComponent * 0.59 + bg.blueComponent * 0.11 > 0.3
+        return light ? (NSColor(rgb: (0.1, 0.12, 0.16)), NSColor(rgb: (0.2, 0.23, 0.28)), true) : (Palette.text, Palette.dim, false)
+    }
+
     func buildHUD() {
         hud.scaleMode = .resizeFill
         hud.backgroundColor = .clear
@@ -230,8 +238,10 @@ extension StationController {
             let loading = rootOf[repo].map { github.isBusy(repoRoot: $0) } ?? false
             signature += "\(repo):\(workers):\(offices):\(loading);"
         }
-        guard signature != legendSignature else { return }
-        legendSignature = signature
+        let inked = signature + "|" + Looks.theme.rawValue
+        guard inked != legendSignature else { return }
+        legendSignature = inked
+        statusLabel.fontColor = ink.dim; shareLabel.fontColor = ink.dim; followLabel.fontColor = ink.text
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
         let slot = hud.size.width / CGFloat(max(1, repos.count))
@@ -239,7 +249,7 @@ extension StationController {
             let x = slot * (CGFloat(i) + 0.5)
             let name = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             name.fontSize = 14
-            name.fontColor = NSColor(fleet.color(forRepo: repo)).lighter(0.15)
+            name.fontColor = ink.onLight ? NSColor(fleet.color(forRepo: repo)).darker(0.35) : NSColor(fleet.color(forRepo: repo)).lighter(0.15)
             name.text = repo
             name.horizontalAlignmentMode = .center
             name.verticalAlignmentMode = .top
@@ -248,7 +258,7 @@ extension StationController {
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
             let counts = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
             counts.fontSize = 10
-            counts.fontColor = Palette.dim
+            counts.fontColor = ink.dim
             counts.text = "\(workers) minions · \(offices) offices"
             counts.horizontalAlignmentMode = .center
             counts.verticalAlignmentMode = .top
@@ -274,14 +284,14 @@ extension StationController {
             let icons = min(count, 8)
             let iconsWidth = CGFloat(icons) * 8
             for k in 0..<icons {
-                let r = SKSpriteNode(color: Palette.minion, size: CGSize(width: 4, height: 9))
+                let r = SKSpriteNode(color: ink.onLight ? ink.text : Palette.minion, size: CGSize(width: 4, height: 9))
                 r.position = CGPoint(x: x - iconsWidth + CGFloat(k) * 8 + 4, y: 14)
                 hud.addChild(r); jobNodes.append(r)
             }
             x -= iconsWidth + 6
             let l = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             l.fontSize = 12
-            l.fontColor = color
+            l.fontColor = ink.onLight ? color.darker(0.4) : color
             l.text = "\(title) \(count)"
             l.horizontalAlignmentMode = .right
             l.verticalAlignmentMode = .bottom
@@ -294,7 +304,7 @@ extension StationController {
     func logEvent(_ text: String) {
         let l = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
         l.fontSize = 11
-        l.fontColor = Palette.text
+        l.fontColor = ink.text
         l.horizontalAlignmentMode = .left
         l.verticalAlignmentMode = .top
         l.text = text
