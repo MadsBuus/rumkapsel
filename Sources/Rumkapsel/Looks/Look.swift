@@ -69,6 +69,33 @@ protocol Look {
     func dress(office room: Room, in station: Station) -> SCNNode?
 }
 
+/// What every look gets unless it draws its own: the classic station, adrift in space. A look overrides
+/// only what it changes; where its own model is missing it can fall back on the `Classic` piece.
+extension Look {
+    var background: NSColor { Palette.void }
+    var viewYaw: Double { .pi / 4 }
+    var floorTop: Double { 0 }
+    var dotsHallway: Bool { true }
+    var drawsBorders: Bool { true }
+    func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { Classic.backdrop(into: root) }
+    func ground(under stations: [Station], into root: SCNNode) {}
+    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
+    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? { nil }
+    func tint(tile: SCNNode, _ color: NSColor) { tile.geometry?.firstMaterial?.diffuse.contents = color }
+    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
+        Classic.airlockFrame(width: width, spans: spans, tint: tint)
+    }
+    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }
+    func monolith() -> SCNNode { Classic.monolith() }
+    func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
+    func pose(figure: SCNNode, height: Double, torso: Double) {}
+    func shuttle(color: NSColor) -> SCNNode { Classic.shuttle(color: color) }
+    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+    func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode { Classic.rocket(color: color, tall: tall, cargo: cargo) }
+    func dress(station: Station) -> [SCNNode] { [] }
+    func dress(office room: Room, in station: Station) -> SCNNode? { nil }
+}
+
 /// The look the scene draws with, swapped when the theme changes.
 enum Looks {
     private(set) static var theme: Theme = .classic

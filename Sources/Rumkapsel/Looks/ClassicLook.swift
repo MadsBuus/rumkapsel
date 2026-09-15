@@ -1,18 +1,15 @@
-// The classic look: flat shading adrift in space, the homage the station started as. These pieces were
-// drawn inline in the scene before there were looks, and are moved here as they were.
+// The classic look: flat shading adrift in space, the homage the station started as. Its pieces are what
+// every look gets unless it draws its own (see `extension Look`), kept here as `Classic` so a look whose
+// own model is missing can still fall back on the classic piece.
 
 import AppKit
 import SceneKit
 
-struct ClassicLook: Look {
-    var background: NSColor { Palette.void }
-    var viewYaw: Double { .pi / 4 }
-    var floorTop: Double { 0 }
-    var dotsHallway: Bool { true }
-    var drawsBorders: Bool { true }
+struct ClassicLook: Look {}
 
+enum Classic {
     /// Flakes of debris drifting, a far star field and a few nebulae.
-    func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] {
+    static func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] {
         var drifting: [(SCNNode, SIMD2<Double>)] = []
         for _ in 0..<110 {
             let size = Double.random(in: 0.05...0.13)
@@ -72,18 +69,8 @@ struct ClassicLook: Look {
         return drifting
     }
 
-    func ground(under stations: [Station], into root: SCNNode) {}
-
-    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
-
-    func tileDetail(floor: Floor, open: Set<Int>, walled: [Int: Floor], color: NSColor) -> SCNNode? { nil }
-
-    func tint(tile: SCNNode, _ color: NSColor) {
-        tile.geometry?.firstMaterial?.diffuse.contents = color
-    }
-
     /// A lintel across the posts.
-    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
+    static func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
         let lintel = SCNNode(geometry: SCNBox(width: width + 0.08, height: 0.08, length: 0.08, chamferRadius: 0))
         lintel.geometry!.firstMaterial = lit(tint)
         lintel.position = v3(0, 0.74, 0)
@@ -91,7 +78,7 @@ struct ClassicLook: Look {
     }
 
     /// Two posts and a lintel.
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+    static func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
         let hatch = SCNNode()
         let frame = lit(NSColor(rgb: (0.55, 0.6, 0.72)))
         for side in [-1.0, 1.0] {
@@ -108,7 +95,7 @@ struct ClassicLook: Look {
     }
 
     /// A dark column with a band of light near its top.
-    func monolith() -> SCNNode {
+    static func monolith() -> SCNNode {
         let n = SCNNode()
         let core = SCNNode(geometry: SCNBox(width: 0.7, height: 2.3, length: 0.7, chamferRadius: 0))
         core.geometry!.firstMaterial = lit(Palette.core)
@@ -121,12 +108,8 @@ struct ClassicLook: Look {
         return n
     }
 
-    func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
-
-    func pose(figure: SCNNode, height: Double, torso: Double) {}
-
     /// The shuttle body, wings in a repo colour.
-    func shuttle(color: NSColor) -> SCNNode {
+    static func shuttle(color: NSColor) -> SCNNode {
         let ship = SCNNode()
         let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
         hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
@@ -150,13 +133,7 @@ struct ClassicLook: Look {
         return ship
     }
 
-    func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
+    static func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         Props.rocket(color: color, tall: tall, cargo: cargo)
     }
-
-    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
-
-    func dress(station: Station) -> [SCNNode] { [] }
-
-    func dress(office room: Room, in station: Station) -> SCNNode? { nil }
 }
