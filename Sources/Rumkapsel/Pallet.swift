@@ -108,15 +108,18 @@ extension Simulation {
                 // Someone is already on this errand: leave them to it.
                 if bodies.values.contains(where: { palletErrand(of: $0)?.station == station.name && palletErrand(of: $0)?.repo == want.repo }) { continue }
                 let console = station.storageConsole.cell
+                // Free: no job, nothing on the arms, and not in the middle of a visit that lasts its whole time.
                 let free = bodies.values.filter {
-                    $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent
+                    $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent && !$0.bathing && !$0.exercising
                         && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
                 }
                 guard let m = free.min(by: { abs($0.cell.x - console.x) + abs($0.cell.y - console.y) < abs($1.cell.x - console.x) + abs($1.cell.y - console.y) }) else { break }
                 m.couch = nil
                 m.bed = nil
-                m.place = .room("kind:storage")
                 start(m, .dispatch(station: station.name, repo: want.repo, number: want.number), announce: true)
+                // Only a body whose order began walks: one that kept something else in hand is left to it.
+                guard case .dispatch = m.current?.kind else { continue }
+                m.place = .room("kind:storage")
                 walk(m, to: console)
             }
         }

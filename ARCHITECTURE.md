@@ -19,8 +19,17 @@ already existed. `readyRepos` tracks which repositories have answered; only chan
 ## 2. Model and diffs
 
 `Station.swift` holds the floor plan: rooms keyed by branch (`task:repo#N` for `gh-N/...` branches), fixed
-rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. `Fleet` arranges
-stations and saves the layout.
+rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway's
+skeleton is a `Plan` (`Plan.swift`): drawn once from the station's name, a plaza round the monolith and four
+one-wide arms, the west and south ones fixed so the yard and the bay never move, the north and east ones
+wandering to a horizon. Every arm cell is reserved for hallway, built or not, so no room ever stands where
+an arm will run. The rest of the hallway is **dug** as rooms arrive (`dug`, saved with the station):
+`placeShape` weighs every place a new room could go against the hallway as built plus one dig, the next
+cells of an arm, a dead-end alley off any hallway cell, or a passage through free floor to hallway that is
+far away by walking, and scores each by the room's walk to the bay and the deck, half a step per cell dug,
+half a step back per free tile the dig opens a door onto, and a bonus for a passage. The least wins, ties
+by steps from the plaza and then the lowest cell, so two machines with the same rooms dig the same hallway. `Fleet` arranges
+stations and saves the layout (`fleet-v21.json`).
 
 `World.swift` owns that floor plan and the diffs. `applyScan`, `applyGitHub`, `applyPeer` and `dropPeer` take
 one fresh answer each, compare it with what was known, change the model, and hand back `WorldEvent`s

@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if args.contains("--ledger-tests") { LedgerTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
+        if args.contains("--layout-tests") { LayoutTests.run() }
         // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
         if args.contains("--idle-tests") { IdleTests.run() }
         // The walk step on its own: made-up bodies meeting on a made-up floor.

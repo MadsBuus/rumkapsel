@@ -70,6 +70,21 @@ enum SimulationTests {
             expect(!m.drying && hung && m.place == .lounge, "the towel back on the rail, and back to the lounge")
         }
 
+        test("a reaction that arrives mid-shower waits, then walks to its place once the visit is over") {
+            let (sim, station, m) = fixture()
+            m.isCrew = true
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            m.showering = true
+            expect(sim.visitBath(m, station: station), "off to the shower")
+            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            sim.react(m, .coding("src"), place: .quarters, minutes: 2, words: "johan is shipping")
+            expect(m.bathing && m.pending != nil, "the reaction waits behind the shower: \(m.words)")
+            _ = step(sim, seconds: m.actFor + 10, until: { !m.bathing })
+            expect(m.current.map { if case .react = $0.kind { return true }; return false } == true, "then the reaction is in hand: \(m.words)")
+            expect(m.place == .quarters && (!m.path.isEmpty || station.cells(of: .quarters).contains(m.cell)), "and the body is on its way to its place, not standing in the bath: place \(m.place.words), path \(m.path.count)")
+        }
+
         test("the shower and the bowl are each one body's for the whole visit: a third visitor is turned away") {
             let (sim, station, a) = fixture()
             let b = body("b", sim: sim, station: station), c = body("c", sim: sim, station: station)
@@ -193,6 +208,38 @@ enum SimulationTests {
             if case .carry(_, let from, _)? = job?.command.kind, let landing = m.landing {
                 expect(abs(from.pos.x - landing.pos.x) < 0.01 && abs(from.pos.z - landing.pos.z) < 0.01, "from where the crate now lies: \(from.cell.x),\(from.cell.y)")
             } else { expect(false, "the carry is still a carry") }
+        }
+
+        test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
+            expect(sim.takeTurnInGym(m, station: station, gym: gym) && m.fetchSpot != nil && m.place == .gym, "off to the gym, a fixture spot in mind")
+            _ = step(sim, seconds: 1)
+            sim.start(m, .dispatch(station: station.name, repo: "web", number: 1))   // a job: it cuts in on the walk
+            expect(!m.exercising && m.fetchSpot == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words), spot \(String(describing: m.fetchSpot))")
+            sim.finish(m)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            m.showering = false
+            expect(sim.visitBath(m, station: station) && m.fixture == 0, "then off to the bowl")
+            _ = step(sim, seconds: 1)
+            sim.start(m, .dispatch(station: station.name, repo: "web", number: 2))
+            expect(!m.bathing && m.fixture == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: fixture \(String(describing: m.fixture)), place \(m.place.words)")
+        }
+
+        test("a pallet ordered mid-workout waits for the turn to end: nobody runs on the spot by the console") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
+            expect(sim.takeTurnInGym(m, station: station, gym: gym), "off to the gym")
+            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            sim.orderPallet(station: station, repo: "web", number: 9001)
+            expect(m.exercising && m.path.isEmpty && sim.palletErrand(of: m) == nil, "the one body is mid-turn and is left to it: \(m.words), path \(m.path.count)")
+            _ = step(sim, seconds: m.actFor + 30, until: { sim.palletErrand(of: m) != nil }, beat: { sim.servicePallets() })   // the half-second pass asks again
+            expect(sim.palletErrand(of: m) != nil && !m.exercising, "once the turn is over it takes the errand: \(m.words)")
         }
 
         test("a staging release: the pallet is ordered, loaded, pushed to the deck on the merge and unloaded there") {

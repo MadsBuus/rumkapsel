@@ -101,15 +101,15 @@ extension StationController {
         for station in fleet.stations.values {
             let anchor = stationAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); stationAnchors[station.name] = n; return n }()
             anchor.position = v3(station.offset.x, 0, station.offset.y)
-            let oldSpine = knownSpine[station.name] ?? station.spineHalfLength
-            knownSpine[station.name] = station.spineHalfLength
+            let oldDug = knownSpine[station.name] ?? station.dugCount
+            knownSpine[station.name] = station.dugCount
             for c in station.corridorCells + station.coreCells {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
-                // New corridor beyond the old length is built tile by tile, outward.
-                let reach = max(abs(c.x), abs(c.y))
-                if reach > oldSpine, station.isCorridor(c) {   // the core sits past the spine's end; it is never new
+                // Hallway dug since the last redraw is built tile by tile, in the order it was dug.
+                let order = station.digOrder(of: c)
+                if order > oldDug {   // the plaza and the fixed arms are order 0; they are never new
                     t.opacity = 0
-                    t.runAction(.sequence([.wait(duration: 0.3 * Double(reach - oldSpine)), .fadeIn(duration: 0.5)]))
+                    t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
             for c in station.hangarCells {
@@ -613,7 +613,7 @@ extension StationController {
                 let airlockLabel = floorSign("airlock", color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
                 airlockLabel.node.position.y = 0.012
                 if let a = station.airlockInner.first {
-                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x) + 0.5, oz + Double(a.y)))
+                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x), oz + Double(a.y)))
                 }
             }
             let occupied: (Cell) -> Bool = { c in

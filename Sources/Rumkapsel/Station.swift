@@ -109,7 +109,13 @@ final class Station {
     var hasHangar = true { didSet { forgetFloorPlan() } }
     var hasPad = true { didSet { forgetFloorPlan() } }
     private(set) var rooms: [String: Room] = [:]
-    private(set) var spineHalfLength = 2 { didSet { forgetFloorPlan() } }
+    /// The hallway dug beyond the plaza and the fixed arms, in the order it was dug: the long arms built
+    /// on, the alleys off them and the links between them. Every cell of it exists because a room needed
+    /// it. Saved with the station.
+    private(set) var dug: [Cell] = [] { didSet { forgetFloorPlan() } }
+    private var dugSet: Set<Cell> { Set(dug) }
+    /// How far the north arm is built, in steps: for the tests and the log.
+    var spineHalfLength: Int { plan.north.prefix { dugSet.contains($0) }.count }
     private var occupied: [Cell: String] = [:]
     private var walkableCache: Set<Cell>?
     /// Which yard block or the corridor each cell is in, and the doorways through the yard: read on
@@ -124,66 +130,105 @@ final class Station {
     /// World-space offset of this station's local grid.
     var offset = SIMD2<Double>(0, 0)
 
+    /// The floor plan drawn from the station's name: the plaza, the four arms, the alleys. Built once;
+    /// everything below reads it. How much of the north and east arms is built is `spineHalfLength`.
+    private var planCache: Plan?
+    var plan: Plan {
+        if let p = planCache { return p }
+        let p = Plan(seed: stableHash(name))
+        planCache = p
+        return p
+    }
+
     /// The fixed parts of the floor, built once per floor plan: read on every step of every route,
     /// every placement and every walk, so never as fresh arrays each time.
     private struct Blocks {
         var core: [Cell], airlock: [Cell], hangar: [Cell], storage: [Cell], deck: [Cell], pad: [Cell], decon: [Cell], corridor: [Cell]
-        /// Every cell no room may take.
+        /// The hallway that is built so far, plaza included: what a room may have its door on.
+        var hallway: Set<Cell>
+        /// Every cell no room may take: the whole plan, built or not, and the blocks.
         var reserved: Set<Cell>
+        /// Steps along the hallway from the plaza, for every built hallway cell.
+        var hallDistance: [Cell: Int]
     }
     private var blocksCache: Blocks?
     private var blocks: Blocks {
         if let b = blocksCache { return b }
-        let core = makeCoreCells(), airlock = makeAirlockCells(), hangar = makeHangarCells()
+        let core = plan.plaza, airlock = makeAirlockCells(), hangar = makeHangarCells()
         let storage = yardBlock(0), deck = yardBlock(1), pad = yardBlock(2), decon = makeDeconCells()
         var reserved = Set(core)
         for cells in [airlock, hangar, storage, deck, pad, decon] { reserved.formUnion(cells) }
-        var corridor = Set<Cell>()
-        for i in -spineHalfLength...spineHalfLength {
-            corridor.insert(Cell(x: i, y: 0)); corridor.insert(Cell(x: i, y: 1))
-            corridor.insert(Cell(x: 0, y: i)); corridor.insert(Cell(x: 1, y: i))
+        reserved.formUnion(plan.everyHallwayCell)
+        reserved.formUnion(dug)   // hallway once dug is hallway for good
+        let built = Set(plan.west + plan.south).union(dug)
+        var hallway = Set(core)
+        hallway.formUnion(built)
+        // Steps from the plaza along the built hallway: what "nearest the middle" means on a wandering line.
+        var dist: [Cell: Int] = [:]
+        var queue = core.filter { $0 != plan.monolith }
+        for c in queue { dist[c] = 0 }
+        var head = 0
+        while head < queue.count {
+            let c = queue[head]; head += 1
+            for n in c.neighbours where hallway.contains(n) && n != plan.monolith && dist[n] == nil { dist[n] = dist[c]! + 1; queue.append(n) }
         }
         let b = Blocks(core: core, airlock: airlock, hangar: hangar, storage: storage, deck: deck, pad: pad, decon: decon,
-                       corridor: corridor.filter { !reserved.contains($0) }, reserved: reserved)
+                       corridor: built.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, hallway: hallway, reserved: reserved, hallDistance: dist)
         blocksCache = b
         return b
     }
 
-    /// The monolith sits in a 2x2 block at the end of the north corridor arm.
+    /// The plaza: three by three of hallway floor with the monolith on the middle tile.
     var coreCells: [Cell] { blocks.core }
-    private func makeCoreCells() -> [Cell] {
-        let y = -spineHalfLength - 1
-        return [Cell(x: 0, y: y - 1), Cell(x: 1, y: y - 1), Cell(x: 0, y: y), Cell(x: 1, y: y)]
-    }
-    var coreCenter: Cell { Cell(x: 0, y: -spineHalfLength - 1) }
-    /// The hangar is the 4x2 bay across the outer end of the south corridor arm, wider than it is long.
-    /// The airlock: a 2x2 chamber that carries the corridor's line on past its south end, before the
-    /// bay. The inner door is on its corridor side, the hatch on its bay side.
+    var monolithCell: Cell { plan.monolith }
+    /// Where a body stands when sent to the monolith: the tile south of it.
+    var coreCenter: Cell { Cell(x: plan.monolith.x, y: plan.monolith.y + 1) }
+    /// The airlock: a chamber one wide and two deep that carries the south arm's line on past its end,
+    /// before the bay. The inner door is on its hallway side, the hatch on its bay side.
     var airlockCells: [Cell] { blocks.airlock }
-    private func makeAirlockCells() -> [Cell] { hasHangar ? (1...2).flatMap { d in (0...1).map { x in Cell(x: x, y: spineHalfLength + d) } } : [] }
-    /// The chamber's inner row, just past the inner door: where a leaver waits for the cycle.
-    var airlockInner: [Cell] { airlockCells.filter { $0.y == spineHalfLength + 1 } }
-    /// The hatch: where the chamber's outer row opens onto the bay.
-    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.filter { $0.y == spineHalfLength + 2 }.map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
+    private func makeAirlockCells() -> [Cell] {
+        guard hasHangar, let end = plan.south.last else { return [] }
+        return [Cell(x: end.x, y: end.y + 1), Cell(x: end.x, y: end.y + 2)]
+    }
+    /// The chamber's inner cell, just past the inner door: where a leaver waits for the cycle.
+    var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
+    /// The hatch: where the chamber's outer cell opens onto the bay.
+    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
+    /// The bay: five wide and three deep across the end of the airlock. The ships land on the back row,
+    /// two tiles apart, so nobody at one slot is ever within a tile of the next; the middle row is where
+    /// a carrier stands to wait for its crate; the front row is the way in from the hatch.
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
-        guard hasHangar else { return [] }
-        let y = spineHalfLength + 3   // past the airlock
-        return (-1...2).flatMap { x in (0..<2).map { d in Cell(x: x, y: y + d) } }
+        guard hasHangar, let end = plan.south.last else { return [] }
+        let y = end.y + 3   // past the airlock
+        return (-2...2).flatMap { dx in (0..<3).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
-    var hangarCenter: SIMD2<Double> { SIMD2(0.5, Double(spineHalfLength) + 3.5) }
-    /// Landing slots across the bay, in local coordinates.
-    var hangarSlots: [SIMD2<Double>] { (0..<3).map { SIMD2(-0.5 + Double($0), Double(spineHalfLength) + 3.5) } }
+    var hangarCenter: SIMD2<Double> {
+        guard let end = plan.south.last else { return .zero }
+        return SIMD2(Double(end.x), Double(end.y) + 4)
+    }
+    /// Landing slots across the bay's back row, two tiles apart.
+    var hangarSlots: [SIMD2<Double>] {
+        guard let end = plan.south.last else { return [] }
+        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y) + 5) }
+    }
+    /// Where a carrier stands to wait for a slot's crate: the middle row, a tile in front of the slot.
+    func bayStand(slot: Int) -> Cell {
+        guard let end = plan.south.last else { return coreCenter }
+        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + 4)
+    }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
-    /// the test deck at the end of the west arm, and the launch pad to the north-west.
+    /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
+    /// deck's east column, the one the west arm's last cell opens onto.
+    private var yardX0: Int { (plan.west.last?.x ?? -2) - 1 }
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
-        let x0 = -spineHalfLength - 1
+        let x0 = yardX0
         let r = yardRow(index)
         return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
     }
-    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, 0.5 + Double(yardRow(index))) }
+    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(yardX0) - 1.5, 0.5 + Double(yardRow(index))) }
     var storageCells: [Cell] { blocks.storage }
     var storageCenter: SIMD2<Double> { yardCenter(0) }
     var deckCells: [Cell] { blocks.deck }
@@ -192,10 +237,10 @@ final class Station {
     /// The storage row nearest the deck. Crates stack from the far wall, so this row is the pallet's.
     var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }
     /// Where a hover pallet stands in storage: the near row, on the column of a deck doorway.
-    var palletCell: Cell { Cell(x: -spineHalfLength - 3, y: storageNearRow) }
+    var palletCell: Cell { Cell(x: yardX0 - 2, y: storageNearRow) }
     /// The console on the wall by the storage doorway: the cell it hangs in, and which way it faces.
     var storageConsole: (cell: Cell, facing: SIMD2<Double>) {
-        (Cell(x: -spineHalfLength - 1, y: storageNearRow), SIMD2(0, -1))
+        (Cell(x: yardX0, y: storageNearRow), SIMD2(0, -1))
     }
 
     /// Decon: a chamber two cells deep at the back of storage, on its south side, the yard's fourth
@@ -204,12 +249,12 @@ final class Station {
     var deconCells: [Cell] { blocks.decon }
     private func makeDeconCells() -> [Cell] {
         guard hasPad else { return [] }
-        let x0 = -spineHalfLength - 1, r = yardRow(0)
+        let x0 = yardX0, r = yardRow(0)
         return (3..<5).flatMap { d in (0..<4).map { x in Cell(x: x0 - x, y: r + d) } }
     }
-    var deconCenter: SIMD2<Double> { SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 3.5) }
+    var deconCenter: SIMD2<Double> { SIMD2(Double(yardX0) - 1.5, Double(yardRow(0)) + 3.5) }
     /// The hatch in decon's back wall, and which way it faces: into the chamber.
-    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(-spineHalfLength) - 2.5, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
+    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(yardX0) - 1.5, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
 
     /// Every crate this station knows: the source's word and the station's, per crate. The counts
     /// below are read off it and kept nowhere.
@@ -219,7 +264,7 @@ final class Station {
     var storedBoxes: Int { stored.values.reduce(0, +) }
     /// Crates belonging to the deck, per repository.
     var staged: [String: Int] { ledger.counts(in: .deck) }
-    var monolithPosition: SIMD2<Double> { SIMD2(0.5, Double(-spineHalfLength) - 1.5) }
+    var monolithPosition: SIMD2<Double> { SIMD2(Double(plan.monolith.x), Double(plan.monolith.y)) }
     /// Eight flat beds, one per dorm tile.
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
         if let b = bedCache { return b }
@@ -258,24 +303,26 @@ final class Station {
         self.name = name
     }
 
-    /// A two-wide corridor cross.
+    /// The hallway built so far, plaza aside: the arms and their alleys, one tile wide.
     var corridorCells: [Cell] { blocks.corridor }
-
-    /// The corridor axes are never built on, however far they extend.
-    func isSpineLine(_ c: Cell) -> Bool { c.x == 0 || c.x == 1 || c.y == 0 || c.y == 1 }
+    /// Steps along the hallway from the plaza; nil off the hallway.
+    func hallDistance(of c: Cell) -> Int? { blocks.hallDistance[c] }
+    /// In what order a hallway cell was dug, 0 for the plaza and the fixed arms: for the fade-in of new floor.
+    func digOrder(of c: Cell) -> Int { (dug.firstIndex(of: c) ?? -1) + 1 }
+    var dugCount: Int { dug.count }
 
     func room(at cell: Cell) -> Room? {
         guard let key = occupied[cell] else { return nil }
         return rooms[key]
     }
 
-    func isCorridor(_ c: Cell) -> Bool {
-        ((c.x == 0 || c.x == 1) && abs(c.y) <= spineHalfLength) || ((c.y == 0 || c.y == 1) && abs(c.x) <= spineHalfLength)
-    }
+    /// Built hallway floor, the plaza's ring included and the monolith's own tile not.
+    func isCorridor(_ c: Cell) -> Bool { c != plan.monolith && blocks.hallway.contains(c) }
 
     var walkable: Set<Cell> {
         if let w = walkableCache { return w }
         var w = Set(coreCells)
+        w.remove(plan.monolith)   // the monolith stands on its tile; the walk goes round it on the plaza
         w.formUnion(hangarCells)
         w.formUnion(airlockCells)
         w.formUnion(padCells)
@@ -292,7 +339,7 @@ final class Station {
 
     func cells(of place: Place) -> [Cell] {
         switch place {
-        case .core: return coreCells + [Cell(x: 0, y: -spineHalfLength), Cell(x: 1, y: -spineHalfLength)]
+        case .core: return coreCells.filter { $0 != plan.monolith }
         case .room("kind:hangar"): return hangarCells
         case .room("kind:airlock"): return airlockCells
         case .room("kind:pad"): return padCells
@@ -304,12 +351,16 @@ final class Station {
 
     /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
+    /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
+    /// on every launch and on every machine.
+    static func shape(forKey key: String) -> [Cell] { baseShapes[Int(stableHash(key) % UInt64(baseShapes.count))] }
+
     func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.baseShapes[abs(key.hashValue) % Station.baseShapes.count], near: near)
+        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.shape(forKey: key), near: near)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
@@ -386,9 +437,10 @@ final class Station {
     }
 
     private func computeYardDoorways() -> [(Cell, Cell)] {
-        guard hasPad else { return [] }
-        let x0 = -spineHalfLength - 1
-        var out: [(Cell, Cell)] = [(Cell(x: x0, y: 0), Cell(x: x0 + 1, y: 0)), (Cell(x: x0, y: 1), Cell(x: x0 + 1, y: 1))]
+        guard hasPad, let armEnd = plan.west.last else { return [] }
+        let x0 = yardX0
+        // The one place the hallway meets the yard: the west arm's last cell onto the deck.
+        var out: [(Cell, Cell)] = [(armEnd, Cell(x: x0, y: armEnd.y))]
         // Corridor into the airlock, airlock out onto the bay: the only way to the outside.
         for a in airlockInner { out.append((Cell(x: a.x, y: a.y - 1), a)) }
         for h in airlockHatches { out.append((h.inside, h.bay)) }
@@ -442,73 +494,227 @@ final class Station {
 
     /// Whether a peer's placement can be adopted as is: free floor, against our corridor.
     private func fits(_ cells: [Cell]) -> Bool {
-        !cells.isEmpty && cells.allSatisfy { !isReserved($0) && occupied[$0] == nil && abs($0.x) <= spineHalfLength + 4 && abs($0.y) <= spineHalfLength + 4 }
+        !cells.isEmpty && cells.allSatisfy { !isReserved($0) && occupied[$0] == nil }
             && cells.contains { $0.neighbours.contains(where: isCorridor) }
     }
 
-    private func isReserved(_ c: Cell) -> Bool { isSpineLine(c) || blocks.reserved.contains(c) }
+    /// The whole plan, built or not, and the blocks: no room ever stands where hallway will run.
+    func isReserved(_ c: Cell) -> Bool { blocks.reserved.contains(c) }
 
+    /// Where a new room goes, and what hallway is dug for it. Every candidate is a place for the room with
+    /// the hallway as it is, or with one dig added: the next few cells of a long arm, or an alley off any
+    /// hallway cell, one to three tiles into free floor, or on until it meets other hallway and so links
+    /// two arms without the plaza. A candidate is judged by the room's walk from its door to the bay and to
+    /// the deck, plus the digging, less what a link saves between the two ends it joins. The least wins;
+    /// ties go to the fewest steps from the plaza, then to the lowest cell. Deterministic throughout, so
+    /// two machines with the same rooms dig the same hallway.
     private func placeShape(_ shape: [Cell], near: [Cell]? = nil) -> [Cell] {
         let variants = rotations(of: shape)
-        var rounds = 0
-        while rounds < 40 {   // bounded: a station can never wedge the render thread
-            rounds += 1
-            let reach = spineHalfLength + 4
-            var anchors: [Cell] = []
-            for x in -reach...reach { for y in -reach...reach { anchors.append(Cell(x: x, y: y)) } }
-            if let near, !near.isEmpty {
-                // Beside the given rooms: closest to their floor first, then the usual order.
-                let set = Set(near)
-                var gaps: [Cell: Int] = [:]
-                for c in anchors { gaps[c] = near.map { abs($0.x - c.x) + abs($0.y - c.y) }.min()! }   // once each, not once per comparison
-                anchors.sort {
-                    let ga = gaps[$0]!, gb = gaps[$1]!
-                    if ga != gb { return ga < gb }
-                    return (max(abs($0.x), abs($0.y)), $0.x, $0.y) < (max(abs($1.x), abs($1.y)), $1.x, $1.y)
-                }
-                for anchor in anchors {
-                    for v in variants {
-                        let cells = v.map { $0 + anchor }
-                        guard cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil && !set.contains($0) }) else { continue }
-                        guard cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) else { continue }
-                        guard cells.contains(where: { $0.neighbours.contains(where: set.contains) }) else { continue }
-                        guard flatTowardsCorridor(cells) else { continue }
-                        return cells
-                    }
-                }
-                // Nothing beside them fits: fall through to the usual search.
+        for _ in 0..<6 {
+            if let cells = placeOnce(variants, near: near) { return cells }
+            // Boxed in: build both long arms on three cells and look again.
+            for arm in [plan.north, plan.east] {
+                let built = arm.prefix { blocks.hallway.contains($0) }.count
+                dug.append(contentsOf: arm[built..<min(arm.count, built + 3)])
             }
-            anchors.sort {
-                let a = max(abs($0.x), abs($0.y)), b = max(abs($1.x), abs($1.y))
-                if a != b { return a < b }
-                let sa = abs($0.x) + abs($0.y), sb = abs($1.x) + abs($1.y)
-                if sa != sb { return sa < sb }
-                return ($0.x, $0.y) < ($1.x, $1.y)
-            }
-            for anchor in anchors {
-                for v in variants {
-                    let cells = v.map { $0 + anchor }
-                    guard cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
-                    guard cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) else { continue }
-                    guard flatTowardsCorridor(cells) else { continue }
-                    return cells
-                }
-            }
-            spineHalfLength += 2
         }
         // Give up gracefully: park the room in a free spot far out along the east arm.
-        let far = Cell(x: spineHalfLength + 2, y: 2)
+        let far = Cell(x: (plan.east.last?.x ?? 0) + 3, y: 2)
         return variants[0].map { $0 + far }
+    }
+
+    private func placeOnce(_ variants: [[Cell]], near: [Cell]?) -> [Cell]? {
+        let hall = blocks.hallway
+        let hallInOrder = hall.sorted { ($0.y, $0.x) < ($1.y, $1.x) }   // the same order on every machine
+        // Steps from the bay door, the deck door and the plaza, through the hallway as built.
+        func distances(from starts: [Cell]) -> [Cell: Int] {
+            var d: [Cell: Int] = [:]
+            var queue = starts.filter { hall.contains($0) }
+            for c in queue { d[c] = 0 }
+            var head = 0
+            while head < queue.count {
+                let c = queue[head]; head += 1
+                for n in c.neighbours where hall.contains(n) && n != plan.monolith && d[n] == nil { d[n] = d[c]! + 1; queue.append(n) }
+            }
+            return d
+        }
+        let toBay = distances(from: [plan.south.last ?? plan.monolith])
+        let toDeck = distances(from: [plan.west.last ?? plan.monolith])
+        let toPlaza = blocks.hallDistance
+        func cost(_ c: Cell) -> Int? {
+            guard let b = toBay[c], let k = toDeck[c] else { return nil }
+            return b + k
+        }
+        /// Free floor a dig may take: not built, not a room, not a block. An unbuilt cell of an arm may be
+        /// dug early by an alley crossing it; it is hallway either way.
+        func diggable(_ c: Cell) -> Bool { !walkable.contains(c) && occupied[c] == nil && (!isReserved(c) || plan.everyHallwayCell.contains(c)) }
+        /// Free floor a room may take.
+        func roomable(_ c: Cell) -> Bool { !isReserved(c) && occupied[c] == nil }
+
+        // A dig is scored in half steps: a room's walk counts one per step, the digging half a step per
+        // cell, and every free tile the dig opens a door onto counts half a step back, since the rooms
+        // that come after share it. `lb` is the least any room on it could score.
+        struct Dig { var cells: [Cell]; var costs: [Cell: Int]; var saves: Int; var lb: Int }
+        func dig(_ cells: [Cell], _ costs: [Cell: Int], saves: Int) -> Dig {
+            var frontage = Set<Cell>()
+            for c in cells { for n in c.neighbours where roomable(n) && !hall.contains(n) && !cells.contains(n) { frontage.insert(n) } }
+            let saves = saves + frontage.count
+            return Dig(cells: cells, costs: costs, saves: saves, lb: 2 * (costs.values.min() ?? 0) + cells.count - saves)
+        }
+        var digs: [Dig] = [Dig(cells: [], costs: [:], saves: 0, lb: 0)]
+        // The long arms built on, one to eight cells.
+        for arm in [plan.north, plan.east] {
+            let built = arm.prefix { hall.contains($0) }.count
+            guard built < arm.count else { continue }
+            let base = built > 0 ? arm[built - 1] : arm[0].neighbours.first { hall.contains($0) }
+            guard let base, let c0 = cost(base) else { continue }
+            var cells: [Cell] = []
+            var costs: [Cell: Int] = [:]
+            for i in built..<min(arm.count, built + 8) {
+                guard occupied[arm[i]] == nil else { break }
+                cells.append(arm[i]); costs[arm[i]] = c0 + 2 * (i - built + 1)
+                digs.append(dig(cells, costs, saves: 0))
+            }
+        }
+        // Alleys off every hallway cell: straight, one to six tiles into free floor, or straight then a
+        // turn, on until they meet other hallway and so link two parts of it without the plaza. An alley
+        // keeps a tile clear on both sides of every cell but the last, so rooms fit along it.
+        let nearSet = near.map(Set.init) ?? []
+        let dirs = [Cell(x: 1, y: 0), Cell(x: -1, y: 0), Cell(x: 0, y: 1), Cell(x: 0, y: -1)]
+        /// Cells of one straight leg from `from` along `d`, and whether it met other hallway at its end.
+        func leg(from: Cell, along d: Cell, upTo n: Int, taken: [Cell]) -> (cells: [Cell], met: Cell?) {
+            var out: [Cell] = []
+            var p = from + d
+            for _ in 0..<n {
+                guard diggable(p) else { break }
+                let met = p.neighbours.first { $0 != p + (d * -1) && hall.contains($0) && $0 != plan.monolith && !taken.contains($0) && !out.contains($0) }
+                out.append(p)
+                if met != nil { return (out, met) }
+                // Two tiles clear on either side, so the strip between this and the next alley holds a room.
+                let sides = [1, 2, -1, -2].map { Cell(x: p.x + $0 * d.y, y: p.y + $0 * d.x) }
+                guard !sides.contains(where: { hall.contains($0) || taken.contains($0) }) else { out.removeLast(); break }
+                p = p + d
+            }
+            return (out, nil)
+        }
+        func linked(_ cells: [Cell], from h: Cell, c0: Int, met: Cell) -> Dig? {
+            guard let cm = cost(met) else { return nil }
+            var costs: [Cell: Int] = [:]
+            for (j, c) in cells.enumerated() { costs[c] = min(c0 + 2 * (j + 1), cm + 2 * (cells.count - j)) }
+            // A second way round is worth having in itself: four steps' worth, plus whatever walk it cuts out.
+            let there = toPlaza[h] ?? 0, back = toPlaza[met] ?? 0
+            return dig(cells, costs, saves: 8 + 2 * max(0, there + back - cells.count))
+        }
+        for h in hallInOrder where h != plan.monolith {
+            guard let c0 = cost(h) else { continue }
+            // Dead-end alleys, straight, one to six.
+            for d in dirs {
+                let first = leg(from: h, along: d, upTo: 6, taken: [])
+                if let met = first.met {
+                    if let l = linked(first.cells, from: h, c0: c0, met: met) { digs.append(l) }
+                    continue
+                }
+                var cells: [Cell] = []
+                var costs: [Cell: Int] = [:]
+                for (i, c) in first.cells.enumerated() {
+                    cells.append(c); costs[c] = c0 + 2 * (i + 1)
+                    digs.append(dig(cells, costs, saves: 0))
+                }
+            }
+            // Links: the shortest passage through free floor from here to any hallway cell that is far
+            // away by walking, up to ten tiles, a tile clear of all other hallway on the way. What it
+            // saves is the walk it cuts out between its two ends.
+            let walkFrom = distances(from: [h])
+            var prev: [Cell: Cell] = [:]
+            var queue: [Cell] = []
+            for n in h.neighbours where diggable(n) && !n.neighbours.contains(where: { $0 != h && hall.contains($0) }) { prev[n] = h; queue.append(n) }
+            var head = 0
+            var found = 0
+            while head < queue.count, found < 3 {
+                let p = queue[head]; head += 1
+                var len = 0; var q = p; while q != h { len += 1; q = prev[q]! }
+                if len >= 10 { continue }
+                for n in p.neighbours where prev[n] == nil && n != h && diggable(n) {
+                    let beside = n.neighbours.filter { hall.contains($0) && $0 != plan.monolith }
+                    // Far enough that this is a way of its own, not a bulge in the wall beside it.
+                    if let g = beside.first(where: { (walkFrom[$0] ?? 0) >= len + 3 }) {
+                        // Meets far hallway: a link from h to g through n.
+                        var path = [n]; var q = p; while q != h { path.append(q); q = prev[q]! }
+                        path.reverse()
+                        if let l = linked(path, from: h, c0: c0, met: g) { digs.append(l); found += 1 }
+                        prev[n] = p
+                        continue
+                    }
+                    guard beside.isEmpty else { continue }   // brushing hallway that is not far: not a passage
+                    prev[n] = p
+                    queue.append(n)
+                }
+            }
+        }
+        digs.sort { $0.lb < $1.lb }
+        // Every room that has a door on the hallway plus one dig; the best by cost.
+        var best: (score: Int, tie: (Int, Int, Int), cells: [Cell], dig: [Cell])?
+        for dig in digs {
+            if let best, dig.lb >= best.score { break }   // nothing on this dig or after it can do better
+            let digSet = Set(dig.cells)
+            let frontage: [Cell] = dig.cells.isEmpty ? hallInOrder : dig.cells
+            func doorCost(_ cells: [Cell]) -> (Int, Int)? {
+                var bestDoor: (Int, Int)?
+                for c in cells {
+                    for n in c.neighbours {
+                        let k: Int? = digSet.contains(n) ? dig.costs[n] : (hall.contains(n) && n != plan.monolith ? cost(n) : nil)
+                        guard let k else { continue }
+                        let steps = digSet.contains(n) ? (toPlaza[n] ?? 0) : (toPlaza[n] ?? 0)
+                        if bestDoor == nil || (k, steps) < bestDoor! { bestDoor = (k, steps) }
+                    }
+                }
+                return bestDoor
+            }
+            var anchorsSeen = Set<[Cell]>()
+            for f in frontage {
+                for v in variants {
+                    // Every placement of this variant that touches `f`: slide the shape so each of its cells sits beside f.
+                    for cell in v {
+                        for side in f.neighbours {
+                            let anchor = Cell(x: side.x - cell.x, y: side.y - cell.y)
+                            let cells = v.map { $0 + anchor }
+                            guard !anchorsSeen.contains(cells) else { continue }
+                            anchorsSeen.insert(cells)
+                            guard cells.allSatisfy({ roomable($0) && !digSet.contains($0) && !nearSet.contains($0) }) else { continue }
+                            guard !dig.cells.isEmpty || cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) else { continue }
+                            if !nearSet.isEmpty { guard cells.contains(where: { $0.neighbours.contains(where: nearSet.contains) }) else { continue } }
+                            guard flatTowards(cells, hallway: hall.union(digSet)) else { continue }
+                            guard let (door, steps) = doorCost(cells) else { continue }
+                            let score = 2 * door + dig.cells.count - dig.saves
+                            let tie = (steps, anchor.x, anchor.y)
+                            if best == nil || (score, tie.0, tie.1, tie.2) < (best!.score, best!.tie.0, best!.tie.1, best!.tie.2) {
+                                best = (score, tie, cells, dig.cells)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        guard let best else { return nil }
+        if ProcessInfo.processInfo.environment["RK_DEBUG_PLACE"] != nil {
+            let links = digs.filter { $0.cells.count >= 4 && $0.cells.last.map { l in l.neighbours.contains { hall.contains($0) } } == true }
+            let lbs = links.prefix(4).map { "len \($0.cells.count) lb \($0.lb) saves \($0.saves) from \($0.cells.first!.x),\($0.cells.first!.y)" }.joined(separator: " | ")
+            FileHandle.standardError.write("place: \(digs.count) digs, \(links.count) links; best score \(best.score) dig \(best.dig.count) cells; links: \(lbs)\n".data(using: .utf8)!)
+        }
+        if !best.dig.isEmpty { dug.append(contentsOf: best.dig) }
+        return best.cells
     }
 
     /// A room shows a straight wall to the hallway: a T with its notch against the corridor
     /// would leave a dark closet between the room, the hallway and its neighbours.
-    private func flatTowardsCorridor(_ cells: [Cell]) -> Bool {
+    private func flatTowardsCorridor(_ cells: [Cell]) -> Bool { flatTowards(cells, hallway: blocks.hallway) }
+
+    private func flatTowards(_ cells: [Cell], hallway: Set<Cell>) -> Bool {
         let set = Set(cells)
         let minX = cells.map(\.x).min()!, maxX = cells.map(\.x).max()!
         let minY = cells.map(\.y).min()!, maxY = cells.map(\.y).max()!
         for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
-            guard cells.contains(where: { isCorridor(Cell(x: $0.x + dx, y: $0.y + dy)) }) else { continue }
+            guard cells.contains(where: { let n = Cell(x: $0.x + dx, y: $0.y + dy); return hallway.contains(n) && n != plan.monolith }) else { continue }
             // The whole edge line facing that direction must be part of the room.
             let edge: [Cell]
             if dx == 0 {
@@ -662,6 +868,7 @@ final class Station {
 
     struct Saved: Codable {
         var spine: Int
+        var hallway: [Cell]?
         var rooms: [String: SavedRoom]
         var stored: Int?
         var ledger: Ledger?
@@ -669,13 +876,13 @@ final class Station {
     struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
 
     var saved: Saved {
-        Saved(spine: spineHalfLength, rooms: rooms.mapValues {
+        Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
         }, stored: storedBoxes, ledger: ledger)
     }
 
     func restore(_ s: Saved) {
-        spineHalfLength = s.spine
+        dug = (s.hallway ?? []).filter { !plan.plaza.contains($0) }
         ledger = s.ledger ?? Ledger()
         ledger.forgetTransit()   // nobody was carrying anything when this launched
         for (key, r) in s.rooms where key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") {
@@ -702,7 +909,7 @@ final class Fleet {
         let dir = AppSupport.root
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v20.json")
+        return dir.appendingPathComponent("fleet-v21.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {

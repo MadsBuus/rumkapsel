@@ -5,13 +5,17 @@ read against. If a behaviour is not allowed here, it is a bug, however pretty.
 
 ## The place
 
-A station is a corridor cross with rooms snapped against it, like the game's. The **monolith** at the
-north end is the ancient artefact the game's minions researched for new skills. Here it stands for the
-outside world: sessions that search the web or talk to other systems send their subagents to it, and
-it answers with cones of light, never lightning. The **bay** at the south end is outside: shuttles land
-there and nowhere else. The **airlock** sits in the corridor's own line between its south end and the
-bay, a 2x2 chamber with a rectangular inner door and a rectangular hatch, so corridor, chamber and
-bay read as one straight way out. Everyone who arrives or leaves goes through it, and a leaver waits
+A station is a hallway one tile wide with rooms snapped against it, like the game's: a plaza three by
+three round the **monolith**, four arms out of it, the two long ones wandering in runs and jogs with
+short alleys off them, every other alley looping back into its arm so there is a way round as well as a
+way out, and rooms on both sides of every stretch. The hallway is drawn whole from the
+station's name and built outward as rooms need it, so it never re-plans and two machines that share a
+station draw the same one. The monolith is the ancient artefact the game's minions researched for new
+skills. Here it stands for the outside world: sessions that search the web or talk to other systems send
+their subagents to it, and it answers with cones of light, never lightning. The **bay** at the south
+arm's end is outside: shuttles land there and nowhere else. The **airlock** sits in the arm's own line
+between its end and the bay, a chamber one wide and two deep with a rectangular inner door and a
+rectangular hatch, so hallway, chamber and bay read as one straight way out. Everyone who arrives or leaves goes through it, and a leaver waits
 inside for the cycle before stepping out. Nobody goes to the bay for any other reason: it is outside. Space walks, visits to other stations and other ships docking are its future. The **yard** along the west side is three
 blocks: **storage** (merged work waiting for a release), the **deck** (work on staging, tested on the
 row nearest the pad, untested on the far row) and the **pad** (rockets). Blocks connect by doorways and

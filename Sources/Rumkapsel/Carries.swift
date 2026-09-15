@@ -156,8 +156,8 @@ extension Simulation {
         for m in bodies.values {
             guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = world.truth.deliveries[id] else { continue }
             if !m.hasLoad {
-                let at = bayCrate(order, station: station).at
-                walk(m, to: standCell(station, near: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))))
+                // Still waiting for the crate or its ship: the standing cell in front of the slot, never the slot.
+                walk(m, to: station.bayStand(slot: order.slot))
             } else if let slot = officeCrateSlot(station: station, roomKey: order.roomKey) { walk(m, to: slot.cell) }   // on to the crate's own slot, not the door
         }
     }
@@ -204,9 +204,11 @@ extension Simulation {
                 }
                 if !order.landed { m.waitingOn = "the crate to come down"; return .spent }
                 if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; return .spent }
-                if let spot = m.fetchSpot {
+                if m.fetchSpot != nil {
+                    // Over to the standing cell in front of the crate; the last arm's length is taken from there,
+                    // so the approach never comes from a neighbouring slot's side.
                     m.fetchSpot = nil
-                    m.path = route(m, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+                    m.path = route(m, to: station.bayStand(slot: order.slot))
                     return .spent
                 }
                 guard m.path.isEmpty else { return .spent }

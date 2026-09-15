@@ -90,7 +90,7 @@ class Body {
     var shortStretches = 0
 
     var promptCount = 0
-    var toolSeed: Int { abs(id.hashValue) % 4 }
+    var toolSeed: Int { Int(stableHash(id) % 4) }
     var pyramidCell: Cell?
     /// On the cone's cell or the one beside it: close enough to work it when its own cell is covered.
     var nearCone: Bool { pyramidCell.map { abs($0.x - cell.x) + abs($0.y - cell.y) <= 1 } ?? false }
