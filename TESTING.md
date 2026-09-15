@@ -1,4 +1,25 @@
-# Testing: where it stands, and the three changes to make
+# Testing: where it stands, and the changes to make
+
+## The gate
+
+Every change runs all of it before it is committed; it takes half a minute.
+
+```bash
+swift build --build-system native
+.build/debug/Rumkapsel --scenarios
+.build/debug/Rumkapsel --sim-tests
+.build/debug/Rumkapsel --idle-tests
+.build/debug/Rumkapsel --walk-tests
+.build/debug/Rumkapsel --ledger-tests
+.build/debug/Rumkapsel --pipeline-tests
+```
+
+The native build system is named because Xcode 26.1's default lays the products out where the debug binary
+cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios pallet` runs
+the scenarios whose name contains a word; `--scenarios-verbose` prints each
+scenario's whole log, ledger and bodies. For a look at the picture, `--simulator --snapshot out.png
+--simulate "Target: web#455,Open PR,Merge PR" --delay 19` renders a frame after those presses, without
+taking the keyboard.
 
 ## How the station is tested today
 
@@ -11,7 +32,7 @@
   lived: walks, doorways, deliveries, carries. That is its strength. Its weakness is the same fact: every
   tick drags SceneKit bookkeeping along, so a station second costs milliseconds, and model rules cannot
   be tested apart from the picture.
-- Measured: 25 scenarios in 179 s, of which the twelve-minute idle soak is 100 s; the other 24 average 3 s.
+- Measured when this was written: 25 scenarios in 179 s, of which one twelve-minute idle run was 100 s.
 
 ## How game engines do it, and where this differs
 
@@ -20,11 +41,12 @@ for a given seed, and is tested headless: unit tests on rules, replay tests on r
 tests that run for hours. Rendering is tested apart, with golden images. The station's simulator and
 ledger tests already follow that shape; the scene is what is still mixed in.
 
-## Change 1: waits in station seconds, the soak on demand
+## Change 1: waits in station seconds
 
 - Scenario waits and tails are written in "wall seconds at sixteen times", a leftover from a wall-clock
   runner. Rewrite every wait as plain station seconds; keep behaviour identical (multiply by 16 once).
-- The idle soak runs only with `--scenarios soak` or an explicit `--soak` flag, not in the gate.
+- The three-hour idle run is gone: what it watched, that visits happen in a mix and last their whole time,
+  the idle tests and the sim tests check in seconds.
 - Target: the gate under 90 s, and a scenario readable as "press, wait 40 station seconds, judge".
 
 ## Change 2: model-only tests for rules that are pure already

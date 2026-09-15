@@ -7,10 +7,10 @@ cd "$(dirname "$0")"
 MODE=release
 for a in "$@"; do [ "$a" = fast ] && MODE=fast; done
 if [ "$MODE" = fast ]; then
-  swift build 2>&1 | grep -E 'error|Build complete' || true
+  swift build --build-system native 2>&1 | grep -E 'error|Build complete' || true
   BIN=.build/debug/Rumkapsel
 else
-  swift build -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
+  swift build --build-system native -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
   BIN=.build/apple/Products/Release/Rumkapsel
 fi
 [ -x "$BIN" ] || { echo "build failed"; exit 1; }

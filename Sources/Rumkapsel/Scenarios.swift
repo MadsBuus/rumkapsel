@@ -7,9 +7,8 @@
 // and passes only if every expectation was met, in order, nothing forbidden was recorded, the floor
 // check agrees, and the invariant checker found nothing.
 //
-//     --scenarios              every scenario but the soak
+//     --scenarios              every scenario
 //     --scenarios pallet       only the ones whose name contains "pallet"
-//     --scenarios --soak       the soak as well: the idle station left alone for three hours
 //     --scenarios-verbose      print each scenario's whole log
 //
 // Exits non-zero if anything failed. Every wait is in station seconds: "press, wait 40, judge".
@@ -160,14 +159,12 @@ struct Scenario {
     /// A minion giving up mid-command is a stall the body reconciler caught: a bug in a scripted run,
     /// unless the scenario means to provoke one.
     var allowGiveUp = false
-    /// A long run that watches the station left alone. Runs only when asked for by name or `--soak`.
-    var soak = false
     /// What must stand on the floor when it is over, for the things the run does not record as it
     /// goes. Returns the reason it failed, or nil.
     let floor: (@MainActor (SimulatorController) -> String?)?
 
     init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [Expect], forbids: [Expect] = [],
-         allowSkips: Bool = false, allowGiveUp: Bool = false, soak: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
+         allowSkips: Bool = false, allowGiveUp: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
         self.tail = tail
@@ -175,23 +172,10 @@ struct Scenario {
         self.forbids = forbids
         self.allowSkips = allowSkips
         self.allowGiveUp = allowGiveUp
-        self.soak = soak
         self.floor = floor
     }
 
     /// How many crates of a repository stand in a yard row right now, by the name the scene gives them.
-    /// Every visit of a kind that ran its course lasted its planned time, counted from arrival.
-    @MainActor
-    static func lasted(_ sim: SimulatorController, _ kind: String) -> String? {
-        let visits = sim.station.visitLog.filter { $0.kind == kind }
-        guard !visits.isEmpty else { return "no \(kind) ran its course" }
-        if let none = visits.first(where: { $0.planned <= 0 }) { return "a \(kind) had no length of its own (\(none.lasted) s)" }
-        if let short = visits.first(where: { $0.lasted + 0.25 < $0.planned }) {
-            return "a \(kind) lasted \(String(format: "%.1f", short.lasted)) s of its \(String(format: "%.1f", short.planned))"
-        }
-        return nil
-    }
-
     @MainActor static func crates(_ sim: SimulatorController, _ area: String, _ repo: String) -> Int {
         sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(area):work|\(repo)|") }.count
     }
@@ -455,16 +439,6 @@ enum Scenarios {
             }
             return carriers.count >= 2 ? nil : "only \(carriers) carried #298"
         }),
-        Scenario("an idle station keeps a mix, each visit for its whole time", [
-            ("Everyone to lounge", 48),
-        ], tail: 11520, expects: [], soak: true, floor: { sim in
-            let log = sim.station.visitLog
-            let kinds = Dictionary(grouping: log, by: \.kind).mapValues(\.count)
-            if kinds.count < 2 { return "only \(kinds) in three idle hours" }
-            if let most = kinds.values.max(), Double(most) > 0.8 * Double(log.count) { return "one activity took over: \(kinds)" }
-            for kind in kinds.keys.sorted() { if let why = Scenario.lasted(sim, kind) { return why } }
-            return nil
-        }),
     ]
 }
 
@@ -483,11 +457,8 @@ final class ScenarioRunner {
     private var failed = 0
     private let suiteStart = Date()
 
-    init(filter: String?, verbose: Bool, soak: Bool = false) {
-        scenarios = Scenarios.all.filter { s in
-            if let filter { return s.name.localizedCaseInsensitiveContains(filter) }
-            return soak || !s.soak
-        }
+    init(filter: String?, verbose: Bool) {
+        scenarios = Scenarios.all.filter { s in filter.map { s.name.localizedCaseInsensitiveContains($0) } ?? true }
         self.verbose = verbose
     }
 

@@ -1,5 +1,13 @@
 import Foundation
 
+/// A hash that is the same in every run, for the little disorder that must not change between launches:
+/// Swift's own `hashValue` is seeded afresh per process. FNV-1a over the UTF-8 bytes.
+func stableHash(_ text: String) -> UInt64 {
+    var h: UInt64 = 0xcbf29ce484222325
+    for b in text.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+    return h
+}
+
 struct Cell: Hashable, Codable {
     var x: Int
     var y: Int

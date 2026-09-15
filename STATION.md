@@ -76,8 +76,7 @@ since real stations mandate both.
 - A change of orders is visible: the minion stops, stands a beat with its head up, as if wondering,
   then goes. The same beat everywhere. A message from you cuts the beat short and it hurries.
 - Minions walk around things, never through, and stand an arm's length from what they work on,
-  facing it. Two never share a couch, a bed, a shower or a crate. Two never stand on the same spot,
-  not even at the start of the day: they arrive one by one, or spread before they set off.
+  facing it. Two never share a couch, a bed, a shower or a crate.
 - Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
   through a room. With something in their hands they need even more room.
 - Two never slide through each other: a body is solid at the middle of its tile, standing or lying.
