@@ -33,6 +33,17 @@ and where it is going.
 needs credentials stored once with `xcrun notarytool store-credentials rumkapsel`; without them the script
 signs and publishes but says so, and the app is not notarised.
 
+## Themes
+
+Settings › General › Look picks how the station is drawn. **Classic** is the flat-shaded homage, adrift in
+space. **Kenney Space Center** puts the same floor plan on the ground, laid out like the Cape: a lawn to every
+side, the sea past the yard so the launch pad stands nearest the water, palms along the shore. It is built
+from Kenney's [Space Kit](https://kenney.nl/assets/space-kit), [Modular Space Kit](https://kenney.nl/assets/modular-space-kit)
+and [Nature Kit](https://kenney.nl/assets/nature-kit) (all CC0): astronauts for minions, kerbed platform
+tiles for every floor, arches on the airlock and the decon hatch, a comms tower for the monolith, kit
+rockets and speeders, a desk in every office, fuel by the pad and a rover in the bay. The view starts turned
+about so the pad faces right. The models used live in `Resources/Kenney`.
+
 ## Controls
 
 | Key / gesture | Action |

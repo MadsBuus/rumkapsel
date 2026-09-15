@@ -25,6 +25,7 @@ extension StationController {
 
     /// The shuttle body, wings in a repo colour.
     private func shuttle(color: NSColor) -> SCNNode {
+        if Theme.isKenney, let craft = Kit.craft(color: color) { return craft }
         let ship = SCNNode()
         let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
         hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
@@ -112,7 +113,8 @@ extension StationController {
     }
 
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
-        let n = Props.rocket(color: NSColor(fleet.color(forRepo: r.repo)), tall: r.tall, cargo: r.cargo)
+        let color = NSColor(fleet.color(forRepo: r.repo))
+        let n = (Theme.isKenney ? Kit.rocketProp(color: color, tall: r.tall, cargo: r.cargo) : nil) ?? Props.rocket(color: color, tall: r.tall, cargo: r.cargo)
         if r.untested {
             let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
             deco.name = "hold"

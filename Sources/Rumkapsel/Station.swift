@@ -221,14 +221,27 @@ final class Station {
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
     /// deck's east column, the one the west arm's last cell opens onto.
     private var yardX0: Int { (plan.west.last?.x ?? -2) - 1 }
+    /// How far the pad stands off the deck: hard by it in the classic plan, a causeway's length away on
+    /// the ground, as a launch complex keeps its distance from the buildings.
+    private var padGap: Int { ConfigStore.shared.current.theme == .kenney ? 5 : 0 }
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
+    /// The pad block's east column and top row: north of the deck in the classic plan; on the ground,
+    /// west of it out toward the sea, with the causeway between.
+    private var padOrigin: (x0: Int, r: Int) { padGap > 0 ? (yardX0 - 4 - padGap, 0) : (yardX0, -4) }
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
-        let x0 = yardX0
-        let r = yardRow(index)
-        return (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
+        let (x0, r) = index == 2 ? padOrigin : (yardX0, yardRow(index))
+        var cells = (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
+        if index == 2, padGap > 0 {
+            // The causeway: two lanes from the deck's west side out to the pad, pad floor the whole way.
+            for x in (x0 + 1)...(yardX0 - 4) { for y in [0, 1] { cells.append(Cell(x: x, y: y)) } }
+        }
+        return cells
     }
-    private func yardCenter(_ index: Int) -> SIMD2<Double> { SIMD2(Double(yardX0) - 1.5, 0.5 + Double(yardRow(index))) }
+    private func yardCenter(_ index: Int) -> SIMD2<Double> {
+        let (x0, r) = index == 2 ? padOrigin : (yardX0, yardRow(index))
+        return SIMD2(Double(x0) - 1.5, 0.5 + Double(r))
+    }
     var storageCells: [Cell] { blocks.storage }
     var storageCenter: SIMD2<Double> { yardCenter(0) }
     var deckCells: [Cell] { blocks.deck }
@@ -446,8 +459,9 @@ final class Station {
         for h in airlockHatches { out.append((h.inside, h.bay)) }
         for x in [x0 - 1, x0 - 2] {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
-            out.append((Cell(x: x, y: -1), Cell(x: x, y: -2)))   // deck to pad
+            if padGap == 0 { out.append((Cell(x: x, y: -1), Cell(x: x, y: -2))) }   // deck to pad
         }
+        if padGap > 0 { for y in [0, 1] { out.append((Cell(x: x0 - 3, y: y), Cell(x: x0 - 4, y: y))) } }   // deck west onto the causeway
         for x in [x0 - 1, x0 - 2] { out.append((Cell(x: x, y: 6), Cell(x: x, y: 7))) }   // storage back into decon
         return out
     }

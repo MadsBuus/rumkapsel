@@ -40,6 +40,8 @@ final class Minion: Body {
     private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
+    /// Kenney's astronaut in the body's place, feet at the body's foot, when that theme is on; else nil.
+    private let figure: SCNNode?
     private var staticNode: SCNNode?
     private var towelNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
@@ -96,6 +98,15 @@ final class Minion: Body {
         shins.position = v3(0, (d - Minion.seat) / 2, d * 1.6)
         legs.addChildNode(thighs); legs.addChildNode(shins)
         legs.opacity = 0
+        // Kenney's theme: the astronaut stands in for the box, hung from the box's middle so every
+        // pose that turns or moves the body carries it along; the box and its visor are not drawn.
+        let figure = Theme.isKenney ? Kit.astronaut(crew: crew, height: h) : nil
+        if let figure {
+            body.geometry = nil
+            visor.isHidden = true
+            figure.position = v3(0, -h / 2, -0.03)
+            body.addChildNode(figure)
+        }
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
         tiltNode.addChildNode(legs)
@@ -113,9 +124,11 @@ final class Minion: Body {
         self.bodyHeight = h
         self.bodyDepth = d
         self.visor = visor
+        self.figure = figure
         super.init(id: id, station: station, home: home, cwd: cwd, toolCount: toolCount, isSubagent: isSubagent, start: start, crew: crew)
         node.name = "minion:" + id
         body.name = node.name
+        figure?.name = node.name
         visor.name = node.name
         legs.name = node.name; thighs.name = node.name; shins.name = node.name
         node.opacity = 0
@@ -327,8 +340,15 @@ final class Minion: Body {
         // The box itself shortens into a torso as the legs come out, and back to full height as they go.
         SCNTransaction.begin()
         SCNTransaction.animationDuration = on ? 0.5 : 0.45
-        (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
-        legs.opacity = on ? 1 : 0
+        if let figure {
+            // The astronaut has legs of its own: it shortens onto the seat, feet at the box's new foot.
+            let s = bodyHeight / 0.79
+            figure.scale = SCNVector3(s, s * (on ? torso : bodyHeight) / bodyHeight, s)
+            figure.position = v3(0, -(on ? torso : bodyHeight) / 2, -0.03)
+        } else {
+            (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
+            legs.opacity = on ? 1 : 0
+        }
         SCNTransaction.commit()
         staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
         // The shadow goes with the body onto the seat, and back to the spot.

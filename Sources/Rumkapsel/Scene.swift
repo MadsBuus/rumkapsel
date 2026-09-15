@@ -153,6 +153,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let propRoot = SCNNode()
     let markerRoot = SCNNode()
     private let debrisRoot = SCNNode()
+    /// The lawn, the sea and the shore of the Kenney theme; empty in the classic one.
+    let groundRoot = SCNNode()
+    /// Where the view starts from: the classic quarter turn, or, on the ground, turned about so the yard
+    /// and its pad face right, toward the sea, as at the Cape.
+    var viewYaw: Double { Theme.isKenney ? .pi / 4 + .pi : .pi / 4 }
     let rig = SCNNode()
     let pitchNode = SCNNode()
     let cameraNode = SCNNode()
@@ -417,8 +422,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     // MARK: scene
 
     private func buildScene() {
-        scene.background.contents = Palette.void
-        for n in [staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot, peerRoot] { scene.rootNode.addChildNode(n) }
+        Theme.active = ConfigStore.shared.current.theme
+        scene.background.contents = Theme.isKenney ? Kit.sky : Palette.void
+        for n in [groundRoot, staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot, peerRoot] { scene.rootNode.addChildNode(n) }
 
         let camera = SCNCamera()
         camera.usesOrthographicProjection = true
@@ -429,7 +435,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         cameraNode.position = v3(0, 0, 120)
         pitchNode.eulerAngles.x = -.pi / 6
         pitchNode.addChildNode(cameraNode)
-        rig.eulerAngles.y = .pi / 4
+        rig.eulerAngles.y = viewYaw
         rig.addChildNode(pitchNode)
         scene.rootNode.addChildNode(rig)
 
@@ -444,18 +450,30 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         ambient.light!.type = .ambient
         ambient.light!.intensity = 550
         scene.rootNode.addChildNode(ambient)
+        buildBackdrop()
+        rebuildStatic()
+    }
 
-        for _ in 0..<110 {
-            let size = Double.random(in: 0.05...0.13)
-            let n = SCNNode(geometry: SCNPlane(width: size, height: size))
-            n.geometry!.firstMaterial = flat(Palette.debris)
-            n.opacity = Double.random(in: 0.25...0.7)
-            n.eulerAngles.x = -.pi / 2
-            n.eulerAngles.z = Double.random(in: 0..<6.28)
-            let p = SIMD2(Double.random(in: -40...40), Double.random(in: -40...40))
-            n.position = v3(p.x, -0.6, p.y)
-            debrisRoot.addChildNode(n)
-            debris.append((n, SIMD2(Double.random(in: -0.12...0.12), Double.random(in: -0.12...0.12))))
+    /// What lies under the station in the classic theme: flakes of debris drifting, a far star field
+    /// and a few nebulae. On the ground there is nothing to drift; the lawn is `rebuildGround`'s.
+    private func buildBackdrop() {
+        debrisRoot.childNodes.forEach { $0.removeFromParentNode() }
+        debris = []
+        scene.background.contents = Theme.isKenney ? Kit.sky : Palette.void
+        if Theme.isKenney { return }
+        do {
+            for _ in 0..<110 {
+                let size = Double.random(in: 0.05...0.13)
+                let n = SCNNode(geometry: SCNPlane(width: size, height: size))
+                n.geometry!.firstMaterial = flat(Palette.debris)
+                n.opacity = Double.random(in: 0.25...0.7)
+                n.eulerAngles.x = -.pi / 2
+                n.eulerAngles.z = Double.random(in: 0..<6.28)
+                let p = SIMD2(Double.random(in: -40...40), Double.random(in: -40...40))
+                n.position = v3(p.x, -0.6, p.y)
+                debrisRoot.addChildNode(n)
+                debris.append((n, SIMD2(Double.random(in: -0.12...0.12), Double.random(in: -0.12...0.12))))
+            }
         }
         // A far, still star field: one point-cloud geometry, faint and small.
         var stars: [SCNVector3] = []
@@ -500,7 +518,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             debrisRoot.addChildNode(cluster)
             debris.append((cluster, SIMD2(Double.random(in: -0.08...0.08), Double.random(in: -0.08...0.08))))
         }
-        rebuildStatic()
     }
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
@@ -1088,7 +1105,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rig.position.x += (focus.x - Double(rig.position.x)) * kp
         rig.position.z += (focus.y - Double(rig.position.z)) * kp
         let ky = 1 - exp(-dt * 10)
-        rig.eulerAngles.y += (Double.pi / 4 + userYaw - Double(rig.eulerAngles.y)) * ky
+        rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
         let wantScale = fitScale(half: targetHalf) / userZoom
         let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
@@ -1127,6 +1144,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         applySharing()
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
+            if Theme.active != cfg.theme {
+                // A new look: the backdrop, the ships and the rockets are drawn again; the floor is
+                // rebuilt below and the minions come back with the rescan in their new figures.
+                Theme.active = cfg.theme
+                buildBackdrop()
+                for v in rocketViews.values { v.node.removeFromParentNode() }
+                rocketViews = [:]
+                for v in shuttleViews.values { v.node.removeFromParentNode() }
+                shuttleViews = [:]
+            }
             for m in Array(minions.values) { despawn(m) }
             world.reset()
             if !cfg.showPrivate { fleet.removeStation(named: "private") }   // off the floor; back with its next session when shown again
