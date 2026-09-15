@@ -753,9 +753,10 @@ final class Simulation<B: Body> {
             }
         case .leaving:
             // Solid all the way to the airlock. Inside, the inner door shuts and the chamber
-            // cycles for a beat; then out through the hatch, fading onto the bay.
+            // cycles for a beat; then along the passage and out through the hatch, fading onto the bay.
             let inChamber = station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell)
-            if station.airlockCells.isEmpty || (inChamber && m.phaseKind != .walk) {
+            let atHatch = station.hangarCells.contains(m.cell) || station.airlockHatches.contains { $0.inside == m.cell }
+            if station.airlockCells.isEmpty || (atHatch && m.phaseKind != .walk) {
                 m.opacity -= dt * 1.2
                 if m.opacity <= 0 { return .gone }
             } else if inChamber, m.phaseKind == .walk, station.airlockInner.contains(m.cell) {
