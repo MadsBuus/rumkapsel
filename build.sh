@@ -10,7 +10,7 @@ if [ "$MODE" = fast ]; then
   BIN=.build/debug/Rumkapsel
   FLAGS=()
 else
-  BIN=.build/apple/Products/Release/Rumkapsel
+  BIN=.build/out/Products/Release/Rumkapsel
   FLAGS=(-c release --arch arm64 --arch x86_64)
 fi
 # A stale binary from the last build must not pass as this one, so it goes before the compiler runs.
