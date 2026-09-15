@@ -203,7 +203,7 @@ extension Simulation {
                     if m.path.isEmpty, (d.x * d.x + d.y * d.y).squareRoot() > 0.05 { m.facing = atan2(d.x, d.y) }
                 }
                 if !order.landed { m.waitingOn = "the crate to come down"; return .spent }
-                if shipStillOver(order: id, station: m.station) { m.waitingOn = "the ship to lift off"; return .spent }
+                if shipStillOver(order: id, station: m.station) { m.waitingOn = Words.current.shipLeaving; return .spent }
                 if m.fetchSpot != nil {
                     // Over to the standing cell in front of the crate; the last arm's length is taken from there,
                     // so the approach never comes from a neighbouring slot's side.

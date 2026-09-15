@@ -366,10 +366,10 @@ extension StationController {
 
     private static func displayName(_ room: Room) -> String {
         switch room.key {
-        case "kind:quarters": return "dorm"
-        case "kind:lounge": return "lounge"
-        case "kind:bath": return "bath"
-        case "kind:airlock": return "airlock"
+        case "kind:quarters": return Words.current.dorm
+        case "kind:lounge": return Words.current.lounge
+        case "kind:bath": return Words.current.bath
+        case "kind:airlock": return Words.current.airlock
         default: return room.name
         }
     }
@@ -402,35 +402,35 @@ extension StationController {
 
             if station.hasPad {
                 if world.deckInUse(station: station.name) {
-                    let deckLabel = floorSign("staging", color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
+                    let deckLabel = floorSign(Words.current.deck, color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
                     deckLabel.node.position.y = 0.012
                     let dc = station.deckCells
                     let dcorner = SIMD2(Double(dc.map(\.x).max()!) + 0.42 - deckLabel.width / 2, Double(dc.map(\.y).max()!) + 0.42 - deckLabel.height / 2)
                     add(deckLabel.node, yaw: 0, center: dcorner + SIMD2(ox, oz))
                 }
-                let storeLabel = floorSign("storage", color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
+                let storeLabel = floorSign(Words.current.storage, color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
                 storeLabel.node.position.y = 0.012
                 let sc = station.storageCells
                 let scorner = SIMD2(Double(sc.map(\.x).max()!) + 0.42 - storeLabel.width / 2, Double(sc.map(\.y).max()!) + 0.42 - storeLabel.height / 2)
                 add(storeLabel.node, yaw: 0, center: scorner + SIMD2(ox, oz))
-                let deconLabel = floorSign("decon", color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
+                let deconLabel = floorSign(Words.current.decon, color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
                 deconLabel.node.position.y = 0.012
                 let qc = station.deconCells
                 let qcorner = SIMD2(Double(qc.map(\.x).max()!) + 0.42 - deconLabel.width / 2, Double(qc.map(\.y).max()!) + 0.42 - deconLabel.height / 2)
                 add(deconLabel.node, yaw: 0, center: qcorner + SIMD2(ox, oz))
-                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
+                let padLabel = floorSign(Words.current.pad, color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
                 padLabel.node.position.y = 0.012
                 let pc = station.padCells
                 let corner = SIMD2(Double(pc.map(\.x).max()!) + 0.42 - padLabel.width / 2, Double(pc.map(\.y).max()!) + 0.42 - padLabel.height / 2)
                 add(padLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             if station.hasHangar {
-                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
+                let hangarLabel = floorSign(Words.current.bay, color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
                 hangarLabel.node.position.y = 0.012
                 let hc = station.hangarCells
                 let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
                 add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
-                let airlockLabel = floorSign("airlock", color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
+                let airlockLabel = floorSign(Words.current.airlock, color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
                 airlockLabel.node.position.y = 0.012
                 if let a = station.airlockInner.first {
                     add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x), oz + Double(a.y)))

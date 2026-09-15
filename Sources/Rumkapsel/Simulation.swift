@@ -584,7 +584,7 @@ final class Simulation<B: Body> {
             if case .flight(.bringWorker(let id), _, _) = f.command.kind, id == m.id { return false }
             return true
         }) {
-            m.waitingOn = "a ship coming down beside"
+            m.waitingOn = Words.current.shipBeside
             return .waking
         }
         if m.wakeUntil > 0 {

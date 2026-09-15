@@ -35,12 +35,12 @@ struct Spot {
     var words: String {
         switch area {
         case .office: return label.isEmpty ? "the office" : label
-        case .bay: return "the bay"
-        case .storage: return "storage"
-        case .deck: return "the deck"
-        case .tested: return "the deck, tested row"
-        case .pad: return "the rocket"
-        case .decon: return "decon"
+        case .bay: return Words.current.theBay
+        case .storage: return Words.current.inStorage
+        case .deck: return Words.current.theDeck
+        case .tested: return Words.current.testedRow
+        case .pad: return Words.current.theRocket
+        case .decon: return Words.current.inDecon
         case .floor: return "the floor"
         }
     }
@@ -255,20 +255,20 @@ struct Command {
     }
 
     static func deliverOffice(order: Int, name: String) -> Command {
-        Command(kind: .deliverOffice(order: order), words: "fetching \(name) from the bay")
+        Command(kind: .deliverOffice(order: order), words: "fetching \(name) from \(Words.current.theBay)")
     }
 
     static func bath(_ kind: Bath, back: Place, seconds: Double) -> Command {
         Command(kind: .bath(kind: kind, back: back, seconds: seconds),
-                words: "off to the bath, back to \(back.words) after")
+                words: "off to \(Words.current.theBath), back to \(back.words) after")
     }
 
     static func exercise(_ kind: Workout, back: Place, seconds: Double) -> Command {
-        Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to the gym for \(kind.words), back to \(back.words) after")
+        Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to \(Words.current.theGym) for \(kind.words), back to \(back.words) after")
     }
 
     static func chore(spot: Cell, seconds: Double) -> Command {
-        Command(kind: .chore(spot: spot, seconds: seconds), words: "having a look round the station")
+        Command(kind: .chore(spot: spot, seconds: seconds), words: Words.current.lookRound)
     }
 
     /// How long the visit lasts once there, for the orders that are visits; nil for the rest.
@@ -280,32 +280,32 @@ struct Command {
     }
 
     static func stow(office: String) -> Command {
-        Command(kind: .stow(office: office), words: "stowing a cube for the commit")
+        Command(kind: .stow(office: office), words: Words.current.stow)
     }
 
     static func pack(office: String) -> Command {
-        Command(kind: .pack(office: office), words: "packing a crate for the pull request")
+        Command(kind: .pack(office: office), words: Words.current.pack)
     }
 
     static func qa(deck station: String) -> Command {
-        Command(kind: .qa(deck: station), words: "walking the rows on the deck")
+        Command(kind: .qa(deck: station), words: Words.current.qaWalk)
     }
 
-    static let leave = Command(kind: .leave, words: "off the station through the airlock")
+    static var leave: Command { Command(kind: .leave, words: Words.current.leaving) }
 
     /// A shuttle on its way in. `what` is what the log and the bubble call the cargo.
     static func flight(_ flight: Flight, station: String, slot: Int, what: String) -> Command {
         Command(kind: .flight(kind: flight, station: station, slot: slot),
-                words: "shuttle inbound with \(what)")
+                words: "\(Words.current.inbound) \(what)")
     }
 
     static func rocket(_ stage: RocketStage, station: String, repo: String) -> Command {
         let words: String
         switch stage {
-        case .standBy: words = "\(repo) standing by on the pad"
-        case .load(let n): words = "loading \(n == 1 ? "one crate" : "\(n) crates") of \(repo) into the rocket"
-        case .steam: words = "\(repo) loaded and steaming, waiting for the release to merge"
-        case .launch: words = "\(repo) lifting off"
+        case .standBy: words = "\(repo) \(Words.current.standingBy)"
+        case .load(let n): words = "loading \(n == 1 ? "one \(Words.current.crate)" : "\(n) \(Words.current.crates)") of \(repo) \(Words.current.loadInto)"
+        case .steam: words = "\(repo) \(Words.current.steaming), waiting for the release to merge"
+        case .launch: words = "\(repo) \(Words.current.liftingOff)"
         }
         return Command(kind: .rocket(stage: stage, station: station, repo: repo), words: words)
     }
@@ -314,11 +314,11 @@ struct Command {
 
     static func dispatch(station: String, repo: String, number: Int) -> Command {
         Command(kind: .dispatch(station: station, repo: repo, number: number),
-                words: "off to the storage console with the clipboard")
+                words: Words.current.console)
     }
 
     static func loadPallet(station: String, repo: String) -> Command {
-        Command(kind: .loadPallet(station: station, repo: repo), words: "loading the pallet for \(repo)")
+        Command(kind: .loadPallet(station: station, repo: repo), words: "loading \(Words.current.pallet) for \(repo)")
     }
 
     static func waitPallet(station: String, repo: String, words: String) -> Command {
@@ -326,12 +326,12 @@ struct Command {
     }
 
     static func pushPallet(station: String, repo: String) -> Command {
-        Command(kind: .pushPallet(station: station, repo: repo), words: "pushing the pallet to the deck")
+        Command(kind: .pushPallet(station: station, repo: repo), words: "pushing \(Words.current.pallet) to \(Words.current.theDeck)")
     }
 
     static func unloadPallet(station: String, repo: String, back: Bool) -> Command {
         Command(kind: .unloadPallet(station: station, repo: repo, back: back),
-                words: back ? "unloading the pallet back into storage" : "unloading the pallet")
+                words: back ? "unloading \(Words.current.pallet) back into \(Words.current.inStorage)" : "unloading \(Words.current.pallet)")
     }
 
     /// A teammate acting on what they just did: coding in their office, walking the halls, at the core.
@@ -341,7 +341,7 @@ struct Command {
 
     /// Where a minion should be when it has no job: asleep in the dorm, at work in its office, or just there.
     static func rest(place: Place, home: String, name: String, asleep: Bool) -> Command {
-        if asleep && place == .quarters { return Command(kind: .sleep, words: "asleep in the dorm") }
+        if asleep && place == .quarters { return Command(kind: .sleep, words: Words.current.asleep) }
         if place == .room(home), !home.hasPrefix("kind:") {
             return Command(kind: .work(office: home), words: "waiting for you in \(name)")
         }
@@ -353,17 +353,17 @@ extension Place {
     /// The room as a person would say it.
     var words: String {
         switch self {
-        case .core: return "the monolith"
+        case .core: return Words.current.theMonolith
         case .room(let key):
             switch key {
-            case "kind:quarters": return "the dorm"
-            case "kind:lounge": return "the couch"
-            case "kind:bath": return "the bath"
-            case "kind:gym": return "the gym"
-            case "kind:airlock": return "the airlock"
-            case "kind:hangar": return "the bay"
-            case "kind:deck": return "the deck"
-            case "kind:pad": return "the pad"
+            case "kind:quarters": return Words.current.theDorm
+            case "kind:lounge": return Words.current.theCouch
+            case "kind:bath": return Words.current.theBath
+            case "kind:gym": return Words.current.theGym
+            case "kind:airlock": return Words.current.theAirlock
+            case "kind:hangar": return Words.current.theBay
+            case "kind:deck": return Words.current.theDeck
+            case "kind:pad": return Words.current.thePad
             default: return key.split(separator: ":").last.map(String.init) ?? key
             }
         }
