@@ -305,8 +305,10 @@ extension StationController {
             m.setSleeping(m.lying)
             m.setSeated(m.seated, at: m.seatOffset)
             m.setBench(m.onBench)
-            m.setStatic(m.place == .bath && m.path.isEmpty, frame: Int(clock * 12))
-            if m.place == .bath, m.path.isEmpty, m.showering, !m.drying, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
+            // What is drawn follows the order in hand, never a flag the last order left behind.
+            let inBath = m.bathing && m.phaseKind == .act && m.path.isEmpty
+            m.setStatic(inBath, frame: Int(clock * 12))
+            if inBath, m.showering, !m.drying, m.fetchSpot == nil, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
                 // Pixel water from the nozzle, falling past the shoulders onto the drain.
                 m.nextDropAt = clock + 0.05
                 let nozzle = station.showerNozzle(bath: bath)
@@ -326,7 +328,7 @@ extension StationController {
             m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
             m.node.opacity = m.opacity
             // A visit outranks the day's work in the picture: someone on the treadmill is not also testing.
-            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing
+            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
             let onFixture = (m.bathing || m.exercising) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)

@@ -210,6 +210,24 @@ enum SimulationTests {
             } else { expect(false, "the carry is still a carry") }
         }
 
+        test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
+            expect(sim.takeTurnInGym(m, station: station, gym: gym) && m.fetchSpot != nil && m.place == .gym, "off to the gym, a fixture spot in mind")
+            _ = step(sim, seconds: 1)
+            sim.start(m, .dispatch(station: station.name, repo: "web", number: 1))   // a job: it cuts in on the walk
+            expect(!m.exercising && m.fetchSpot == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words), spot \(String(describing: m.fetchSpot))")
+            sim.finish(m)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            m.showering = false
+            expect(sim.visitBath(m, station: station) && m.fixture == 0, "then off to the bowl")
+            _ = step(sim, seconds: 1)
+            sim.start(m, .dispatch(station: station.name, repo: "web", number: 2))
+            expect(!m.bathing && m.fixture == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: fixture \(String(describing: m.fixture)), place \(m.place.words)")
+        }
+
         test("a pallet ordered mid-workout waits for the turn to end: nobody runs on the spot by the console") {
             let (sim, station, m) = fixture()
             station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")

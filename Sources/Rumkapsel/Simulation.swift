@@ -179,6 +179,9 @@ final class Simulation<B: Body> {
         if let old = m.current, !redirected, old.kindName != c.kindName, m.state == .settled {
             if case .work = c.kind { m.wonderUntil = clock + 0.15 } else { m.wonderUntil = clock + 0.5 }
         }
+        // The order in hand owns the body's posture. A new order of another kind drops the old one's
+        // leftovers, so nobody carries a fixture, a seat, a towel or a spot to shuffle to into the next thing.
+        if let old = m.current, !redirected, old.kindName != c.kindName { dropLeftovers(m, of: old) }
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
         m.phaseUntil = 0
@@ -187,6 +190,20 @@ final class Simulation<B: Body> {
         if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { onLog(c.words) }
         if redirected, let aim = cargo[c.id]?.aim { walk(m, to: aim.cell) }
+    }
+
+    /// What an order leaves on the body when another cuts in: the spot it was shuffling to, the seat, the
+    /// bench, the fixture it held, the towel; and a visit's place, which goes back to where the visit began.
+    private func dropLeftovers(_ m: B, of old: Command) {
+        m.fetchSpot = nil
+        m.seated = false
+        m.onBench = false
+        if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
+        m.fixture = nil
+        switch old.kind {
+        case .bath(_, let back, _), .exercise(_, let back, _): if m.place == .bath || m.place == .gym { m.place = back }
+        default: break
+        }
     }
 
     /// On to the next phase of the command in hand.
@@ -416,11 +433,11 @@ final class Simulation<B: Body> {
         let want = m.showering ? 1 : 0
         guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { return false }
         m.showering = fixture == 1
-        m.fixture = fixture
         m.bathDue = 0
         let back = m.place
         send(m, to: .bath)
         start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60))   // a shower two to three minutes, the toilet one
+        m.fixture = fixture   // held from here: the order is in hand, and the last order's leftovers are gone
         let f = station.bathFixtures(bath: bath)
         let cell = m.showering ? f.shower : f.toilet
         m.path = route(m, to: cell)
