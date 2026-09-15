@@ -376,7 +376,7 @@ final class Station {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { fits($0) ? $0 : nil } ?? placeShape(shape ?? Station.shape(forKey: key), near: near)
+        let cells = preferredCells.flatMap { adopt($0) ? $0 : nil } ?? placeShape(shape ?? Station.shape(forKey: key), near: near)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
@@ -509,10 +509,61 @@ final class Station {
         return out
     }
 
-    /// Whether a peer's placement can be adopted as is: free floor, against our corridor.
-    private func fits(_ cells: [Cell]) -> Bool {
-        !cells.isEmpty && cells.allSatisfy { !isReserved($0) && occupied[$0] == nil }
-            && cells.contains { $0.neighbours.contains(where: isCorridor) }
+    /// Takes a peer's placement as is when the floor is free: against our hallway, or with the shortest
+    /// dig through free floor to reach it, up to twelve tiles. False when the floor is taken or too far.
+    private func adopt(_ cells: [Cell]) -> Bool {
+        let mine = dugSet
+        guard !cells.isEmpty, cells.allSatisfy({ occupied[$0] == nil && (!isReserved($0) || mine.contains($0)) }) else { return false }
+        // Their floor over hallway we dug: that hallway is given back, if what is left is still one piece
+        // from the plaza and every room keeps its door. The plan's own arms and alleys are never given back.
+        let overlap = cells.filter(mine.contains)
+        if !overlap.isEmpty {
+            let remaining = dug.filter { !overlap.contains($0) }
+            var hall = Set(plan.plaza + plan.west + plan.south).union(remaining)
+            hall.remove(plan.monolith)
+            var seen: Set<Cell> = [coreCenter]; var queue = [coreCenter]; var head = 0
+            while head < queue.count { let c = queue[head]; head += 1; for n in c.neighbours where hall.contains(n) && !seen.contains(n) { seen.insert(n); queue.append(n) } }
+            guard seen.count == hall.count else { return false }
+            guard rooms.values.allSatisfy({ r in r.cells.contains { c in c.neighbours.contains(where: hall.contains) } }) else { return false }
+            dug = remaining
+        }
+        if cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) { return true }
+        // A passage from the room's edge to the built hallway, through floor nobody has.
+        let room = Set(cells)
+        let hall = blocks.hallway
+        func diggable(_ c: Cell) -> Bool { !walkable.contains(c) && occupied[c] == nil && !room.contains(c) && (!isReserved(c) || plan.everyHallwayCell.contains(c)) }
+        var prev: [Cell: Cell?] = [:]
+        var queue: [Cell] = []
+        for c in cells.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) { for n in c.neighbours where diggable(n) && prev[n] == nil { prev[n] = .some(nil); queue.append(n) } }
+        var head = 0
+        while head < queue.count {
+            let p = queue[head]; head += 1
+            var len = 1; var q = p; while let back = prev[q], let b = back { len += 1; q = b }
+            if p.neighbours.contains(where: { hall.contains($0) && $0 != plan.monolith }) {
+                var path = [p]; var q = p; while let back = prev[q], let b = back { path.append(b); q = b }
+                dug.append(contentsOf: path.reversed())
+                return true
+            }
+            guard len < 12 else { continue }
+            for n in p.neighbours where prev[n] == nil && diggable(n) { prev[n] = .some(p); queue.append(n) }
+        }
+        return false
+    }
+
+    /// A peer's placements of rooms we hold elsewhere win the tie: ours go, all of them first, since one
+    /// often stands where another of theirs belongs; then theirs are adopted, or a room is placed afresh
+    /// when their floor is taken here by something else. Returns true when the floor changed.
+    @discardableResult
+    func replaceRooms(_ theirs: [(key: String, cells: [Cell])]) -> Bool {
+        let disputed = theirs.filter { t in rooms[t.key].map { r in r.cells != t.cells } == true }
+        guard !disputed.isEmpty else { return false }
+        var kept: [(Room, [Cell])] = []
+        for (key, cells) in disputed { if let r = rooms[key] { kept.append((r, cells)); removeRoom(key: key) } }
+        for (r, cells) in kept.sorted(by: { $0.0.key < $1.0.key }) {
+            ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, preferredCells: cells)
+            if let n = rooms[r.key] { n.branch = r.branch; n.repoRoot = r.repoRoot; n.worktree = r.worktree }
+        }
+        return true
     }
 
     /// The whole plan, built or not, and the blocks: no room ever stands where hallway will run.

@@ -48,6 +48,22 @@ enum LayoutTests {
             expect(!armsTouch, "the north and east arms never touch")
         }
 
+        test("two stations that placed one room differently agree once the lower name's cells are taken") {
+            let a = fresh(), b = fresh()
+            for k in keys.prefix(3) { place(k, on: a); place(k, on: b) }
+            place("task:web#900", on: b)             // b heard of one more room first
+            place("task:api#901", on: a); place("task:api#901", on: b)   // then both placed the same room, against different floors
+            place("task:web#900", on: a)
+            let differ = a.rooms["task:api#901"]!.cells != b.rooms["task:api#901"]!.cells || a.rooms["task:web#900"]!.cells != b.rooms["task:web#900"]!.cells
+            expect(differ, "the two disagree before the tie-break")
+            // a has the lower name: b takes a's cells for every room they disagree on, all at once.
+            expect(b.replaceRooms(["task:api#901", "task:web#900"].map { ($0, a.rooms[$0]!.cells) }), "the disputed rooms are taken as a placed them")
+            for k in ["task:api#901", "task:web#900"] { expect(a.rooms[k]?.cells == b.rooms[k]?.cells, "\(k): \(cells(a, k)) against \(cells(b, k))") }
+            let hall = Set(b.corridorCells + b.coreCells).subtracting([b.monolithCell])
+            expect(hall.allSatisfy { b.hallDistance(of: $0) != nil }, "b's hallway is still one piece")
+            for (k, r) in b.rooms { expect(r.cells.contains { c in c.neighbours.contains { b.isCorridor($0) } }, "\(k) still has a door on the hallway") }
+        }
+
         test("forty rooms: the station builds outward along the hallway, every room on it, none on the plan") {
             let a = fresh()
             let before = a.dugCount

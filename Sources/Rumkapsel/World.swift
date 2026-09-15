@@ -726,6 +726,9 @@ final class World {
     /// A peer's claim lands on our work station: its offices get the same key here, adopting the
     /// peer's floor plan when that floor is free. A whole peer arriving fades in; one new checkout
     /// on a peer we already follow earns a shuttle, like a new session of our own.
+    /// This machine's own name on the local network, for the tie-break below. Empty until sharing starts.
+    var peerName = ""
+
     func applyPeer(_ snap: PeerSnapshot, now: Date) -> [WorldEvent] {
         var events: [WorldEvent] = []
         let isNewPeer = peerFirstSeen[snap.name] == nil
@@ -740,6 +743,7 @@ final class World {
         let cfg = ConfigStore.shared.current
         let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
         var live: Set<String> = []
+        var disputed: [(key: String, cells: [Cell])] = []
         for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
             let key = sk + o.key
             live.insert(key)
@@ -755,6 +759,9 @@ final class World {
             if let r = station.rooms[o.key] {
                 r.lastActive = max(r.lastActive, o.lastActive, now)
                 if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
+                // The same room in two places: both placed it before hearing the other. The lower name's
+                // cells stand; the other side takes them, so the two stations agree within one round.
+                if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName { disputed.append((o.key, o.cells)) }
                 continue
             }
             let color = fleet.color(forRepo: o.repo)
@@ -766,6 +773,10 @@ final class World {
             } else {
                 events.append(.officeOpened(station: station.name, key: o.key, source: .peer(snap.name), arrival: .fade))
             }
+        }
+        if station.replaceRooms(disputed) {
+            changed = true
+            events.append(.log("\(disputed.count) office\(disputed.count == 1 ? " stands" : "s stand") where \(snap.name) put \(disputed.count == 1 ? "it" : "them")"))
         }
         for key in mine where !live.contains(key) {
             peerOffices[key]?[snap.name] = nil

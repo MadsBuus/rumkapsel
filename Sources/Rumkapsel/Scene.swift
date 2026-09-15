@@ -765,6 +765,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A peer's claim lands on our work station. The model merges it; the scene shows the result and
     /// stands their figures in whichever offices we happened to give them.
     func receivePeer(_ snap: PeerSnapshot) {
+        world.peerName = peers.name
         handle(world.applyPeer(snap, now: now))
         flushScene()
         flushDeliveries()
