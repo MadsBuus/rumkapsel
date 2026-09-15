@@ -7,12 +7,15 @@ cd "$(dirname "$0")"
 MODE=release
 for a in "$@"; do [ "$a" = fast ] && MODE=fast; done
 if [ "$MODE" = fast ]; then
-  swift build --build-system native 2>&1 | grep -E 'error|Build complete' || true
   BIN=.build/debug/Rumkapsel
+  FLAGS=()
 else
-  swift build --build-system native -c release --arch arm64 --arch x86_64 2>&1 | grep -E 'error|Build complete' || true
   BIN=.build/apple/Products/Release/Rumkapsel
+  FLAGS=(-c release --arch arm64 --arch x86_64)
 fi
+# A stale binary from the last build must not pass as this one, so it goes before the compiler runs.
+rm -f "$BIN"
+swift build --build-system native "${FLAGS[@]}" 2>&1 | grep -E 'error|Build complete' || true
 [ -x "$BIN" ] || { echo "build failed"; exit 1; }
 APP=build/rumkapsel.app
 rm -rf "$APP"
