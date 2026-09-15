@@ -32,14 +32,16 @@ Every theme draws the same six layers. Design them in this order.
 6. **The world: terrain, water, forest, weather.** Designed around the fixed set pieces, and giving way to
    the growth zone as it expands.
 
-## Stations are sites
+## Stations are worlds
 
-Each station owns its own bay, yard, ledger and rockets, so under a theme each station is its own **site**:
-the same site template, placed apart in a landscape, with the input and the output in their designed spots.
-The landscape between sites is the theme's to compose (a village on the coast, a homestead up the river).
-Whether the private station stays a site of its own or becomes a quarter of one place is still open; one
-place with quarters would mean sharing the input and output between work and private repositories, and
-keeping the private quarter out of what is shared with peers.
+Each station owns its own bay, yard, ledger and rockets, so under a theme each station is its own **world**:
+the same site template, with the input and the output in their designed spots and the landscape composed
+round it, shown one at a time. The private station is a world of its own, not a second site beside work in
+one landscape and not a quarter of one place (decided 2026-09-15). This keeps every set piece in its best
+spot without composing a landscape between stations. Moving between worlds, and what the whole-fleet view
+becomes under a theme, is still to design; one place with quarters stays possible later, at the cost of
+sharing the input and output between work and private repositories and keeping the private quarter out of
+what is shared with peers.
 
 ## Design for change
 
@@ -112,6 +114,7 @@ The pointer over the window shows its hover panel in a snapshot; keep it off the
 - **Key the world to position.** Today's ground scatters from one seed over the whole fleet.
 - **Own the lift-off and the work tools.** The launch animation and the tools minions hold (scanner,
   tablet, torch, hammer) are still the scene's.
+- **Show one world at a time.** Stations are still laid out side by side in one scene.
 - **Place the idle areas.** Their rooms are placed by the plan; a look only furnishes them.
 - **Keep HUD text legible on a light ground.** The HUD's greys were tuned for space.
 
