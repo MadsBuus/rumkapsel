@@ -192,7 +192,7 @@ extension StationController {
                     continue
                 }
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
-                var seed = UInt64(truncatingIfNeeded: key.hashValue) | 1
+                var seed = stableHash(key) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 var newest: SCNNode?

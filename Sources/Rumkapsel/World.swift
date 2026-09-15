@@ -893,7 +893,7 @@ final class World {
     /// A little disorder in storage, seeded per crate so a crate keeps its own nudge and turn wherever
     /// it lands in the rows.
     private static func jitter(repo: String, number: Int) -> (Double, Double, Double) {
-        var seed = UInt64(truncatingIfNeeded: "\(repo)#\(number)".hashValue) | 1
+        var seed = stableHash("\(repo)#\(number)") | 1
         func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
         return ((rnd() - 0.5) * 0.22, (rnd() - 0.5) * 0.3, (rnd() - 0.5) * 0.7)
     }

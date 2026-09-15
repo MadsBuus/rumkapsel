@@ -53,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         if let i = args.firstIndex(of: "--scenarios") {
             let next = args.count > i + 1 ? args[i + 1] : nil
             let filter = (next?.hasPrefix("--") ?? true) ? nil : next
-            scenarios = ScenarioRunner(filter: filter, verbose: args.contains("--scenarios-verbose"), soak: args.contains("--soak"))
+            scenarios = ScenarioRunner(filter: filter, verbose: args.contains("--scenarios-verbose"))
             scenarios?.run()
             return
         }

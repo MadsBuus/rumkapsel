@@ -17,6 +17,22 @@ Pull requests welcome. Fork, branch, `./build.sh run` to try it, open a PR. Feat
 
 Requires Xcode 26 / Swift 6.3 and the `gh` CLI for pull request lookups.
 
+## Tests
+
+```bash
+swift build --build-system native && .build/debug/Rumkapsel --scenarios
+```
+
+runs the scripted scenarios headless in about twelve seconds; `--sim-tests`, `--idle-tests`, `--walk-tests`,
+`--ledger-tests` and `--pipeline-tests` run the model on its own, no window. TESTING.md has the whole gate
+and where it is going.
+
+## Release
+
+`./release.sh 0.32` builds, signs, notarises and publishes a release with a Sparkle appcast. Notarisation
+needs credentials stored once with `xcrun notarytool store-credentials rumkapsel`; without them the script
+signs and publishes but says so, and the app is not notarised.
+
 ## Controls
 
 | Key / gesture | Action |

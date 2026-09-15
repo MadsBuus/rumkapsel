@@ -90,6 +90,11 @@ light, pusher and flying crate drawn from its job.
   ghost of an archived room sinking through the floor. None of it decides anything.
 - `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
   that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
+- Three decisions are still the scene's, and they are what keeps a scenario needing a `StationController`
+  (TESTING.md, Change 4): the event glue in `Scene.handle`, the obstacles read off the props' boxes, and the
+  stows ordered from inside the redraw. The ledger's `landed` is written by the scene's landing closures.
+- `Spot` carries a world position, so the scene's geometry leaks a little into the model side. Left alone
+  on purpose: fixing it would touch every consumer of a spot for no change in behaviour.
 
 ## Where this is going
 
@@ -125,8 +130,9 @@ Steps 4 to 7 exist for crates, described in the next section. `Commands.swift` h
 phase list with each phase marked interruptible or not, and words for humans) and
 `StationTruth` (the pallet out and what rides on it, offices ordered and crates waiting in the bay). Where
 each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. `World`
-issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — and the scene
-binds each command to the crate's node, by key, and hands it to a minion. Minions execute one command at a time:
+issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — the simulation
+hands each to the nearest free body, and the scene keeps the crate's node by command id for the arms. Bodies
+execute one command at a time:
 a new one replaces the old at the next interruptible phase, at most one waits, a carry can only be redirected
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
 it holds where it stands.
@@ -136,8 +142,8 @@ constants with `startLift`/`lift` and `startSetDown`/`setDown`/`release`): an ar
 it, a crouch whose posture comes from how high the crate stands, the crate up past the chest and onto the
 arms, and out of the arms onto its slot turned the way the layout will draw it. The office delivery uses the
 same pair, so a new office's crate is set down on the far cell its package will occupy and only then does
-the office fade in round it. The arcs are `SCNAction`s and the phase clock is the station's, but both are
-derived from the same durations, so the posture and the motion cannot drift apart. A crate on the arms is
+the office fade in round it. The arcs are crate motions on the station clock (`CrateMotion`) and so are the
+phases, both derived from the same durations, so the posture and the motion cannot drift apart. A crate on the arms is
 drawn once, in the hands: the yard it left leaves it out, and the yard it is bound for holds its place
 without drawing it.
 
@@ -149,15 +155,10 @@ move forward: stand by, load, steam, launch. `World.applyReleases` reads the lau
 releases and hands out those stages as commands — untested stands by, cleared loads, merged launches, and a
 launch loads first if it has to. The load phase issues the same `carryToPad` carries as before, remembers
 every crate it ordered aboard, and ends only when station truth counts all of them on the pad and nothing of
-the repository is left on the rows or on anyone's arms. A load that is taking its time is waited out and said
-out loud; a rocket with no cargo at all still goes at once. A teammate's reaction
+the repository is left on the rows or on anyone's arms. A load that is taking its time is waited out; a
+rocket with no cargo at all still goes at once. A teammate's reaction
 to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
 runs the same machine as everyone else and says so on hover.
-
-What still does not: a carry's `from` for a merged office's package is the office door rather than the
-exact package position; and `Spot` carries a world position, so the scene's geometry leaks a little into
-the model side. Both are small, and left alone on purpose: the second would touch every consumer of a spot
-for no change in behaviour.
 
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.

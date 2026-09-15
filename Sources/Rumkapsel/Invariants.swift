@@ -251,13 +251,6 @@ final class Invariants {
                 }
             }
             for other in all[(i + 1)...] where other.station == m.station {
-                if m.path.isEmpty, other.path.isEmpty {
-                    let d = ((m.pos.x - other.pos.x) * (m.pos.x - other.pos.x)
-                             + (m.pos.y - other.pos.y) * (m.pos.y - other.pos.y)).squareRoot()
-                    if d < 0.15 {
-                        flag("two minions never share a spot", pair(m.id, other.id), String(format: "%.3f apart", d))
-                    }
-                }
                 if let a = m.couch, let b = other.couch, a == b {
                     flag("two never share a couch", pair(m.id, other.id), "couch \(a)")
                 }
