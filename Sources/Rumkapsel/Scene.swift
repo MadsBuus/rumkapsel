@@ -1065,10 +1065,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The view: camera, labels and HUD, on real time whatever the station clock is doing.
     private func tickView(dt: Double) {
         if hud.size != viewSize { hud.size = viewSize }
-        // A desk toy's frame rate: 60 while the camera is being driven, 30 when watched, 8 when the window is
-        // covered or the app is in the background, where nothing but the clock needs to move.
+        // A desk toy's frame rate: 60 while the camera is being driven, 30 whenever the window can be seen,
+        // focused or not, since it sits beside the work; 8 only when it is covered or hidden.
         let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
-        let want = !seen || (!NSApp.isActive && userDriving <= 0) ? 8 : (userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
+        let want = !seen ? 8 : (userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
         if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
         if ProcessInfo.processInfo.environment["RK_FPS"] != nil {
             fpsFrames += 1
