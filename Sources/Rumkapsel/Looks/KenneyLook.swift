@@ -6,17 +6,12 @@ import AppKit
 import SceneKit
 
 struct KenneyLook: Look {
-    private let classic = ClassicLook()
-
     var background: NSColor { Kit.sky }
     /// Turned about so the yard and its pad face right, toward the sea.
     var viewYaw: Double { .pi / 4 + .pi }
     var floorTop: Double { Kit.plateTop }
     /// The kit's plates have marks of their own.
     var dotsHallway: Bool { false }
-    var drawsBorders: Bool { true }
-
-    func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
 
     /// On the ground there is nothing to drift.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { [] }
@@ -96,7 +91,7 @@ struct KenneyLook: Look {
     func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
         let row = SCNNode()
         for x in spans {
-            guard let gate = Kit.gate(yaw: 0) else { return classic.airlockFrame(width: width, spans: spans, tint: tint) }
+            guard let gate = Kit.gate(yaw: 0) else { return Classic.airlockFrame(width: width, spans: spans, tint: tint) }
             gate.position = v3(x, 0, 0)
             row.addChildNode(gate)
         }
@@ -104,12 +99,12 @@ struct KenneyLook: Look {
     }
 
     func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
-        guard let gate = Kit.gate(yaw: facing.x == 0 ? 0 : .pi / 2) else { return classic.hatchFrame(facing: facing) }
+        guard let gate = Kit.gate(yaw: facing.x == 0 ? 0 : .pi / 2) else { return Classic.hatchFrame(facing: facing) }
         return (gate, 0.9)
     }
 
     /// The kit's comms tower, its dish turning slowly over the plaza.
-    func monolith() -> SCNNode { Kit.tower() ?? classic.monolith() }
+    func monolith() -> SCNNode { Kit.tower() ?? Classic.monolith() }
 
     /// Astronauts; the crew wear the other suit.
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? { Kit.astronaut(crew: crew, height: height) }
@@ -121,12 +116,10 @@ struct KenneyLook: Look {
         figure.position = v3(0, -torso / 2, -0.03)
     }
 
-    func shuttle(color: NSColor) -> SCNNode { Kit.craft(color: color) ?? classic.shuttle(color: color) }
-
-    func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+    func shuttle(color: NSColor) -> SCNNode { Kit.craft(color: color) ?? Classic.shuttle(color: color) }
 
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
-        Kit.rocketProp(color: color, tall: tall, cargo: cargo) ?? classic.rocket(color: color, tall: tall, cargo: cargo)
+        Kit.rocketProp(color: color, tall: tall, cargo: cargo) ?? Classic.rocket(color: color, tall: tall, cargo: cargo)
     }
 
     /// Fuel by the pad, on its two corners clear of the rockets; a rover parked in the bay.

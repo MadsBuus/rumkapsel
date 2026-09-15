@@ -9,8 +9,6 @@ import AppKit
 import SceneKit
 
 struct KingdomLook: Look {
-    private let classic = ClassicLook()
-
     static let grass = NSColor(rgb: (0.49, 0.74, 0.38))
     static let sand = NSColor(rgb: (0.9, 0.84, 0.68))
     static let cobble = NSColor(rgb: (0.72, 0.68, 0.6))
@@ -22,8 +20,6 @@ struct KingdomLook: Look {
     static let villagers = ["a", "b", "c", "d", "e", "f"].flatMap { ["character-male-" + $0, "character-female-" + $0] }
 
     var background: NSColor { NSColor(rgb: (0.55, 0.76, 0.92)) }
-    var viewYaw: Double { .pi / 4 }
-    var floorTop: Double { 0 }
     var dotsHallway: Bool { false }
     /// Fences and hedges part the floors; no dark lines on the green.
     var drawsBorders: Bool { false }
@@ -174,7 +170,7 @@ struct KingdomLook: Look {
     func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
         let row = SCNNode()
         for x in spans {
-            guard let gate = Kit.node("gate", from: .castle) else { return classic.airlockFrame(width: width, spans: spans, tint: tint) }
+            guard let gate = Kit.node("gate", from: .castle) else { return Classic.airlockFrame(width: width, spans: spans, tint: tint) }
             gate.eulerAngles.y = .pi / 2   // its face across the doorway
             gate.position = v3(x, 0, 0)
             row.addChildNode(gate)
@@ -183,7 +179,7 @@ struct KingdomLook: Look {
     }
 
     func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
-        guard let gate = Kit.node("gate", from: .castle) else { return classic.hatchFrame(facing: facing) }
+        guard let gate = Kit.node("gate", from: .castle) else { return Classic.hatchFrame(facing: facing) }
         gate.eulerAngles.y = facing.x == 0 ? .pi / 2 : 0
         let n = SCNNode()
         n.addChildNode(gate)
@@ -193,7 +189,7 @@ struct KingdomLook: Look {
     /// A square keep about the monolith's size: a base, a storey and a roofed top.
     func monolith() -> SCNNode {
         guard let base = Kit.node("tower-square-base", from: .castle), let storey = Kit.node("tower-square-mid", from: .castle),
-              let top = Kit.node("tower-square-top-roof", from: .castle) else { return classic.monolith() }
+              let top = Kit.node("tower-square-top-roof", from: .castle) else { return Classic.monolith() }
         let n = SCNNode()
         let s = 0.8
         for (i, part) in [base, storey, top].enumerated() {
@@ -222,7 +218,7 @@ struct KingdomLook: Look {
 
     /// A sailing ship, its hull tinted toward the repo colour.
     func shuttle(color: NSColor) -> SCNNode {
-        guard let m = Kit.node("unit-ship-large", from: .hexagon, multiply: color.mixed(with: .white, 0.55)) else { return classic.shuttle(color: color) }
+        guard let m = Kit.node("unit-ship-large", from: .hexagon, multiply: color.mixed(with: .white, 0.55)) else { return Classic.shuttle(color: color) }
         m.scale = SCNVector3(1.2, 1.2, 1.2)
         m.position = v3(0, -0.15, 0)
         let n = SCNNode()
@@ -259,7 +255,7 @@ struct KingdomLook: Look {
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         let grow = tall ? min(1.6, 0.85 + Double(cargo) * 0.06) : 1.0
         let (name, native, height) = tall ? ("siege-tower", 2.68, 1.5 * grow + 0.3) : ("siege-catapult", 1.18, 0.9)
-        guard let engine = Kit.node(name, from: .castle) else { return classic.rocket(color: color, tall: tall, cargo: cargo) }
+        guard let engine = Kit.node(name, from: .castle) else { return Classic.rocket(color: color, tall: tall, cargo: cargo) }
         let s = height / native
         engine.scale = SCNVector3(s, s, s)
         engine.eulerAngles.y = .pi / 2
