@@ -44,9 +44,14 @@ final class Drone: @unchecked Sendable {
     ]
     private static let pentatonic: [Int] = [74, 77, 79, 81, 84, 86, 89, 91]
 
+    /// Music on or off. Off, the engine is stopped outright: a render callback forty times a second for
+    /// silence is not lightweight.
     var isEnabled: Bool {
         get { masterTarget > 0 }
-        set { masterTarget = newValue ? 1 : 0 }
+        set {
+            masterTarget = newValue ? 1 : 0
+            if newValue { start() } else { engine.stop() }
+        }
     }
 
     init() {
@@ -80,6 +85,7 @@ final class Drone: @unchecked Sendable {
     }
 
     func start() {
+        guard isEnabled, !engine.isRunning else { return }
         engine.prepare()
         try? engine.start()
     }

@@ -318,8 +318,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         buildHUD()
         view.scene = scene
         view.backgroundColor = Palette.void
-        view.antialiasingMode = .multisampling4X
-        view.preferredFramesPerSecond = 60
+        view.antialiasingMode = .multisampling2X   // flat shading and straight edges: 2X reads the same as 4X
+        view.preferredFramesPerSecond = 30           // raised to 60 while a gesture is under way, lowered while unseen (tickView)
         view.isPlaying = true
         view.autoresizingMask = [.width, .height]
         view.allowsCameraControl = false
@@ -1064,6 +1064,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The view: camera, labels and HUD, on real time whatever the station clock is doing.
     private func tickView(dt: Double) {
         if hud.size != viewSize { hud.size = viewSize }
+        // A desk toy's frame rate: 60 while the camera is being driven, 30 when watched, 8 when the window is
+        // covered or the app is in the background, where nothing but the clock needs to move.
+        let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
+        let want = !seen || (!NSApp.isActive && userDriving <= 0) ? 8 : (userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
+        if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
         if keyMove != .zero {
             // Held WASD: a steady slide, a bit under the view's height per second.
             let speed = Double(viewSize.height) * 0.7 * dt
