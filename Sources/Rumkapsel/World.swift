@@ -189,6 +189,9 @@ final class World {
         !demo && !room.key.hasPrefix("kind:") && !lookedAt(room.repo)
     }
 
+    /// Some repository the floor knows about has still not been looked at today.
+    var stillLooking: Bool { waitsForGitHub && !repoRoots.isEmpty && repoRoots.keys.contains { !github.answered(repoRoot: $0) } }
+
     /// GitHub has answered for this repository over the wire in this run — not from last night's notes,
     /// and not from a neighbour. Repositories the floor has not even found yet count as unlooked-at.
     func lookedAt(_ repo: String?) -> Bool {

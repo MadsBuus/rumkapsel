@@ -777,12 +777,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Which offices were last drawn as not yet looked at, so the lights can be brought up on the ones
     /// that have been without rebuilding the floor under them.
     private var drawnUnchecked: [String: Bool] = [:]
+    /// Offices still waiting to be looked at, and where in the breath each sits.
+    var breathing: [String: Double] = [:]
+
+    /// How bright a waiting office is just now. On the wall clock, not the station's: the station's
+    /// stands still while the floor is still being worked out, which is exactly when this has something
+    /// to say — it was frozen at 0.78 for the whole of it, so nothing moved.
+    static func breath(phase: Double) -> Double {
+        0.64 + 0.22 * sin((CACurrentMediaTime() * 0.55 + phase) * 2 * .pi)
+    }
 
     /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
     /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
     /// again — and building it again is what stopped the breathing being seen and made the whole floor
     /// jump each time another repository answered.
     private func lightRooms() {
+        for (key, phase) in breathing {
+            guard let tiles = roomTiles[key] else { breathing[key] = nil; continue }
+            let o = CGFloat(StationController.breath(phase: phase))
+            for t in tiles { t.opacity = o }
+        }
         for st in fleet.stations.values {
             for room in st.rooms.values where !room.key.hasPrefix("kind:") {
                 let key = roomKey(st, room)
@@ -790,6 +804,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 guard drawnUnchecked[key] != unchecked else { continue }
                 drawnUnchecked[key] = unchecked
                 guard !unchecked, let tiles = roomTiles[key] else { continue }
+                breathing[key] = nil   // looked at: it stops breathing and comes up to full
                 for t in tiles {
                     t.removeAllActions()
                     t.runAction(.fadeOpacity(to: 1, duration: 0.9))
@@ -812,7 +827,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             layoutDirty = false; markersDirty = false
             rebuildStatic()
             if firstRun, !viewPinned { restoreView() }
-            for st in fleet.stations.values { resettle(st) }
+            // Not while offices are still arriving: settling the bodies and reframing on a floor that
+            // is about to grow again is the jitter, and none of it is wasted by waiting for the end.
+            if !world.stillLooking { for st in fleet.stations.values { resettle(st) } }
             refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
             markersDirty = false
