@@ -441,10 +441,12 @@ final class World {
     // MARK: github
 
     /// A fresh answer from GitHub: board columns that moved, and the crew's floor rebuilt around it.
-    func applyGitHub(now: Date) -> [WorldEvent] {
-        var events = applyReleases()
-        events += applyBoardMoves()
-        events += rebuildCrew(now: now)
+    func applyGitHub(now: Date, timed: ((String, () -> [WorldEvent]) -> [WorldEvent])? = nil) -> [WorldEvent] {
+        let run = timed ?? { _, b in b() }
+        placementsLeft = false
+        var events = run("gh.releases") { self.applyReleases() }
+        events += run("gh.board") { self.applyBoardMoves() }
+        events += run("gh.crew") { self.rebuildCrew(now: now) }
         return events
     }
 
@@ -587,9 +589,18 @@ final class World {
         return github.takeProjectMoves().map { .boardMoved(item: $0.item, from: $0.from, to: st.stage(of: $0.item.status)) }
     }
 
+    /// How many offices may be found a place in one go. Finding one somewhere to stand is a search over
+    /// the whole floor, about a fiftieth of a second each, and a launch has a dozen of them to place —
+    /// which is a quarter of a second of the window standing still if they are all done at once. Waiting
+    /// on GitHub costs nothing; it is what arrives with the answer that has to be paced.
+    static let placementsPerPass = 1
+    /// True while offices are still waiting for somewhere to stand, so the next pass comes round.
+    private(set) var placementsLeft = false
+
     /// Crew station: an office per open teammate pull request, boxes per push, and minions that
     /// react only to what just happened in the repositories' activity feeds.
     private func rebuildCrew(now: Date) -> [WorldEvent] {
+        var placed = 0
         var events: [WorldEvent] = []
         let me = github.myLogin() ?? ""
         let cfg = ConfigStore.shared.current
@@ -700,6 +711,10 @@ final class World {
             let key = home.key
             let name = home.name
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
+            if station.rooms[key] == nil {
+                guard placed < World.placementsPerPass else { placementsLeft = true; continue }
+                placed += 1
+            }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
                 if isReady(repo) {
@@ -715,6 +730,10 @@ final class World {
             let key = "task:\(repo)#\(it.number)"
             let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
+            if station.rooms[key] == nil {
+                guard placed < World.placementsPerPass else { placementsLeft = true; continue }
+                placed += 1
+            }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
                 if isReady(repo) {

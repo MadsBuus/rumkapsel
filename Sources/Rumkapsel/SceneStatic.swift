@@ -4,15 +4,24 @@ import AppKit
 import SceneKit
 
 extension StationController {
+    /// Whose floor a cell is. Asked a dozen times for every tile — four sides and eight neighbours — and
+    /// it used to answer by looking through seven arrays of cells and then every room, which on a station
+    /// of four hundred tiles is millions of comparisons for a picture that has not changed shape. It is
+    /// read off a map now, built once for each station in a redraw.
     private func owner(_ station: Station, _ c: Cell) -> String? {
-        if station.hangarCells.contains(c) { return "kind:hangar" }
-        if station.airlockCells.contains(c) { return "kind:airlock" }
-        if station.storageCells.contains(c) { return "kind:storage" }
-        if station.deckCells.contains(c) && world.deckInUse(station: station.name) { return "kind:deck" }
-        if station.padCells.contains(c) { return "kind:pad" }
-        if station.deconCells.contains(c) { return "kind:decon" }
-        if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
-        return station.room(at: c)?.key
+        if let m = owners[station.name] { return m[c] }
+        var m: [Cell: String] = [:]
+        for (key, room) in station.rooms { for c in room.cells { m[c] = key } }   // rooms give way to all the rest
+        for c in station.corridorCells where station.isCorridor(c) { m[c] = "corridor" }
+        for c in station.coreCells { m[c] = "corridor" }
+        for c in station.deconCells { m[c] = "kind:decon" }
+        for c in station.padCells { m[c] = "kind:pad" }
+        if world.deckInUse(station: station.name) { for c in station.deckCells { m[c] = "kind:deck" } }
+        for c in station.storageCells { m[c] = "kind:storage" }
+        for c in station.airlockCells { m[c] = "kind:airlock" }
+        for c in station.hangarCells { m[c] = "kind:hangar" }
+        owners[station.name] = m
+        return m[c]
     }
 
     private func joined(_ station: Station, _ a: Cell, _ b: Cell, _ key: String) -> Bool {
@@ -33,13 +42,55 @@ extension StationController {
 
     /// Full-size floor tile; borders are drawn separately as strips so corners meet cleanly.
     @discardableResult
+    /// A square of floor, or a strip of border, shared by everything that looks the same. A station is
+    /// four hundred tiles and each of them a plane and up to four borders, so a redraw was making a
+    /// couple of thousand geometries and as many materials; there are a dozen distinct ones.
+    ///
+    /// The key must carry everything that goes into the material, since a shared one cannot be tweaked
+    /// afterwards — that is the whole bargain. Opacity is not in it: opacity is set on the node, and the
+    /// nodes are not shared. Nor is anything a look decides, because the cache is emptied when the look
+    /// changes; a tile drawn by a look is that look's until it is.
+    private func shared(_ id: String, width: Double, height: Double, _ material: () -> SCNMaterial) -> SCNGeometry {
+        guard Looks.current.sharesTiles else {
+            let p = SCNPlane(width: width, height: height)
+            p.firstMaterial = material()
+            return p
+        }
+        if Looks.theme != tileCacheLook { tileCache = [:]; tileCacheLook = Looks.theme }
+        if let g = tileCache[id] { return g }
+        let p = SCNPlane(width: width, height: height)
+        p.firstMaterial = material()
+        tileCache[id] = p
+        return p
+    }
+
+    /// A colour as a key, or nil for one that will not resolve — those are built fresh rather than risk
+    /// two unlike colours sharing a square.
+    private func swatch(_ c: NSColor) -> String? {
+        guard let s = c.usingColorSpace(.sRGB) else { return nil }
+        return String(format: "%.4f/%.4f/%.4f/%.4f", s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent)
+    }
+
     private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into parent: SCNNode? = nil) -> SCNNode {
         let root = parent ?? staticRoot
         let look = Looks.current
         let floor = floorKind(key)
-        let plane = SCNPlane(width: 1.0, height: 1.0)
-        plane.firstMaterial = flat(look.floorColor(color, floor: floor))
-        if !look.drawsPlane(floor) { plane.firstMaterial?.transparency = 0; plane.firstMaterial?.writesToDepthBuffer = false }
+        tilesBuilt += 1
+        let tint = look.floorColor(color, floor: floor)
+        let drawn = look.drawsPlane(floor)
+        let plane: SCNGeometry
+        if let id = swatch(tint) {
+            plane = shared("floor:\(id):\(drawn)", width: 1, height: 1) {
+                let m = flat(tint)
+                if !drawn { m.transparency = 0; m.writesToDepthBuffer = false }
+                return m
+            }
+        } else {
+            let p = SCNPlane(width: 1.0, height: 1.0)
+            p.firstMaterial = flat(tint)
+            if !drawn { p.firstMaterial?.transparency = 0; p.firstMaterial?.writesToDepthBuffer = false }
+            plane = p
+        }
         let n = SCNNode(geometry: plane)
         n.eulerAngles.x = -.pi / 2
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
@@ -58,8 +109,9 @@ extension StationController {
             guard other != key, !joined(station, cell, nb, key) else { continue }
             walled[edge] = floorKind(other)
             guard look.drawsBorders else { continue }
-            let strip = SCNPlane(width: vertical ? g * 2 : 1 + g * 2, height: vertical ? 1 + g * 2 : g * 2)
-            strip.firstMaterial = flat(Palette.void)
+            // Every border is the void, in one of two sizes: two geometries for the whole fleet.
+            let strip = shared("border:\(vertical)", width: vertical ? g * 2 : 1 + g * 2,
+                               height: vertical ? 1 + g * 2 : g * 2) { flat(Palette.void) }
             let b = SCNNode(geometry: strip)
             b.eulerAngles.x = -.pi / 2
             b.position = v3(station.offset.x + Double(cell.x) + off.x, look.floorTop + 0.002, station.offset.y + Double(cell.y) + off.y)
@@ -119,6 +171,7 @@ extension StationController {
 
     func rebuildStatic() {
         fleet.arrange()
+        owners = [:]   // the floor is about to be read afresh: last redraw's map is last redraw's
         staticRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomTiles = [:]
         openEdges = []
@@ -394,7 +447,7 @@ extension StationController {
             Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
         rebuildLabels()
-        rebuildMarkers()
+        timed("markers") { rebuildMarkers() }
         for key in fadeIn {
             for t in roomTiles[key] ?? [] { let o = t.opacity; t.opacity = 0; t.runAction(.fadeOpacity(to: o, duration: 2.5)) }
             if let l = roomLabels[key] { let o = l.opacity; l.opacity = 0; l.runAction(.fadeOpacity(to: o, duration: 2.5)) }

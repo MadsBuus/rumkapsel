@@ -9,6 +9,15 @@ import SceneKit
 protocol Look {
     // MARK: the world
 
+    /// Whether tiles that look alike may share one geometry and one material. True for a look that
+    /// decides a tile's appearance once and leaves it: a station of four hundred tiles then needs a
+    /// dozen geometries rather than two thousand, and a redraw costs a third of what it did.
+    ///
+    /// A look that wants to reach into a single tile afterwards — one that fades, flickers, or is tinted
+    /// by something that happens on it — says false and is given a tile of its own each time, which it
+    /// may do as it likes with.
+    var sharesTiles: Bool { get }
+
     /// The colour past the edge of everything.
     var background: NSColor { get }
     /// The view's turn about the vertical before the user turns it.
@@ -97,6 +106,7 @@ protocol Look {
 
 /// What every look gets unless it draws its own: the classic station, adrift in space.
 extension Look {
+    var sharesTiles: Bool { true }
     var background: NSColor { Palette.void }
     var viewYaw: Double { .pi / 4 }
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { Classic.backdrop(into: root) }
