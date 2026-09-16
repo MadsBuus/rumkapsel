@@ -789,6 +789,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// How dim an office is while it waits to be looked at.
     static let unlitOffice = 0.55
+    /// When the window opened, for the fly-in.
+    let launchedAt = CACurrentMediaTime()
+    /// How much floor the view takes in while a station is still arriving. It comes in slowly over the
+    /// first few seconds rather than sitting at one height: the floor is filling in under it, so there
+    /// is something to fly towards, and a station that is being assembled is worth watching arrive.
+    var settlingHalf: SIMD2<Double> {
+        let t = min(1, (CACurrentMediaTime() - launchedAt) / 7)
+        let eased = 1 - pow(1 - t, 3)
+        let half = 34 - 16 * eased
+        return SIMD2(half, half)
+    }
 
     /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
     /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
@@ -1101,7 +1112,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        let wantScale = fitScale(half: targetHalf) / userZoom
+        // Flying in: the height is asked for every frame while the floor arrives, so the approach is
+        // continuous rather than a step at each rebuild.
+        let wantScale = fitScale(half: floorSettling ? settlingHalf : targetHalf) / userZoom
         let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
         cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
         userZoomChanged = false
