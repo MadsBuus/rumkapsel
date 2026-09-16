@@ -309,7 +309,9 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 rest.geometry!.firstMaterial = lit(color)
                 rest.position = v3(spot.x, seat + back / 2, spot.y - 0.24)
                 scene.rootNode.addChildNode(rest)
-                return minion(at: spot)
+                // A sitter is put down a shin's reach behind its spot, so it stands that far in front of
+                // the seat — the same as a body walking up to a couch on a station.
+                return minion(at: SIMD2(spot.x, spot.y + Body.seatReach))
             }
             let a = sitter(at: SIMD2(p.x - 0.5, p.y), NSColor(rgb: (0.62, 0.45, 0.4)),
                            seat: Minion.couchSeat, width: 0.8, back: 0.22)

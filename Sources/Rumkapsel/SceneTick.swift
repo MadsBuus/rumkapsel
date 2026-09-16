@@ -340,7 +340,9 @@ extension StationController {
             // A visit outranks the day's work in the picture: someone on the treadmill is not also testing.
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
             let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
-            let onFixture = (m.bathing || m.exercising) && m.path.isEmpty && m.fetchSpot == nil
+            // A body on a seat keeps the way it was put down: a sitter is placed behind where its feet
+            // are, along its own facing, so turning it to face the camera would swing it off the seat.
+            let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing

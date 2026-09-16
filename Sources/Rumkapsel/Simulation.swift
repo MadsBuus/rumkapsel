@@ -759,7 +759,10 @@ final class Simulation<B: Body> {
                         m.facing = atan2(0, -f.toiletCorner.y)
                         let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
                         m.seatedOnBowl = true
-                        m.seatOffset = SIMD2(across, ahead - 0.02)
+                        // This is the vector to the bowl itself, and a sitter is put down a shin's reach
+                        // behind where it is aimed — so aim that much past it, or it ends up sitting
+                        // through the back of the pan instead of on it.
+                        m.seatOffset = SIMD2(across, ahead - 0.02 + B.seatReach)
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3)
                     } else if m.seatedOnBowl, clock >= standAt {
                         m.seatedOnBowl = false
