@@ -94,6 +94,31 @@ enum LayoutTests {
             expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
         }
 
+        test("the yard has room for a pallet: a lane through its doorway, and a body's width of aisle past each end") {
+            let a = fresh()
+            let rows = Set(a.storageCells.map(\.y)).sorted()
+            expect(Set(a.storageCells.map(\.x)).count == Station.yardWide && rows.count == 4,
+                   "storage is \(Station.yardWide) wide and four deep: \(cells(a.storageCells))")
+            // The lane is two columns of the crate rows either side of the aisle the pallet floats in.
+            let lane = a.palletLane
+            expect(lane.count == 4, "the lane is four cells: \(cells(Array(lane)))")
+            expect(lane.allSatisfy { a.storageCells.contains($0) }, "all of it storage floor")
+            expect(Set(lane.map(\.y)) == [a.storageNearRow, a.storageAisleRow + 1], "on the rows either side of the aisle")
+            // The doorway to the deck takes the lane and a column either side, so a body can walk past a
+            // pallet standing in it.
+            let gate = Set(a.yardDoorways.filter { a.storageCells.contains($0.0) && a.deckCells.contains($0.1)
+                                                || a.storageCells.contains($0.1) && a.deckCells.contains($0.0) }
+                .flatMap { [$0.0.x, $0.1.x] })
+            expect(Set(a.palletLaneColumns).isSubset(of: gate) && gate.count == Set(a.palletLaneColumns).count + 2,
+                   "the doorway is the lane with a column either side: \(gate.sorted())")
+            // And the aisle it stands in is wide enough to get round: a body needs a third of a tile.
+            let xs = a.storageCells.map { Double($0.x) }
+            let home = Double(a.palletLaneColumns.reduce(0, +)) / 2
+            let past = (xs.max()! + 0.5) - (home + PalletGeometry.width / 2 + 0.2)
+            expect(past >= 0.34 && abs(past - ((home - PalletGeometry.width / 2 - 0.2) - (xs.min()! - 0.5))) < 0.01,
+                   "\(past) of clear aisle at each end of it")
+        }
+
         for theme in Theme.allCases {
             Theme.pinnedForPlan = theme
             test("\(theme.title): forty rooms keep off the yard, and no hallway is dug through it") {

@@ -253,8 +253,8 @@ sits beside `isProduction`, and `World.applyStaging` diffs each repository's rel
 `.stagingOpened`, `.stagingMerged` and `.stagingClosed`. The first answer per repository is quiet.
 
 Station truth gains one pallet per station (`StationTruth.Pallet`: repo, number, the cell it hovers over,
-its state — arriving, loading, loaded, moving, unloading — and its crates by pallet slot, three rows of
-four counted from the pallet's floor up). Further requests queue in `palletQueue` in the order they came.
+its state — arriving, loading, loaded, moving, unloading — and its crates by pallet slot, two rows of
+four, two levels, counted from the pallet's floor up). Further requests queue in `palletQueue` in the order they came.
 A crate on it is `Placement.pallet`, so `yardLayout` leaves it out of the rows and `reconcile` returns
 `.waiting` for that repository: from the moment a pallet is ordered until it is empty, the pallet is the
 hand carry for those crates and no `carryToDeck` is issued for them.
@@ -267,7 +267,7 @@ storage doorway and across to the untested row) and `unloadPallet`
 (the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
 unmerged, and the empty pallet fades). The `PalletJob` in `Pallet.swift` holds where it hovers, what is aboard
 and the crate in the air; its state is the truth's, read there and written there. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
-cushion of light, bobbing on a sine, with twelve sunk fields matching the crate slots, rivets along the
+cushion of light, bobbing on a sine, with a sunk field per crate slot, rivets along the
 rim, an amber corner light the tick blinks, and a floor shadow of its own that stays down and tightens as
 the slab sinks; and `Props.console`, the small panel on the wall by the storage doorway,
 which blinks while an order stands unanswered. Two new tools: `.clipboard` and `.telekinesis`, a short
@@ -277,23 +277,46 @@ out in front for the push.
 The push, leg by leg. The pallet is heavy and only ever moves along one axis. `palletRoute` cuts the way
 to the deck into axis-aligned legs: line up on the two doorway columns without leaving storage, out
 through the doorway onto the deck's aisle row (the crate rows are every other row; the aisles are the
-rest), then along that aisle to the repository's group on the untested row. Every leg end is clamped so
-the whole 1.8 by 1.4 footprint stays on the block's tiles. For each leg the minion walks round to the
-back side on that leg's axis — the pallet's footprint is in `station.obstacles`, so the walk goes round
-it, never through it — then leans in at a tilt of 0.35 and the pallet creeps forward at half a cell a
-second, easing in, with the pusher locked a step behind it and a small forward-and-back shove in the
-body. The minion tick skips anyone on a pallet errand, so the push places the pusher's own node.
+rest — and of those it takes the one the doorway opens onto, so it never crosses a row of crates to
+reach it), then along that aisle to the repository's group on the untested row. Every leg end is clamped
+so the whole 1.8 by 0.92 footprint stays on the block's tiles. For each leg the minion walks round to the
+back side on that leg's axis — the walk goes round the slab, never through it — then leans in at a tilt
+of 0.35 and the pallet creeps forward at half a cell a second, easing in, with the pusher locked a step
+behind it and a small forward-and-back shove in the body. Squarely behind is a crate row as often as not,
+so `pushSpot` slides along the back edge to the nearest place that is clear floor and can be walked to, and
+`PalletJob.pushAcross` carries that stance into the push so the figure does not jump when the hands go on.
+The last stretch onto the spot — which the pathfinder will not route to, being hard against the slab — the
+body covers itself, at a walking pace rather than a slide. The minion tick skips anyone on a pallet errand, so the push places the pusher's own node.
 
 What differs from the plan above:
 
-- **Which crates it carries.** Every crate of that repository standing in storage, twelve at most, taken
-  by yard order from the top of each stack — not the pull request's own commit list, which the sources do
-  not break down per staging release.
+- **Which crates it carries.** Every crate of that repository standing in storage, `PalletGeometry.capacity`
+  at most, taken by yard order from the top of each stack — not the pull request's own commit list, which the
+  sources do not break down per staging release. One that reaches storage while the pallet is still standing
+  there joins it: `palletLatecomer` gives it the next slot, and a pallet already loaded goes back to loading
+  for the one extra lift. Once it is moving or unloading it is too late and the crate stays on the rows.
 - **A crate in the air is moved by the tick, not by an SCNAction.** Actions do not advance in a headless
   `--snapshot` run, so a load that depended on one never landed. The arc, the turn and the pallet's own
   fade all ride the station clock, like everything else that decides something.
-- **The pallet is bigger than a cell** (1.8 by 1.4) so twelve crates at their one size fit on it. It
-  hovers over the near row on the two columns of the deck doorway and overhangs the wall a little.
+- **The pallet is wider than a cell but no deeper** (1.8 by 0.92): four crates across, two deep, two
+  levels. A yard's crate rows have a single cell of aisle between them, and a pallet three crates deep
+  cannot float in one without standing in the stacks on either side. It hovers in storage's first aisle,
+  on the two columns of the deck doorway, at the x with the most air round it — `palletSpot` scores every
+  place along the aisles against the crates standing in the rows and the bodies on the floor, and gives up
+  its place by the door only where there is no room to float. The rows keep its lane out (`palletLane`: the
+  two middle doorway columns of the crate rows either side of the aisle) empty: in front because nothing stands
+  in a doorway and the way out must be clear, behind because that is where the pusher puts its hands on it.
+  A yard block is `Station.yardWide` = six columns, widened from four for this: the lane costs two of a row's
+  six cells rather than two of four, and the aisle past each end of the slab is a shade under a tile rather
+  than a third of one. The doorway is four columns, the lane with one either side, so a body can walk past a
+  pallet standing in it. `--layout-tests` pins all of it.
+  `Invariants.palletsClear` checks the whole of it every half second: no crate and nobody but the pusher,
+  who has its hands on it, is ever inside its footprint.
+- **A pallet is walked round, never through, where it stands now.** Its footprint is not in
+  `station.obstacles`: that set is only as fresh as the last marker rebuild, and a pallet slides while it is
+  pushed. `crowd` adds the live rectangle instead, so every walk planned round it is planned round where it
+  actually is, and `replanBlockedWalks` walks each path's line a fifth of a tile at a time against it — a
+  pallet is met between waypoints as often as on one — and replans at once for anyone already inside it.
 - **A release that ends while the dispatcher is still walking** is remembered (`palletWishes`) and handed
   to the pallet the moment it is out, because the simulator presses "opens" and "merges" two seconds apart
   and GitHub can answer just as fast.

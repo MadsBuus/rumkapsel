@@ -78,7 +78,8 @@ enum Props {
     }
 
     /// The hover pallet: a flat two-tier slab that floats a hand's breadth off the floor, with a
-    /// glowing rim and a cushion of light under it. Three rows of four crates stand on the top plate.
+    /// glowing rim and a cushion of light under it. Its slots are `PalletGeometry`'s, so the plate is
+    /// marked out wherever a crate can stand.
     static let palletWidth = PalletGeometry.width, palletDepth = PalletGeometry.depth, palletLift = PalletGeometry.lift
 
     static func pallet(color: NSColor) -> SCNNode {
@@ -100,9 +101,9 @@ enum Props {
             strip.position = v3(0, 0.02, side * (palletDepth / 2 - 0.02))
             n.addChildNode(strip)
         }
-        // Twelve shallow fields sunk into the plate, one per crate slot, so the deck is not a blank sheet.
-        for row in 0..<3 {
-            for column in 0..<4 {
+        // A shallow field sunk into the plate per crate slot, so the deck is not a blank sheet.
+        for row in 0..<PalletGeometry.rows {
+            for column in 0..<PalletGeometry.columns {
                 let field = SCNNode(geometry: SCNBox(width: 0.36, height: 0.014, length: 0.36, chamferRadius: 0))
                 field.geometry!.firstMaterial = flat(deckColor.darker(0.26))
                 let at = palletOffset(row: row, column: column, level: 0)

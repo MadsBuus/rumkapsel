@@ -242,6 +242,95 @@ enum SimulationTests {
             expect(sim.palletErrand(of: m) != nil && !m.exercising, "once the turn is over it takes the errand: \(m.words)")
         }
 
+        test("a crate reaching storage while the pallet still stands there is lifted aboard too") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            sim.orderPallet(station: station, repo: "web", number: 9000)
+            expect(step(sim, seconds: 60, until: { sim.pallets["work"] != nil }), "a pallet comes out")
+            let spot = sim.pallets["work"]?.spot ?? .zero
+            expect(abs(spot.y - Double(station.storageAisleRow)) < 0.01,
+                   "it floats in the aisle nearest the deck, row \(station.storageAisleRow), not \(spot.y)")
+            expect(step(sim, seconds: 30, until: { sim.world.truth.pallets["work"]?.state == .loaded }), "the one crate is aboard and the pallet stands loaded")
+            // A second pull request merges and its crate is walked into storage while the pallet waits.
+            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")
+            expect(sim.palletLatecomer(station: station, repo: "web", number: 441), "the late crate is taken on")
+            expect(sim.world.truth.pallets["work"]?.state == .loading, "the pallet goes back to loading")
+            expect(step(sim, seconds: 30, until: { sim.pallets["work"]?.isSettled == true }), "and settles again")
+            expect(sim.pallets["work"]?.aboard.count == 2 && sim.world.truth.pallets["work"]?.crates.count == 2, "both crates aboard: \(sim.pallets["work"]?.aboard.count ?? -1)")
+            sim.palletMerged(station: station, repo: "web")
+            expect(step(sim, seconds: 120, until: { sim.pallets["work"] == nil }), "pushed across, emptied and gone")
+            let placed = station.ledger.crates(of: "web").map(\.placed)
+            expect(placed == [.deck, .deck], "both crates on the deck: \(placed)")
+        }
+
+        test("the pusher walks round to the back and steps in at a walk, rather than sliding across the floor") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            sim.orderPallet(station: station, repo: "web", number: 9000)
+            expect(step(sim, seconds: 90, until: { sim.world.truth.pallets["work"]?.state == .loaded }), "the pallet is loaded")
+            guard let p = sim.pallets["work"] else { return expect(false, "a pallet out") }
+            sim.palletMerged(station: station, repo: "web")
+            // The most it covers in one tick while it has nowhere left to walk: the step onto the spot.
+            var creep = 0.0, was = m.pos, hadNowhereToWalk = false
+            _ = step(sim, seconds: 90, until: {
+                // Only the ticks where it was already standing still at the start of them: the tick a walk
+                // ends on is a walk's own last stride onto its waypoint, not a creep.
+                if hadNowhereToWalk, m.path.isEmpty, case .pushPallet = m.current?.kind, !p.pushing {
+                    let d = m.pos - was
+                    creep = max(creep, (d.x * d.x + d.y * d.y).squareRoot())
+                }
+                hadNowhereToWalk = m.path.isEmpty
+                was = m.pos
+                return p.pushing
+            })
+            expect(p.pushing, "it has its hands on the pallet")
+            expect(creep <= 1.4 / 30 + 0.001, "and stepped in at a walking pace rather than sliding: \(creep) in a tick")
+            expect(p.pushAcross == 0, "squarely behind it: storage keeps the lane behind the pallet clear floor")
+        }
+
+        test("a pallet is walked round, never through") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            sim.orderPallet(station: station, repo: "web", number: 9000)
+            expect(step(sim, seconds: 60, until: { sim.pallets["work"] != nil }), "a pallet comes out")
+            guard let p = sim.pallets["work"] else { return }
+            // Another body crosses the aisle the pallet is floating in, from one end to the other.
+            let b = body("b", sim: sim, station: station)
+            let row = station.storageAisleRow
+            let xs = station.storageCells.filter { $0.y == row }.map(\.x)
+            guard let lo = xs.min(), let hi = xs.max() else { return expect(false, "an aisle to cross") }
+            b.pos = SIMD2(Double(lo), Double(row))
+            b.place = .room("kind:storage")
+            sim.walk(b, to: Cell(x: hi, y: row))
+            expect(!b.path.isEmpty, "it has a way across")
+            var through: SIMD2<Double>?
+            _ = step(sim, seconds: 60, until: {
+                if through == nil, sim.insidePallet(p, b.pos) { through = b.pos }
+                return false
+            }, beat: { sim.replanBlockedWalks() })
+            expect(through == nil, "it went round the slab, not through it: \(String(describing: through)) against \(p.spot)")
+        }
+
+        test("a pallet already moving leaves a late crate where it stands") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            sim.orderPallet(station: station, repo: "web", number: 9000)
+            expect(step(sim, seconds: 60, until: { sim.pallets["work"] != nil }), "a pallet comes out")
+            expect(step(sim, seconds: 30, until: { sim.world.truth.pallets["work"]?.state == .loaded }), "loaded")
+            sim.palletMerged(station: station, repo: "web")
+            expect(step(sim, seconds: 30, until: { sim.world.truth.pallets["work"]?.state == .moving }), "and on its way across")
+            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")
+            expect(!sim.palletLatecomer(station: station, repo: "web", number: 441), "too late: it stays on the rows")
+        }
+
         test("a staging release: the pallet is ordered, loaded, pushed to the deck on the merge and unloaded there") {
             let (sim, station, m) = fixture()
             sim.hooks = SimHooks()

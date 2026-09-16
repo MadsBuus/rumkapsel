@@ -61,16 +61,8 @@ extension StationController {
                 blocked[stationName, default: []].insert(Cell(x: Int((p.x * f).rounded()), y: Int((p.y * f).rounded())))
             }
         }
-        // A hover pallet is a heavy thing standing on the floor: walks go round it, never through it.
-        for (name, p) in simulation.pallets {
-            let f = Double(Station.fine)
-            let hx = Props.palletWidth / 2, hy = Props.palletDepth / 2
-            for sx in Int(((p.spot.x - hx) * f).rounded())...Int(((p.spot.x + hx) * f).rounded()) {
-                for sy in Int(((p.spot.y - hy) * f).rounded())...Int(((p.spot.y + hy) * f).rounded()) {
-                    blocked[name, default: []].insert(Cell(x: sx, y: sy))
-                }
-            }
-        }
+        // A hover pallet is not here: it slides while it is pushed, and this set is only as fresh as the
+        // last redraw of the markers. The simulation blocks its footprint where it stands now, in `crowd`.
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 

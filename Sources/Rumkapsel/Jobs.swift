@@ -309,6 +309,7 @@ extension StationController {
             world.unorder(crate)
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             rebuildMarkers(); refreshRockets()
+            simulation.palletLatecomer(station: station, repo: repo, number: number)
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
             return
         }
@@ -320,6 +321,7 @@ extension StationController {
             // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
             if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
             refreshRockets()
+            simulation.palletLatecomer(station: station, repo: repo, number: number)
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
@@ -342,6 +344,7 @@ extension StationController {
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
+            simulation.palletLatecomer(station: station, repo: repo, number: number)
             // Every merge ships: the crate goes up at once, in a rocket of its own.
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }

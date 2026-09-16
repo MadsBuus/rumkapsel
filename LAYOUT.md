@@ -61,9 +61,12 @@ alleys. Same roles as today, so the sources, the ledger and the scenarios keep t
 
 - **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: five wide
   by three deep beyond it, three shuttle slots two tiles apart on the back row, a standing row for carriers, the front row the way in.
-- **Yard**: pad, deck, storage and decon keep their 4x4 (decon 4x2) and their order along the west arm, and
-  the yard's internal aisle stays **two wide**: the pallet is 1.8 by 1.4 and is pushed from storage across
-  the deck, and that route never touches the hallway. The one place the hallway meets the yard, the deck
+- **Yard**: pad, deck, storage and decon keep their order along the west arm and are **six wide** (`Station.yardWide`),
+  four deep, decon 6x2 — four was too narrow once a pallet lived there, since two of its eight crate cells went
+  to the pallet's lane and the way past the slab came down to a single stride. The yard's internal aisle stays
+  **two wide**: the pallet is 1.8 by 0.92 and is pushed from storage across the deck, and that route never
+  touches the hallway. A doorway between two yard blocks is four columns, the pallet's lane with a column
+  either side, so a body walks past a pallet standing in it. The one place the hallway meets the yard, the deck
   doorway, becomes a single door. So `yardDoorways` keeps its pairs inside the yard and loses them on the
   corridor side.
 - **Lounge, dorm, bath, gym**: placed by the same deterministic placement as offices, from the seed, in a
@@ -187,7 +190,7 @@ Not yet: the smaller shape set, the minion scale switch, the palette switch, the
   switchable, because they are liked too.
 - **Minion scale**: try both, behind a setting. The poses, the hands, the pixel patch and the crate arcs are
   all sized off the body, so the smaller figure has to be watched for what it breaks.
-- **Yard**: stays two wide inside, and may go wider if the pallet or the pushes want it.
+- **Yard**: ~~stays two wide inside, and may go wider if the pallet or the pushes want it~~ — done: six wide, and the aisle two.
 - **Private station**: same treatment, same release.
 - **Start with the shapes**: an office's shape from its key through `stableHash`, so a room looks the same
   on every launch and every machine. Done first, on the cross, before the floor changes.
