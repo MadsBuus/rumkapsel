@@ -137,6 +137,9 @@ final class GitHubResolver {
     /// the floor dims until.
     private var answeredLive: Set<String> = []
     func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
+    /// Roots whose answers came off last night's notes. They carry the time they were fetched, so the
+    /// poll would otherwise count them as fresh and skip the one ask that confirms them.
+    private var fromCache: Set<String> = []
 
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
@@ -165,6 +168,7 @@ final class GitHubResolver {
         guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
               let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
         for (root, k) in saved { adopt(k, repoRoot: root) }
+        lock.lock(); fromCache.formUnion(saved.keys); lock.unlock()
     }
 
     /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
@@ -204,7 +208,9 @@ final class GitHubResolver {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
+        let remembered = fromCache.remove(repoRoot) != nil   // one ask owed, whatever its age says
+        if !remembered, let (_, at) = openPRs[repoRoot],
+           Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
         lock.unlock()

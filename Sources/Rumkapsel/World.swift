@@ -180,12 +180,13 @@ final class World {
     /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
     func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
-        guard !demo, !room.key.hasPrefix("kind:") else { return false }
-        // Everything the floor came back with is provisional until it has been looked at today. It is
-        // last night's picture: right about most of it, and the only honest way to say so is to draw it
-        // low until GitHub has spoken for the repository, and then to keep it or let it go.
-        if !lookedAt(room.repo) { return true }
-        return room.worktree == nil && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
+        return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
+    }
+
+    /// Drawn from last night's notes and not yet confirmed today. A different thing from provisional,
+    /// which is about whether anybody vouches for an office at all: this is about whether we have looked.
+    func isUnchecked(_ station: Station, _ room: Room) -> Bool {
+        !demo && !room.key.hasPrefix("kind:") && !lookedAt(room.repo)
     }
 
     /// GitHub has answered for this repository over the wire in this run — not from last night's notes,

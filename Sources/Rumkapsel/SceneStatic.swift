@@ -329,6 +329,9 @@ extension StationController {
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = world.isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
+                // Drawn from last night's notes and not yet confirmed today: it breathes until it is.
+                let unchecked = world.isUnchecked(station, room)
+                let breath = 0.25 * Double(abs(key.hashValue) % 7)   // rooms are not all in step
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -342,6 +345,11 @@ extension StationController {
                     if !powered { color = color.darker(0.2) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
+                    else if unchecked {
+                        t.opacity = 0.5
+                        t.runAction(.sequence([.wait(duration: breath), .repeatForever(.sequence([
+                            .fadeOpacity(to: 0.82, duration: 1.1), .fadeOpacity(to: 0.5, duration: 1.3)]))]))
+                    }
                     else if provisional { t.opacity = 0.38 }
                     tiles.append(t)
                     if failing || dusty {
