@@ -56,6 +56,7 @@ final class Invariants {
         if c.clock - slowAt >= Invariants.slowEvery {
             slowAt = c.clock
             crates(c)
+            palletsClear(c)
         }
     }
 
@@ -86,6 +87,41 @@ final class Invariants {
                                 half: Double(max(hi.x - lo.x, hi.z - lo.z)) / 2))
         }
         return out
+    }
+
+    /// A hover pallet floats where nothing else stands. It comes out in a yard's aisle, and the rows
+    /// keep its lane through the doorway clear, so this holds while it is being pushed as well as while
+    /// it loads: no crate on the rows and no body on the floor is ever inside its footprint.
+    private func palletsClear(_ c: StationController) {
+        guard !c.simulation.pallets.isEmpty else { return }
+        let all = standing(c)
+        for (name, p) in c.simulation.pallets {
+            guard let station = c.fleet.stations[name] else { continue }
+            let at = SIMD2(station.offset.x + p.spot.x, station.offset.y + p.spot.y)
+            let hx = PalletGeometry.width / 2, hy = PalletGeometry.depth / 2
+            /// How deep a thing of that width, standing there, reaches into the plate. Negative is clear.
+            func into(_ x: Double, _ z: Double, _ half: Double) -> Double {
+                -max(abs(x - at.x) - (hx + half), abs(z - at.y) - (hy + half))
+            }
+            for s in all where s.station == name {
+                // Its own crate in the air is above the plate, not in it; the ones aboard are the plate's.
+                if p.flight?.crate.number == s.number { continue }
+                let deep = into(s.pos.x, s.pos.z, s.half)
+                if deep > 0.02 {
+                    flag("a pallet floats clear of what stands round it", "\(name)|\(p.repo)",
+                         String(format: "%@ is %.2f inside its footprint", s.name, deep))
+                }
+            }
+            // The pusher has its hands on it and leans into it: its place is at the edge, and in it.
+            for m in c.minions.values where m.station == name && m.id != p.dispatcher {
+                let deep = into(Double(m.node.position.x), Double(m.node.position.z), 0.28)
+                if deep > 0.05 {
+                    let state = c.world.truth.pallets[name]?.state.rawValue ?? "?"
+                    flag("a pallet floats clear of what stands round it", "\(name)|\(p.repo)",
+                         String(format: "%@ is %.2f inside its footprint while it is %@", m.id, deep, state))
+                }
+            }
+        }
     }
 
     /// A crate is a merged pull request: storage holds merged work waiting for a release, the deck work

@@ -853,7 +853,9 @@ final class World {
         // Every other row holds crates with aisles between. In decon the objects stand along the back
         // wall by the hatch, and the row by storage is the aisle a carrier reaches them from.
         let crateRows = area == "decon" ? Set(rows.suffix(1)) : Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
-        let sorted = cells.filter { crateRows.contains($0.y) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        // Storage keeps the pallet's lane out of its doorway free: no crate is ever given one of those cells.
+        let lane = area == "storage" ? station.palletLane : []
+        let sorted = cells.filter { crateRows.contains($0.y) && !lane.contains($0) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let rowList = crateRows.sorted()
         let testedRow = sorted.filter { $0.y == rowList.first }, untestedRow = sorted.filter { $0.y == rowList.last }
         func row(_ group: Int) -> [Cell] { area == "deck" && rowList.count > 1 ? (group == 0 ? testedRow : untestedRow) : sorted }
@@ -1064,7 +1066,15 @@ final class World {
         yardLayout(station: station, area: "storage").filter { $0.repo == repo && !$0.carried }
             .sorted { ($0.level, $0.index) > ($1.level, $1.index) }
             .map { (CrateRef(station: station.name, repo: repo, number: $0.number), standingSpot($0, area: "storage", station: station)) }
-            .prefix(12).map { $0 }
+            .prefix(PalletGeometry.capacity).map { $0 }
+    }
+
+    /// Where one crate stands in storage right now, if it is on the rows and not on anyone's arms.
+    /// The rows are re-laid every time a crate leaves them, so a place asked for earlier goes stale.
+    func storageSpot(station: Station, crate: CrateRef) -> Spot? {
+        guard let s = yardLayout(station: station, area: "storage")
+            .first(where: { $0.repo == crate.repo && $0.number == crate.number && !$0.carried }) else { return nil }
+        return standingSpot(s, area: "storage", station: station)
     }
 
     /// A merged office's package, from the office door to storage. Storage holds a place for it from

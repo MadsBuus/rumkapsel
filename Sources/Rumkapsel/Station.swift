@@ -229,30 +229,54 @@ final class Station {
     private func yardRow(_ index: Int) -> Int { [4, 0, -4][index] }
     /// The pad block's east column and top row: north of the deck in the classic plan; on the ground,
     /// west of it out toward the sea, with the causeway between.
-    private var padOrigin: (x0: Int, r: Int) { padGap > 0 ? (yardX0 - 4 - padGap, 0) : (yardX0, -4) }
+    private var padOrigin: (x0: Int, r: Int) { padGap > 0 ? (yardX0 - Station.yardWide - padGap, 0) : (yardX0, -4) }
+    /// How many columns wide a yard block is. Six, not four: two of them are the pallet's lane, and a
+    /// four-wide yard that gave up two of its eight crate cells to that lane left the rows crowded and
+    /// the way past the slab down to a single stride at either end.
+    static let yardWide = 6
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
         let (x0, r) = index == 2 ? padOrigin : (yardX0, yardRow(index))
-        var cells = (0..<4).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
+        var cells = (0..<Station.yardWide).flatMap { d in (-1...2).map { y in Cell(x: x0 - d, y: y + r) } }
         if index == 2, padGap > 0 {
             // The causeway: two lanes from the deck's west side out to the pad, pad floor the whole way.
-            for x in (x0 + 1)...(yardX0 - 4) { for y in [0, 1] { cells.append(Cell(x: x, y: y)) } }
+            for x in (x0 + 1)...(yardX0 - Station.yardWide) { for y in [0, 1] { cells.append(Cell(x: x, y: y)) } }
         }
         return cells
     }
     private func yardCenter(_ index: Int) -> SIMD2<Double> {
         let (x0, r) = index == 2 ? padOrigin : (yardX0, yardRow(index))
-        return SIMD2(Double(x0) - 1.5, 0.5 + Double(r))
+        return SIMD2(Double(x0) - Double(Station.yardWide - 1) / 2, 0.5 + Double(r))
     }
     var storageCells: [Cell] { blocks.storage }
     var storageCenter: SIMD2<Double> { yardCenter(0) }
     var deckCells: [Cell] { blocks.deck }
     var padCells: [Cell] { blocks.pad }
     var padCenter: SIMD2<Double> { yardCenter(2) }
-    /// The storage row nearest the deck. Crates stack from the far wall, so this row is the pallet's.
+    /// The storage row nearest the deck: the row the deck doorway opens onto.
     var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }
-    /// Where a hover pallet stands in storage: the near row, on the column of a deck doorway.
-    var palletCell: Cell { Cell(x: yardX0 - 2, y: storageNearRow) }
+    /// The aisle a pallet floats in. Every other row of a yard holds crates, so the rows themselves
+    /// are no place for it: the first aisle behind the near row is the nearest clear floor.
+    var storageAisleRow: Int {
+        let rows = Set(storageCells.map(\.y)).sorted()
+        return rows.count > 1 ? rows[1] : storageNearRow
+    }
+    /// The pallet's lane: the doorway's two columns on the crate rows either side of its aisle. The rows
+    /// leave them empty. In front, because nothing stands in a doorway and a loaded pallet needs the way
+    /// out clear; behind, because that is where the pusher puts its hands on it.
+    var palletLane: Set<Cell> {
+        guard hasPad, storageAisleRow != storageNearRow else { return [] }
+        return Set([storageNearRow, storageAisleRow + 1].flatMap { y in
+            palletLaneColumns.map { Cell(x: $0, y: y) }
+        }.filter { storageCells.contains($0) })
+    }
+    /// The two columns wide enough for the slab itself, in the middle of the doorway. The doorway is
+    /// wider than they are so that a body can walk past a pallet standing in it.
+    var palletLaneColumns: [Int] { [yardX0 - Station.yardWide / 2 + 1, yardX0 - Station.yardWide / 2] }
+    /// The columns a doorway between two yard blocks spans: the pallet's lane with a column either side.
+    private var yardGateColumns: [Int] { (1...4).map { yardX0 - $0 } }
+    /// Where a hover pallet stands in storage: the aisle, on the middle columns of the deck doorway.
+    var palletCell: Cell { Cell(x: palletLaneColumns[1], y: storageAisleRow) }
     /// The console on the wall by the storage doorway: the cell it hangs in, and which way it faces.
     var storageConsole: (cell: Cell, facing: SIMD2<Double>) {
         (Cell(x: yardX0, y: storageNearRow), SIMD2(0, -1))
@@ -265,11 +289,11 @@ final class Station {
     private func makeDeconCells() -> [Cell] {
         guard hasPad else { return [] }
         let x0 = yardX0, r = yardRow(0)
-        return (3..<5).flatMap { d in (0..<4).map { x in Cell(x: x0 - x, y: r + d) } }
+        return (3..<5).flatMap { d in (0..<Station.yardWide).map { x in Cell(x: x0 - x, y: r + d) } }
     }
-    var deconCenter: SIMD2<Double> { SIMD2(Double(yardX0) - 1.5, Double(yardRow(0)) + 3.5) }
+    var deconCenter: SIMD2<Double> { SIMD2(Double(yardX0) - Double(Station.yardWide - 1) / 2, Double(yardRow(0)) + 3.5) }
     /// The hatch in decon's back wall, and which way it faces: into the chamber.
-    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(yardX0) - 1.5, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
+    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) { (SIMD2(Double(yardX0) - Double(Station.yardWide - 1) / 2, Double(yardRow(0)) + 4.46), SIMD2(0, -1)) }
 
     /// Every crate this station knows: the source's word and the station's, per crate. The counts
     /// below are read off it and kept nowhere.
@@ -462,12 +486,13 @@ final class Station {
         // Corridor into the airlock, airlock out onto the bay: the only way to the outside.
         for a in airlockInner { out.append((Cell(x: a.x, y: a.y - 1), a)) }
         for h in airlockHatches { out.append((h.inside, h.bay)) }
-        for x in [x0 - 1, x0 - 2] {
+        for x in yardGateColumns {
             out.append((Cell(x: x, y: 2), Cell(x: x, y: 3)))     // deck to storage
             if padGap == 0 { out.append((Cell(x: x, y: -1), Cell(x: x, y: -2))) }   // deck to pad
+            out.append((Cell(x: x, y: 6), Cell(x: x, y: 7)))     // storage back into decon
         }
-        if padGap > 0 { for y in [0, 1] { out.append((Cell(x: x0 - 3, y: y), Cell(x: x0 - 4, y: y))) } }   // deck west onto the causeway
-        for x in [x0 - 1, x0 - 2] { out.append((Cell(x: x, y: 6), Cell(x: x, y: 7))) }   // storage back into decon
+        // Deck west onto the causeway, on its two middle rows.
+        if padGap > 0 { for y in [0, 1] { out.append((Cell(x: x0 - Station.yardWide + 1, y: y), Cell(x: x0 - Station.yardWide, y: y))) } }
         return out
     }
 

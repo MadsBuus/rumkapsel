@@ -353,7 +353,30 @@ final class Simulation<B: Body> {
                 if hypot(p.x - at.x, p.y - at.y) < 0.55 { out.insert(sub) }
             } }
         }
+        // The hover pallet where it stands this instant. It is read here rather than from the obstacle
+        // grid because it slides while it is pushed, and that grid is only rebuilt when the markers are.
+        // Its own pusher walks round to its edge and must not be kept off it.
+        if let p = pallets[m.station], p.dispatcher != m.id { out.formUnion(palletFootprint(p)) }
         return out
+    }
+
+    /// The sub-cells a pallet covers where it floats right now, a body's shoulders allowed for, so a
+    /// walk planned round it keeps clear of the slab rather than clipping its corner.
+    func palletFootprint(_ p: PalletJob) -> Set<Cell> {
+        var out: Set<Cell> = []
+        let f = Double(Station.fine)
+        let hx = PalletGeometry.width / 2 + 0.2, hy = PalletGeometry.depth / 2 + 0.2
+        for sx in Int(((p.spot.x - hx) * f).rounded())...Int(((p.spot.x + hx) * f).rounded()) {
+            for sy in Int(((p.spot.y - hy) * f).rounded())...Int(((p.spot.y + hy) * f).rounded()) {
+                out.insert(Cell(x: sx, y: sy))
+            }
+        }
+        return out
+    }
+
+    /// True where a body would be standing in a pallet: the slab's own footprint, a shoulder's width out.
+    func insidePallet(_ p: PalletJob, _ at: SIMD2<Double>) -> Bool {
+        abs(at.x - p.spot.x) < PalletGeometry.width / 2 + 0.2 && abs(at.y - p.spot.y) < PalletGeometry.depth / 2 + 0.2
     }
 
     /// A walk for a body: round the props and round everyone else. When the only way through is
@@ -369,11 +392,33 @@ final class Simulation<B: Body> {
     func replanBlockedWalks() {
         for m in bodies.values where !m.path.isEmpty {
             guard let station = fleet.stations[m.station] else { continue }
-            let blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
-            guard blocked, clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
+            var blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
+            // A pallet is met between waypoints as often as on one, and it moves: the line itself is
+            // walked, a step at a time, rather than only the corners of it.
+            var inside = false
+            if let p = pallets[m.station], p.dispatcher != m.id {
+                inside = insidePallet(p, m.pos)
+                blocked = blocked || inside || crosses(p, from: m.pos, along: m.path)
+            }
+            // Standing in it already: round it now, whatever the last plan cost.
+            guard blocked, inside || clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
             m.lastReplanAt = clock
             m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
         }
+    }
+
+    /// Whether a walk's line runs through a pallet, walked leg by leg a fifth of a tile at a time.
+    private func crosses(_ p: PalletJob, from: SIMD2<Double>, along path: [SIMD2<Double>]) -> Bool {
+        var at = from
+        for leg in path {
+            let d = leg - at
+            let len = (d.x * d.x + d.y * d.y).squareRoot()
+            if len > 1e-6 {
+                for step in 1...max(1, Int(len / 0.2)) where insidePallet(p, at + d * (Double(step) * 0.2 / len)) { return true }
+            }
+            at = leg
+        }
+        return false
     }
 
     // MARK: hands
