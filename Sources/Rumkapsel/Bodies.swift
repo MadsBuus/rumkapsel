@@ -92,7 +92,7 @@ extension Simulation {
                 guard m.station == station.name, case .deliverOffice(let id) = m.current?.kind else { return nil }
                 return id
             })
-            let free = bodies.values.filter { $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 && !$0.isCrew }
+            let free = bodies.values.filter { $0.station == station.name && $0.isFree }
             for order in world.truth.deliveries.values where order.station == station.name && order.landed && !fetching.contains(order.id) {
                 guard let room = station.rooms[order.roomKey] else {
                     // The office went away while its crate was on the floor: the crate folds away where it lies.

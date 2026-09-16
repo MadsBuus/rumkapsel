@@ -153,6 +153,16 @@ class Body {
     }
     /// Carrying, delivering or leaving: holding something, not free for anything else.
     var onJob: Bool { current?.isJob ?? false }
+
+    /// Whether a body can be handed a chore this instant: it has none in hand, its arms are empty, it
+    /// stands in for nobody else, and whatever it is doing can be cut into. Every picker asks this one
+    /// question rather than listing the cases over again, so they cannot drift apart from each other —
+    /// and a doing that must not be cut into says so once, in its phases, instead of by name here.
+    var isFree: Bool {
+        !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
+            && state != .leaving && wakeUntil == 0
+            && (current == nil || phaseKind.interruptible)
+    }
     /// Resting: only then do the couch and the bed pull.
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
