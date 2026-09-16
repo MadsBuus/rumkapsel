@@ -8,9 +8,8 @@ import Foundation
 /// The hover pallet's shape, as numbers: the slab's size, how high it hovers, and where its crate
 /// slots are on the top plate.
 enum PalletGeometry {
-    /// Four crates across, two deep, stacked two high. The depth is what matters: a yard's crate rows
-    /// have a single cell of aisle between them, and a pallet three crates deep cannot float in one
-    /// without standing in the stacks on either side.
+    /// Four crates across, two deep, stacked two high. The depth is the constraint: a yard's crate rows
+    /// have a single cell of aisle between them, so anything deeper stands in the stacks on either side.
     static let rows = 2, columns = 4, levels = 2, spacing = 0.42
     static var capacity: Int { rows * columns * levels }
     static let width = 1.8, depth = 0.92, lift = 0.12

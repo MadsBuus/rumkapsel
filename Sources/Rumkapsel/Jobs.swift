@@ -153,10 +153,9 @@ extension StationController {
     }
 
     func reveal(_ key: String) {
-        // The crate that was set down hands over to the office's own package: it fades out on its slot
-        // over the same beat the office fades in, rather than blinking away.
-        // The crate folds open where it stands, and the office unfolds out of it: tile by tile away
-        // from the doorway until the plot is filled, then the name fades in.
+        // The crate folds open where it stands and the office unfolds out of it: tile by tile away from
+        // the doorway until the plot is filled, then the name fades in. The crate fades out on its slot
+        // over the same beat, handing over to the office's own package.
         let parts0 = key.split(separator: "|", maxSplits: 1).map(String.init)
         let station0 = parts0.count == 2 ? fleet.stations[parts0[0]] : nil
         let door = station0?.doorCell(of: parts0[1])
