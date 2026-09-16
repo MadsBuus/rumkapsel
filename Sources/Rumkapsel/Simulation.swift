@@ -870,7 +870,17 @@ final class Simulation<B: Body> {
             m.pos += (stand - m.pos) * min(1, dt * 4)
         }
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
-            m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
+            let spot = station.beds[b].pos
+            // Lying, it is on the mattress; on its feet or sitting on the edge, it is a shin's reach out
+            // from it, which is where a body stands to get into a bed and where it lands getting out.
+            var stand = spot
+            if !m.lying, let room = station.rooms["kind:quarters"], !room.cells.isEmpty {
+                let xs = room.cells.map { Double($0.x) }, ys = room.cells.map { Double($0.y) }
+                let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
+                let d = mid - spot, far = (d.x * d.x + d.y * d.y).squareRoot()
+                if far > 0.01 { stand = spot + d / far * B.seatReach }
+            }
+            m.pos += (stand - m.pos) * min(1, dt * 4)
         }
     }
 }
