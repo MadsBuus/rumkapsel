@@ -381,9 +381,14 @@ final class Minion: Body {
             seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = 0
             at = v3(0, bodyHeight / 2, 0)
         case .seated(let height, let offset):
+            // A sitter's feet stay where it was standing and the rest of it goes back: the shins reach
+            // forward of the body, so the body sits that far behind the spot. Standing again is then
+            // nothing but the way back, and the torso comes up over the feet instead of the feet
+            // sliding in under the torso.
             seat = offset; boxHeight = torso; pitch = -0.1
-            at = v3(offset.x, height + torso / 2, offset.y)
-            legs.position = v3(offset.x, height, offset.y)
+            let back = offset.y - bodyDepth * 1.6
+            at = v3(offset.x, height + torso / 2, back)
+            legs.position = v3(offset.x, height, back)
         case .flat(let height):
             seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = -.pi / 2
             at = v3(0, height + bodyDepth / 2, 0)
