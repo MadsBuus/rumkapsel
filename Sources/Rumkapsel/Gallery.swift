@@ -129,9 +129,9 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             // Going to bed and getting up are the same moves in opposite orders. It comes to the side of
             // the bunk, turns its back on it, sits on the edge, and swings round into line as it stretches
             // out; getting up it swings back out of line onto the edge, stands, and walks off as it faces.
-            // The bunk is 0.34 across, so its edge is 0.17 out: sitting a little inside that puts the
-            // body on the mattress rather than in the air beside it.
-            let side = p.x + 0.12, off = p.x + 1.3
+            // It stops at the bunk's edge, which is 0.17 out from the middle of a bed 0.34 across: that
+            // is where its feet go, and sitting puts the rest of it back onto the mattress behind them.
+            let side = p.x + 0.17, off = p.x + 1.3
             let onEdge = p.y + 0.1, along = p.y             // where it sits, and where it lies
             let sat = Minion.Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
             let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0

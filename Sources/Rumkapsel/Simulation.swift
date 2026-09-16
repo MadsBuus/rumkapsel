@@ -855,14 +855,19 @@ final class Simulation<B: Body> {
         // Seats and beds draw a body in only while it has nothing else to do.
         if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
             let spot = station.couches[c]
-            m.pos += (spot - m.pos) * min(1, dt * 4)
-            // A couch stands against the wall it is drawn along, so a sitter looks into the room.
-            if m.onCouch, let lounge = station.rooms["kind:lounge"], !lounge.cells.isEmpty {
+            // A couch stands against the wall it is drawn along, so a sitter looks into the room — and
+            // stands a shin's reach out from the couch, where its feet will be, rather than in it.
+            var stand = spot
+            if let lounge = station.rooms["kind:lounge"], !lounge.cells.isEmpty {
                 let xs = lounge.cells.map { Double($0.x) }, ys = lounge.cells.map { Double($0.y) }
                 let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
-                let d = mid - spot
-                if (d.x * d.x + d.y * d.y).squareRoot() > 0.01 { m.facing = atan2(d.x, d.y) }
+                let d = mid - spot, far = (d.x * d.x + d.y * d.y).squareRoot()
+                if far > 0.01 {
+                    stand = spot + d / far * B.seatReach
+                    if m.onCouch { m.facing = atan2(d.x, d.y) }
+                }
             }
+            m.pos += (stand - m.pos) * min(1, dt * 4)
         }
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
             m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)

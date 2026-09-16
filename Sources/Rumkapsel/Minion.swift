@@ -386,7 +386,7 @@ final class Minion: Body {
             // nothing but the way back, and the torso comes up over the feet instead of the feet
             // sliding in under the torso.
             seat = offset; boxHeight = torso; pitch = -0.1
-            let back = offset.y - bodyDepth * 1.6
+            let back = offset.y - Minion.seatReach
             at = v3(offset.x, height + torso / 2, back)
             legs.position = v3(offset.x, height, back)
         case .flat(let height):

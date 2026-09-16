@@ -80,6 +80,9 @@ class Body {
     /// The shower's last beat: over at the rail with the towel before going.
     var drying = false
     var nextFidgetAt = 0.0
+    /// How far a sitter's shins reach in front of its body. A body stands with its feet on the spot and
+    /// sits down behind them, so this is also how far out from a seat it stops on the way to sitting.
+    static let seatReach = 0.176
     var wakeUntil = 0.0
     /// Getting to its feet off a bed: it holds still until then, but unlike `wakeUntil` it is no bar to
     /// being given something to do — standing up is usually the answer to an order, not a refusal of it.
