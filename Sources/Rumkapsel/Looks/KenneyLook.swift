@@ -76,6 +76,145 @@ struct KenneyLook: Look {
         }
     }
 
+    // The complex is poured, not tiled: one apron under the whole of it, with each part painted on top.
+    static let concrete = NSColor(rgb: (0.66, 0.67, 0.66))
+    static let kerb = NSColor(rgb: (0.46, 0.47, 0.48))
+    static let padPaint = NSColor(rgb: (0.34, 0.35, 0.38))
+    static let hazard = NSColor(rgb: (0.82, 0.68, 0.26))
+    static let bayPaint = NSColor(rgb: (0.52, 0.55, 0.62))
+    static let deckPaint = NSColor(rgb: (0.42, 0.55, 0.52))
+    static let paintLine = NSColor(rgb: (0.92, 0.93, 0.92))
+    static let steel = NSColor(rgb: (0.72, 0.74, 0.76))
+
+    /// A flat slab over a set of the station's cells, its edge `grow` out from them and its corners rounded,
+    /// placed in the world. One sampling of the distance to the cells cut at that edge, so a run of them is
+    /// one shape with no seam down the middle.
+    private func slab(_ cells: [Cell], of station: Station, grow: Double, _ color: NSColor, y: Double) -> SCNNode? {
+        guard !cells.isEmpty else { return nil }
+        let own = Set(cells)
+        // Drawn out from the cells, or in from them. Measuring in means measuring to the ring of cells just
+        // outside the set: the distance to the set's own squares says only how deep one square is, so an
+        // inset taken from it would cut every cell into a lozenge of its own instead of one shape.
+        let from = grow >= 0 ? cells : own.flatMap { c in
+            Tile.around.map { Cell(x: c.x + $0.0, y: c.y + $0.1) }
+        }.filter { !own.contains($0) }
+        let pts = Array(Set(from)).map { SIMD2(Double($0.x), Double($0.y)) }
+        guard !pts.isEmpty else { return nil }
+        let cx = cells.map(\.x), cz = cells.map(\.y)
+        let pad = max(grow, 0) + 1
+        let lo = SIMD2(Double(cx.min()!) - pad, Double(cz.min()!) - pad)
+        let hi = SIMD2(Double(cx.max()!) + pad, Double(cz.max()!) + pad)
+        let round = 0.28, half = SIMD2<Double>(repeating: 0.5 - round)
+        let geometry = Shapes.fill(from: lo, to: hi, step: 0.25) { p in
+            var near = Double.infinity
+            for c in pts {
+                let q = simd_abs(p - c) - half
+                near = min(near, simd_length(simd_max(q, SIMD2(repeating: 0))) + min(max(q.x, q.y), 0) - round)
+            }
+            return grow >= 0 ? grow - near : near + grow
+        }
+        guard let n = Shapes.node(geometry, color, y: 0) else { return nil }
+        n.position = v3(station.offset.x, y, station.offset.y)
+        return n
+    }
+
+    /// The launch complex, poured as one apron: screening at the hatch, the store, the test rows and the
+    /// pad, each painted on it, with a gantry beside the pad and floodlights over the yard.
+    func output(_ station: Station, deckInUse: Bool) -> SetPiece? {
+        guard station.hasPad else { return nil }
+        var piece = SetPiece()
+        let deck = deckInUse ? station.deckCells : []
+        let parts: [(Area, [Cell], NSColor)] = [(.decon, station.deconCells, Self.hazard),
+                                                (.storage, station.storageCells, Self.bayPaint),
+                                                (.deck, deck, Self.deckPaint),
+                                                (.pad, station.padCells, Self.padPaint)]
+        // The apron itself, a part at a time so the pointer still finds what it is standing over, each a
+        // hair over the last so the overlaps do not fight.
+        for (i, (area, cells, _)) in parts.enumerated() {
+            if let k = slab(cells, of: station, grow: 0.5, Self.kerb, y: -0.004) { piece.add(k, as: area) }
+            if let a = slab(cells, of: station, grow: 0.36, Self.concrete, y: Kit.plateTop + Double(i) * 0.0004) {
+                piece.add(a, as: area)
+            }
+        }
+        for (area, cells, color) in parts {
+            if let n = slab(cells, of: station, grow: -0.14, color, y: Kit.plateTop + 0.003) { piece.add(n, as: area) }
+        }
+        // A white line round the pad, and the gantry standing off its seaward corner.
+        if let ring = slab(station.padCells, of: station, grow: 0.06, Self.paintLine, y: Kit.plateTop + 0.0035),
+           let inner = slab(station.padCells, of: station, grow: -0.1, Self.padPaint, y: Kit.plateTop + 0.004) {
+            piece.add(ring, as: .pad)
+            piece.add(inner, as: .pad)
+        }
+        let px = station.padCells.map(\.x), pz = station.padCells.map(\.y)
+        let trench = SCNNode(geometry: SCNPlane(width: 1.15, height: 1.15))
+        trench.geometry!.firstMaterial = flat(NSColor(rgb: (0.16, 0.16, 0.18)))
+        trench.eulerAngles.x = -.pi / 2
+        trench.eulerAngles.z = .pi / 4
+        trench.position = v3(station.offset.x + station.padCenter.x, Kit.plateTop + 0.005, station.offset.y + station.padCenter.y)
+        piece.add(trench, as: .pad)
+        let gantry = Self.gantry()
+        gantry.position = v3(station.offset.x + Double(px.min()!) - 0.75, 0, station.offset.y + station.padCenter.y)
+        piece.add(gantry, as: .pad)
+        // Floodlights on the pad's own corners, where they would light a rocket standing on it.
+        for (dx, dz) in [(Double(px.min()!) - 0.95, Double(pz.min()!) - 0.95), (Double(px.max()!) + 0.95, Double(pz.min()!) - 0.95)] {
+            let mast = Self.floodlight()
+            mast.position = v3(station.offset.x + dx, 0, station.offset.y + dz)
+            piece.add(mast, as: .pad)
+        }
+        return piece
+    }
+
+    /// A service gantry: four legs braced in a lattice, a head at the top and an arm swung over the pad.
+    private static func gantry() -> SCNNode {
+        let n = SCNNode()
+        let frame = lit(steel), dark = lit(NSColor(rgb: (0.5, 0.52, 0.55)))
+        let height = 2.4, span = 0.34
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let leg = SCNNode(geometry: SCNBox(width: 0.07, height: height, length: 0.07, chamferRadius: 0))
+            leg.geometry!.firstMaterial = frame
+            leg.position = v3(sx * span, height / 2, sz * span)
+            n.addChildNode(leg)
+        }
+        for level in 1...4 {
+            let y = height * Double(level) / 4.5
+            for turned in [false, true] {
+                let rail = SCNNode(geometry: SCNBox(width: turned ? 0.05 : span * 2, height: 0.05, length: turned ? span * 2 : 0.05, chamferRadius: 0))
+                rail.geometry!.firstMaterial = dark
+                rail.position = v3(turned ? span : 0, y, turned ? 0 : span)
+                n.addChildNode(rail)
+                let far = rail.clone()
+                far.position = v3(turned ? -span : 0, y, turned ? 0 : -span)
+                n.addChildNode(far)
+            }
+        }
+        let head = SCNNode(geometry: SCNBox(width: span * 2.3, height: 0.2, length: span * 2.3, chamferRadius: 0))
+        head.geometry!.firstMaterial = frame
+        head.position = v3(0, height + 0.1, 0)
+        n.addChildNode(head)
+        // The arm reaches out over the pad, where a rocket stands.
+        let arm = SCNNode(geometry: SCNBox(width: 1.5, height: 0.09, length: 0.16, chamferRadius: 0))
+        arm.geometry!.firstMaterial = dark
+        arm.position = v3(0.85, height - 0.35, 0)
+        n.addChildNode(arm)
+        return n
+    }
+
+    /// A floodlight mast: a post with a row of lamps on its head, turned in over the yard.
+    private static func floodlight() -> SCNNode {
+        let n = SCNNode()
+        let post = SCNNode(geometry: SCNBox(width: 0.08, height: 1.35, length: 0.08, chamferRadius: 0))
+        post.geometry!.firstMaterial = lit(steel)
+        post.position = v3(0, 0.675, 0)
+        n.addChildNode(post)
+        for i in -1...1 {
+            let lamp = SCNNode(geometry: SCNBox(width: 0.16, height: 0.12, length: 0.08, chamferRadius: 0))
+            lamp.geometry!.firstMaterial = flat(NSColor(rgb: (0.96, 0.95, 0.8)))
+            lamp.position = v3(Double(i) * 0.18, 1.37, 0)
+            n.addChildNode(lamp)
+        }
+        return n
+    }
+
     /// One of the kit's platforms, kerbed on the open edges, the dark line between owners kept as it is.
     func tileDetail(_ tile: Tile) -> SCNNode? {
         guard let plate = Kit.platform(open: tile.open, color: tile.color) else { return nil }
@@ -86,6 +225,44 @@ struct KenneyLook: Look {
     }
 
     func tint(tile: SCNNode, _ color: NSColor) { Kit.tint(tile: tile, color) }
+
+    /// The bay: an apron outside the hull with a landing circle painted for every slot, and the airlock a
+    /// marked passage running back in through it.
+    func input(_ station: Station) -> SetPiece? {
+        guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
+        var piece = SetPiece()
+        for (area, cells) in [(Area.bay, station.hangarCells), (.airlock, station.airlockCells)] {
+            if let k = slab(cells, of: station, grow: 0.5, Self.kerb, y: -0.004) { piece.add(k, as: area) }
+            if let a = slab(cells, of: station, grow: 0.36, Self.concrete, y: Kit.plateTop) { piece.add(a, as: area) }
+        }
+        if let apron = slab(station.hangarCells, of: station, grow: -0.14, Self.bayPaint, y: Kit.plateTop + 0.003) {
+            piece.add(apron, as: .bay)
+        }
+        // The passage is marked down its middle rather than floored in a colour of its own.
+        if !station.airlockCells.isEmpty {
+            let xs = station.airlockCells.map(\.x), zs = station.airlockCells.map(\.y)
+            let lane = SCNNode(geometry: SCNPlane(width: min(0.8, Double(xs.max()! - xs.min()!) + 0.7), height: Double(zs.max()! - zs.min()!) + 0.4))
+            lane.geometry!.firstMaterial = flat(Self.hazard.darker(0.15))
+            lane.eulerAngles.x = -.pi / 2
+            lane.position = v3(station.offset.x + Double(xs.min()! + xs.max()!) / 2, Kit.plateTop + 0.003,
+                               station.offset.y + Double(zs.min()! + zs.max()!) / 2)
+            piece.add(lane, as: .airlock)
+        }
+        // A circle painted where each ship sets down, with its own number bar beside it.
+        for slot in station.hangarSlots {
+            let ring = SCNNode(geometry: SCNPlane(width: 1.18, height: 1.18))
+            ring.geometry!.firstMaterial = flat(Self.paintLine)
+            ring.eulerAngles.x = -.pi / 2
+            ring.position = v3(station.offset.x + slot.x, Kit.plateTop + 0.004, station.offset.y + slot.y)
+            piece.add(ring, as: .bay)
+            let inner = SCNNode(geometry: SCNPlane(width: 1.0, height: 1.0))
+            inner.geometry!.firstMaterial = flat(Self.bayPaint)
+            inner.eulerAngles.x = -.pi / 2
+            inner.position = v3(station.offset.x + slot.x, Kit.plateTop + 0.005, station.offset.y + slot.y)
+            piece.add(inner, as: .bay)
+        }
+        return piece
+    }
 
     /// A row of the kit's arches across the chamber, the pane still dropping behind them.
     func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
