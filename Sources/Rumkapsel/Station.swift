@@ -833,7 +833,6 @@ final class Station {
         return true
     }
 
-    /// Breadth-first path over walkable cells. Returns cells to visit, excluding `from`.
     // MARK: walking round things
 
     /// Props on the floor, as blocked spots on a finer grid: three steps to a cell side, so a minion
@@ -844,9 +843,6 @@ final class Station {
     static func cell(ofSub s: Cell) -> Cell { Cell(x: Int((Double(s.x) / Double(fine)).rounded()), y: Int((Double(s.y) / Double(fine)).rounded())) }
     static func point(ofSub s: Cell) -> SIMD2<Double> { SIMD2(Double(s.x) / Double(fine), Double(s.y) / Double(fine)) }
 
-    /// Waypoints from a position to a cell, threading between crates, boxes and pyramids. Ends on the
-    /// cell's centre when that is clear, else on the clearest spot in it. Falls back to wading through
-    /// on the coarse grid only when nothing is passable at all.
     /// A lane along a wall: a spot whose next spot over lies where a walk may not go. Kept off unless
     /// nothing else leads through, so walks run down the middle and never brush the walls.
     private func isEdge(_ s: Cell) -> Bool {

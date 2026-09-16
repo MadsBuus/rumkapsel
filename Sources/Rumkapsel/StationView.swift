@@ -219,7 +219,6 @@ extension StationController {
         return SIMD2(Double(near.x) + Double(far.x - near.x) * t, Double(near.z) + Double(far.z - near.z) * t)
     }
 
-    /// Orthographic half-height that fits a footprint of the given span at the current aspect.
     /// Where the default isometric camera should look to centre these stations, and the half-extent
     /// they cover on screen (in ground units across, and along the view before the tilt foreshortens it).
     /// Each station's own footprint is projected, so an L-shaped fleet isn't framed by its empty corner.

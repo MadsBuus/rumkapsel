@@ -356,8 +356,6 @@ final class Minion: Body {
         toolNode?.childNodes.first?.childNode(withName: "tip", recursively: false)?.opacity = on ? 1 : 0.25
     }
 
-    /// Flat on the back on the bench, arms up, or off it again.
-
     /// How a body is held. Standing, sat on a seat of some height, or flat on its back — one answer,
     /// because they are not things that can be true at once. Everything hung on the body follows from
     /// this: the box's height, the face, whatever is held, the legs, the blur and the shadow.

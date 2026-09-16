@@ -314,13 +314,6 @@ extension StationController {
         }
     }
 
-    /// The figure drawn where the body is, held as the body says: sleeping, seated, on the bench, blurred
-    /// in the bath; then the one little routine per activity, so you can tell at a glance what it is up to.
-    /// Copies what the body is onto the figure you see: its pose, where it stands, how solid it is.
-    /// This is not work the body does — it is the picture catching up to the facts — so it runs for
-    /// every body every frame, whatever else that frame skips. A frame that skips it leaves the figure
-    /// showing the last frame's facts until one finally runs, and then it jumps to catch up.
-
     /// The flourishes on top of the mirror: the shower's drops, which way the figure turns, and the one
     /// little routine per activity. A frame may skip these — a dropped droplet is nothing.
     private func pose(_ m: Minion, station: Station, dt: Double) {
