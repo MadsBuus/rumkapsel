@@ -140,12 +140,12 @@ extension StationController {
         m.tilt.eulerAngles = SCNVector3(tilt, 0, 0)
     }
 
-    /// What is in the hands on a pallet errand: the clipboard to the console, the wand while crates
+    /// What is in the hands on a pallet errand: the tablet to the console, the wand while crates
     /// fly, both hands on the pallet while it is shoved.
     func errandTool(_ m: Minion) -> Minion.Tool? {
         switch m.current?.kind {
-        case .dispatch: return .clipboard
-        case .waitPallet(_, let repo): return simulation.pallets[m.station]?.repo == repo ? .telekinesis : .clipboard
+        case .dispatch: return .tablet
+        case .waitPallet(_, let repo): return simulation.pallets[m.station]?.repo == repo ? .telekinesis : .tablet
         case .loadPallet, .unloadPallet: return .telekinesis
         case .pushPallet: return simulation.pallets[m.station]?.pushing == true ? .hands : nil
         default: return nil

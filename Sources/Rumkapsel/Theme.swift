@@ -57,7 +57,7 @@ struct Vocabulary {
     // What minions are doing.
     var lookRound = "having a look round the station", leaving = "off the station through the airlock"
     var inbound = "shuttle inbound with", stow = "stowing a cube for the commit", pack = "packing a crate for the pull request"
-    var asleep = "asleep in the dorm", console = "off to the storage console with the clipboard", pallet = "the pallet"
+    var asleep = "asleep in the dorm", console = "off to the storage console with the tablet", pallet = "the pallet"
     var qaWalk = "walking the rows on the deck"
     // Releases.
     var crate = "crate", crates = "crates", loadInto = "into the rocket", standingBy = "standing by on the pad"
