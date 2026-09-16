@@ -105,6 +105,8 @@ final class World {
     /// Scans since this run began, for the moment the floor waits before putting offices up on its own.
     /// Counted in scans rather than seconds because a scripted run lives out a whole day in under one.
     private var scans = 0
+    /// When last run's answers were last written down.
+    private var savedKnowledgeAt = Date.distantPast
     /// How many scans offices wait for GitHub's first word. A station with no network is still your
     /// station, so they go up regardless after this.
     static let officeGraceScans = 10
@@ -734,7 +736,11 @@ final class World {
         // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
         let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
-        if waitsForGitHub, readyRepos.count != before {
+        // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
+        // the floor and must go from what next launch is told as well, or it comes back from the dead
+        // every morning. Written when a repository first answers, and now and then after that.
+        if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
+            savedKnowledgeAt = Date()
             github.saveKnowledge(repoRoots.mapValues(\.repo))
         }
         return events
