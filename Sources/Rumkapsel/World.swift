@@ -361,7 +361,16 @@ final class World {
     /// A session's office, unless that office was merged and cleared while the session lingers on the
     /// branch: then the minion waits in the lounge rather than rebuilding the office every scan.
     func homeFor(_ s: SessionInfo, station: String) -> Home {
-        let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+        var home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+        // A branch names an office until GitHub says which pull request it is, and after that the pull
+        // request does. Otherwise the same work is one office here, under the branch it is checked out
+        // on, and another from GitHub under its number — and neither knows about the other, so the
+        // rules that keep your own office standing never see the remote one at all. A branch named
+        // `gh-N/…` already arrives as `#N`; this is for every branch that is not.
+        if home.issue == nil, let branch = s.branch, let root = s.repoRoot,
+           let pr = github.pull(branch: branch, repoRoot: root), pr.state == "OPEN" {
+            home = Home(key: "task:\(s.repo)#\(pr.number)", name: home.name, repo: home.repo, issue: pr.number)
+        }
         if let at = retired["\(station)|\(home.key)"], Date().timeIntervalSince(at) < World.holdWindow {
             return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
         }
