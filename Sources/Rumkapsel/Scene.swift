@@ -312,6 +312,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         self.demo = demo
         let world = World(demo: demo || simulated)
         world.simulated = simulated
+        world.waitsForGitHub = !simulated
         world.fleet.persists = !simulated
         world.github.frozen = simulated
         simulation = Simulation(world: world)
@@ -667,7 +668,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func applySharing() {
         let cfg = ConfigStore.shared.current
         if cfg.shareOnLAN {
-            if !peers.isRunning { github.holdUntil = Date().addingTimeInterval(Double.random(in: 3...12)) }
             peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName)
         } else { peers.stop() }
     }
@@ -774,6 +774,45 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The floor plan or the props changed. The rebuild waits until the caller has finished its own
     /// work, so a scan can place its workers before the station is redrawn under them.
     private var layoutDirty = false
+    /// Which offices were last drawn as not yet looked at, so the lights can be brought up on the ones
+    /// that have been without rebuilding the floor under them.
+    private var drawnUnchecked: [String: Bool] = [:]
+    /// Whether the floor was still arriving last tick, so the one settling can be done when it stops.
+    private var wasLooking = true
+    /// When the floor was last rebuilt, on the wall clock.
+    var lastRebuildAt = CACurrentMediaTime()
+
+    /// The floor is still arriving, or has only just stopped. Answers from GitHub are not the end of it:
+    /// offices land after them, and minions after those, each a rebuild of its own. Holding until the
+    /// rebuilds go quiet is what "settled" has to mean, or the view is let go one step too early.
+    var floorSettling: Bool { world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5 }
+
+    /// How dim an office is while it waits to be looked at.
+    static let unlitOffice = 0.55
+    /// How much floor the view takes in while a station is still arriving. One height, held: a fly-in
+    /// was tried and read badly, and until it is known why a launch drops frames the way it does, the
+    /// camera is better still than moving unevenly.
+    var settlingHalf: SIMD2<Double> { SIMD2(20, 20) }
+
+    /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
+    /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
+    /// again — and building it again is what stopped the breathing being seen and made the whole floor
+    /// jump each time another repository answered.
+    private func lightRooms() {
+        for st in fleet.stations.values {
+            for room in st.rooms.values where !room.key.hasPrefix("kind:") {
+                let key = roomKey(st, room)
+                let unchecked = world.isUnchecked(st, room)
+                guard drawnUnchecked[key] != unchecked else { continue }
+                drawnUnchecked[key] = unchecked
+                guard !unchecked, let tiles = roomTiles[key] else { continue }
+                for t in tiles {
+                    t.removeAllActions()
+                    t.runAction(.fadeOpacity(to: 1, duration: 0.9))
+                }
+            }
+        }
+    }
     var markersDirty = false
     /// Offices ordered this scan, by session id: the worker fetches its own from the bay.
     private var newRooms: [String: String] = [:]
@@ -784,11 +823,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // The world's word first, then the picture: the reconciler may hand out carries or move a count,
         // and the redraw that follows draws what it decided. The drawing itself decides nothing.
         reconcileYards()
+        lightRooms()
+        // The floor has stopped arriving: frame it whole and settle everyone, once.
+        if wasLooking, !floorSettling {
+            wasLooking = false
+            focusNow(on: focused)
+            for st in fleet.stations.values { resettle(st) }
+        }
         if layoutDirty {
             layoutDirty = false; markersDirty = false
             rebuildStatic()
             if firstRun, !viewPinned { restoreView() }
-            for st in fleet.stations.values { resettle(st) }
+            // Not while offices are still arriving: settling the bodies and reframing on a floor that
+            // is about to grow again is the jitter, and none of it is wasted by waiting for the end.
+            if !floorSettling { for st in fleet.stations.values { resettle(st) } }
             refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
             markersDirty = false
@@ -1052,14 +1100,25 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let focus = targetFocus + userPan
         let kp = userDriving > 0 ? 1 - exp(-dt * 25) : k
         if userDriving > 0 { userDriving -= dt }
-        rig.position.x += (focus.x - Double(rig.position.x)) * kp
-        rig.position.z += (focus.y - Double(rig.position.z)) * kp
+        if floorSettling {
+            rig.position.x = focus.x; rig.position.z = focus.y   // pinned: nothing to ease toward
+        } else {
+            rig.position.x += (focus.x - Double(rig.position.x)) * kp
+            rig.position.z += (focus.y - Double(rig.position.z)) * kp
+        }
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        let wantScale = fitScale(half: targetHalf) / userZoom
-        let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
-        cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
+        // Nothing eases while the floor arrives: an eased camera closes a fraction of whatever gap is
+        // left each frame, which is smooth only while the frames are even, and a launch is when they are
+        // least even. The height is simply held until the station has stopped arriving.
+        if floorSettling {
+            cameraNode.camera!.orthographicScale = fitScale(half: settlingHalf) / userZoom
+        } else {
+            let wantScale = fitScale(half: targetHalf) / userZoom
+            let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
+            cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
+        }
         userZoomChanged = false
 
         for (n, vel) in debris {

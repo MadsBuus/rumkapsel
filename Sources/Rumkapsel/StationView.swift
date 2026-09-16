@@ -226,6 +226,14 @@ extension StationController {
     func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
         let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
+        // While the floor is still arriving, the view is pinned on the monolith at a fixed height and
+        // does not move at all. Nothing about a station is steady enough to frame in that moment — even
+        // the parts that are always there grow, since the hallway is dug outward as offices are placed —
+        // so there is nothing to compute: the middle of the station is where it has always been.
+        if floorSettling, let st = stations.min(by: { $0.name < $1.name }) {
+            let c = st.coreCenter
+            return (SIMD2(st.offset.x + Double(c.x), st.offset.y + Double(c.y)), settlingHalf)
+        }
         for st in stations {
             let b = st.bounds
             for (x, z) in [(Double(b.min.x), Double(b.min.y)), (Double(b.max.x) + 1, Double(b.min.y)),
@@ -235,7 +243,10 @@ extension StationController {
                 lo = pointwiseMin(lo, SIMD2(u, v)); hi = pointwiseMax(hi, SIMD2(u, v))
             }
         }
-        guard lo.x.isFinite else { return (SIMD2(0, 0), SIMD2(6, 6)) }
+        // No station yet, which is the first frame of every launch: hold the height a station is
+        // watched from rather than closing right in. Framing nothing tightly shows the sky and the dust
+        // at six across, and then the camera has to travel once the floor turns up.
+        guard lo.x.isFinite else { return (SIMD2(0, 0), settlingHalf) }
         let c = (lo + hi) / 2
         return (SIMD2(c.x * cos(yaw) + c.y * sin(yaw), -c.x * sin(yaw) + c.y * cos(yaw)), (hi - lo) / 2)
     }

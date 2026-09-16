@@ -102,12 +102,37 @@ final class World {
     private(set) var seenLogins: Set<String> = []
     private var crewSeen: Set<String> = []
     private var didLoadLayout = false
+    /// Scans since this run began, for the moment the floor waits before putting offices up on its own.
+    /// Counted in scans rather than seconds because a scripted run lives out a whole day in under one.
+    private var scans = 0
+    /// When last run's answers were last written down.
+    private var savedKnowledgeAt = Date.distantPast
+    /// How many scans offices wait for GitHub's first word. A station with no network is still your
+    /// station, so they go up regardless after this.
+    static let officeGraceScans = 10
+    /// Whether offices wait for GitHub at all. A real station does, so that the offices everyone can
+    /// see are laid down before the ones only this machine knows about. Nothing scripted does: a
+    /// scenario, a model test and the gallery all have to put a station up without a network, and a
+    /// floor that stayed empty until GitHub answered would leave them with nothing to run on.
+    var waitsForGitHub = true
 
     /// Whether an office has a package standing on its floor at all.
     var hasPackage: (String) -> Bool = { _ in false }
     var rocketBusy: (String) -> Bool = { _ in false }
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
+
+    /// Every repository the floor has found has spoken. Not one of them: offices go down in one go or
+    /// not at all, since a floor that fills a repository at a time is a stutter with a pause in it.
+    var allReady: Bool { !repoRoots.isEmpty && repoRoots.values.allSatisfy { readyRepos.contains($0.repo) } }
+
+    /// The floor is still waiting to hear from GitHub, and holding its offices back until it does.
+    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady && !knewAlready }
+
+    /// The floor came back with last run's answers, so there is nothing to wait for. What arrives now
+    /// corrects a station already standing, and a room nothing vouches for yet is drawn low until
+    /// something does — which is what `isProvisional` has always meant.
+    private var knewAlready: Bool { github.hasAnswers }
 
     /// Settings changed: forget the fleet and start again from the next scan.
     func reset() {
@@ -156,6 +181,31 @@ final class World {
     func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
+    }
+
+    /// Drawn from last night's notes and not yet confirmed today. A different thing from provisional,
+    /// which is about whether anybody vouches for an office at all: this is about whether we have looked.
+    func isUnchecked(_ station: Station, _ room: Room) -> Bool {
+        !demo && !room.key.hasPrefix("kind:") && !lookedAt(room.repo)
+    }
+
+    /// The floor is still arriving: some repository has not been looked at today, or none has been found
+    /// yet — which is the first second or two of every launch, and precisely when it must not be taken
+    /// for "nothing left to wait for". Bounded, so a repository that never answers cannot hold it open.
+    var stillLooking: Bool {
+        guard waitsForGitHub, scans < World.lookingScans else { return false }
+        return repoRoots.isEmpty || repoRoots.keys.contains { !github.answered(repoRoot: $0) }
+    }
+    /// The most scans the floor will call itself still arriving for.
+    static let lookingScans = 60
+
+    /// GitHub has answered for this repository over the wire in this run — not from last night's notes,
+    /// and not from a neighbour. Repositories the floor has not even found yet count as unlooked-at.
+    func lookedAt(_ repo: String?) -> Bool {
+        guard waitsForGitHub else { return true }
+        guard let repo else { return true }
+        let roots = repoRoots.filter { $0.value.repo == repo }.map(\.key)
+        return !roots.isEmpty && roots.contains { github.answered(repoRoot: $0) }
     }
 
     /// Someone is at work in a peer's office right now: a session awake in it on their machine.
@@ -238,17 +288,28 @@ final class World {
         if firstRun {
             didLoadLayout = true
             fleet.load()
+            // Last run's answers come back with the floor, so the station stands whole from the first
+            // frame and the asks going out are corrections rather than the thing it is waiting for.
+            if waitsForGitHub { github.loadKnowledge() }
             changed = true
             events.append(.worldLoaded)
         }
 
+        scans += 1
         let cfg = ConfigStore.shared.current
         for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
             && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let station = fleet.station(stationName)
             let home = homeFor(s, station: stationName)
-            if let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
+            // The shared offices go down first, so that two stations seeing the same pull requests dig
+            // the same floor: yours are held until GitHub has spoken for the repository, by which time
+            // its own offices are already placed. An office already on the floor is never held, and
+            // nothing waits forever — after a moment they go up regardless.
+            // Held as one floor, not one repository at a time: everything it knows about goes down
+            // together, so the wait is a wait and then a station, rather than a dribble with gaps.
+            let held = settling && station.rooms[home.key] == nil
+            if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
                !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
                 let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:")
                 station.renameRoom(from: m.key, to: home.key, name: home.name)
@@ -257,10 +318,13 @@ final class World {
                 changed = true
             }
             if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
-            if station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
+            if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
                 roomCreated["\(stationName)|\(home.key)"] = now
-                events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id), arrival: firstRun ? .appear : .shuttle))
+                // A floor still settling puts its offices up where they stand; a shuttle is for one that
+                // arrives on a station already at work.
+                events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id),
+                                            arrival: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle))
             }
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
@@ -361,7 +425,16 @@ final class World {
     /// A session's office, unless that office was merged and cleared while the session lingers on the
     /// branch: then the minion waits in the lounge rather than rebuilding the office every scan.
     func homeFor(_ s: SessionInfo, station: String) -> Home {
-        let home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+        var home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
+        // A branch names an office until GitHub says which pull request it is, and after that the pull
+        // request does. Otherwise the same work is one office here, under the branch it is checked out
+        // on, and another from GitHub under its number — and neither knows about the other, so the
+        // rules that keep your own office standing never see the remote one at all. A branch named
+        // `gh-N/…` already arrives as `#N`; this is for every branch that is not.
+        if home.issue == nil, let branch = s.branch, let root = s.repoRoot,
+           let pr = github.pull(branch: branch, repoRoot: root), pr.state == "OPEN" {
+            home = Home(key: "task:\(s.repo)#\(pr.number)", name: home.name, repo: home.repo, issue: pr.number)
+        }
         if let at = retired["\(station)|\(home.key)"], Date().timeIntervalSince(at) < World.holdWindow {
             return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
         }
@@ -686,7 +759,16 @@ final class World {
                                                      detail: e.detail, branch: e.branch, title: e.title, ready: isReady(repo))))
         }
         // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
+        let lookedBefore = repoRoots.keys.filter { github.answered(repoRoot: $0) }.count
+        let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
+        // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
+        // the floor and must go from what next launch is told as well, or it comes back from the dead
+        // every morning. Written when a repository first answers, and now and then after that.
+        if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
+            savedKnowledgeAt = Date()
+            github.saveKnowledge(repoRoots.mapValues(\.repo))
+        }
         return events
     }
 

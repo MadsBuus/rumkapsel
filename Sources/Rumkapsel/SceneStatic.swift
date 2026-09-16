@@ -148,6 +148,24 @@ extension StationController {
                     t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
+            // Nothing to put on the floor yet: the hallway pulses out from the plaza while the station
+            // waits to hear which offices it has, in the order the hallway was dug, so the waiting reads
+            // as the same outward movement as the building.
+            if world.settling {
+                for c in station.corridorCells + station.coreCells {
+                    let mark = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.34))
+                    mark.geometry!.firstMaterial = flat(NSColor(white: 0.75, alpha: 1))
+                    mark.geometry!.firstMaterial?.writesToDepthBuffer = false
+                    mark.renderingOrder = 3
+                    mark.eulerAngles.x = -.pi / 2
+                    mark.position = v3(station.offset.x + Double(c.x), 0.004, station.offset.y + Double(c.y))
+                    mark.opacity = 0
+                    let wait = 0.12 * Double(station.digOrder(of: c) % 12)
+                    mark.runAction(.sequence([.wait(duration: wait), .repeatForever(.sequence([
+                        .fadeOpacity(to: 0.28, duration: 0.5), .fadeOpacity(to: 0, duration: 0.7), .wait(duration: 0.4)]))]))
+                    staticRoot.addChildNode(mark)
+                }
+            }
             // The input and the output: a look's set pieces, or tiles.
             let input = Looks.current.input(station)
             if let input { addSetPiece(input, station) } else {
@@ -311,6 +329,8 @@ extension StationController {
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = world.isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
+                // Drawn from last night's notes and not yet confirmed today: dim until it is.
+                let unchecked = world.isUnchecked(station, room)
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -324,6 +344,7 @@ extension StationController {
                     if !powered { color = color.darker(0.2) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
+                    else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }
                     else if provisional { t.opacity = 0.38 }
                     tiles.append(t)
                     if failing || dusty {
@@ -380,6 +401,7 @@ extension StationController {
         }
         fadeIn = []
 
+        lastRebuildAt = CACurrentMediaTime()
         (targetFocus, targetHalf) = frame(for: shownStations)
         if let f = focused { focusNow(on: f) }
         fleet.save()

@@ -129,6 +129,18 @@ final class GitHubResolver {
     private var interval: TimeInterval { Double(intervalMinutes) * 60 }
     private var openPRs: [String: ([OpenPR], Date)] = [:]
 
+    /// Anything at all known about anybody's open pull requests, from this run or the last.
+    var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
+
+    /// Repository roots GitHub has answered for over the wire in this run. Remembered answers and a
+    /// neighbour's word do not count: this is what says a room has been looked at today, and so what
+    /// the floor dims until.
+    private var answeredLive: Set<String> = []
+    func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
+    /// Roots whose answers came off last night's notes. They carry the time they were fetched, so the
+    /// poll would otherwise count them as fresh and skip the one ask that confirms them.
+    private var fromCache: Set<String> = []
+
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
         return openPRs[repoRoot]?.0
@@ -138,6 +150,26 @@ final class GitHubResolver {
     /// Polls wait until this moment: a random hold at start-up so apps opening together on one
     /// network don't all ask GitHub at once, and the first one to answer feeds the rest.
     var holdUntil = Date.distantPast
+
+    /// Where last run's answers are kept, so a station can be drawn whole before GitHub has said a word.
+    private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
+
+    /// Everything worth keeping until next time, by repository root.
+    func saveKnowledge(_ roots: [String: String]) {
+        var out: [String: Knowledge] = [:]
+        for (root, repo) in roots { if let k = knowledge(repoRoot: root, repo: repo) { out[root] = k } }
+        guard !out.isEmpty, let json = try? JSONEncoder().encode(out) else { return }
+        Fleet.writing.async { try? json.write(to: GitHubResolver.cacheURL) }
+    }
+
+    /// Last run's answers, taken the way a neighbour's are: `adopt` keeps whichever is newer, so a cache
+    /// can never talk over something fresher, and the floor stands complete while the asks go out.
+    func loadKnowledge() {
+        guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
+              let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
+        for (root, k) in saved { adopt(k, repoRoot: root) }
+        lock.lock(); fromCache.formUnion(saved.keys); lock.unlock()
+    }
 
     /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
     struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
@@ -176,7 +208,9 @@ final class GitHubResolver {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = openPRs[repoRoot], Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
+        let remembered = fromCache.remove(repoRoot) != nil   // one ask owed, whatever its age says
+        if !remembered, let (_, at) = openPRs[repoRoot],
+           Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
         lock.unlock()
@@ -202,8 +236,9 @@ final class GitHubResolver {
             lock.lock()
             let changed = openPRs[repoRoot]?.0 != found
             openPRs[repoRoot] = (found, Date())
+            let first = answeredLive.insert(repoRoot).inserted
             lock.unlock()
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+            if changed || first { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
 

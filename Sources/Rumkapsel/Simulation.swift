@@ -759,7 +759,10 @@ final class Simulation<B: Body> {
                         m.facing = atan2(0, -f.toiletCorner.y)
                         let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
                         m.seatedOnBowl = true
-                        m.seatOffset = SIMD2(across, ahead - 0.02)
+                        // This is the vector to the bowl itself, and a sitter is put down a shin's reach
+                        // behind where it is aimed — so aim that much past it, or it ends up sitting
+                        // through the back of the pan instead of on it.
+                        m.seatOffset = SIMD2(across, ahead - 0.02 + B.seatReach)
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3)
                     } else if m.seatedOnBowl, clock >= standAt {
                         m.seatedOnBowl = false
@@ -851,7 +854,9 @@ final class Simulation<B: Body> {
     /// The rest of a frame for any body that is still on the station: fading in, drawn onto the couch
     /// or the bed while it has nothing else to do, and lying down where it is meant to lie.
     func stepRest(_ m: B, station: Station, dt: Double) {
-        if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
+        // Fading in from nothing, and from below nothing: a body given a head start of less than zero
+        // waits that long before it begins to show, so a roomful does not appear in one piece.
+        if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 0.9) }
         // Seats and beds draw a body in only while it has nothing else to do.
         if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
             let spot = station.couches[c]
@@ -884,7 +889,8 @@ final class Simulation<B: Body> {
             if !m.lying, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
                 let gap = stand - m.pos
                 if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
-                    m.beddingUntil = clock + 1.1
+                    // A moment apart from one another: four of them turning in together looks drilled.
+                    m.beddingUntil = clock + 1.1 + Double.random(in: 0...0.8)
                     m.facing = atan2(outward.x, outward.y)   // its back to the bunk, ready to sit down
                 }
             }
