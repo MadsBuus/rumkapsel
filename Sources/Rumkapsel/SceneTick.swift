@@ -32,6 +32,16 @@ extension StationController {
             m.branch = a.3
             m.place = Place.forActivity(a.2, home: h.key, isSubagent: m.isSubagent)
         }
+        // RK_DEMO_OFFICES adds that many more offices to the demo's work station, to see a theme under load.
+        if let n = ProcessInfo.processInfo.environment["RK_DEMO_OFFICES"].flatMap(Int.init), n > 0 {
+            let repos = ["api-node-nest", "tattoodo-web", "app-ios"]
+            let work = fleet.station("work")
+            for i in 0..<n {
+                let repo = repos[i % repos.count]
+                let h = Home.from(repo: repo, branch: "gh-\(900 + i)/demo-office-\(i)", cwd: "\(home)/conductor/workspaces/\(repo)/demo\(i)")
+                work.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
+            }
+        }
         rebuildStatic()
         for m in minions.values { send(m, to: m.place) }
         logEvent("#450 opened a pull request")
@@ -362,7 +372,7 @@ extension StationController {
                 switch tool {
                 case 0:
                     tilt = 0.32
-                    if m.weldLight == nil {
+                    if Looks.current.workSparks, m.weldLight == nil {
                         let l = SCNNode()
                         l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
                         let spark = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))

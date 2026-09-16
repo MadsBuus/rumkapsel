@@ -23,31 +23,8 @@ final class RocketView {
 extension StationController {
     // MARK: shuttles
 
-    /// The shuttle body, wings in a repo colour.
-    private func shuttle(color: NSColor) -> SCNNode {
-        if Theme.isKenney, let craft = Kit.craft(color: color) { return craft }
-        let ship = SCNNode()
-        let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03))
-        hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9)))
-        ship.addChildNode(hull)
-        let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02))
-        cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0)))
-        cockpit.position = v3(0.16, 0.11, 0)
-        ship.addChildNode(cockpit)
-        for side in [-1.0, 1.0] {
-            let wing = SCNNode(geometry: SCNBox(width: 0.28, height: 0.05, length: 0.34, chamferRadius: 0))
-            wing.geometry!.firstMaterial = lit(color)
-            wing.position = v3(-0.14, 0, side * 0.34)
-            ship.addChildNode(wing)
-        }
-        for side in [-1.0, 1.0] {
-            let skid = SCNNode(geometry: SCNBox(width: 0.5, height: 0.03, length: 0.03, chamferRadius: 0))
-            skid.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            skid.position = v3(0, -0.14, side * 0.16)
-            ship.addChildNode(skid)
-        }
-        return ship
-    }
+    /// The shuttle body, wings in a repo colour: the look's.
+    private func shuttle(color: NSColor) -> SCNNode { Looks.current.shuttle(color: color) }
 
     /// Every ship in the air, where the simulation has it. Everything is parented to the hangar
     /// anchor, so a station shifting underneath does not misalign it; a flight that is over loses its node.
@@ -65,6 +42,12 @@ extension StationController {
                 return v
             }()
             let hc = station.hangarCenter
+            let leg = ShipLeg(phase: f.phaseKind, progress: f.progress(at: clock), slot: SIMD2(f.down.x, f.down.z), side: f.exit.x >= f.down.x ? 1 : -1)
+            if let pose = Looks.current.shipPose(leg) {
+                v.node.position = v3(pose.pos.x - hc.x, pose.pos.y, pose.pos.z - hc.y)
+                v.node.eulerAngles = SCNVector3(0, pose.yaw, 0)
+                continue
+            }
             v.node.position = v3(f.pos.x - hc.x, f.pos.y, f.pos.z - hc.y)
             if f.phaseKind == .leave, f.restYaw != nil, !v.leaving {
                 v.leaving = true
@@ -114,7 +97,7 @@ extension StationController {
 
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
-        let n = (Theme.isKenney ? Kit.rocketProp(color: color, tall: r.tall, cargo: r.cargo) : nil) ?? Props.rocket(color: color, tall: r.tall, cargo: r.cargo)
+        let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
         if r.untested {
             let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
             deco.name = "hold"
@@ -187,10 +170,7 @@ extension StationController {
     func liftOff(_ node: SCNNode) {
         drone.sweep(up: true)
         node.childNode(withName: "flame", recursively: false)?.opacity = 1
-        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
-        rise.timingMode = .easeIn
-        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
-        node.runAction(.sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])]), .removeFromParentNode()]))
+        node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
     }
 
     /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the due rings redrawn.

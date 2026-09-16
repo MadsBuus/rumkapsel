@@ -392,11 +392,11 @@ extension StationController {
                 let base = room.key.hasPrefix("proj:") ? full.darker(0.32) : full
                 let color = powered ? base : base.darker(0.2)
                 for t in roomTiles[key] ?? [] {
-                    Kit.tint(tile: t, color)
+                    Looks.current.tint(tile: t, color)
                     let flicker = SCNAction.sequence([.fadeOpacity(to: 0.35, duration: 0.05), .fadeOpacity(to: 1, duration: 0.08), .fadeOpacity(to: 0.5, duration: 0.05), .fadeOpacity(to: 1, duration: 0.12), .fadeOpacity(to: 0.7, duration: 0.05), .fadeOpacity(to: 1, duration: 0.1)])
                     t.runAction(flicker)
                 }
-                if powered { logEvent("\(room.name): lights on") }
+                if powered { logEvent("\(room.name): \(Words.current.lightsOn)") }
             }
         }
     }

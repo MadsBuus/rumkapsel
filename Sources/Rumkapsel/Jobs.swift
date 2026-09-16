@@ -235,7 +235,7 @@ extension StationController {
         let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queuedCones.count : 0)]
         let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
         let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
-        let n = Props.pyramid(color: tint, size: 0.32, floor: floorColor)
+        let n = Looks.current.message(color: tint, floor: floorColor) ?? Props.pyramid(color: tint, size: 0.32, floor: floorColor)
         let ox = 0.0, oz = 0.0
         n.position = v3(Double(cell.x) + ox, -0.35, Double(cell.y) + oz)
         let rise = SCNAction.move(to: v3(Double(cell.x) + ox, 0, Double(cell.y) + oz), duration: 0.5)
@@ -304,7 +304,7 @@ extension StationController {
     /// down in storage by the rows.
     func haulCleared(station: Station, repo: String, number: Int) {
         let crate = CrateRef(station: station.name, repo: repo, number: number)
-        logEvent("#\(number) cleared decon, into storage")
+        logEvent("#\(number) \(Words.current.clearedDecon)")
         guard let node = crateNode(crate), let command = world.carryFromDecon(station: station, repo: repo, number: number) else {
             world.unorder(crate)
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
@@ -329,7 +329,7 @@ extension StationController {
     func haulMergedBoxes(station: Station, key: String, roomName: String, repo: String, number: Int) {
         guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }),
               let room = station.rooms[key.split(separator: "|", maxSplits: 1).map(String.init).last ?? ""] else { return }
-        logEvent("\(roomName): merged, package to storage")
+        logEvent("\(roomName): merged, \(Words.current.toStorage)")
         // The order names the office; the carry starts from where the package actually stands.
         let at = pkg.position
         let exact = Spot(area: .office, station: station.name, owner: room.key, label: room.name,
@@ -369,7 +369,7 @@ extension StationController {
             }
         }
         guard started > 0 else { return }
-        logEvent("\(repo): deployed to staging, moving to the test deck")
+        logEvent("\(repo): deployed to staging, \(Words.current.toDeck)")
     }
 
     // MARK: crew
@@ -406,7 +406,7 @@ extension StationController {
         case "comment" where a.hasRoom:
             react(m, .writing, place: .room(a.roomKey), minutes: 8, words: "\(who) writing on \(a.label)")
         case "branch_create":
-            react(m, .planning, place: .core, minutes: 10, words: "\(who) planning \(a.branch ?? "a branch") at the monolith")
+            react(m, .planning, place: .core, minutes: 10, words: "\(who) planning \(a.branch ?? "a branch") \(Words.current.atMonolith)")
             logEvent("\(who) started \(a.branch ?? "a branch")")
         case "issue_open":
             logEvent("\(who) filed \(a.label) \(a.title?.prefix(40) ?? "")")

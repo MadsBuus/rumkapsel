@@ -98,7 +98,7 @@ extension Simulation {
                     // The office went away while its crate was on the floor: the crate folds away where it lies.
                     cue(.foldCrate(order.key))
                     world.truth.officeDelivered(order.key)
-                    onEvent(.log("the office for \(order.roomKey) is gone: its crate folds away on the bay"))
+                    onEvent(.log("the office for \(order.roomKey) is gone: \(Words.current.foldsAway)"))
                     continue
                 }
                 let box = bayCrate(order, station: station).at
@@ -110,7 +110,7 @@ extension Simulation {
                 guard case .deliverOffice = m.current?.kind else { continue }
                 m.couch = nil; m.bed = nil
                 m.place = .hangar
-                onEvent(.log("\(m.home.name) picks up the office for \(room.name) from the bay"))
+                onEvent(.log("\(m.home.name) picks up the office for \(room.name) from \(Words.current.theBay)"))
             }
             // Pending with no order and no ship: the shuttle never came, or the app was relaunched under it.
             for key in world.truth.pendingOffices where key.hasPrefix(station.name + "|") && world.truth.delivery(for: key) == nil {

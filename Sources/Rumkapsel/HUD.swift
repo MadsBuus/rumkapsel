@@ -76,6 +76,14 @@ enum LoungeOrder: CaseIterable {
 extension StationController {
     // MARK: hud
 
+    /// The HUD's ink for the ground under it: light text over a dark look, dark text over a light one, read off
+    /// the look's background so a theme needs to say nothing.
+    var ink: (text: NSColor, dim: NSColor, onLight: Bool) {
+        let bg = Looks.current.background.usingColorSpace(.deviceRGB) ?? Palette.void
+        let light = bg.redComponent * 0.3 + bg.greenComponent * 0.59 + bg.blueComponent * 0.11 > 0.3
+        return light ? (NSColor(rgb: (0.1, 0.12, 0.16)), NSColor(rgb: (0.2, 0.23, 0.28)), true) : (Palette.text, Palette.dim, false)
+    }
+
     func buildHUD() {
         hud.scaleMode = .resizeFill
         hud.backgroundColor = .clear
@@ -230,8 +238,10 @@ extension StationController {
             let loading = rootOf[repo].map { github.isBusy(repoRoot: $0) } ?? false
             signature += "\(repo):\(workers):\(offices):\(loading);"
         }
-        guard signature != legendSignature else { return }
-        legendSignature = signature
+        let inked = signature + "|" + Looks.theme.rawValue
+        guard inked != legendSignature else { return }
+        legendSignature = inked
+        statusLabel.fontColor = ink.dim; shareLabel.fontColor = ink.dim; followLabel.fontColor = ink.text
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
         let slot = hud.size.width / CGFloat(max(1, repos.count))
@@ -239,7 +249,7 @@ extension StationController {
             let x = slot * (CGFloat(i) + 0.5)
             let name = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             name.fontSize = 14
-            name.fontColor = NSColor(fleet.color(forRepo: repo)).lighter(0.15)
+            name.fontColor = ink.onLight ? NSColor(fleet.color(forRepo: repo)).darker(0.35) : NSColor(fleet.color(forRepo: repo)).lighter(0.15)
             name.text = repo
             name.horizontalAlignmentMode = .center
             name.verticalAlignmentMode = .top
@@ -248,7 +258,7 @@ extension StationController {
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
             let counts = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
             counts.fontSize = 10
-            counts.fontColor = Palette.dim
+            counts.fontColor = ink.dim
             counts.text = "\(workers) minions · \(offices) offices"
             counts.horizontalAlignmentMode = .center
             counts.verticalAlignmentMode = .top
@@ -274,14 +284,14 @@ extension StationController {
             let icons = min(count, 8)
             let iconsWidth = CGFloat(icons) * 8
             for k in 0..<icons {
-                let r = SKSpriteNode(color: Palette.minion, size: CGSize(width: 4, height: 9))
+                let r = SKSpriteNode(color: ink.onLight ? ink.text : Palette.minion, size: CGSize(width: 4, height: 9))
                 r.position = CGPoint(x: x - iconsWidth + CGFloat(k) * 8 + 4, y: 14)
                 hud.addChild(r); jobNodes.append(r)
             }
             x -= iconsWidth + 6
             let l = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             l.fontSize = 12
-            l.fontColor = color
+            l.fontColor = ink.onLight ? color.darker(0.4) : color
             l.text = "\(title) \(count)"
             l.horizontalAlignmentMode = .right
             l.verticalAlignmentMode = .bottom
@@ -294,7 +304,7 @@ extension StationController {
     func logEvent(_ text: String) {
         let l = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
         l.fontSize = 11
-        l.fontColor = Palette.text
+        l.fontColor = ink.text
         l.horizontalAlignmentMode = .left
         l.verticalAlignmentMode = .top
         l.text = text
@@ -418,11 +428,11 @@ extension StationController {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("decon:"), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let repo = String(h.split(separator: "|")[1])
-            infoLabel.text = "\(repo) · unidentified object · PR #\(n) · merge clears it into storage, closing ejects it · click to open"
+            infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click to open"
         } else if h.hasPrefix("decon:") {
             let name = String(h.dropFirst(6))
             let waiting = fleet.stations[name]?.ledger.allCrates.filter { $0.alien && $0.placed == .decon }.count ?? 0
-            infoLabel.text = "decon · dependabot and friends wait here · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
+            infoLabel.text = Words.current.deconHover + " · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let parts = h.split(separator: "|")
             let repo = String(parts[1])
@@ -432,15 +442,15 @@ extension StationController {
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
-            infoLabel.text = "storage · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
+            infoLabel.text = Words.current.storage + " · " + (parts.isEmpty ? "empty" : parts.joined(separator: " · ")) + " · waiting for a release"
         } else if h.hasPrefix("peer:") {
             infoLabel.text = "\(h.dropFirst(5))'s station · shared on the local network"
         } else if h.hasPrefix("deck:") {
             let qa = minions.values.filter { $0.activity == .qa && $0.state != .leaving }.map { $0.home.name }
-            if !qa.isEmpty { infoLabel.text = "test deck · QA in progress: " + qa.joined(separator: ", "); return }
+            if !qa.isEmpty { infoLabel.text = Words.current.testDeck + " · QA in progress: " + qa.joined(separator: ", "); return }
             let name = String(h.dropFirst(5).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.staged ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }
-            infoLabel.text = "test deck · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
+            infoLabel.text = Words.current.testDeck + " · " + (parts.isEmpty ? "nothing on staging" : parts.joined(separator: " · ") + " on staging, in QA")
         } else if h.hasPrefix("pad:") {
             let name = String(h.dropFirst(4))
             let due = fleet.stations[name].map { st in
@@ -449,11 +459,11 @@ extension StationController {
                     return n > 0 ? "\(n) \(repo)" : nil
                 }.sorted()
             } ?? []
-            infoLabel.text = "launch pad · release pull requests wait here; merging launches" + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
+            infoLabel.text = Words.current.padHover + (due.isEmpty ? "" : " · cargo waiting: " + due.joined(separator: ", "))
         } else if h.hasPrefix("hangar:") {
-            infoLabel.text = "hangar · new offices arrive here by ship"
+            infoLabel.text = Words.current.bayHover
         } else if h.hasPrefix("station:") {
-            infoLabel.text = String(h.dropFirst(8)) + " · the monolith: web research and subagents"
+            infoLabel.text = String(h.dropFirst(8)) + " · " + Words.current.monolithHover
         } else {
             infoLabel.text = ""
         }

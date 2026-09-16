@@ -10,6 +10,7 @@ extension StationController {
         if station.storageCells.contains(c) { return "kind:storage" }
         if station.deckCells.contains(c) && world.deckInUse(station: station.name) { return "kind:deck" }
         if station.padCells.contains(c) { return "kind:pad" }
+        if station.deconCells.contains(c) { return "kind:decon" }
         if station.coreCells.contains(c) || station.isCorridor(c) { return "corridor" }
         return station.room(at: c)?.key
     }
@@ -18,48 +19,70 @@ extension StationController {
         owner(station, b) == key || openEdges.contains("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
     }
 
+    /// What kind of floor an owner's tile is, for the look.
+    private func floorKind(_ key: String) -> Floor {
+        switch key {
+        case "corridor": return .hallway
+        case "kind:hangar": return .bay
+        case "kind:airlock": return .airlock
+        case "kind:pad", "kind:storage", "kind:deck", "kind:decon": return .yard
+        case let k where k.hasPrefix("kind:"): return .fixed
+        default: return .room
+        }
+    }
+
     /// Full-size floor tile; borders are drawn separately as strips so corners meet cleanly.
     @discardableResult
     private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into parent: SCNNode? = nil) -> SCNNode {
         let root = parent ?? staticRoot
+        let look = Looks.current
+        let floor = floorKind(key)
         let plane = SCNPlane(width: 1.0, height: 1.0)
-        plane.firstMaterial = flat(color)
+        plane.firstMaterial = flat(look.floorColor(color, floor: floor))
+        if !look.drawsPlane(floor) { plane.firstMaterial?.transparency = 0; plane.firstMaterial?.writesToDepthBuffer = false }
         let n = SCNNode(geometry: plane)
         n.eulerAngles.x = -.pi / 2
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
         n.name = name
         root.addChildNode(n)
-        // Dark border toward any neighbouring floor of another owner, extended past the corners. The
-        // edges are numbered round the tile as the kit's platforms are, for the kerbs of the Kenney theme.
+        // Dark border toward any neighbouring floor of another owner, extended past the corners. Edges
+        // with no floor beyond are open, numbered round the tile (z-, x-, z+, x+) for the look's kerbs.
         let g = 0.075
         let sides: [(Cell, SIMD2<Double>, Bool, Int)] = [
             (Cell(x: cell.x - 1, y: cell.y), SIMD2(-0.5, 0), true, 1), (Cell(x: cell.x + 1, y: cell.y), SIMD2(0.5, 0), true, 3),
             (Cell(x: cell.x, y: cell.y - 1), SIMD2(0, -0.5), false, 0), (Cell(x: cell.x, y: cell.y + 1), SIMD2(0, 0.5), false, 2),
         ]
-        var open = Set<Int>()
+        var open = Set<Int>(), walled: [Int: Floor] = [:]
         for (nb, off, vertical, edge) in sides {
             guard let other = owner(station, nb) else { open.insert(edge); continue }   // the void: a kerb, no border
             guard other != key, !joined(station, cell, nb, key) else { continue }
+            walled[edge] = floorKind(other)
+            guard look.drawsBorders else { continue }
             let strip = SCNPlane(width: vertical ? g * 2 : 1 + g * 2, height: vertical ? 1 + g * 2 : g * 2)
             strip.firstMaterial = flat(Palette.void)
             let b = SCNNode(geometry: strip)
             b.eulerAngles.x = -.pi / 2
-            b.position = v3(station.offset.x + Double(cell.x) + off.x, Theme.isKenney ? Kit.plateTop + 0.002 : 0.002, station.offset.y + Double(cell.y) + off.y)
+            b.position = v3(station.offset.x + Double(cell.x) + off.x, look.floorTop + 0.002, station.offset.y + Double(cell.y) + off.y)
             b.name = name
             b.opacity = n.opacity
             root.addChildNode(b)
         }
-        // Kenney's theme lays one of the kit's platforms on the tile, kerbed only where the floor meets
-        // space, the dark line between owners kept as it is, hung
-        // under the plane so the plane keeps the name, the colour and the place the scene reads. Its
-        // plate is set a hair above the plane, under the text on the floor.
-        if Theme.isKenney, let plate = Kit.platform(open: open, color: color) {
-            plate.eulerAngles.x = .pi / 2
-            plate.position = SCNVector3(0, 0, Kit.plateTop - 0.05)
-            plate.name = name
-            n.addChildNode(plate)
+        // Whatever the look hangs under the plane; the plane keeps the name, the colour and the place
+        // the scene reads.
+        var same: UInt8 = 0
+        for (k, (dx, dz)) in Tile.around.enumerated() where owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == key { same |= 1 << k }
+        if let detail = look.tileDetail(Tile(floor: floor, color: color, open: open, walled: walled, same: same)) {
+            detail.name = name
+            n.addChildNode(detail)
         }
         return n
+    }
+
+    /// A look's set piece into the scene, each part named for its area so the pointer and the clicks find it.
+    private func addSetPiece(_ piece: SetPiece, _ station: Station) {
+        for (area, nodes) in piece.parts {
+            for n in nodes { n.name = area.rawValue + ":" + station.name; staticRoot.addChildNode(n) }
+        }
     }
 
     /// Dashed outline around a room's footprint, the game's look for a room under construction.
@@ -125,12 +148,18 @@ extension StationController {
                     t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
-            for c in station.hangarCells {
-                addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+            // The input and the output: a look's set pieces, or tiles.
+            let input = Looks.current.input(station)
+            if let input { addSetPiece(input, station) } else {
+                for c in station.hangarCells {
+                    addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
+                }
+                for c in station.airlockCells {
+                    addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
+                }
             }
-            for c in station.airlockCells {
-                addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
-            }
+            let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
+            if let output { addSetPiece(output, station) }
             if station.hasHangar, !station.airlockCells.isEmpty {
                 // Two rectangular door frames across the chamber's full width: the inner door on the
                 // corridor side, the hatch on the bay side. Posts and a lintel, a dark pane between.
@@ -140,27 +169,17 @@ extension StationController {
                 for (edge, tint) in [(Double(ys.min()!) - 0.46, NSColor(rgb: (0.55, 0.6, 0.72))), (Double(ys.max()!) + 0.46, NSColor(rgb: (0.75, 0.62, 0.25)))] {
                     let door = SCNNode()
                     let frame = lit(tint)
+                    let spans = (xs.min()!...xs.max()!).map { station.offset.x + Double($0) - cx }
+                    let drawn = Looks.current.airlockFrame(width: width, spans: spans, tint: tint)
                     for side in [-1.0, 1.0] {
                         let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.7, length: 0.08, chamferRadius: 0))
                         post.geometry!.firstMaterial = frame
                         post.position = v3(side * width / 2, 0.35, 0)
                         post.name = "post"
-                        post.isHidden = Theme.isKenney   // the walks still go between them
+                        post.isHidden = !drawn.showsPosts   // drawn or not, the walks go between them
                         door.addChildNode(post)
                     }
-                    if Theme.isKenney {
-                        // A row of the kit's arches across the chamber, the pane still dropping behind them.
-                        for x in xs.min()!...xs.max()! {
-                            guard let gate = Kit.gate(yaw: 0) else { continue }
-                            gate.position = v3(station.offset.x + Double(x) - cx, 0, 0)
-                            door.addChildNode(gate)
-                        }
-                    } else {
-                        let lintel = SCNNode(geometry: SCNBox(width: width + 0.08, height: 0.08, length: 0.08, chamferRadius: 0))
-                        lintel.geometry!.firstMaterial = frame
-                        lintel.position = v3(0, 0.74, 0)
-                        door.addChildNode(lintel)
-                    }
+                    door.addChildNode(drawn.node)
                     let pane = SCNNode(geometry: SCNBox(width: width - 0.08, height: 0.7, length: 0.03, chamferRadius: 0))
                     pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
                     pane.position = v3(0, 0.35, 0)
@@ -171,13 +190,13 @@ extension StationController {
                     staticRoot.addChildNode(door)
                 }
             }
-            for c in station.padCells {
+            for c in station.padCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
             }
-            for c in station.storageCells {
+            for c in station.storageCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
             }
-            if world.deckInUse(station: station.name) {
+            if output == nil, world.deckInUse(station: station.name) {
                 for c in station.deckCells {
                     addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
                 }
@@ -185,34 +204,20 @@ extension StationController {
             if station.hasPad {
                 // Decon: a darker floor at the back of storage, and the hatch in the back wall that
                 // everything from outside comes through, with its light over it.
-                for c in station.deconCells {
+                for c in station.deconCells where output == nil {
                     addTile(station: station, cell: c, owner: "kind:decon", color: NSColor(rgb: (0.17, 0.24, 0.24)), name: "decon:" + station.name)
                 }
                 let (hp, facing) = station.deconHatch
                 let hatch = SCNNode()
-                let frame = lit(NSColor(rgb: (0.55, 0.6, 0.72)))
-                let kenneyGate = Theme.isKenney ? Kit.gate(yaw: facing.x == 0 ? 0 : .pi / 2) : nil
-                if let kenneyGate {
-                    hatch.addChildNode(kenneyGate)
-                } else {
-                    for side in [-1.0, 1.0] {
-                        let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.7, length: 0.08, chamferRadius: 0))
-                        post.geometry!.firstMaterial = frame
-                        post.position = v3(side * 0.5, 0.35, 0)
-                        hatch.addChildNode(post)
-                    }
-                    let lintel = SCNNode(geometry: SCNBox(width: 1.08, height: 0.08, length: 0.08, chamferRadius: 0))
-                    lintel.geometry!.firstMaterial = frame
-                    lintel.position = v3(0, 0.74, 0)
-                    hatch.addChildNode(lintel)
-                }
+                let drawn = Looks.current.hatchFrame(facing: facing)
+                hatch.addChildNode(drawn.node)
                 let pane = SCNNode(geometry: SCNBox(width: 0.92, height: 0.7, length: 0.03, chamferRadius: 0))
                 pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
                 pane.position = v3(0, 0.35, 0)
                 hatch.addChildNode(pane)
                 let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
                 light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
-                light.position = v3(0, kenneyGate == nil ? 0.84 : 0.9, facing.y * 0.05)
+                light.position = v3(0, drawn.lightHeight, facing.y * 0.05)
                 hatch.addChildNode(light)
                 hatchLights[station.name] = light
                 hatch.position = v3(station.offset.x + hp.x, 0, station.offset.y + hp.y)
@@ -229,232 +234,48 @@ extension StationController {
                 staticRoot.addChildNode(console)
                 consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
             }
-            if station.hasPad {
+            if station.hasPad, output == nil {
                 let pc = station.padCenter
                 let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01)))
                 ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
                 ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
                 staticRoot.addChildNode(ring)
             }
-            if Theme.isKenney { dressStation(station) }
+            for prop in Looks.current.dress(station: station) {
+                prop.position.x += station.offset.x; prop.position.z += station.offset.y
+                prop.name = "station:" + station.name
+                staticRoot.addChildNode(prop)
+            }
+            // The fixed rooms' furniture, from the look. The solid pieces carry the room's name; the gym's are
+            // stood on and stepped round, so they carry the gym's; the towel, the bar and the bag move.
             if let lounge = station.rooms["kind:lounge"] {
-                let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
-                let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
-                // A low coffee table: a thin top on two side panels, with a magazine left on it.
-                let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
-                table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3)))
-                table.position = v3(station.offset.x + cx, 0.2, station.offset.y + cy)
-                for lx in [-0.4, 0.4] {
-                    let panel = SCNNode(geometry: SCNBox(width: 0.03, height: 0.19, length: 0.34, chamferRadius: 0))
-                    panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.32, 0.24)))
-                    panel.position = v3(lx, -0.1, 0)
-                    table.addChildNode(panel)
-                }
-                let magazine = SCNNode(geometry: SCNBox(width: 0.16, height: 0.01, length: 0.22, chamferRadius: 0))
-                magazine.geometry!.firstMaterial = flat(NSColor(rgb: (0.85, 0.85, 0.8)))
-                magazine.position = v3(0.15, 0.02, 0.02)
-                magazine.eulerAngles.y = 0.3
-                table.addChildNode(magazine)
-                table.name = "room:" + roomKey(station, lounge)
-                staticRoot.addChildNode(table)
-                let lxs = lounge.cells.map(\.x)
-                for c in station.couches {
-                    let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1   // side walls run along z, the far wall along x
-                    let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: 0.18, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
-                    couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.45, 0.4)))
-                    couch.position = v3(station.offset.x + c.x, 0.09, station.offset.y + c.y)
-                    couch.name = "room:" + roomKey(station, lounge)
-                    let back = SCNNode(geometry: SCNBox(width: along ? 0.08 : 0.8, height: 0.22, length: along ? 0.8 : 0.08, chamferRadius: 0.02))
-                    back.geometry!.firstMaterial = couch.geometry!.firstMaterial
-                    back.position = v3(along ? (c.x < cx ? -0.11 : 0.11) : 0, 0.16, along ? 0 : 0.11)
-                    couch.addChildNode(back)
-                    staticRoot.addChildNode(couch)
-                }
-                // A potted plant in one corner and a low shelf in another: somewhere to look at.
-                let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
-                // A square pot with a few flat leaves fanned out on a thin stem.
-                let pot = SCNNode(geometry: SCNBox(width: 0.2, height: 0.16, length: 0.2, chamferRadius: 0))
-                pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
-                pot.position = v3(station.offset.x + Double(xs.min()!) - 0.28, 0.08, station.offset.y + Double(ys.min()!) - 0.28)
-                let stem = SCNNode(geometry: SCNBox(width: 0.03, height: 0.3, length: 0.03, chamferRadius: 0))
-                stem.geometry!.firstMaterial = lit(NSColor(rgb: (0.25, 0.45, 0.28)))
-                stem.position = v3(0, 0.22, 0)
-                pot.addChildNode(stem)
-                for (i, (w, yaw, tiltZ)) in [(0.22, 0.0, 0.6), (0.2, 2.1, 0.5), (0.24, 4.2, 0.7), (0.16, 1.0, -0.2)].enumerated() {
-                    let leaf = SCNNode(geometry: SCNBox(width: w, height: 0.02, length: 0.09, chamferRadius: 0))
-                    leaf.geometry!.firstMaterial = lit(NSColor(rgb: (0.3 + Double(i) * 0.03, 0.62, 0.38)))
-                    leaf.pivot = SCNMatrix4MakeTranslation(-w / 2, 0, 0)
-                    leaf.position = v3(0, 0.3 + Double(i) * 0.03, 0)
-                    leaf.eulerAngles = SCNVector3(0, yaw, tiltZ)
-                    pot.addChildNode(leaf)
-                }
-                pot.name = "room:" + roomKey(station, lounge)
-                staticRoot.addChildNode(pot)
-                let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
-                shelf.geometry!.firstMaterial = lit(NSColor(rgb: (0.5, 0.4, 0.32)))
-                shelf.position = v3(station.offset.x + Double(xs.max()!), 0.16, station.offset.y + Double(ys.min()!) - 0.32)
-                for i in 0..<4 {
-                    let book = SCNNode(geometry: SCNBox(width: 0.08, height: 0.2, length: 0.14, chamferRadius: 0))
-                    book.geometry!.firstMaterial = lit(NSColor(Colors.repos[i % Colors.repos.count]))
-                    book.position = v3(-0.22 + Double(i) * 0.13, 0.26, 0)
-                    shelf.addChildNode(book)
-                }
-                shelf.name = "room:" + roomKey(station, lounge)
-                staticRoot.addChildNode(shelf)
+                for n in Looks.current.furnishLounge(lounge, in: station).props { n.name = "room:" + roomKey(station, lounge); staticRoot.addChildNode(n) }
             }
             if let bath = station.rooms["kind:bath"] {
-                // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
-                let f = station.bathFixtures(bath: bath)
-                let sc2 = f.shower, tk = f.toiletCorner, sk = f.showerCorner
-                // A WC, square to the walls: a pedestal, the seat on it at Minion.seat, a dark inset
-                // for the hole, and the tank standing on the back of the seat against the wall.
-                let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
-                let spot = station.bowlSpot(bath: bath)
-                let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
-                bowl.geometry!.firstMaterial = porcelain
-                bowl.position = v3(spot.x, (Minion.seat - 0.06) / 2, spot.y)
-                let seat = SCNNode(geometry: SCNBox(width: 0.24, height: 0.06, length: 0.28, chamferRadius: 0.01))
-                seat.geometry!.firstMaterial = porcelain
-                seat.position = v3(0, Minion.seat - 0.03 - bowl.position.y, -0.02 * tk.y)
-                bowl.addChildNode(seat)
-                let hole = SCNNode(geometry: SCNBox(width: 0.12, height: 0.006, length: 0.14, chamferRadius: 0))
-                hole.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.6, 0.66)))
-                hole.position = v3(0, 0.032, -0.03 * tk.y)
-                seat.addChildNode(hole)
-                let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
-                tank.geometry!.firstMaterial = porcelain
-                tank.position = v3(0, Minion.seat + 0.15 - bowl.position.y, 0.16 * tk.y)
-                bowl.addChildNode(tank)
-                let button = SCNNode(geometry: SCNBox(width: 0.05, height: 0.012, length: 0.04, chamferRadius: 0))
-                button.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-                button.position = v3(0.06, 0.156, 0)
-                tank.addChildNode(button)
-                bowl.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(bowl)
-                // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
-                let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
-                arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-                arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.72, station.offset.y + Double(sc2.y) + 0.35 * sk.y)   // clear of a head
-                let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
-                nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                nozzle.position = v3(0, -0.03, -0.1 * sk.y)
-                arm.addChildNode(nozzle)
-                arm.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(arm)
-                // The pole the arm comes off: a pipe up the corner wall from the floor, a tap at waist height.
-                let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.72, length: 0.04, chamferRadius: 0))
-                pole.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                pole.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.36, station.offset.y + Double(sc2.y) + 0.45 * sk.y)
-                let tap = SCNNode(geometry: SCNBox(width: 0.07, height: 0.03, length: 0.05, chamferRadius: 0))
-                tap.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                tap.position = v3(0, 0.0, -0.04 * sk.y)   // waist height on the pole, out from the wall
-                pole.addChildNode(tap)
-                pole.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(pole)
-                // A towel over a rail on the other wall of the corner, at the far end of the tile from the shower
-                // so it never lines up with the nozzle in the picture. Named, so the scene can take it off the rail.
-                let railAt = station.towelRail(bath: bath)
-                let rail = SCNNode(geometry: SCNBox(width: 0.02, height: 0.02, length: 0.24, chamferRadius: 0))
-                rail.geometry!.firstMaterial = arm.geometry!.firstMaterial
-                rail.position = v3(railAt.x, 0.46, railAt.y)
-                let towel = SCNNode(geometry: SCNBox(width: 0.035, height: 0.24, length: 0.18, chamferRadius: 0.004))
-                towel.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
-                towel.position = v3(-0.03 * sk.x, -0.09, 0)
-                towel.name = "towel:" + station.name
-                rail.addChildNode(towel)
-                let stripe = SCNNode(geometry: SCNBox(width: 0.04, height: 0.03, length: 0.18, chamferRadius: 0))
-                stripe.geometry!.firstMaterial = lit(NSColor(rgb: (0.98, 0.9, 0.82)))
-                stripe.position = v3(0, -0.06, 0)
-                towel.addChildNode(stripe)
-                rail.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(rail)
-                let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
-                drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
-                drain.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.01, station.offset.y + Double(sc2.y) + 0.25 * sk.y)
-                drain.name = "room:" + roomKey(station, bath)
-                staticRoot.addChildNode(drain)
+                let f = Looks.current.furnishBath(bath, in: station)
+                for n in f.props { n.name = "room:" + roomKey(station, bath); staticRoot.addChildNode(n) }
+                for n in f.fixtures { n.name = "gym:" + roomKey(station, bath); staticRoot.addChildNode(n) }
+                f.towel?.name = "towel:" + station.name
             }
+            gymProps[station.name] = nil
             if let gym = station.rooms["kind:gym"] {
-                // Four fixtures on the four corner tiles: a treadmill, a bench with a barbell over it, a
-                // bag on an arm, and a mat. The middle tiles stay clear to walk through.
-                let spots = station.gymSpots(gym: gym)
-                let dark = lit(NSColor(rgb: (0.22, 0.23, 0.28)))
-                let steel = lit(NSColor(rgb: (0.66, 0.68, 0.74)))
-                // Fixtures are stood on, lain on and stepped round: not obstacles, so they are not "room:" props.
-                func place(_ n: SCNNode) { n.name = "gym:" + roomKey(station, gym); staticRoot.addChildNode(n) }
-                // Treadmill: a low slab with a rail at its head.
-                let tread = SCNNode(geometry: SCNBox(width: 0.42, height: 0.06, length: 0.72, chamferRadius: 0.01))
-                tread.geometry!.firstMaterial = dark
-                tread.position = v3(spots[0].x, 0.03, spots[0].y)
-                let rail = SCNNode(geometry: SCNBox(width: 0.42, height: 0.04, length: 0.04, chamferRadius: 0))
-                rail.geometry!.firstMaterial = steel
-                rail.position = v3(0, 0.42, 0.34)
-                let post = SCNNode(geometry: SCNBox(width: 0.04, height: 0.4, length: 0.04, chamferRadius: 0))
-                post.geometry!.firstMaterial = steel
-                post.position = v3(0, 0.2, 0.34)
-                tread.addChildNode(rail); tread.addChildNode(post)
-                place(tread)
-                // Bench and barbell: the bar rests on two uprights and rises for the presses.
-                let bench = SCNNode(geometry: SCNBox(width: 0.28, height: 0.2, length: 0.7, chamferRadius: 0.01))
-                bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
-                bench.position = v3(spots[1].x, 0.1, spots[1].y)
-                place(bench)
-                for side in [-1.0, 1.0] {
-                    let up = SCNNode(geometry: SCNBox(width: 0.04, height: 0.6, length: 0.04, chamferRadius: 0))
-                    up.geometry!.firstMaterial = steel
-                    up.position = v3(spots[1].x + side * 0.36, 0.3, spots[1].y - 0.18)
-                    place(up)
-                }
-                let bar = SCNNode(geometry: SCNBox(width: 0.9, height: 0.035, length: 0.035, chamferRadius: 0))
-                bar.geometry!.firstMaterial = steel
-                bar.position = v3(spots[1].x, 0.62, spots[1].y - 0.18)
-                for side in [-1.0, 1.0] {
-                    let disc = SCNNode(geometry: SCNBox(width: 0.05, height: 0.2, length: 0.2, chamferRadius: 0.01))
-                    disc.geometry!.firstMaterial = dark
-                    disc.position = v3(side * 0.4, 0, 0)
-                    bar.addChildNode(disc)
-                }
-                place(bar)
-                // The bag: a post in the corner with an arm out, and the bag hanging from it.
-                let out = station.gymOutward(gym: gym, at: spots[2])
-                let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
-                bagPost.geometry!.firstMaterial = steel
-                bagPost.position = v3(spots[2].x + out.x * 0.3, 0.55, spots[2].y + out.y * 0.3)
-                let bagArm = SCNNode(geometry: SCNBox(width: 0.34, height: 0.04, length: 0.04, chamferRadius: 0))
-                bagArm.geometry!.firstMaterial = steel
-                bagArm.position = v3(-out.x * 0.15, 0.53, -out.y * 0.15)
-                bagArm.eulerAngles.y = atan2(-out.x, -out.y) + .pi / 2
-                bagPost.addChildNode(bagArm)
-                place(bagPost)
-                let bag = SCNNode()   // pivot at the arm's end: the bag hangs from it and swings about it
-                bag.position = v3(spots[2].x, 1.08, spots[2].y)
-                let sack = SCNNode(geometry: SCNBox(width: 0.2, height: 0.42, length: 0.2, chamferRadius: 0.02))
-                sack.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.28, 0.26)))
-                sack.position = v3(0, -0.36, 0)
-                let chain = SCNNode(geometry: SCNBox(width: 0.02, height: 0.16, length: 0.02, chamferRadius: 0))
-                chain.geometry!.firstMaterial = steel
-                chain.position = v3(0, -0.08, 0)
-                bag.addChildNode(sack); bag.addChildNode(chain)
-                place(bag)
-                // The mat: a dark square on the floor.
-                let mat = SCNNode(geometry: SCNBox(width: 0.7, height: 0.012, length: 0.7, chamferRadius: 0))
-                mat.geometry!.firstMaterial = flat(NSColor(rgb: (0.26, 0.4, 0.34)))
-                mat.position = v3(spots[3].x, 0.006, spots[3].y)
-                place(mat)
-                gymProps[station.name] = (bar, bag)
+                let f = Looks.current.furnishGym(gym, in: station)
+                for n in f.props { n.name = "room:" + roomKey(station, gym); staticRoot.addChildNode(n) }
+                for n in f.fixtures { n.name = "gym:" + roomKey(station, gym); staticRoot.addChildNode(n) }
+                if let bar = f.bar, let bag = f.bag { gymProps[station.name] = (bar, bag) }
             }
             if station.hasHangar {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
                 anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
-                for slot in station.hangarSlots {
+                for slot in station.hangarSlots where input == nil {
                     let mark = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
                     mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
                     mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
                     staticRoot.addChildNode(mark)
                 }
             }
-            for c in station.corridorCells where (c.x + c.y * 3) % 4 == 0 && !Theme.isKenney {   // the kit's plates have their own marks
+            for c in station.corridorCells where Looks.current.dotsHallway && (c.x + c.y * 3) % 4 == 0 {
                 let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
                 d.geometry!.firstMaterial = flat(Palette.void)
                 d.eulerAngles.x = -.pi / 2
@@ -462,44 +283,16 @@ extension StationController {
                 staticRoot.addChildNode(d)
             }
             let mp = station.monolithPosition
-            if Theme.isKenney, let tower = Kit.tower() {
-                // The monolith as the kit's comms tower, its dish turning slowly over the plaza.
-                tower.position = v3(station.offset.x + mp.x, 0, station.offset.y + mp.y)
-                tower.name = "station:" + station.name
-                staticRoot.addChildNode(tower)
-            } else {
-                let core = SCNNode(geometry: SCNBox(width: 0.7, height: 2.3, length: 0.7, chamferRadius: 0))
-                core.geometry!.firstMaterial = lit(Palette.core)
-                core.position = v3(station.offset.x + mp.x, 1.15, station.offset.y + mp.y)
-                core.name = "station:" + station.name
-                staticRoot.addChildNode(core)
-                let glow = SCNNode(geometry: SCNBox(width: 0.72, height: 0.04, length: 0.72, chamferRadius: 0))
-                glow.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.75, 1.0)))
-                glow.position = v3(station.offset.x + mp.x, 1.75, station.offset.y + mp.y)
-                staticRoot.addChildNode(glow)
-            }
+            let monolith = Looks.current.monolith()
+            monolith.position = v3(station.offset.x + mp.x, 0, station.offset.y + mp.y)
+            monolith.name = "station:" + station.name
+            staticRoot.addChildNode(monolith)
             for bed in station.beds {
-                if bed.level == 0 {
-                    let b = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72))
-                    b.geometry!.firstMaterial = flat(NSColor(Colors.bed))
-                    b.eulerAngles.x = -.pi / 2
-                    b.position = v3(station.offset.x + bed.pos.x, Theme.isKenney ? Kit.plateTop + 0.004 : 0.005, station.offset.y + bed.pos.y)
-                    b.name = "room:\(station.name)|kind:quarters"
-                    staticRoot.addChildNode(b)
-                } else {
-                    // The upper bunk: a slab on four thin posts.
-                    let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))
-                    slab.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.08))
-                    slab.position = v3(station.offset.x + bed.pos.x, 0.34, station.offset.y + bed.pos.y)
-                    slab.name = "room:\(station.name)|kind:quarters"
-                    for dx in [-0.16, 0.16] { for dz in [-0.35, 0.35] {
-                        let post = SCNNode(geometry: SCNBox(width: 0.025, height: 0.34, length: 0.025, chamferRadius: 0))
-                        post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.22, 0.3)))
-                        post.position = v3(dx, -0.17, dz)
-                        slab.addChildNode(post)
-                    } }
-                    staticRoot.addChildNode(slab)
-                }
+                let b = Looks.current.bed(level: bed.level)
+                b.position.x = station.offset.x + bed.pos.x
+                b.position.z = station.offset.y + bed.pos.y
+                b.name = "room:\(station.name)|kind:quarters"
+                staticRoot.addChildNode(b)
             }
 
             for room in station.rooms.values {
@@ -537,7 +330,7 @@ extension StationController {
                         let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
                         overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
                         overlay.eulerAngles.x = -.pi / 2
-                        overlay.position = v3(t.position.x, Theme.isKenney ? Kit.plateTop + 0.004 : 0.004, t.position.z)
+                        overlay.position = v3(t.position.x, Looks.current.floorTop + 0.004, t.position.z)
                         overlay.name = "room:" + key
                         if failing {
                             overlay.opacity = 0.15
@@ -549,7 +342,12 @@ extension StationController {
                     }
                 }
                 roomTiles[key] = tiles
-                if Theme.isKenney, !pending, !room.key.hasPrefix("kind:") { dressOffice(station, room, key: key, provisional: provisional) }
+                if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station) {
+                    prop.position.x += station.offset.x; prop.position.z += station.offset.y
+                    prop.name = "station:" + station.name
+                    if provisional { prop.opacity = 0.38 }
+                    staticRoot.addChildNode(prop)
+                }
                 // Outlined while not built; a peer's local office someone works in is solid and keeps the frame as a mark.
                 if provisional || world.isLocalLive(station, room), !pending {
                     // A thin frame round each tile's outer edges: reserved, not built.
@@ -568,7 +366,14 @@ extension StationController {
             }
         }
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
-        rebuildGround()
+        groundRoot.childNodes.forEach { $0.removeFromParentNode() }
+        if headless {
+            // A run with no window draws no world round the stations: nothing would see it.
+        } else if Looks.theme.separateWorlds {
+            for station in fleet.stations.values { Looks.current.ground(under: [station], into: groundRoot) }
+        } else {
+            Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
+        }
         rebuildLabels()
         rebuildMarkers()
         for key in fadeIn {
@@ -577,17 +382,17 @@ extension StationController {
         }
         fadeIn = []
 
-        (targetFocus, targetHalf) = frame(for: Array(fleet.stations.values))
+        (targetFocus, targetHalf) = frame(for: shownStations)
         if let f = focused { focusNow(on: f) }
         fleet.save()
     }
 
     private static func displayName(_ room: Room) -> String {
         switch room.key {
-        case "kind:quarters": return "dorm"
-        case "kind:lounge": return "lounge"
-        case "kind:bath": return "bath"
-        case "kind:airlock": return "airlock"
+        case "kind:quarters": return Words.current.dorm
+        case "kind:lounge": return Words.current.lounge
+        case "kind:bath": return Words.current.bath
+        case "kind:airlock": return Words.current.airlock
         default: return room.name
         }
     }
@@ -620,35 +425,35 @@ extension StationController {
 
             if station.hasPad {
                 if world.deckInUse(station: station.name) {
-                    let deckLabel = floorSign("staging", color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
+                    let deckLabel = floorSign(Words.current.deck, color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
                     deckLabel.node.position.y = 0.012
                     let dc = station.deckCells
                     let dcorner = SIMD2(Double(dc.map(\.x).max()!) + 0.42 - deckLabel.width / 2, Double(dc.map(\.y).max()!) + 0.42 - deckLabel.height / 2)
                     add(deckLabel.node, yaw: 0, center: dcorner + SIMD2(ox, oz))
                 }
-                let storeLabel = floorSign("storage", color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
+                let storeLabel = floorSign(Words.current.storage, color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
                 storeLabel.node.position.y = 0.012
                 let sc = station.storageCells
                 let scorner = SIMD2(Double(sc.map(\.x).max()!) + 0.42 - storeLabel.width / 2, Double(sc.map(\.y).max()!) + 0.42 - storeLabel.height / 2)
                 add(storeLabel.node, yaw: 0, center: scorner + SIMD2(ox, oz))
-                let deconLabel = floorSign("decon", color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
+                let deconLabel = floorSign(Words.current.decon, color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
                 deconLabel.node.position.y = 0.012
                 let qc = station.deconCells
                 let qcorner = SIMD2(Double(qc.map(\.x).max()!) + 0.42 - deconLabel.width / 2, Double(qc.map(\.y).max()!) + 0.42 - deconLabel.height / 2)
                 add(deconLabel.node, yaw: 0, center: qcorner + SIMD2(ox, oz))
-                let padLabel = floorSign("launch", color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
+                let padLabel = floorSign(Words.current.pad, color: NSColor(rgb: (0.45, 0.48, 0.58)), size: 0.34)
                 padLabel.node.position.y = 0.012
                 let pc = station.padCells
                 let corner = SIMD2(Double(pc.map(\.x).max()!) + 0.42 - padLabel.width / 2, Double(pc.map(\.y).max()!) + 0.42 - padLabel.height / 2)
                 add(padLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
             }
             if station.hasHangar {
-                let hangarLabel = floorSign("bay", color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
+                let hangarLabel = floorSign(Words.current.bay, color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
                 hangarLabel.node.position.y = 0.012
                 let hc = station.hangarCells
                 let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
                 add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
-                let airlockLabel = floorSign("airlock", color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
+                let airlockLabel = floorSign(Words.current.airlock, color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
                 airlockLabel.node.position.y = 0.012
                 if let a = station.airlockInner.first {
                     add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x), oz + Double(a.y)))
@@ -768,56 +573,5 @@ extension StationController {
             let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
             return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
         }
-    }
-}
-
-// MARK: Kenney's set dressing: props in the spots nobody stands, named for the station so none is an obstacle.
-extension StationController {
-    /// Fuel by the pad, on the two corners farthest from every rocket slot; a rover parked in the bay,
-    /// on the cell farthest from the slots the ships drop crates on and from the airlock.
-    private func dressStation(_ station: Station) {
-        let name = "station:" + station.name
-        if station.hasPad {
-            let pc = station.padCenter
-            let slots = [SIMD2(0.0, 0.0), SIMD2(1.3, 0.0), SIMD2(-1.3, 0.0), SIMD2(0.0, 1.2)].map { pc + $0 }
-            func clearance(_ c: Cell) -> Double { slots.map { simd_distance(SIMD2(Double(c.x), Double(c.y)), $0) }.min() ?? 0 }
-            let corners = station.padCells.filter { clearance($0) > 1.1 && simd_distance(SIMD2(Double($0.x), Double($0.y)), pc) < 2.5 }.sorted { (clearance($0), $0.y, $0.x) > (clearance($1), $1.y, $1.x) }.prefix(2)
-            for (i, c) in corners.enumerated() {
-                guard let barrel = Kit.prop("machine_barrel", scale: 0.8, yaw: Double(i) * .pi / 2 + 0.4, color: NSColor(rgb: (0.75, 0.62, 0.25))) else { continue }
-                barrel.position = v3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y))
-                barrel.name = name
-                staticRoot.addChildNode(barrel)
-            }
-        }
-        if station.hasHangar, !station.hangarCells.isEmpty {
-            let keepOff = station.hangarSlots + station.airlockCells.map { SIMD2(Double($0.x), Double($0.y)) }
-            func clearance(_ c: Cell) -> Double { keepOff.map { simd_distance(SIMD2(Double(c.x), Double(c.y)), $0) }.min() ?? 0 }
-            if let c = station.hangarCells.max(by: { (clearance($0), $0.y, $0.x) < (clearance($1), $1.y, $1.x) }), clearance(c) > 0.9,
-               let rover = Kit.prop("rover", scale: 1.5, yaw: 0.6, color: NSColor(Colors.hangar).lighter(0.25)) {
-                rover.position = v3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y))
-                rover.name = name
-                staticRoot.addChildNode(rover)
-            }
-        }
-    }
-
-    /// A computer desk against an outer wall of the office's farthest cell from the door, its screen
-    /// turned into the room, so whoever stands on that cell stands at it.
-    private func dressOffice(_ station: Station, _ room: Room, key: String, provisional: Bool) {
-        let cells = Set(room.cells)
-        guard let door = station.doorCell(of: room.key), let outside = station.doorOutside(of: room.key) else { return }
-        let far = room.cells.max { a, b in
-            (abs(a.x - door.x) + abs(a.y - door.y), -a.y, -a.x) < (abs(b.x - door.x) + abs(b.y - door.y), -b.y, -b.x)
-        }!
-        let sides = [Cell(x: far.x, y: far.y - 1), Cell(x: far.x, y: far.y + 1), Cell(x: far.x - 1, y: far.y), Cell(x: far.x + 1, y: far.y)]
-        // An outer wall: a side with no room beyond it, the void before anything, never the doorway.
-        let walls = sides.filter { !cells.contains($0) && !($0 == outside && far == door) }
-        guard let wall = walls.first(where: { station.room(at: $0) == nil && !station.isCorridor($0) }) ?? walls.first else { return }
-        let d = SIMD2(Double(wall.x - far.x), Double(wall.y - far.y))
-        guard let desk = Kit.prop("desk_computer", scale: 0.8, yaw: atan2(-d.x, -d.y), color: NSColor(room.color)) else { return }
-        desk.position = v3(station.offset.x + Double(far.x) + d.x * 0.36, Kit.plateTop, station.offset.y + Double(far.y) + d.y * 0.36)
-        desk.name = "station:" + station.name
-        if provisional { desk.opacity = 0.38 }
-        staticRoot.addChildNode(desk)
     }
 }

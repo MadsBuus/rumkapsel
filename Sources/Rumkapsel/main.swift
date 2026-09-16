@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         let simulatorOnly = args.contains("--simulator")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
+        // Every test run reads the log in Classic's words, whatever theme is picked: scenarios expect lines by their words.
+        if args.contains(where: { $0 == "--scenarios" || $0.hasSuffix("-tests") }) { Words.pinned = Vocabulary() }
         // The crate ledger on its own: facts in every order, no station.
         if args.contains("--ledger-tests") { LedgerTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
