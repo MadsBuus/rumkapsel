@@ -58,6 +58,21 @@ enum Colors {
     /// beside the six rather than in front of them. A theme may bring its own — see `Theme.repoColors`.
     static var repos: [RGB] { Theme.forPlan.repoColors }
 
+    /// A house's colours: the dyes a banner could actually be made in, so a field of them reads as a row
+    /// of shields rather than a chart.
+    static let heraldry: [RGB] = [
+        RGB(r: 0.663, g: 0.216, b: 0.212),   // gules, madder red
+        RGB(r: 0.271, g: 0.373, b: 0.600),   // azure, woad blue
+        RGB(r: 0.824, g: 0.643, b: 0.243),   // or, saffron gold
+        RGB(r: 0.290, g: 0.451, b: 0.298),   // vert, a deep forest green
+        RGB(r: 0.482, g: 0.267, b: 0.435),   // purpure
+        RGB(r: 0.741, g: 0.451, b: 0.216),   // tenné, burnt orange
+        RGB(r: 0.361, g: 0.396, b: 0.435),   // a slate grey
+        RGB(r: 0.604, g: 0.318, b: 0.298),   // brick
+        RGB(r: 0.357, g: 0.545, b: 0.553),   // a faded teal
+        RGB(r: 0.549, g: 0.502, b: 0.294),   // olive
+    ]
+
     static let classicRepos: [RGB] = [
         RGB(r: 0.808, g: 0.431, b: 0.212),   // #CE6E36  the game's orange
         RGB(r: 0.835, g: 0.647, b: 0.251),   // #D5A540  its yellow

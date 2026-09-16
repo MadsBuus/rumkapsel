@@ -78,7 +78,7 @@ of the config (a config holding only `themeName` fails to decode and falls back 
 
 ```bash
 mkdir -p /tmp/look/Rumkapsel
-jq '. + {themeName:"kenney"}' ~/Library/Application\ Support/Rumkapsel/config.json > /tmp/look/Rumkapsel/config.json
+jq '. + {themeName:"kingdom"}' ~/Library/Application\ Support/Rumkapsel/config.json > /tmp/look/Rumkapsel/config.json
 RUMKAPSEL_SUPPORT=/tmp/look RK_FPS=1 .build/debug/Rumkapsel --demo --snapshot /tmp/look/demo.png --delay 14
 RUMKAPSEL_SUPPORT=/tmp/look .build/debug/Rumkapsel --demo --focus work --zoom 2.4 --snapshot /tmp/look/close.png --delay 14
 ```
@@ -110,6 +110,8 @@ The pointer over the window shows its hover panel in a snapshot; keep it off the
   neighbours. `Noise` is keyed to position, so a world stays where it was as the growth zone moves.
 - **`Looks/ClassicLook.swift` and `Looks/ClassicFurniture.swift`**: the defaults, as `Classic`, which a look
   can fall back on when its own model is missing.
+- **`Looks/KingdomLook.swift`**: the worked example of every layer, with a `Site` that reads a station's plan
+  (its floor, the bay's centre, the shoreline, the road) and builds its world once per floor.
 - **`Looks/Kit.swift`**: the Kenney model loader. A model is loaded once and cloned with its own materials;
   kits with named materials are tinted by name, atlas-textured kits through `multiply`. Merge many props into
   one node with `flattenedClone()` once they are placed.
