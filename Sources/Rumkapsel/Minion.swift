@@ -38,6 +38,7 @@ final class Minion: Body {
     private var posedSeated = false
     private var posedLying = false
     private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
+    private var posedSeatHeight = Minion.seat      // the height of the seat it is sat on
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
     /// The look's own figure in the box's place, when it has one; the box and its visor are then not drawn.
@@ -77,9 +78,14 @@ final class Minion: Body {
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
     }
     /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
-    private var staticSpot: SCNVector3 { posedSeated ? v3(posedSeat.x, Minion.seat + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
+    private var staticSpot: SCNVector3 { posedSeated ? v3(posedSeat.x, posedSeatHeight + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
     /// The top of the bowl, where a sitter's thighs rest.
     static let seat = 0.2
+    /// The top of a couch, which is lower than the bowl. A seat's own height, so that a body put down
+    /// on it lands on it: one height for every seat leaves a sitter hovering over the shorter one.
+    static let couchSeat = 0.18
+    /// How high the seat under this body is, by which seat it is on.
+    var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
@@ -333,17 +339,18 @@ final class Minion: Body {
     /// Sit down on the bowl, its middle at `offset` in the figure's own frame (x across, z ahead, so
     /// behind when negative): the body bends into a sit, the torso upright on the seat, thighs out
     /// in front and shins down to the floor. Or straighten and stand back up onto the spot.
-    func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0)) {
+    func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0), height: Double = Minion.seat) {
         guard on != posedSeated else { return }
         posedSeated = on
         posedSeat = on ? offset : SIMD2(0, 0)
+        posedSeatHeight = on ? height : Minion.seat
         body.removeAllActions()
         let torso = bodyHeight * 0.62
         let pose: SCNAction
         if on {
             pose = .group([.rotateTo(x: -0.1, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
-                           .move(to: v3(offset.x, Minion.seat + torso / 2, offset.y), duration: 0.5)])
-            legs.position = v3(offset.x, Minion.seat, offset.y)
+                           .move(to: v3(offset.x, height + torso / 2, offset.y), duration: 0.5)])
+            legs.position = v3(offset.x, height, offset.y)
         } else {
             pose = .group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.45, usesShortestUnitArc: true),
                            .move(to: v3(0, bodyHeight / 2, 0), duration: 0.45)])
