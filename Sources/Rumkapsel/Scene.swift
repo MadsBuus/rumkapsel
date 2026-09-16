@@ -861,8 +861,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func handle(_ events: [WorldEvent]) { for e in events { handle(e) } }
 
-    /// A message landed in an office: one cone per message that arrived since last time, and its
-    /// worker walks over to work them. A queued cone lights up when it is picked up.
     /// A message reached the session: the one cone that stands for the message being worked. The
     /// queued cone at the head of the row, if any, is the one it came from.
     private func promptLanded(station: String, key: String, minionId: String, count: Int) {

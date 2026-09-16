@@ -161,7 +161,7 @@ enum Props {
         return s
     }
 
-    /// Where crate `index` stands on a pallet: four across, three rows back, stacked past twelve.
+    /// Where crate `index` stands on a pallet: four across, two rows back, stacked past eight.
     static func palletSlot(_ index: Int) -> (row: Int, column: Int, level: Int) { PalletGeometry.slot(index) }
 
     /// That slot's place on the pallet's own top plate.

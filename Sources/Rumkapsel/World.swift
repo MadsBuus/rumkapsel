@@ -1161,7 +1161,7 @@ final class World {
     }
 
     /// What a pallet takes: every crate of a repository standing in storage, top of each stack first,
-    /// twelve at most. Anything already on someone's arms stays where it is.
+    /// a pallet's worth at most. Anything already on someone's arms stays where it is.
     func palletCargo(station: Station, repo: String) -> [(crate: CrateRef, from: Spot)] {
         yardLayout(station: station, area: "storage").filter { $0.repo == repo && !$0.carried }
             .sorted { ($0.level, $0.index) > ($1.level, $1.index) }
