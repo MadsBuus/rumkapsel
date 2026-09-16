@@ -331,7 +331,10 @@ extension StationController {
                 let provisional = world.isProvisional(station, room)
                 // Drawn from last night's notes and not yet confirmed today: it breathes until it is.
                 let unchecked = world.isUnchecked(station, room)
-                let breath = 0.25 * Double(abs(key.hashValue) % 7)   // rooms are not all in step
+                // Rooms are put out of step by where in the breath they start, not by waiting to begin:
+                // the floor is redrawn often, and anything that starts with a pause starts that pause
+                // again each time and is never seen to move.
+                let phase = Double(abs(key.hashValue) % 7) / 7
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -346,9 +349,12 @@ extension StationController {
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     else if unchecked {
-                        t.opacity = 0.5
-                        t.runAction(.sequence([.wait(duration: breath), .repeatForever(.sequence([
-                            .fadeOpacity(to: 0.82, duration: 1.1), .fadeOpacity(to: 0.5, duration: 1.3)]))]))
+                        let low = 0.42, high = 0.86
+                        t.opacity = low + (high - low) * phase
+                        t.runAction(.repeatForever(.sequence([
+                            .fadeOpacity(to: high, duration: 1.0 * (1 - phase) + 0.2),
+                            .fadeOpacity(to: low, duration: 1.3),
+                            .fadeOpacity(to: high, duration: 1.0)])))
                     }
                     else if provisional { t.opacity = 0.38 }
                     tiles.append(t)
