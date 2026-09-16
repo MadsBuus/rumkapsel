@@ -15,8 +15,7 @@ protocol Look {
     var viewYaw: Double { get }
     /// What lies beyond the stations, into `root`; returns what drifts, each with its velocity.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)]
-    /// The ground round `stations`, into `root`, rebuilt with the floor. Under a theme of separate worlds it
-    /// is asked once for each station.
+    /// The ground round `stations`, into `root`, rebuilt with the floor.
     func ground(under stations: [Station], into root: SCNNode)
 
     // MARK: the input: the bay and the airlock

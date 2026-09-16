@@ -261,28 +261,10 @@ extension StationController {
         }
     }
 
-    /// The stations the camera frames: the world on show under a theme of separate worlds, else the whole fleet.
-    var shownStations: [Station] {
-        guard Looks.theme.separateWorlds else { return Array(fleet.stations.values) }
-        return [fleet.stations[shownWorld ?? ""] ?? fleet.ordered.first].compactMap { $0 }
-    }
+    /// The stations the camera frames: the whole fleet.
+    var shownStations: [Station] { Array(fleet.stations.values) }
 
     func focusNow(on stationName: String?) {
-        if Looks.theme.separateWorlds {
-            // One world at a time: there is no whole-fleet view, so no name means the first world. A new world is
-            // cut to, not flown to across the gap between them.
-            let name = stationName.flatMap { fleet.stations[$0] != nil ? $0 : nil } ?? fleet.ordered.first?.name
-            let moved = name != shownWorld
-            shownWorld = name
-            focused = name
-            (targetFocus, targetHalf) = frame(for: shownStations)
-            userPan = .zero; userZoom = 1; userZoomChanged = true
-            if moved {
-                rig.position.x = targetFocus.x; rig.position.z = targetFocus.y
-                cameraNode.camera!.orthographicScale = fitScale(half: targetHalf)
-            }
-            return
-        }
         focused = stationName
         guard let name = stationName, let station = fleet.stations[name] else {
             userPan = .zero; userZoom = 1; userZoomChanged = true; return
@@ -333,7 +315,6 @@ extension StationController {
         d.set(userYaw, forKey: "view.yaw"); d.set(userPitch, forKey: "view.pitch"); d.set(userZoom, forKey: "view.zoom")
         d.set(userPan.x, forKey: "view.panx"); d.set(userPan.y, forKey: "view.pany")
         d.set(focused ?? "", forKey: "view.focus")
-        d.set(shownWorld ?? "", forKey: "view.world")
     }
 
     func restoreView() {
@@ -344,10 +325,6 @@ extension StationController {
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
         rig.eulerAngles.y = viewYaw + userYaw; pitchNode.eulerAngles.x = userPitch
-        if Looks.theme.separateWorlds {
-            focusNow(on: d.string(forKey: "view.world"))
-            return
-        }
         let f = d.string(forKey: "view.focus") ?? ""
         if !f.isEmpty, fleet.stations[f] != nil {
             focusNow(on: f)

@@ -87,7 +87,7 @@ The pointer over the window shows its hover panel in a snapshot; keep it off the
 
 ## Where a theme lives
 
-- **`Theme.swift`**: the case, its title and credit for the picker, `padGap`, `separateWorlds`, and its
+- **`Theme.swift`**: the case, its title and credit for the picker, `padGap`, and its
   `vocabulary`, the words for floor signs, hover text, orders and log lines. A theme overrides only the words
   it redraws.
 - **`Looks/Look.swift`**: the `Look` protocol, ordered by the layers. Every requirement has a default, the

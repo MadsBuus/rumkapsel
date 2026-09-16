@@ -369,8 +369,6 @@ extension StationController {
         groundRoot.childNodes.forEach { $0.removeFromParentNode() }
         if headless {
             // A run with no window draws no world round the stations: nothing would see it.
-        } else if Looks.theme.separateWorlds {
-            for station in fleet.stations.values { Looks.current.ground(under: [station], into: groundRoot) }
         } else {
             Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
