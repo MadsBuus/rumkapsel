@@ -789,17 +789,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// How dim an office is while it waits to be looked at.
     static let unlitOffice = 0.55
-    /// When the window opened, for the fly-in.
-    let launchedAt = CACurrentMediaTime()
-    /// How much floor the view takes in while a station is still arriving. It comes in slowly over the
-    /// first few seconds rather than sitting at one height: the floor is filling in under it, so there
-    /// is something to fly towards, and a station that is being assembled is worth watching arrive.
-    var settlingHalf: SIMD2<Double> {
-        let t = min(1, (CACurrentMediaTime() - launchedAt) / 7)
-        let eased = 1 - pow(1 - t, 3)
-        let half = 34 - 16 * eased
-        return SIMD2(half, half)
-    }
+    /// How much floor the view takes in while a station is still arriving. One height, held: a fly-in
+    /// was tried and read badly, and until it is known why a launch drops frames the way it does, the
+    /// camera is better still than moving unevenly.
+    var settlingHalf: SIMD2<Double> { SIMD2(20, 20) }
 
     /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
     /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
@@ -1116,11 +1109,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        // Flying in: the height is worked out from the time since the window opened and taken as it is,
-        // with nothing easing toward it. An eased camera chases its target by a fraction of whatever gap
-        // is left each frame, which is smooth only while the frames are even — and they are at their
-        // least even during a launch, with the floor being dug and GitHub being asked. A curve read off
-        // the clock lands where it should however the frames fall.
+        // Nothing eases while the floor arrives: an eased camera closes a fraction of whatever gap is
+        // left each frame, which is smooth only while the frames are even, and a launch is when they are
+        // least even. The height is simply held until the station has stopped arriving.
         if floorSettling {
             cameraNode.camera!.orthographicScale = fitScale(half: settlingHalf) / userZoom
         } else {
