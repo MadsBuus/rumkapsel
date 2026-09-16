@@ -94,21 +94,21 @@ final class Minion: Body {
     /// How high the seat under this body is, by which seat it is on.
     var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
 
-    /// How long of a rise is spent sitting on the edge before standing up.
-    static let riseSit = 0.55
-
     /// The one pose this body is in, from what it is doing. Flat beats sitting: a body on the bench is
     /// both on a seat and on its back, and it is its back that shows.
     ///
     /// Getting up off a bunk is the one pose that is two: nobody rises from flat on their back straight
     /// onto their feet. It swings round to sit on the edge of the mattress first, and stands from there.
     func currentPose(at clock: Double) -> Pose {
+        let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
         if onBench { return .flat(height: Minion.seat) }
+        // Into bed: sit on the edge, then stretch out along it. Out of bed: the same, backwards.
+        if beddingUntil > clock {
+            return beddingUntil - clock > Minion.riseSit ? onEdge : .flat(height: Minion.bedSeat)
+        }
         if lying { return .flat(height: Minion.bedSeat) }
         if risingUntil > clock {
-            return risingUntil - clock > Minion.riseSit
-                ? .seated(height: Minion.bedSeat, at: SIMD2(Minion.bedEdge, 0))
-                : .standing
+            return risingUntil - clock > Minion.riseSit ? onEdge : .standing
         }
         if seated { return .seated(height: seatHeight, at: seatSpot) }
         return .standing
@@ -364,6 +364,24 @@ final class Minion: Body {
         case standing
         case seated(height: Double, at: SIMD2<Double>)
         case flat(height: Double)
+    }
+
+    /// Copies what the body is onto the figure you see: its pose, where it stands, how solid it is.
+    /// This is not work the body does — it is the picture catching up to the facts — so it runs for
+    /// every body every frame, whatever else that frame skips. It lives here rather than in the scene
+    /// so that anything drawing a minion draws it the one way: the gallery is a debugger for these
+    /// movements, and a debugger with an animation of its own would be worth nothing.
+    func mirror(station: Station, clock: Double, dt: Double) {
+        setPose(currentPose(at: clock))
+        // What is drawn follows the order in hand, never a flag the last order left behind.
+        setStatic(bathing && phaseKind == .act && path.isEmpty, frame: Int(clock * 12))
+        let resting = path.isEmpty && state == .settled
+        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? abs(sin(clock * 7 + bobPhase)) * 0.14 : 0   // nobody hops in the shower
+        // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
+        drawnLean += (lean - drawnLean) * min(1, dt * 8)
+        node.position = v3(station.offset.x + pos.x + drawnLean.x, hop, station.offset.y + pos.y + drawnLean.y)
+        shadow.position.y = CGFloat(0.003 - hop)   // the shadow stays on the floor while the body hops
+        node.opacity = opacity
     }
 
     /// Puts the figure into a pose. The only thing that moves the body node, so no two poses can fight

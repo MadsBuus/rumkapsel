@@ -194,7 +194,7 @@ extension StationController {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
                 // draw it anywhere while it rises. The mirror below still does, as it always does.
-                mirror(m, station: station, dt: dt)
+                m.mirror(station: station, clock: clock, dt: dt)
                 continue
             case .walking, .wondering: break
             case .there:
@@ -210,7 +210,7 @@ extension StationController {
                 if case .pushPallet = m.current?.kind, m.path.isEmpty { drawPusher(m, station: station) }
             }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
-            mirror(m, station: station, dt: dt)   // the picture catches up whatever else this frame skipped
+            m.mirror(station: station, clock: clock, dt: dt)   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
             pose(m, station: station, dt: dt)
         }
@@ -320,19 +320,6 @@ extension StationController {
     /// This is not work the body does — it is the picture catching up to the facts — so it runs for
     /// every body every frame, whatever else that frame skips. A frame that skips it leaves the figure
     /// showing the last frame's facts until one finally runs, and then it jumps to catch up.
-    private func mirror(_ m: Minion, station: Station, dt: Double) {
-        m.setPose(m.currentPose(at: clock))
-        // What is drawn follows the order in hand, never a flag the last order left behind.
-        m.setStatic(m.bathing && m.phaseKind == .act && m.path.isEmpty, frame: Int(clock * 12))
-        let resting = m.path.isEmpty && m.state == .settled
-        let bunkLift = m.place == .quarters && m.path.isEmpty && m.isResting && m.bed.map { $0 < station.beds.count && station.beds[$0].level == 1 } == true ? 0.36 : 0
-        let jump = m.isJumping(at: clock) && resting && m.place != .lounge && !m.bathing ? abs(sin(clock * 7 + m.bobPhase)) * 0.14 : 0   // nobody hops in the shower
-        // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
-        m.drawnLean += (m.lean - m.drawnLean) * min(1, dt * 8)
-        m.node.position = v3(station.offset.x + m.pos.x + m.drawnLean.x, jump + bunkLift, station.offset.y + m.pos.y + m.drawnLean.y)
-        m.shadow.position.y = CGFloat(0.003 - jump)   // the shadow stays on the floor while the body hops
-        m.node.opacity = m.opacity
-    }
 
     /// The flourishes on top of the mirror: the shower's drops, which way the figure turns, and the one
     /// little routine per activity. A frame may skip these — a dropped droplet is nothing.

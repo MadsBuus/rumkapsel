@@ -873,14 +873,25 @@ final class Simulation<B: Body> {
             let spot = station.beds[b].pos
             // Lying, it is on the mattress; on its feet or sitting on the edge, it is a shin's reach out
             // from it, which is where a body stands to get into a bed and where it lands getting out.
-            var stand = spot
-            if !m.lying, let room = station.rooms["kind:quarters"], !room.cells.isEmpty {
-                let xs = room.cells.map { Double($0.x) }, ys = room.cells.map { Double($0.y) }
-                let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
-                let d = mid - spot, far = (d.x * d.x + d.y * d.y).squareRoot()
-                if far > 0.01 { stand = spot + d / far * B.seatReach }
+            // Either long side of a bunk can be sat on, so it uses the one it has business with: the
+            // side it is walking in from, or, once it is up and going somewhere, the side it is headed
+            // for. A bunk lies along its room, so its sides are the two across it.
+            let aim = m.path.first ?? m.pos
+            let outward = SIMD2(aim.x >= spot.x ? 1.0 : -1.0, 0)
+            let stand = spot + outward * B.seatReach
+            // At the edge with nothing else to do: it turns its back on the bunk, sits on it, and
+            // stretches out along it. The same move the other way round is what getting up is.
+            if !m.lying, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
+                let gap = stand - m.pos
+                if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
+                    m.beddingUntil = clock + 1.1
+                    m.facing = atan2(outward.x, outward.y)   // its back to the bunk, ready to sit down
+                }
             }
-            m.pos += (stand - m.pos) * min(1, dt * 4)
+            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0 }
+            // It is on the mattress once it is lying on it, or once the sit is over and it is stretching.
+            let stretching = m.beddingUntil > 0 && m.beddingUntil - clock <= B.riseSit
+            m.pos += ((m.lying || stretching ? spot : stand) - m.pos) * min(1, dt * 4)
         }
     }
 }

@@ -87,6 +87,11 @@ class Body {
     /// Getting to its feet off a bed: it holds still until then, but unlike `wakeUntil` it is no bar to
     /// being given something to do — standing up is usually the answer to an order, not a refusal of it.
     var risingUntil = 0.0
+    /// Getting into bed, which is the same moves in the opposite order: sitting on the edge, then
+    /// stretching out along it.
+    var beddingUntil = 0.0
+    /// How much of either move is spent sitting on the edge, before stretching out or standing up.
+    static let riseSit = 0.55
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
     /// Who stood in the way on the last step, for the log.
@@ -174,7 +179,7 @@ class Body {
     /// moment it is roused, not when it finally sets off.
     var lying: Bool {
         if onBench { return true }
-        return risingUntil == 0 && !onJob && path.isEmpty && state == .settled
+        return risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
             && (activity == .sleeping || napping) && place == .quarters
     }
 
