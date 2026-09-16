@@ -505,7 +505,9 @@ final class GitHubResolver {
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var stateChanges: [(branch: String, pr: PullRequest, previous: PullRequest?)] = []
     private var feeds: [String: ([FeedEvent], Date)] = [:]
-    private var me: String?
+    /// Whether this run has asked GitHub who it is yet; the answer is remembered between runs.
+    private var askedWho = false
+    private var me: String? = ConfigStore.shared.current.viewerLogin
 
     /// Open release pull requests for a repository, or nil if not fetched yet.
     func openReleases(repoRoot: String) -> [ReleasePR]? {
@@ -584,9 +586,12 @@ final class GitHubResolver {
         trace("ask feed \(repoRoot)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("f:" + repoRoot); lock.unlock() }
-            if me == nil, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
+            // Asked once a session even when it is already remembered, so a wrong name puts itself
+            // right within a few seconds rather than lasting until someone clears the config.
+            if !askedWho, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
                let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
-                lock.lock(); me = login; lock.unlock()
+                lock.lock(); askedWho = true; let changed = me != login; me = login; lock.unlock()
+                if changed { ConfigStore.shared.update { $0.viewerLogin = login } }
             }
             var owner = nameWithOwner(repoRoot: repoRoot)
             if owner == nil, let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),

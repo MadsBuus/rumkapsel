@@ -20,6 +20,10 @@ struct AppConfig: Codable, Equatable {
     var workOwners: [String] = ["Tattoodo"]
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
+    /// Whose GitHub account this is. Remembered because it does not change, and because asking costs a
+    /// subprocess that cannot answer until a repository has been found: without it the offices you have
+    /// checked out are labelled "me" for the first few seconds of every launch, and then relabelled.
+    var viewerLogin: String?
     /// The backstop: how often the whole board and every repository are read again. Changes arrive
     /// within seconds regardless, from the board's delta, the activity feeds and the predictive asks.
     var githubMinutes: Int = 5
