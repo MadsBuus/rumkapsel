@@ -102,12 +102,26 @@ final class World {
     private(set) var seenLogins: Set<String> = []
     private var crewSeen: Set<String> = []
     private var didLoadLayout = false
+    /// Scans since this run began, for the moment the floor waits before putting offices up on its own.
+    /// Counted in scans rather than seconds because a scripted run lives out a whole day in under one.
+    private var scans = 0
+    /// How many scans offices wait for GitHub's first word. A station with no network is still your
+    /// station, so they go up regardless after this.
+    static let officeGraceScans = 16
+    /// Whether offices wait for GitHub at all. A real station does, so that the offices everyone can
+    /// see are laid down before the ones only this machine knows about. Nothing scripted does: a
+    /// scenario, a model test and the gallery all have to put a station up without a network, and a
+    /// floor that stayed empty until GitHub answered would leave them with nothing to run on.
+    var waitsForGitHub = true
 
     /// Whether an office has a package standing on its floor at all.
     var hasPackage: (String) -> Bool = { _ in false }
     var rocketBusy: (String) -> Bool = { _ in false }
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
+
+    /// The floor is still waiting to hear from GitHub, and holding its offices back until it does.
+    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && readyRepos.isEmpty }
 
     /// Settings changed: forget the fleet and start again from the next scan.
     func reset() {
@@ -242,13 +256,20 @@ final class World {
             events.append(.worldLoaded)
         }
 
+        scans += 1
         let cfg = ConfigStore.shared.current
         for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
             && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let station = fleet.station(stationName)
             let home = homeFor(s, station: stationName)
-            if let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
+            // The shared offices go down first, so that two stations seeing the same pull requests dig
+            // the same floor: yours are held until GitHub has spoken for the repository, by which time
+            // its own offices are already placed. An office already on the floor is never held, and
+            // nothing waits forever — after a moment they go up regardless.
+            let settling = waitsForGitHub && scans < World.officeGraceScans
+            let held = settling && !isReady(home.repo) && station.rooms[home.key] == nil
+            if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
                !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
                 let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:")
                 station.renameRoom(from: m.key, to: home.key, name: home.name)
@@ -257,10 +278,13 @@ final class World {
                 changed = true
             }
             if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
-            if station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
+            if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
                 roomCreated["\(stationName)|\(home.key)"] = now
-                events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id), arrival: firstRun ? .appear : .shuttle))
+                // A floor still settling puts its offices up where they stand; a shuttle is for one that
+                // arrives on a station already at work.
+                events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id),
+                                            arrival: firstRun || settling ? .appear : .shuttle))
             }
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)

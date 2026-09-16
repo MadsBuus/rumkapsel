@@ -312,6 +312,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         self.demo = demo
         let world = World(demo: demo || simulated)
         world.simulated = simulated
+        world.waitsForGitHub = !simulated
         world.fleet.persists = !simulated
         world.github.frozen = simulated
         simulation = Simulation(world: world)

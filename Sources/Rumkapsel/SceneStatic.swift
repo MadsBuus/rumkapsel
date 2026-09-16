@@ -148,6 +148,24 @@ extension StationController {
                     t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
+            // Nothing to put on the floor yet: the hallway pulses out from the plaza while the station
+            // waits to hear which offices it has, in the order the hallway was dug, so the waiting reads
+            // as the same outward movement as the building.
+            if world.settling {
+                for c in station.corridorCells + station.coreCells {
+                    let mark = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.34))
+                    mark.geometry!.firstMaterial = flat(NSColor(white: 0.75, alpha: 1))
+                    mark.geometry!.firstMaterial?.writesToDepthBuffer = false
+                    mark.renderingOrder = 3
+                    mark.eulerAngles.x = -.pi / 2
+                    mark.position = v3(station.offset.x + Double(c.x), 0.004, station.offset.y + Double(c.y))
+                    mark.opacity = 0
+                    let wait = 0.12 * Double(station.digOrder(of: c) % 12)
+                    mark.runAction(.sequence([.wait(duration: wait), .repeatForever(.sequence([
+                        .fadeOpacity(to: 0.28, duration: 0.5), .fadeOpacity(to: 0, duration: 0.7), .wait(duration: 0.4)]))]))
+                    staticRoot.addChildNode(mark)
+                }
+            }
             // The input and the output: a look's set pieces, or tiles.
             let input = Looks.current.input(station)
             if let input { addSetPiece(input, station) } else {
