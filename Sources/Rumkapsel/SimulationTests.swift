@@ -390,6 +390,28 @@ enum SimulationTests {
             }
         }
 
+        test("a sleeper given something to do stands up where it lies before it walks anywhere") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .quarters)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
+            m.activity = .sleeping
+            m.napping = true
+            _ = step(sim, seconds: 2)
+            expect(m.lying, "asleep in the quarters, flat on its back")
+            let bedSpot = m.pos
+
+            sim.send(m, to: .lounge)
+            expect(m.risingUntil > 0, "roused: it is getting to its feet, not walking yet")
+            var moved = 0.0
+            _ = step(sim, seconds: 1.0, beat: {
+                moved = max(moved, ((m.pos.x - bedSpot.x) * (m.pos.x - bedSpot.x)
+                                    + (m.pos.y - bedSpot.y) * (m.pos.y - bedSpot.y)).squareRoot())
+            })
+            expect(moved < 0.05, String(format: "it stays where it lay while it rises: moved %.2f", moved))
+            _ = step(sim, seconds: 30, until: { m.place == .lounge && m.path.isEmpty })
+            expect(m.place == .lounge, "and then walks there")
+        }
+
         say(failures == 0 ? "simulation: all passed" : "simulation: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
