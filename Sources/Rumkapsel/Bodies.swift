@@ -73,7 +73,6 @@ extension Simulation {
                 send(m, to: m.place)   // the same rest, planned afresh from here
             } else {
                 m.seated = false
-                m.onBench = false
                 m.fixture = nil
                 m.drying = false
                 finish(m)

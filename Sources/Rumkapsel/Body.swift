@@ -64,12 +64,10 @@ class Body {
     var hammerUp = false
     /// The poses the simulation decides and the scene draws: flat on the back in bed or on the bench,
     /// sat on the bowl (its middle at `seatOffset` in the body's own frame), or on the bench itself.
-    var lying = false
     var seated = false
     var seatOffset = SIMD2<Double>(0, 0)
     /// The shower's last beat: over at the rail with the towel before going.
     var drying = false
-    var onBench = false
     var nextFidgetAt = 0.0
     var wakeUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
@@ -158,6 +156,20 @@ class Body {
     /// stands in for nobody else, and whatever it is doing can be cut into. Every picker asks this one
     /// question rather than listing the cases over again, so they cannot drift apart from each other —
     /// and a doing that must not be cut into says so once, in its phases, instead of by name here.
+    /// Flat on its back: asleep in its own quarters, or on the bench in the middle of a turn. Asked of
+    /// the order in hand rather than kept beside it, so it cannot outlive the order that explains it —
+    /// which is how a carrier woken from bed used to lie down again at the crate.
+    var lying: Bool {
+        if onBench { return true }
+        return !onJob && path.isEmpty && state == .settled
+            && (activity == .sleeping || napping) && place == .quarters
+    }
+
+    /// On the weight bench, settled onto the fixture itself rather than still walking up to it.
+    var onBench: Bool {
+        exercising && workout == .bench && path.isEmpty && fetchSpot == nil && phaseKind == .act
+    }
+
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
             && state != .leaving && wakeUntil == 0

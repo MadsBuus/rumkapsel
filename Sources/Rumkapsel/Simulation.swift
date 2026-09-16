@@ -197,8 +197,6 @@ final class Simulation<B: Body> {
     private func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
         m.seated = false
-        m.onBench = false
-        m.lying = false
         m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         m.fixture = nil
@@ -385,6 +383,9 @@ final class Simulation<B: Body> {
     /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
     func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
+        // Roused: somewhere to go is what ends a lie-down, so the moment for getting to its feet is
+        // here, where every walk on the station is worked out, whoever asked for it.
+        if m.lying, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.napping = false; m.bed = nil }
         let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
         return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
@@ -574,7 +575,7 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
-        if m.lying { m.lying = false; m.bed = nil }
+        if m.lying { m.napping = false; m.bed = nil }
         if m.place != place || m.path.isEmpty { send(m, to: place) }
         start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
@@ -623,7 +624,6 @@ final class Simulation<B: Body> {
         let hurried = m.current.flatMap { cargo[$0.id]?.hurry } ?? false
         let pacing = m.isPacing(at: clock)
         let speed = m.wedged ? 0 : m.isHauling ? (hurried ? 1.7 : 1.1) : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
-        if m.lying, !m.path.isEmpty, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.lying = false; m.bed = nil }
         // A worker out of one shuttle stands by it while any other shuttle is coming down or unloading in
         // the bay, then walks in. A carrier on a job has its own wait for its crate's ship.
         if !m.onJob, station.hangarCells.contains(m.cell), flights.contains(where: { f in
@@ -780,10 +780,8 @@ final class Simulation<B: Body> {
                     if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
                     m.fetchSpot = nil
                     if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = station.gymStand(gym: gym, kind).facing }
-                    if m.workout == .bench { m.onBench = true }
                 }
                 if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
-                    m.onBench = false
                     var back = restPlace(m)
                     if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
                     visitDone(m, "gym")
@@ -845,12 +843,5 @@ final class Simulation<B: Body> {
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
             m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
         }
-        let resting = m.path.isEmpty && m.state == .settled
-        // Only where it sleeps, and only with nothing in hand. A body woken for a job keeps the activity
-        // and the place it was sleeping in until it arrives somewhere that names them, so without this a
-        // carrier stood at the crate still answers to "asleep in the quarters" and lies down on the spot.
-        if resting && !m.onJob && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.lying = true }
-        // On the bench: flat on the back along it; the walk step sits it up again when the turn is over.
-        if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, m.workout == .bench { m.lying = true }
     }
 }
