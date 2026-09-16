@@ -82,7 +82,7 @@ struct Command {
         case rocket(stage: RocketStage, station: String, repo: String)
         /// A teammate acting on something they just did, until the time runs out.
         case react(activity: Activity, place: Place, for: TimeInterval)
-        /// The dispatcher's errand: clipboard in hand, to the storage console to order a pallet.
+        /// The dispatcher's errand: tablet in hand, to the storage console to order a pallet.
         case dispatch(station: String, repo: String, number: Int)
         /// Lifting a repository's crates off their slots and onto the pallet, one at a time.
         case loadPallet(station: String, repo: String)
