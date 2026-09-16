@@ -3,6 +3,13 @@ import ServiceManagement
 import Sparkle
 import SwiftUI
 
+/// Whether this run was started by a script rather than by somebody at the keyboard: the scenario
+/// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
+/// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
+enum Scripted {
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var window: NSWindow!
@@ -99,8 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         window.setFrameAutosaveName("RumkapselMain")
         if !simulatorOnly {
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(controller.view)
+            if Scripted.run {
+                window.orderBack(nil)   // a render still needs the window drawn, just not in front
+            } else {
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(controller.view)
+            }
         }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -278,9 +289,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
                 openSimulator()
             }
         }
-        simulatorWindow?.makeKeyAndOrderFront(nil)
-        simulatorWindow?.makeFirstResponder(simulator?.station.view)
-        NSApp.activate(ignoringOtherApps: true)
+        if Scripted.run {
+            simulatorWindow?.orderBack(nil)
+        } else {
+            simulatorWindow?.makeKeyAndOrderFront(nil)
+            simulatorWindow?.makeFirstResponder(simulator?.station.view)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// The release notes bundled with this build, in a small scrollable window.
@@ -395,8 +410,6 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     // A scripted suite has no window and wants no dock icon in the way.
-    // Headless runs never take the keyboard: the scenario suite, every model-only test and a snapshot.
-    let headlessRun = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
-    app.setActivationPolicy(headlessRun ? .accessory : .regular)
+    app.setActivationPolicy(Scripted.run ? .accessory : .regular)
     app.run()
 }
