@@ -181,6 +181,7 @@ final class Simulation<B: Body> {
         }
         // The order in hand owns the body's posture. A new order of another kind drops the old one's
         // leftovers, so nobody carries a fixture, a seat, a towel or a spot to shuffle to into the next thing.
+        rouse(m)   // an order of any kind gets a sleeper up before it is acted on
         if let old = m.current, !redirected, old.kindName != c.kindName { dropLeftovers(m, of: old) }
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
@@ -290,7 +291,10 @@ final class Simulation<B: Body> {
         // panel asking for rest under a command in hand changes nothing.
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if place != .quarters { m.bed = nil; m.napping = false }
+        if place != .quarters {
+            rouse(m)
+            m.bed = nil; m.napping = false
+        }
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(bodies.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
@@ -329,6 +333,16 @@ final class Simulation<B: Body> {
     }
 
     func walk(_ m: B, to cell: Cell) { m.path = route(m, to: cell) }
+
+    /// On its feet before it goes anywhere. Lying down is worked out from the bed, the nap and the
+    /// place, so this has to run before any of the three is changed: a body already cleared of them
+    /// is not lying any more, and there is nothing left to say it should stand up first.
+    func rouse(_ m: B) {
+        guard m.lying, m.wakeUntil == 0 else { return }
+        m.wakeUntil = clock + 1.1
+        m.napping = false
+        m.bed = nil
+    }
 
     /// Spots taken by the other bodies on a station, as the pathfinder sees them: solid, like props.
     func crowd(around m: B, round blocker: String? = nil) -> Set<Cell> {
@@ -383,8 +397,7 @@ final class Simulation<B: Body> {
     /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
     func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
-        // Roused: somewhere to go is what ends a lie-down, and every walk is worked out here.
-        if m.lying, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.napping = false; m.bed = nil }
+        rouse(m)
         let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
         return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
