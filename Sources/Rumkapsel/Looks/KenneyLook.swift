@@ -16,63 +16,63 @@ struct KenneyLook: Look {
     /// On the ground there is nothing to drift.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { [] }
 
-    /// A lawn to every side and the sea past the yard, so the pad stands nearest the water; palms along
-    /// the shore and scrub on the grass, from a fixed seed so it stands where it stood last time.
+    /// The cape: a lawn, and the sea past the pads, its edge wandering rather than ruled. Every palm, rock
+    /// and tuft is keyed to the cell it stands on in its own station's plan, so growing an office moves
+    /// nothing that was already there.
     func ground(under stations: [Station], into root: SCNNode) {
-        guard let fp = fleetFootprint(stations) else { return }
-        let lo = fp.lo, hi = fp.hi
-        let onStation = { (p: SIMD2<Double>, margin: Double) -> Bool in
-            fp.each.contains { p.x > $0.lo.x - margin && p.x < $0.hi.x + margin && p.y > $0.lo.y - margin && p.y < $0.hi.y + margin }
-        }
-        // The pad stands at the fleet's west end on its causeway, so the sea begins a few tiles past it.
-        let shore = (lo.x - 4).rounded()
-        let mid = (lo + hi) / 2
-        let reach = 140.0
-        let lawn = SCNNode(geometry: SCNPlane(width: reach, height: reach * 2))
+        guard let fp = fleetFootprint(stations), let cape = Cape(stations) else { return }
+        let lo = SIMD2(cape.shore - 90, fp.lo.y - 46), hi = SIMD2(fp.hi.x + 40, fp.hi.y + 46)
+        let lawn = SCNNode(geometry: SCNPlane(width: hi.x - cape.shore + 8, height: hi.y - lo.y))
         lawn.geometry!.firstMaterial = lit(Kit.grass)
         lawn.eulerAngles.x = -.pi / 2
-        lawn.position = v3(shore + reach / 2, -0.03, mid.y)
+        lawn.position = v3((cape.shore - 8 + hi.x) / 2, -0.06, (lo.y + hi.y) / 2)
         root.addChildNode(lawn)
-        let sea = SCNNode(geometry: SCNPlane(width: reach, height: reach * 2))
-        sea.geometry!.firstMaterial = lit(Kit.water)
-        sea.eulerAngles.x = -.pi / 2
-        sea.position = v3(shore - reach / 2, -0.08, mid.y)
-        root.addChildNode(sea)
-        // The shore: the kit's bank tiles in a row, their grass side turned toward the station.
-        let span = Int(reach / 2)
-        let midZ = mid.y.rounded()
-        for k in -span...span {
-            guard let bank = Kit.node("ground_riverSide", from: .nature, tint: Kit.shoreTint) else { break }
-            bank.eulerAngles.y = .pi / 2
-            bank.position = v3(shore + 0.5, -0.03, midZ + Double(k))
-            root.addChildNode(bank)
+
+        // One sampling of how far a point lies to landward of the coast, cut at four levels: the open sea,
+        // the shallows over it, the foam at the line itself, and the sand behind it.
+        let land = Shapes.sample(from: lo, to: hi, step: 0.5) { p in p.x - cape.shoreline(p.y) }
+        let bands: [(Shapes.Grid, NSColor, Double)] = [
+            (land.map { _, d in -d }, Kit.water, -0.05),
+            (land.map { _, d in min(-d, 2.6 + d) }, Kit.water.lighter(0.18), -0.045),
+            (land.map { _, d in min(0.5 - d, 0.5 + d) }, NSColor(rgb: (0.93, 0.97, 0.99)), -0.04),
+            (land.map { _, d in min(d, 1.5 - d) }, NSColor(rgb: (0.89, 0.83, 0.66)), -0.043),
+        ]
+        for (grid, color, y) in bands {
+            if let n = Shapes.node(Shapes.fill(grid), color, y: y) { root.addChildNode(n) }
         }
-        var rng = Scatter(seed: 7)
-        func plant(_ name: String, at p: SIMD2<Double>, scale: Double) {
-            guard let n = Kit.node(name, from: .nature, tint: Kit.scrubTint) else { return }
-            n.scale = SCNVector3(scale, scale, scale)
-            n.eulerAngles.y = rng.between(0, 2 * .pi)
-            n.position = v3(p.x, -0.03, p.y)
-            root.addChildNode(n)
-        }
-        // Palms along the shore, a few steps up the bank, and never on the station.
+
+        // Palms in groves behind the sand, scrub in thickets over the lawn, both thinning to bare ground
+        // between: what stands on a cell, and how big and which way about, all follow from the cell itself.
         let palms = ["tree_palm", "tree_palmTall", "tree_palmBend", "tree_palmDetailedShort"]
-        for _ in 0..<26 {
-            let p = SIMD2(shore + rng.between(1.2, 4.5), midZ + rng.between(-Double(span) + 2, Double(span) - 2))
-            guard !onStation(p, 1.5) else { continue }
-            plant(rng.pick(palms), at: p, scale: rng.between(0.75, 1.1))
-        }
-        // Scrub on the lawn round the fleet: tufts of grass most of all, then bushes, rocks and flowers.
-        let scrub = ["grass", "grass", "grass_large", "grass_large", "plant_bush", "plant_bushLarge", "rock_smallA", "rock_smallB", "flower_yellowA", "flower_redA"]
-        for _ in 0..<140 {
-            let p = SIMD2(rng.between(max(shore + 1.5, lo.x - 22), hi.x + 22), rng.between(lo.y - 22, hi.y + 22))
-            guard !onStation(p, 1.2) else { continue }
-            plant(rng.pick(scrub), at: p, scale: rng.between(0.7, 1.1))
-        }
-        for _ in 0..<6 {
-            let p = SIMD2(rng.between(max(shore + 3, lo.x - 22), hi.x + 22), rng.between(lo.y - 22, hi.y + 22))
-            guard !onStation(p, 2) else { continue }
-            plant("rock_largeA", at: p, scale: rng.between(0.8, 1.2))
+        let scrub = ["grass", "grass", "grass", "grass", "grass", "grass_large", "grass_large", "grass_large",
+                     "plant_bush", "plant_bushLarge", "flower_yellowA", "flower_redA", "rock_smallA", "rock_smallB"]
+        for z in Int(lo.y.rounded())...Int(hi.y.rounded()) {
+            for x in Int((cape.shore - 2).rounded())...Int(hi.x.rounded()) {
+                let p = SIMD2(Double(x), Double(z))
+                guard let home = cape.nearest(p), !home.claims(p, within: 1.4) else { continue }
+                let cell = home.cell(p)
+                let h = Noise.hash(cell.x, cell.y, seed: home.seed)
+                let d = p.x - cape.shoreline(p.y)
+                guard d > 1.4 else { continue }   // never in the water or on the wet sand
+                let q = SIMD2(Double(cell.x), Double(cell.y))
+                let grove = Noise.fbm(q, scale: 26, seed: 9)
+                let onSand = d < 8 && grove > 0.47
+                let density = onSand ? (grove - 0.47) * 2.4
+                                     : max(0, Noise.fbm(q, scale: 23, seed: 3) - 0.50) * 2.6
+                guard h < density else { continue }
+                let pick = Noise.hash(cell.x, cell.y, seed: home.seed + 31)
+                // A boulder now and then, wherever the ground is open enough to notice one.
+                let names = onSand ? palms : (pick < 0.03 ? ["rock_largeA"] : scrub)
+                let name = names[min(names.count - 1, Int(pick * Double(names.count)))]
+                guard let n = Kit.node(name, from: .nature, tint: Kit.scrubTint) else { continue }
+                let s = 0.7 + 0.4 * Noise.hash(cell.x, cell.y, seed: home.seed + 57)
+                n.scale = SCNVector3(s, s, s)
+                n.eulerAngles.y = 2 * .pi * Noise.hash(cell.x, cell.y, seed: home.seed + 83)
+                let jitter = SIMD2(Noise.hash(cell.x, cell.y, seed: home.seed + 11) - 0.5,
+                                   Noise.hash(cell.x, cell.y, seed: home.seed + 19) - 0.5) * 0.7
+                n.position = v3(p.x + jitter.x, -0.03, p.y + jitter.y)
+                root.addChildNode(n)
+            }
         }
     }
 
@@ -145,5 +145,77 @@ struct KenneyLook: Look {
         guard let desk = Kit.prop("desk_computer", scale: 0.8, yaw: atan2(-d.x, -d.y), color: NSColor(room.color)) else { return nil }
         desk.position = v3(Double(wall.cell.x) + d.x * 0.36, Kit.plateTop, Double(wall.cell.y) + d.y * 0.36)
         return desk
+    }
+}
+
+/// The cape the stations stand on: where the water's edge runs, and whose plan a patch of ground belongs to.
+/// Everything the look scatters is keyed to a cell of that station's own plan, so the ground keeps its
+/// character as the station grows instead of being reshuffled by the fleet's new extent.
+private struct Cape {
+    /// One station's claim on the ground: its floor in its own cells, and where that sits in the world.
+    struct Home {
+        let offset: SIMD2<Double>
+        let floor: Set<Cell>
+        let lo: SIMD2<Double>, hi: SIMD2<Double>
+        let seed: Int
+
+        func cell(_ p: SIMD2<Double>) -> Cell {
+            Cell(x: Int((p.x - offset.x).rounded()), y: Int((p.y - offset.y).rounded()))
+        }
+
+        /// Whether the station's floor reaches this point: the cells about it, not its bounding box, so the
+        /// lawn runs into the notches between the arms.
+        func claims(_ p: SIMD2<Double>, within margin: Double) -> Bool {
+            let c = cell(p), r = Int(margin.rounded(.up))
+            for dz in -r...r {
+                for dx in -r...r where floor.contains(Cell(x: c.x + dx, y: c.y + dz)) {
+                    let at = offset + SIMD2(Double(c.x + dx), Double(c.y + dz))
+                    if simd_length(simd_max(simd_abs(p - at) - SIMD2(0.5, 0.5), SIMD2(repeating: 0))) < margin { return true }
+                }
+            }
+            return false
+        }
+
+        func reach(to p: SIMD2<Double>) -> Double {
+            let q = simd_max(simd_max(lo - p, p - hi), SIMD2(repeating: 0))
+            return simd_length(q)
+        }
+    }
+
+    let homes: [Home]
+    /// The line the water's edge wanders about, a causeway's length past the seaward pad.
+    let shore: Double
+    private let phase: Double
+
+    init?(_ stations: [Station]) {
+        var homes: [Home] = []
+        var shore = Double.infinity
+        for st in stations {
+            let floor = Set(st.allCells)
+            guard let b = floor.isEmpty ? nil : st.bounds else { continue }
+            homes.append(Home(offset: st.offset, floor: floor,
+                              lo: st.offset + SIMD2(Double(b.min.x), Double(b.min.y)),
+                              hi: st.offset + SIMD2(Double(b.max.x), Double(b.max.y)),
+                              seed: abs(st.name.hashValue % 9973)))
+            let west = st.hasPad ? st.padCells.map(\.x).min() ?? b.min.x : b.min.x
+            shore = min(shore, st.offset.x + Double(west) - 4)
+        }
+        guard !homes.isEmpty, shore.isFinite else { return nil }
+        self.homes = homes
+        self.shore = shore
+        // The wobble is set against the seaward station's own plan, so the coast keeps its shape where it is.
+        phase = homes.min { $0.lo.x < $1.lo.x }?.offset.y ?? 0
+    }
+
+    /// Where the water's edge stands at this distance along the coast: a long slow bay with a smaller
+    /// wander over it, so no stretch of it is straight.
+    func shoreline(_ z: Double) -> Double {
+        let t = z - phase
+        return shore + (Noise.fbm(SIMD2(0, t), scale: 58) - 0.5) * 17 + (Noise.fbm(SIMD2(0, t), scale: 16, seed: 5) - 0.5) * 6
+    }
+
+    /// Whose ground this is: the station whose floor lies nearest.
+    func nearest(_ p: SIMD2<Double>) -> Home? {
+        homes.min { $0.reach(to: p) < $1.reach(to: p) }
     }
 }
