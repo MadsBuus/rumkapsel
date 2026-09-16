@@ -178,11 +178,11 @@ final class Minion: Body {
 
     var headHeight: Double { bodyHeight }
 
-    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
-    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     /// Where the hammer rests (about one o'clock seen from the side) and where it lands, as pitches of its grip.
     static let hammerRest = -1.05, hammerStrike = 0.55
 
+    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
+    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t

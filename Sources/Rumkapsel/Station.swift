@@ -391,12 +391,12 @@ final class Station {
     /// Tuning of the digging (`placeShape`): how far an arm is cheap to build on, and what a step of it costs after.
     static var armEasyReach = 6, armDearStep = 2, passageBonus = 16
 
-    /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
     /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
     /// on every launch and on every machine.
     static func shape(forKey key: String) -> [Cell] { baseShapes[Int(stableHash(key) % UInt64(baseShapes.count))] }
 
+    /// Creates a room if missing. Returns true when the layout changed.
     func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
@@ -457,7 +457,6 @@ final class Station {
         return d.neighbours.first(where: isCorridor)
     }
 
-    /// Walking between a room and the hallway is only allowed through the doorway.
     /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
     private func yardArea(_ c: Cell) -> String? {
         if let areas = yardAreaCache { return areas[c] }
@@ -496,6 +495,7 @@ final class Station {
         return out
     }
 
+    /// Walking between a room and the hallway is only allowed through the doorway.
     private func canStep(from a: Cell, to b: Cell) -> Bool {
         if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
             return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }

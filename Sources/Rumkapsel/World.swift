@@ -814,12 +814,12 @@ final class World {
 
     // MARK: peers
 
-    /// A peer's claim lands on our work station: its offices get the same key here, adopting the
-    /// peer's floor plan when that floor is free. A whole peer arriving fades in; one new checkout
-    /// on a peer we already follow earns a shuttle, like a new session of our own.
     /// This machine's own name on the local network, for the tie-break below. Empty until sharing starts.
     var peerName = ""
 
+    /// A peer's claim lands on our work station: its offices get the same key here, adopting the
+    /// peer's floor plan when that floor is free. A whole peer arriving fades in; one new checkout
+    /// on a peer we already follow earns a shuttle, like a new session of our own.
     func applyPeer(_ snap: PeerSnapshot, now: Date) -> [WorldEvent] {
         var events: [WorldEvent] = []
         let isNewPeer = peerFirstSeen[snap.name] == nil
