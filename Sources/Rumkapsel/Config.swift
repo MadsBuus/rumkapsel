@@ -104,8 +104,13 @@ struct AppConfig: Codable, Equatable {
         return name == "private" && !showPrivate ? "hidden" : name
     }
 
-    func crewEnabled(repo: String) -> Bool { showCrew && repos[repo]?.station != "hidden" }
-    func shared(repo: String) -> Bool { shareOnLAN && (repos[repo]?.share ?? false) }
+    /// Whether a repository is on the station at all. One question, asked in one place, so that every
+    /// part of the app agrees about what is hidden.
+    func shown(repo: String) -> Bool { repos[repo]?.station != "hidden" }
+    func crewEnabled(repo: String) -> Bool { showCrew && shown(repo: repo) }
+    /// Hidden takes a repository off the network as well as off the floor: something not worth looking
+    /// at is not worth telling the neighbours about, and the two switches must not be able to disagree.
+    func shared(repo: String) -> Bool { shareOnLAN && shown(repo: repo) && (repos[repo]?.share ?? false) }
 }
 
 /// Shared, mutable copy used by the scene; the settings window replaces it and notifies.

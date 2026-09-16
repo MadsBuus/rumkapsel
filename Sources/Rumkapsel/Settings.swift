@@ -118,29 +118,27 @@ struct SettingsView: View {
 
     private var repositories: some View {
         page {
-            Text("Where each repository's sessions go, and whether it is shared on the local network. Nothing is shared unless ticked.")
+            Text("Which repositories are on the station, and which of those the neighbours can see. Nothing is shared unless ticked, and a repository you have taken off the station is not shared at all.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
                 TableColumn("Repository") { Text($0.id) }
-                TableColumn("Station") { (row: Named) in
-                    let repo = row.id
-                    Picker("", selection: Binding(
-                        get: { model.config.repos[repo]?.station ?? "auto" },
-                        set: { model.config.repos[repo, default: .init()].station = $0; model.commit() })) {
-                        Text("Automatic").tag("auto")
-                        Text("Work").tag("work")
-                        Text("Private").tag("private")
-                        Text("Hidden").tag("hidden")
-                    }
-                    .labelsHidden()
-                }
-                .width(130)
-                TableColumn("Share") { (row: Named) in
+                TableColumn("Show") { (row: Named) in
                     let repo = row.id
                     Toggle("", isOn: Binding(
-                        get: { model.config.repos[repo]?.share ?? false },
+                        get: { model.config.shown(repo: repo) },
+                        set: { model.config.repos[repo, default: .init()].station = $0 ? "auto" : "hidden"; model.commit() }))
+                    .labelsHidden()
+                }
+                .width(50)
+                TableColumn("Share") { (row: Named) in
+                    let repo = row.id
+                    let shown = model.config.shown(repo: repo)
+                    Toggle("", isOn: Binding(
+                        get: { shown && (model.config.repos[repo]?.share ?? false) },
                         set: { model.config.repos[repo, default: .init()].share = $0; model.commit() }))
                     .labelsHidden()
+                    .disabled(!shown)
+                    .opacity(shown ? 1 : 0.4)
                 }
                 .width(50)
             }

@@ -17,8 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
-    /// The focus submenu, kept so its stations can be filled in once there is a fleet to name.
-    var focusMenu: NSMenu!
+    /// The View menu, kept so its focus lines can be laid out again whenever the fleet changes.
+    var viewMenu: NSMenu!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
     var notesWindow: NSWindow?
@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             controller.viewSize = controller.view.bounds.size
         }
         controller.view.postsFrameChangedNotifications = true
-        menuNeedsUpdate(focusMenu)
+        menuNeedsUpdate(viewMenu)
 
         if !window.setFrameUsingName("RumkapselMain"), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -251,12 +251,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // What the station looks like from here: where the camera is pointed, and the two toggles
         // worth reaching for often enough to want a key.
         let view = menu("View")
-        let focus = NSMenuItem(title: "Focus", action: nil, keyEquivalent: "")
-        focusMenu = NSMenu(title: "Focus")
-        focusMenu.delegate = self   // the stations are only known once there is a fleet, and they change
-        focus.submenu = focusMenu
-        view.addItem(focus)
-        view.addItem(.separator())
+        viewMenu = view
+        view.delegate = self   // the stations it can point at are only known once there is a fleet
         view.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
         floatItem = view.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
         floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
@@ -281,20 +277,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         NSApp.mainMenu = main
     }
 
-    /// The focus menu, filled as it is opened: one item per station the fleet actually has, by name.
-    /// A fleet of one station says so in one line, and nothing here has to be changed when the many
-    /// stations become rooms of a single one.
+    /// The View menu's stations, laid out again whenever it is opened: one line per station the fleet
+    /// actually has, named rather than numbered, above the rest of the menu. Where there is only one
+    /// station there is nothing to choose between, so no line is put there at all — and that is the
+    /// whole of it when the stations become rooms of a single one.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let all = menu.addItem(withTitle: "All Stations", action: #selector(focusStation(_:)), keyEquivalent: "0")
-        all.tag = 0
+        guard menu === viewMenu else { return }
+        for item in menu.items where item.representedObject as? String == "focus" { menu.removeItem(item) }
         let names = controller?.fleet.ordered.map(\.name) ?? []
         guard names.count > 1 else { return }
-        menu.addItem(.separator())
-        for (i, name) in names.enumerated() {
-            let item = menu.addItem(withTitle: name, action: #selector(focusStation(_:)), keyEquivalent: i < 9 ? "\(i + 1)" : "")
-            item.tag = i + 1
+        var at = 0
+        func put(_ item: NSMenuItem) {
+            item.representedObject = "focus"
+            menu.insertItem(item, at: at)
+            at += 1
         }
+        let all = NSMenuItem(title: "All Stations", action: #selector(focusStation(_:)), keyEquivalent: "0")
+        all.tag = 0
+        put(all)
+        for (i, name) in names.enumerated() where i < 9 {
+            let item = NSMenuItem(title: name, action: #selector(focusStation(_:)), keyEquivalent: "\(i + 1)")
+            item.tag = i + 1
+            put(item)
+        }
+        put(.separator())
     }
 
     @objc func about() {
