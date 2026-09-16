@@ -126,6 +126,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let frameBegan = CACurrentMediaTime()
         frameNo &+= 1
         phases = []
+        tilesBuilt = 0
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         timed("handoff") { for w in work { w() } }
         // Wall time rather than the renderer's: a frame asked for by hand carries no timestamp.
@@ -143,8 +144,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if gap > Trace.slowFrame || spent > Trace.slowWork {
             let worst = phases.filter { $0.seconds > 0.002 }.sorted { $0.seconds > $1.seconds }
                 .map { String(format: "%@ %.0fms", $0.name, $0.seconds * 1000) }.joined(separator: " ")
-            FileHandle.standardError.write(String(format: "frame gap %.0fms work %.0fms  %@\n",
-                                                  gap * 1000, spent * 1000, worst).data(using: .utf8)!)
+            FileHandle.standardError.write(String(format: "frame gap %.0fms work %.0fms tiles %d  %@\n",
+                                                  gap * 1000, spent * 1000, tilesBuilt, worst).data(using: .utf8)!)
         }
     }
 
@@ -161,6 +162,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var frameNo = 0
     private var lastFloorFrame = -1
     private var lastGitHubFrame = -1
+    /// Tiles built since the last frame was reported, for the trace.
+    var tilesBuilt = 0
+    /// Floor and border geometry shared between every tile that looks the same, and the look it was
+    /// built for: a change of look empties it.
+    var tileCache: [String: SCNGeometry] = [:]
+    /// Whose floor each cell is, per station, for the length of one redraw.
+    var owners: [String: [Cell: String]] = [:]
+    var tileCacheLook: Theme = Looks.theme
 
     /// Runs `body`, noting how long it took when frames are being traced.
     @discardableResult func timed<T>(_ name: String, _ body: () -> T) -> T {
