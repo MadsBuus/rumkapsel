@@ -329,12 +329,8 @@ extension StationController {
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = world.isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
-                // Drawn from last night's notes and not yet confirmed today: it breathes until it is.
+                // Drawn from last night's notes and not yet confirmed today: dim until it is.
                 let unchecked = world.isUnchecked(station, room)
-                // Out of step by where in the breath each one starts. The breathing itself is driven
-                // from the tick, not by an action on the tiles: the floor is rebuilt while offices are
-                // still arriving, and an action begins again with the node it hangs on.
-                let phase = Double(abs(key.hashValue) % 7) / 7
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
                     let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
@@ -348,7 +344,7 @@ extension StationController {
                     if !powered { color = color.darker(0.2) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
-                    else if unchecked { t.opacity = CGFloat(StationController.breath(phase: phase)) }
+                    else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }
                     else if provisional { t.opacity = 0.38 }
                     tiles.append(t)
                     if failing || dusty {
@@ -367,7 +363,6 @@ extension StationController {
                     }
                 }
                 roomTiles[key] = tiles
-                if unchecked { breathing[key] = phase } else { breathing[key] = nil }
                 if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station) {
                     prop.position.x += station.offset.x; prop.position.z += station.offset.y
                     prop.name = "station:" + station.name

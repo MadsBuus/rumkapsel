@@ -189,8 +189,15 @@ final class World {
         !demo && !room.key.hasPrefix("kind:") && !lookedAt(room.repo)
     }
 
-    /// Some repository the floor knows about has still not been looked at today.
-    var stillLooking: Bool { waitsForGitHub && !repoRoots.isEmpty && repoRoots.keys.contains { !github.answered(repoRoot: $0) } }
+    /// The floor is still arriving: some repository has not been looked at today, or none has been found
+    /// yet — which is the first second or two of every launch, and precisely when it must not be taken
+    /// for "nothing left to wait for". Bounded, so a repository that never answers cannot hold it open.
+    var stillLooking: Bool {
+        guard waitsForGitHub, scans < World.lookingScans else { return false }
+        return repoRoots.isEmpty || repoRoots.keys.contains { !github.answered(repoRoot: $0) }
+    }
+    /// The most scans the floor will call itself still arriving for.
+    static let lookingScans = 60
 
     /// GitHub has answered for this repository over the wire in this run — not from last night's notes,
     /// and not from a neighbour. Repositories the floor has not even found yet count as unlooked-at.
