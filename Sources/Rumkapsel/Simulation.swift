@@ -198,6 +198,8 @@ final class Simulation<B: Body> {
         m.fetchSpot = nil
         m.seated = false
         m.onBench = false
+        m.lying = false
+        m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         m.fixture = nil
         switch old.kind {
@@ -844,7 +846,10 @@ final class Simulation<B: Body> {
             m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
         }
         let resting = m.path.isEmpty && m.state == .settled
-        if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.lying = true }
+        // Only where it sleeps, and only with nothing in hand. A body woken for a job keeps the activity
+        // and the place it was sleeping in until it arrives somewhere that names them, so without this a
+        // carrier stood at the crate still answers to "asleep in the quarters" and lies down on the spot.
+        if resting && !m.onJob && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.lying = true }
         // On the bench: flat on the back along it; the walk step sits it up again when the turn is over.
         if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, m.workout == .bench { m.lying = true }
     }

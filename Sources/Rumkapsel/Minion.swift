@@ -399,9 +399,13 @@ final class Minion: Body {
         if asleep {
             body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.7, usesShortestUnitArc: true), .move(to: v3(0, bodyDepth / 2, 0), duration: 0.7)]))
         } else {
-            // Sit up first, then straighten, then the legs can go.
-            let sitUp = SCNAction.rotateTo(x: -0.75, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true); sitUp.timingMode = .easeOut
-            let stand = SCNAction.group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true), .move(to: v3(0, bodyHeight / 2, 0), duration: 0.4)])
+            // Sit up first, then straighten, then the legs can go. The rise off the mattress belongs to
+            // the sitting up, not to the straightening: lifted at the end, the body spends the whole of
+            // the turn at lying height, and anything that moved it then dragged it through the floor.
+            let sitUp = SCNAction.group([.rotateTo(x: -0.75, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
+                                         .move(to: v3(0, bodyHeight / 2, 0), duration: 0.5)])
+            sitUp.timingMode = .easeOut
+            let stand = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true)
             body.runAction(.sequence([sitUp, .wait(duration: 0.15), stand]))
         }
     }
