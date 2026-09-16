@@ -755,9 +755,6 @@ final class World {
         // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
         // the floor and must go from what next launch is told as well, or it comes back from the dead
         // every morning. Written when a repository first answers, and now and then after that.
-        if repoRoots.keys.filter({ github.answered(repoRoot: $0) }).count != lookedBefore {
-            events.append(.layoutChanged)   // one more repository looked at: its offices come up to full
-        }
         if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
             savedKnowledgeAt = Date()
             github.saveKnowledge(repoRoots.mapValues(\.repo))

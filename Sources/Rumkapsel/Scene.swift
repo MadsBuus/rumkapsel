@@ -774,6 +774,29 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The floor plan or the props changed. The rebuild waits until the caller has finished its own
     /// work, so a scan can place its workers before the station is redrawn under them.
     private var layoutDirty = false
+    /// Which offices were last drawn as not yet looked at, so the lights can be brought up on the ones
+    /// that have been without rebuilding the floor under them.
+    private var drawnUnchecked: [String: Bool] = [:]
+
+    /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
+    /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
+    /// again — and building it again is what stopped the breathing being seen and made the whole floor
+    /// jump each time another repository answered.
+    private func lightRooms() {
+        for st in fleet.stations.values {
+            for room in st.rooms.values where !room.key.hasPrefix("kind:") {
+                let key = roomKey(st, room)
+                let unchecked = world.isUnchecked(st, room)
+                guard drawnUnchecked[key] != unchecked else { continue }
+                drawnUnchecked[key] = unchecked
+                guard !unchecked, let tiles = roomTiles[key] else { continue }
+                for t in tiles {
+                    t.removeAllActions()
+                    t.runAction(.fadeOpacity(to: 1, duration: 0.9))
+                }
+            }
+        }
+    }
     var markersDirty = false
     /// Offices ordered this scan, by session id: the worker fetches its own from the bay.
     private var newRooms: [String: String] = [:]
@@ -784,6 +807,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // The world's word first, then the picture: the reconciler may hand out carries or move a count,
         // and the redraw that follows draws what it decided. The drawing itself decides nothing.
         reconcileYards()
+        lightRooms()
         if layoutDirty {
             layoutDirty = false; markersDirty = false
             rebuildStatic()
