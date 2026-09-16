@@ -125,7 +125,12 @@ final class World {
     var allReady: Bool { !repoRoots.isEmpty && repoRoots.values.allSatisfy { readyRepos.contains($0.repo) } }
 
     /// The floor is still waiting to hear from GitHub, and holding its offices back until it does.
-    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady }
+    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady && !knewAlready }
+
+    /// The floor came back with last run's answers, so there is nothing to wait for. What arrives now
+    /// corrects a station already standing, and a room nothing vouches for yet is drawn low until
+    /// something does — which is what `isProvisional` has always meant.
+    private var knewAlready: Bool { github.hasAnswers }
 
     /// Settings changed: forget the fleet and start again from the next scan.
     func reset() {
@@ -256,6 +261,9 @@ final class World {
         if firstRun {
             didLoadLayout = true
             fleet.load()
+            // Last run's answers come back with the floor, so the station stands whole from the first
+            // frame and the asks going out are corrections rather than the thing it is waiting for.
+            if waitsForGitHub { github.loadKnowledge() }
             changed = true
             events.append(.worldLoaded)
         }
@@ -724,7 +732,11 @@ final class World {
                                                      detail: e.detail, branch: e.branch, title: e.title, ready: isReady(repo))))
         }
         // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
+        let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
+        if waitsForGitHub, readyRepos.count != before {
+            github.saveKnowledge(repoRoots.mapValues(\.repo))
+        }
         return events
     }
 

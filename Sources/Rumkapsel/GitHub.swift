@@ -129,6 +129,9 @@ final class GitHubResolver {
     private var interval: TimeInterval { Double(intervalMinutes) * 60 }
     private var openPRs: [String: ([OpenPR], Date)] = [:]
 
+    /// Anything at all known about anybody's open pull requests, from this run or the last.
+    var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
+
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
         return openPRs[repoRoot]?.0
@@ -138,6 +141,25 @@ final class GitHubResolver {
     /// Polls wait until this moment: a random hold at start-up so apps opening together on one
     /// network don't all ask GitHub at once, and the first one to answer feeds the rest.
     var holdUntil = Date.distantPast
+
+    /// Where last run's answers are kept, so a station can be drawn whole before GitHub has said a word.
+    private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
+
+    /// Everything worth keeping until next time, by repository root.
+    func saveKnowledge(_ roots: [String: String]) {
+        var out: [String: Knowledge] = [:]
+        for (root, repo) in roots { if let k = knowledge(repoRoot: root, repo: repo) { out[root] = k } }
+        guard !out.isEmpty, let json = try? JSONEncoder().encode(out) else { return }
+        try? json.write(to: GitHubResolver.cacheURL)
+    }
+
+    /// Last run's answers, taken the way a neighbour's are: `adopt` keeps whichever is newer, so a cache
+    /// can never talk over something fresher, and the floor stands complete while the asks go out.
+    func loadKnowledge() {
+        guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
+              let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
+        for (root, k) in saved { adopt(k, repoRoot: root) }
+    }
 
     /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
     struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
