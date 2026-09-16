@@ -132,7 +132,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let side = p.x + 0.34, off = p.x + 1.3          // the edge it sits on, and off the tile
             let onEdge = p.y + 0.1, along = p.y             // where it sits, and where it lies
             let sat = Minion.Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
-            let toBed = Double.pi / 2, offBed = -Double.pi / 2, inLine = 0.0
+            let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0
             let walkIn = 1.5, turns = walkIn + 0.5, sitDown = turns + 0.5, lieBack = sitDown + 0.8
             let wakes = lieBack + 2.6, sitsUp = wakes + 0.8, stands = sitsUp + 0.5
             let walksOff = stands + 1.5, loop = walksOff + 0.7
