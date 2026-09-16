@@ -528,7 +528,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } }.sorted().joined()
         // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
         // while it still stands on the untested row, and the redraw then leaves it out as carried.
-        timed("github") { handle(world.applyGitHub(now: now)) }
+        timed("github") { handle(world.applyGitHub(now: now, timed: { n, b in self.timed(n, b) })) }
+        // Offices left waiting for somewhere to stand come round on the next frame, since GitHub may
+        // have nothing further to say and they would otherwise wait for something that never comes.
+        if world.placementsLeft { enqueue { [weak self] in self?.onGitHubUpdate() } }
         reconcileYards()
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
