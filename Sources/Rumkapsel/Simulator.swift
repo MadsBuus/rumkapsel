@@ -1208,7 +1208,7 @@ extension StationController {
                 for (m, from, to) in [(a, -half, half), (b, half, -half)] {
                     m.busy = false; m.activity = .waiting
                     m.couch = nil; m.bed = nil
-                    m.lying = false
+                    m.napping = false
                     m.current = nil
                     send(m, to: .core)
                     m.pos = SIMD2(Double(from), 0)

@@ -3,13 +3,22 @@ import ServiceManagement
 import Sparkle
 import SwiftUI
 
+/// Whether this run was started by a script rather than by somebody at the keyboard: the scenario
+/// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
+/// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
+enum Scripted {
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
+}
+
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuDelegate {
     var window: NSWindow!
     var controller: StationController!
     private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
+    /// The View menu, kept so its focus lines can be laid out again whenever the fleet changes.
+    var viewMenu: NSMenu!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
     var notesWindow: NSWindow?
@@ -92,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             controller.viewSize = controller.view.bounds.size
         }
         controller.view.postsFrameChangedNotifications = true
+        menuNeedsUpdate(viewMenu)
 
         if !window.setFrameUsingName("RumkapselMain"), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -99,8 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         }
         window.setFrameAutosaveName("RumkapselMain")
         if !simulatorOnly {
-            window.makeKeyAndOrderFront(nil)
-            window.makeFirstResponder(controller.view)
+            if Scripted.run {
+                window.orderBack(nil)   // a render still needs the window drawn, just not in front
+            } else {
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(controller.view)
+            }
         }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -196,9 +210,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     private func buildMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
-        let app = NSMenu()
+
+        /// A top-level menu, in the bar and ready to be filled.
+        func menu(_ title: String) -> NSMenu {
+            let item = NSMenuItem()
+            let sub = NSMenu(title: title)
+            item.submenu = sub
+            main.addItem(item)
+            return sub
+        }
+
+        // The application's own: what it is, keeping it current, and getting out.
+        let app = menu("rumkapsel")
         app.addItem(withTitle: "About rumkapsel", action: #selector(about), keyEquivalent: "")
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
@@ -207,28 +230,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
             app.addItem(withTitle: "What's New in \(v)…", action: #selector(openWhatsNew), keyEquivalent: "")
         }
-        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
-        g.keyEquivalentModifierMask = [.command, .shift]
-        let sim = app.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
-        sim.keyEquivalentModifierMask = [.command, .shift]
-        app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
-        app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
-        musicItem = app.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
-        floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
-        floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
-        app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
-        app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
-        for (title, key) in [("Focus All", "0"), ("Focus Station 1", "1"), ("Focus Station 2", "2"), ("Focus Station 3", "3"), ("Focus Station 4", "4")] {
-            let item = app.addItem(withTitle: title, action: #selector(focusStation(_:)), keyEquivalent: key)
-            item.keyEquivalentModifierMask = []
-        }
+        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         app.addItem(.separator())
         app.addItem(withTitle: "Hide", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = app
+
+        // The standard editing keys. Settings has fields to type organisations and a name into, and
+        // without these in the bar the system does not give them copy and paste.
+        let edit = menu("Edit")
+        for (title, selector, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z")] {
+            edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+        edit.addItem(.separator())
+        for (title, selector, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"),
+                                       ("Select All", "selectAll:", "a")] {
+            edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+
+        // What the station looks like from here: where the camera is pointed, and the two toggles
+        // worth reaching for often enough to want a key.
+        let view = menu("View")
+        viewMenu = view
+        view.delegate = self   // the stations it can point at are only known once there is a fleet
+        view.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
+        floatItem = view.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
+        floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
+        musicItem = view.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
+
+        // The station's dealings with the outside.
+        let station = menu("Station")
+        let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
+        refresh.keyEquivalentModifierMask = [.command, .shift]
+
+        // The tools for working on rumkapsel itself, out of the way of the ordinary path.
+        let develop = menu("Develop")
+        let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
+        g.keyEquivalentModifierMask = [.command, .shift]
+        let sim = develop.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
+        sim.keyEquivalentModifierMask = [.command, .shift]
+
+        let help = menu("Help")
+        help.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
+        help.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
+
         NSApp.mainMenu = main
+    }
+
+    /// The View menu's stations, laid out again whenever it is opened: one line per station the fleet
+    /// actually has, named rather than numbered, above the rest of the menu. Where there is only one
+    /// station there is nothing to choose between, so no line is put there at all — and that is the
+    /// whole of it when the stations become rooms of a single one.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === viewMenu else { return }
+        for item in menu.items where item.representedObject as? String == "focus" { menu.removeItem(item) }
+        let names = controller?.fleet.ordered.map(\.name) ?? []
+        guard names.count > 1 else { return }
+        var at = 0
+        func put(_ item: NSMenuItem) {
+            item.representedObject = "focus"
+            menu.insertItem(item, at: at)
+            at += 1
+        }
+        let all = NSMenuItem(title: "All Stations", action: #selector(focusStation(_:)), keyEquivalent: "0")
+        all.tag = 0
+        put(all)
+        for (i, name) in names.enumerated() where i < 9 {
+            let item = NSMenuItem(title: name, action: #selector(focusStation(_:)), keyEquivalent: "\(i + 1)")
+            item.tag = i + 1
+            put(item)
+        }
+        put(.separator())
     }
 
     @objc func about() {
@@ -278,9 +350,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
                 openSimulator()
             }
         }
-        simulatorWindow?.makeKeyAndOrderFront(nil)
-        simulatorWindow?.makeFirstResponder(simulator?.station.view)
-        NSApp.activate(ignoringOtherApps: true)
+        if Scripted.run {
+            simulatorWindow?.orderBack(nil)
+        } else {
+            simulatorWindow?.makeKeyAndOrderFront(nil)
+            simulatorWindow?.makeFirstResponder(simulator?.station.view)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// The release notes bundled with this build, in a small scrollable window.
@@ -321,16 +397,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         settingsModel.pipelines = controller.pipelineRows
         settingsModel.knownLogins = Array(Set(controller.seenLogins).union(settingsModel.config.crewNames.keys)).sorted()
         settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
-        settingsModel.musicOn = controller.drone.isEnabled
-        settingsModel.floatOn = window.level == .floating
         if settingsWindow == nil {
             let view = SettingsView(model: settingsModel,
-                                    onMusic: { [weak self] on in self?.setMusic(on) },
-                                    onFloat: { [weak self] on in self?.setFloat(on) },
                                     onLaunchAtLogin: { on in
                                         if on { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
-                                    },
-                                    onCheckUpdates: { [weak self] in self?.updater.checkForUpdates(nil) })
+                                    })
             let w = NSWindow(contentViewController: NSHostingController(rootView: view))
             w.title = "rumkapsel settings"
             w.styleMask = [.titled, .closable]
@@ -381,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     @objc func refreshGitHub() { controller.refreshGitHub() }
 
     @objc func focusStation(_ sender: NSMenuItem) {
-        if let n = Int(sender.keyEquivalent), n > 0 { controller.focus(onIndex: n - 1) } else { controller.focus(on: nil) }
+        if sender.tag > 0 { controller.focus(onIndex: sender.tag - 1) } else { controller.focus(on: nil) }
     }
 
     @objc func toggleMusic() { setMusic(!controller.drone.isEnabled) }
@@ -395,8 +466,6 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     // A scripted suite has no window and wants no dock icon in the way.
-    // Headless runs never take the keyboard: the scenario suite, every model-only test and a snapshot.
-    let headlessRun = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
-    app.setActivationPolicy(headlessRun ? .accessory : .regular)
+    app.setActivationPolicy(Scripted.run ? .accessory : .regular)
     app.run()
 }

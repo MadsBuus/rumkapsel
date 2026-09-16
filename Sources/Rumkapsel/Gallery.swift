@@ -117,17 +117,54 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 m.node.eulerAngles.y = cos(c * 1.2) >= 0 ? .pi / 2 : -.pi / 2
             }
         }
-        // 2. sleeping and rising
+        // 2. a night's sleep, end to end
         do {
-            let p = tile(i, "sleep / rise"); i += 1
+            let p = tile(i, "walk in / turn / sit / lie / rise / walk off"); i += 1
             roomFloor(at: p, color: NSColor(Colors.quarters))
-            let bed = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72)); bed.geometry!.firstMaterial = flat(NSColor(Colors.bed)); bed.eulerAngles.x = -.pi / 2; bed.position = v3(p.x, 0.006, p.y)
-            scene.rootNode.addChildNode(bed)
-            let m = minion(at: p); m.setSleeping(true)
-            var phase = 0
+            let bunk = Looks.current.bed(level: 0)
+            bunk.position = v3(p.x, 0, p.y)
+            scene.rootNode.addChildNode(bunk)
+            let m = minion(at: p)
+
+            // Going to bed and getting up are the same moves in opposite orders. It comes to the side of
+            // the bunk, turns its back on it, sits on the edge, and swings round into line as it stretches
+            // out; getting up it swings back out of line onto the edge, stands, and walks off as it faces.
+            // It stops at the bunk's edge, which is 0.17 out from the middle of a bed 0.34 across: that
+            // is where its feet go, and sitting puts the rest of it back onto the mattress behind them.
+            let side = p.x + 0.17, off = p.x + 1.3
+            let onEdge = p.y + 0.1, along = p.y             // where it sits, and where it lies
+            let sat = Minion.Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
+            let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0
+            let walkIn = 1.5, turns = walkIn + 0.5, sitDown = turns + 0.5, lieBack = sitDown + 0.8
+            let wakes = lieBack + 2.6, sitsUp = wakes + 0.8, stands = sitsUp + 0.5
+            let walksOff = stands + 1.5, loop = walksOff + 0.7
+            func ease(_ a: Double, _ b: Double, _ t: Double) -> Double {
+                let e = min(1, max(0, t)); return a + (b - a) * (e * e * (3 - 2 * e))
+            }
             updaters.append { c, _ in
-                let k = Int(c / 3) % 2
-                if k != phase { phase = k; m.setSleeping(k == 0) }
+                let t = c.truncatingRemainder(dividingBy: loop)
+                var x = off, z = onEdge, yaw = toBed, pose = Minion.Pose.standing
+                switch t {
+                case ..<walkIn:   x = ease(off, side, t / walkIn)
+                case ..<turns:    x = side; yaw = ease(toBed, offBed, (t - walkIn) / (turns - walkIn))
+                case ..<sitDown:  x = side; yaw = offBed; pose = sat
+                case ..<lieBack:  // a quarter turn into the bed's line as it stretches out
+                                  let k = (t - sitDown) / (lieBack - sitDown)
+                                  x = ease(side, p.x, k); z = ease(onEdge, along, k)
+                                  yaw = ease(offBed, inLine, k); pose = .flat(height: Minion.bedSeat)
+                case ..<wakes:    x = p.x; z = along; yaw = inLine; pose = .flat(height: Minion.bedSeat)
+                case ..<sitsUp:   // and back out of it, onto the edge
+                                  let k = (t - wakes) / (sitsUp - wakes)
+                                  x = ease(p.x, side, k); z = ease(along, onEdge, k)
+                                  yaw = ease(inLine, offBed, k); pose = sat
+                case ..<stands:   x = side; yaw = offBed
+                case ..<walksOff: x = ease(side, off, (t - stands) / (walksOff - stands)); yaw = offBed
+                default:          x = off; yaw = offBed
+                }
+                m.node.position = v3(x, 0, z)
+                m.node.eulerAngles.y = CGFloat(yaw)
+                m.node.opacity = t > walksOff ? 0 : 1
+                m.setPose(pose)
             }
         }
         // 3. working routines
@@ -257,7 +294,40 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 bolt.opacity = Double.random(in: 0.35...1)
             }
         }
-        // 11. lounge and crew
+        // 11. sitting: the one pose, on the two seats that use it
+        do {
+            let p = tile(i, "sit: couch / bowl"); i += 1
+            roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))
+            // The station's own seats, at its own heights: a couch sized to suit the picture would hide
+            // the very misfit this tile is here to show.
+            func sitter(at spot: SIMD2<Double>, _ color: NSColor, seat: Double, width: Double, back: Double) -> Minion {
+                let pad = SCNNode(geometry: SCNBox(width: width, height: seat, length: 0.4, chamferRadius: 0.02))
+                pad.geometry!.firstMaterial = lit(color)
+                pad.position = v3(spot.x, seat / 2, spot.y)
+                scene.rootNode.addChildNode(pad)
+                let rest = SCNNode(geometry: SCNBox(width: width, height: back, length: 0.08, chamferRadius: 0.02))
+                rest.geometry!.firstMaterial = lit(color)
+                rest.position = v3(spot.x, seat + back / 2, spot.y - 0.24)
+                scene.rootNode.addChildNode(rest)
+                return minion(at: spot)
+            }
+            let a = sitter(at: SIMD2(p.x - 0.5, p.y), NSColor(rgb: (0.62, 0.45, 0.4)),
+                           seat: Minion.couchSeat, width: 0.8, back: 0.22)
+            let b = sitter(at: SIMD2(p.x + 0.5, p.y), .white, seat: Minion.seat, width: 0.3, back: 0.3)
+            a.setTool(.tablet)   // reading on the couch: what a sitter most often has in its hands
+            a.setPose(.seated(height: Minion.couchSeat, at: SIMD2(0, 0)))
+            b.setPose(.seated(height: Minion.seat, at: SIMD2(0, 0)))
+            var phase = 0
+            updaters.append { c, _ in
+                let k = Int(c / 3) % 2
+                if k != phase {
+                    phase = k
+                    a.setPose(k == 0 ? .seated(height: Minion.couchSeat, at: SIMD2(0, 0)) : .standing)
+                    b.setPose(k == 0 ? .seated(height: Minion.seat, at: SIMD2(0, 0)) : .standing)
+                }
+            }
+        }
+        // 12. lounge and crew
         do {
             let p = tile(i, "lounge + crew minion"); i += 1
             roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))

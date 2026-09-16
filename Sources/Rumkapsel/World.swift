@@ -300,10 +300,19 @@ final class World {
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
-                if gone || cleared || orphan {
-                    if cleared { retired[key] = now }
+                // An office of three kinds, and they do not end the same way. One of yours is backed by
+                // a checkout on this disk and one of a neighbour's by their word over the network, and
+                // both last until the workspace itself is archived — a merged pull request says the work
+                // shipped, not that the desk was cleared. An office that is only GitHub's has nothing
+                // else to go on: the merge is the last anybody hears of it, since branches are left to
+                // die with their pull requests rather than deleted.
+                let mine = room.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
+                let lan = peerOffices[key] != nil
+                let ended = cleared && !mine && !lan
+                if gone || ended || orphan {
+                    if ended { retired[key] = now }
                     events.append(drop(station: station, room: room, announce: !firstRun,
-                                       reason: gone ? "worktree gone" : closed ? "closed, not merged" : cleared ? "merged and hauled" : "nobody's"))
+                                       reason: gone ? "workspace archived" : closed ? "closed, not merged" : ended ? "merged and hauled" : "nobody's"))
                     changed = true
                 }
             }
@@ -896,7 +905,16 @@ final class World {
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
             let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
-            let pos = SIMD3(station.offset.x + Double(cell.x) + side + jx, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
+            // The rows leave the pallet's lane empty, but the lane is only as wide as the slab, so an
+            // untidy crate beside it could lean over the line. The nudge is taken back to the edge.
+            var x = Double(cell.x) + side + jx
+            if !lane.isEmpty, let lo = lane.map(\.x).min(), let hi = lane.map(\.x).max() {
+                let edge = 0.3   // a crate's own half, and a hair
+                if x > Double(lo) - 0.5 - edge && x < Double(hi) + 0.5 + edge {
+                    x = x < (Double(lo) + Double(hi)) / 2 ? Double(lo) - 0.5 - edge : Double(hi) + 0.5 + edge
+                }
+            }
+            let pos = SIMD3(station.offset.x + x, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
             out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien, group: s.group,
                                 column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
         }

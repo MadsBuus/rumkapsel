@@ -137,8 +137,13 @@ extension StationController {
 
     /// Nothing but rest in hand, and not at work: only then does a pick from the bubble go through, as with
     /// the idle clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
+    /// Whether you may send this one somewhere. It asks what the simulation asks — whether the doing in
+    /// hand can be cut into — rather than a stricter question of its own: a minion on its way to the gym
+    /// is walking, and a walk can be turned round, so the row should not dim the moment it sets off.
+    /// A turn actually under way is another matter, and stays its own until it is over.
     func canOrder(_ m: Minion) -> Bool {
-        m.state == .settled && !m.busy && m.isResting && m.pending == nil && !m.hasLoad
+        m.state == .settled && !m.busy && m.pending == nil && !m.hasLoad && !m.onJob
+            && (m.current == nil || m.phaseKind.interruptible)
     }
 
     /// The bubble's say on a point, from the main thread: over the plate, or on the way up to it from the

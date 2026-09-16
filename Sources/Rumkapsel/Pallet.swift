@@ -59,6 +59,10 @@ final class PalletJob {
     /// Asked for while it was still loading: push it out, or empty it back into storage.
     var wantsPush = false
     var wantsBack = false
+    /// When the way ahead was first found blocked, and when it last asked for a new one. Both nought
+    /// while there is a way it can take.
+    var blockedAt = 0.0
+    var askedAt = 0.0
 
     /// A crate on its way through the air, in world coordinates, on the station clock: onto the
     /// pallet, or off it onto a slot in a yard.
@@ -120,10 +124,7 @@ extension Simulation {
                 if bodies.values.contains(where: { palletErrand(of: $0)?.station == station.name && palletErrand(of: $0)?.repo == want.repo }) { continue }
                 let console = station.storageConsole.cell
                 // Free: no job, nothing on the arms, and not in the middle of a visit that lasts its whole time.
-                let free = bodies.values.filter {
-                    $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent && !$0.bathing && !$0.exercising
-                        && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
-                }
+                let free = bodies.values.filter { $0.station == station.name && $0.isFree }
                 guard let m = free.min(by: { abs($0.cell.x - console.x) + abs($0.cell.y - console.y) < abs($1.cell.x - console.x) + abs($1.cell.y - console.y) }) else { break }
                 m.couch = nil
                 m.bed = nil
@@ -247,7 +248,11 @@ extension Simulation {
                 advance(m)
             default:
                 if p.pushing { return .spent }
-                guard let leg = p.route.first else { arrive(m, station: station, p); return .spent }
+                guard let leg = p.route.first else {
+                    if p.blockedAt > 0 { m.waitingOn = "the rows to clear a way across"; return .spent }
+                    arrive(m, station: station, p)
+                    return .spent
+                }
                 // The leg is done and the next one turns a corner: walk round to the new back side.
                 m.phase = 0
                 let (want, _, _) = pushSpot(p, station: station, toward: leg)
@@ -314,7 +319,14 @@ extension Simulation {
         p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
         p.pushing = false
         handOver(m, .pushPallet(station: station.name, repo: p.repo), announce: true)
-        guard let leg = p.route.first else { arrive(m, station: station, p); return }
+        guard let leg = p.route.first else {
+            // Boxed in the moment it was asked to go: it waits by the pallet for the rows to clear.
+            p.blockedAt = clock
+            p.askedAt = clock
+            return
+        }
+        p.blockedAt = 0
+        p.askedAt = 0
         let (want, _, _) = pushSpot(p, station: station, toward: leg)
         walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
     }
@@ -323,9 +335,39 @@ extension Simulation {
     private func arrive(_ m: B, station: Station, _ p: PalletJob) {
         p.pushing = false
         p.route = []
+        p.blockedAt = 0
+        p.askedAt = 0
         world.truth.movePallet(station: station.name, cell: p.cellUnder,
                                pos: SIMD3(station.offset.x + p.spot.x, PalletGeometry.lift, station.offset.y + p.spot.y))
         beginUnload(m, station: station, p, back: false)
+    }
+
+    /// What a hover pallet must not pass through: the crates on either yard's rows, and the bodies on
+    /// the floor. Its own cargo, its crate in the air and its pusher are not in its way. The two are
+    /// kept apart because a crate calls for a new route and a body only for waiting.
+    func palletStanding(station: Station, _ p: PalletJob? = nil)
+        -> (crates: [(at: SIMD2<Double>, half: Double)], crowd: [(at: SIMD2<Double>, half: Double)]) {
+        let flying = p?.flight?.crate
+        let crates = ["storage", "deck"].flatMap { world.yardLayout(station: station, area: $0) }
+            .filter { !$0.carried && !($0.repo == flying?.repo && $0.number == flying?.number) }
+            .map { (at: SIMD2($0.pos.x - station.offset.x, $0.pos.z - station.offset.y), half: 0.27) }
+        let crowd = bodies.values.filter { $0.station == station.name && $0.id != p?.dispatcher }
+            .map { (at: $0.pos, half: 0.3) }
+        return (crates, crowd)
+    }
+
+    /// How much air is left between the plate and the nearest of `near`. Below zero they overlap.
+    /// With `to`, the plate is travelling, and the whole band it sweeps on the way is measured: a leg
+    /// is axis-aligned, so that band is the footprint grown by half the distance it covers.
+    func palletClearance(_ spot: SIMD2<Double>, to: SIMD2<Double>? = nil,
+                         among near: [(at: SIMD2<Double>, half: Double)]) -> Double {
+        let end = to ?? spot
+        let mid = (spot + end) / 2
+        let hx = PalletGeometry.width / 2 + abs(end.x - spot.x) / 2
+        let hy = PalletGeometry.depth / 2 + abs(end.y - spot.y) / 2
+        return near.reduce(9.9) { least, o in
+            min(least, max(abs(o.at.x - mid.x) - (hx + o.half), abs(o.at.y - mid.y) - (hy + o.half)))
+        }
     }
 
     /// Where a pallet floats out: along storage's aisle, at the place with the most air round it. The
@@ -338,18 +380,9 @@ extension Simulation {
         let lanes = aisles.isEmpty ? rows : aisles
         // What it must keep off: a crate's own box, turned and nudged where storage is untidy, and a
         // body's shoulders. Anything further than a crate's width away is as good as anywhere else.
-        let crates = world.yardLayout(station: station, area: "storage").filter { !$0.carried }
-            .map { (at: SIMD2($0.pos.x - station.offset.x, $0.pos.z - station.offset.y), half: 0.27) }
-        let crowd = bodies.values.filter { $0.station == station.name }.map { (at: $0.pos, half: 0.3) }
-        let near = crates + crowd
-        /// How much air is left between the plate and the nearest thing standing. Below zero they overlap.
-        func clearance(_ spot: SIMD2<Double>) -> Double {
-            near.reduce(9.9) { least, o in
-                let dx = abs(o.at.x - spot.x) - (PalletGeometry.width / 2 + o.half)
-                let dy = abs(o.at.y - spot.y) - (PalletGeometry.depth / 2 + o.half)
-                return min(least, max(dx, dy))
-            }
-        }
+        let standing = palletStanding(station: station)
+        let near = standing.crates + standing.crowd
+        func clearance(_ spot: SIMD2<Double>) -> Double { palletClearance(spot, among: near) }
         // Home is the doorway's own columns on the first aisle: a pallet stands by the door it will
         // leave through, and gives that up only where there is no room to float.
         let doorX = deckDoorX(station: station) ?? Double(station.palletCell.x) + 0.5
@@ -429,8 +462,11 @@ extension Simulation {
 
     /// The way out, as axis-aligned legs: line up on the deck doorway's two columns, out through it
     /// onto the deck's aisle row, then along that aisle to the repository's group. Never diagonal,
-    /// never off the tiles.
-    private func palletRoute(station: Station, repo: String, from: SIMD2<Double>) -> [SIMD2<Double>] {
+    /// never off the tiles, and never through anything: every leg is measured against what is standing
+    /// this instant, and an aisle with something in it is not taken. The aisles are tried nearest the
+    /// doorway first, so the shortest clear way wins. Empty where there is no clear way at all just
+    /// now: the pallet waits rather than pushing through the rows.
+    func palletRoute(station: Station, repo: String, from: SIMD2<Double>) -> [SIMD2<Double>] {
         let deck = station.deckCells, storage = station.storageCells
         guard !deck.isEmpty, !storage.isEmpty else { return [] }
         let doorX = deckDoorX(station: station) ?? from.x
@@ -438,24 +474,32 @@ extension Simulation {
         // takes is the one the doorway opens onto, so it never crosses a row of crates to reach it.
         let rows = Set(deck.map(\.y)).sorted()
         let crateRows = Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
-        let aisles = rows.filter { !crateRows.contains($0) }
         let near = Double(station.storageNearRow)
-        let aisleY = Double(aisles.min { abs(Double($0) - near) < abs(Double($1) - near) } ?? rows.last!)
+        let aisles = rows.filter { !crateRows.contains($0) }.sorted { abs(Double($0) - near) < abs(Double($1) - near) }
         // Beside the repository's group on the untested row.
         let untested = world.yardLayout(station: station, area: "deck").filter { $0.repo == repo && !$0.cleared }
         let groupX = untested.first.map { Double($0.cell.x) } ?? doorX
+        let standing = palletStanding(station: station, pallets[station.name]).crates
 
-        var legs: [SIMD2<Double>] = []
-        var at = from
-        func leg(_ to: SIMD2<Double>) {
-            guard abs(to.x - at.x) + abs(to.y - at.y) > 0.05 else { return }
-            legs.append(to)
-            at = to
+        func way(through aisleY: Double) -> [SIMD2<Double>]? {
+            var legs: [SIMD2<Double>] = []
+            var at = from
+            func leg(_ to: SIMD2<Double>) -> Bool {
+                guard abs(to.x - at.x) + abs(to.y - at.y) > 0.05 else { return true }
+                guard palletClearance(at, to: to, among: standing) >= 0.02 else { return false }
+                legs.append(to)
+                at = to
+                return true
+            }
+            guard leg(clampToYard(SIMD2(doorX, at.y), storage)),
+                  leg(clampToYard(SIMD2(at.x, aisleY), deck)),
+                  leg(clampToYard(SIMD2(groupX, aisleY), deck)) else { return nil }
+            return legs
         }
-        leg(clampToYard(SIMD2(doorX, at.y), storage))
-        leg(clampToYard(SIMD2(at.x, aisleY), deck))
-        leg(clampToYard(SIMD2(groupX, aisleY), deck))
-        return legs
+        for aisleY in aisles {
+            if let legs = way(through: Double(aisleY)) { return legs }
+        }
+        return []
     }
 
     /// The wand out again: the crates float off, onto the deck or back into storage.
@@ -490,11 +534,38 @@ extension Simulation {
                 // A loaded pallet takes a second to get going: half a cell a second once it is moving.
                 let speed = 0.45, ramp = 1.0
                 let gone = t < ramp ? speed * t * t / (2 * ramp) : speed * (t - ramp / 2)
-                p.spot = p.legFrom + dir * min(total, gone)
+                let want = p.legFrom + dir * min(total, gone)
+                let standing = palletStanding(station: station, p)
                 m.pos = pushStand(p, dir: dir)
                 m.path = []
                 m.facing = atan2(dir.x, dir.y)
-                if gone >= total { p.route.removeFirst(); p.pushing = false; p.pushAcross = 0 }
+                // The route was drawn clear, but the yard has not stood still since: the way from here
+                // to the next step is measured before the plate is moved over it, never after.
+                if palletClearance(p.spot, to: want, among: standing.crates) < 0.02 {
+                    // A crate stands in the way now. Hands off, and the way worked out again from here.
+                    p.pushing = false
+                    p.pushAcross = 0
+                    p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
+                    if p.route.isEmpty { if p.blockedAt == 0 { p.blockedAt = clock }; p.askedAt = clock }
+                    else { p.blockedAt = 0; p.askedAt = 0 }
+                } else if palletClearance(p.spot, to: want, among: standing.crowd) < 0.02 {
+                    // Somebody is in front of it: they walk on, so it holds the leg and leans in again
+                    // from a standstill once they are past.
+                    p.legFrom = p.spot
+                    p.legAt = clock
+                } else {
+                    p.spot = want
+                    if gone >= total { p.route.removeFirst(); p.pushing = false; p.pushAcross = 0 }
+                }
+            } else if let m, case .pushPallet = m.current?.kind, p.route.isEmpty, p.blockedAt > 0 {
+                // Standing with nowhere to go: the rows shift as crates are carried off, so the way is
+                // asked for again every so often, and given up on after a while.
+                if clock - p.askedAt > 1 {
+                    p.askedAt = clock
+                    p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
+                    if !p.route.isEmpty { p.blockedAt = 0; p.askedAt = 0 }
+                    else if clock - p.blockedAt > 30 { arrive(m, station: station, p) }
+                }
             }
             // A crate in the air lands on the station's own clock, whatever is drawing.
             if let f = p.flight {
@@ -514,10 +585,7 @@ extension Simulation {
 
     /// The dispatcher went away mid-errand: whoever is free takes the pallet over where it stands.
     private func adopt(_ p: PalletJob, station: Station) {
-        let free = bodies.values.filter {
-            $0.station == station.name && !$0.onJob && !$0.hasLoad && !$0.isSubagent
-                && !$0.isCrew && !$0.isQA && $0.state != .leaving && $0.wakeUntil == 0
-        }
+        let free = bodies.values.filter { $0.station == station.name && $0.isFree }
         guard let m = free.min(by: { abs($0.cell.x - p.cellUnder.x) + abs($0.cell.y - p.cellUnder.y) < abs($1.cell.x - p.cellUnder.x) + abs($1.cell.y - p.cellUnder.y) }) else { return }
         p.dispatcher = m.id
         m.couch = nil; m.bed = nil

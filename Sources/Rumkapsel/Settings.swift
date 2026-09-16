@@ -12,18 +12,13 @@ final class SettingsModel: ObservableObject {
     @Published var pipelines: [PipelineRow] = []
     @Published var knownLogins: [String] = []
     @Published var launchAtLogin = false
-    @Published var musicOn = UserDefaults.standard.bool(forKey: "music")
-    @Published var floatOn = UserDefaults.standard.bool(forKey: "float")
 
     func commit() { ConfigStore.shared.update { $0 = config } }
 }
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
-    var onMusic: (Bool) -> Void
-    var onFloat: (Bool) -> Void
     var onLaunchAtLogin: (Bool) -> Void
-    var onCheckUpdates: () -> Void
 
     var body: some View {
         TabView {
@@ -123,29 +118,27 @@ struct SettingsView: View {
 
     private var repositories: some View {
         page {
-            Text("Where each repository's sessions go, and whether it is shared on the local network. Nothing is shared unless ticked.")
+            Text("Which repositories are on the station, and which of those the neighbours can see. Nothing is shared unless ticked, and a repository you have taken off the station is not shared at all.")
                 .font(.caption).foregroundStyle(.secondary)
             Table(model.knownRepos.map(Named.init)) {
                 TableColumn("Repository") { Text($0.id) }
-                TableColumn("Station") { (row: Named) in
-                    let repo = row.id
-                    Picker("", selection: Binding(
-                        get: { model.config.repos[repo]?.station ?? "auto" },
-                        set: { model.config.repos[repo, default: .init()].station = $0; model.commit() })) {
-                        Text("Automatic").tag("auto")
-                        Text("Work").tag("work")
-                        Text("Private").tag("private")
-                        Text("Hidden").tag("hidden")
-                    }
-                    .labelsHidden()
-                }
-                .width(130)
-                TableColumn("Share") { (row: Named) in
+                TableColumn("Show") { (row: Named) in
                     let repo = row.id
                     Toggle("", isOn: Binding(
-                        get: { model.config.repos[repo]?.share ?? false },
+                        get: { model.config.shown(repo: repo) },
+                        set: { model.config.repos[repo, default: .init()].station = $0 ? "auto" : "hidden"; model.commit() }))
+                    .labelsHidden()
+                }
+                .width(50)
+                TableColumn("Share") { (row: Named) in
+                    let repo = row.id
+                    let shown = model.config.shown(repo: repo)
+                    Toggle("", isOn: Binding(
+                        get: { shown && (model.config.repos[repo]?.share ?? false) },
                         set: { model.config.repos[repo, default: .init()].share = $0; model.commit() }))
                     .labelsHidden()
+                    .disabled(!shown)
+                    .opacity(shown ? 1 : 0.4)
                 }
                 .width(50)
             }
@@ -182,8 +175,6 @@ struct SettingsView: View {
                 Text(credit).font(.caption).foregroundStyle(.secondary)
             }
             Divider()
-            Toggle("Music", isOn: $model.musicOn).onChange(of: model.musicOn) { onMusic($0) }
-            Toggle("Float on top of other windows", isOn: $model.floatOn).onChange(of: model.floatOn) { onFloat($0) }
             Toggle("Open at login", isOn: $model.launchAtLogin).onChange(of: model.launchAtLogin) { onLaunchAtLogin($0) }
             Divider()
             Stepper("Re-read the whole board and every repository every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
@@ -197,8 +188,6 @@ struct SettingsView: View {
             HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
                 .disabled(!model.config.shareOnLAN).opacity(model.config.shareOnLAN ? 1 : 0.5)
             Text("Only repositories ticked under Repositories are shared: the offices you have checked out, their branch names and package counts, and where minions stand. No paths or transcripts. Right-click an office someone else put on your station to kick it.").font(.caption).foregroundStyle(.secondary)
-            Divider()
-            Button("Check for Updates…") { onCheckUpdates() }
             Spacer()
             Text("Config file: \(AppConfig.url.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }

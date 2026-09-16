@@ -91,7 +91,7 @@ extension Simulation {
             guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
             // Crates stacked above this one are still on their way: wait, deadline and all.
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            let all = bodies.values.filter { $0.station == crate.station && !$0.onJob && !$0.hasLoad && !$0.isSubagent && $0.state != .leaving && $0.wakeUntil == 0 }
+            let all = bodies.values.filter { $0.station == crate.station && $0.isFree }
             let fresh = all.filter { !job.gaveUp.contains($0.id) }
             let free = fresh.isEmpty ? all : fresh
             guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else { continue }

@@ -62,16 +62,36 @@ class Body {
         }
     }
     var hammerUp = false
-    /// The poses the simulation decides and the scene draws: flat on the back in bed or on the bench,
-    /// sat on the bowl (its middle at `seatOffset` in the body's own frame), or on the bench itself.
-    var lying = false
-    var seated = false
+    /// Sat on the bowl. Latched, because the visit's clock decides it and a body cannot read the clock.
+    var seatedOnBowl = false
     var seatOffset = SIMD2<Double>(0, 0)
+
+    /// Sat down on either seat: one pose, the offset and the height all that differ.
+    var seated: Bool { seatedOnBowl || onCouch }
+
+    /// Settled onto a lounge couch with nothing to do.
+    var onCouch: Bool {
+        !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil
+    }
+
+    /// The seat's middle in the body's own frame. Only the bowl is stepped onto sideways; a couch is
+    /// walked up to and sat on square, so it needs no offset.
+    var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     /// The shower's last beat: over at the rail with the towel before going.
     var drying = false
-    var onBench = false
     var nextFidgetAt = 0.0
+    /// How far a sitter's shins reach in front of its body. A body stands with its feet on the spot and
+    /// sits down behind them, so this is also how far out from a seat it stops on the way to sitting.
+    static let seatReach = 0.176
     var wakeUntil = 0.0
+    /// Getting to its feet off a bed: it holds still until then, but unlike `wakeUntil` it is no bar to
+    /// being given something to do — standing up is usually the answer to an order, not a refusal of it.
+    var risingUntil = 0.0
+    /// Getting into bed, which is the same moves in the opposite order: sitting on the edge, then
+    /// stretching out along it.
+    var beddingUntil = 0.0
+    /// How much of either move is spent sitting on the edge, before stretching out or standing up.
+    static let riseSit = 0.55
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
     /// Who stood in the way on the last step, for the log.
@@ -153,6 +173,28 @@ class Body {
     }
     /// Carrying, delivering or leaving: holding something, not free for anything else.
     var onJob: Bool { current?.isJob ?? false }
+
+    /// Flat on its back: asleep in its own quarters, or on the bench mid-turn. A body getting to its
+    /// feet is not lying — that is the whole of what rising means, and the pose must change at the
+    /// moment it is roused, not when it finally sets off.
+    var lying: Bool {
+        if onBench { return true }
+        return risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
+            && (activity == .sleeping || napping) && place == .quarters
+    }
+
+    /// On the weight bench, settled onto the fixture rather than still walking up to it.
+    var onBench: Bool {
+        exercising && workout == .bench && path.isEmpty && fetchSpot == nil && phaseKind == .act
+    }
+
+    /// Free for a chore: nothing in hand, arms empty, standing in for nobody, and whatever it is doing
+    /// can be cut into. Every picker asks this, so none of them can drift from the others.
+    var isFree: Bool {
+        !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
+            && state != .leaving && wakeUntil == 0
+            && (current == nil || phaseKind.interruptible)
+    }
     /// Resting: only then do the couch and the bed pull.
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }

@@ -357,6 +357,62 @@ enum SimulationTests {
             expect(m.current?.isRest == true, "and the dispatcher is back to rest: \(m.words)")
         }
 
+        test("a crowded yard: the pallet's way across is measured, never assumed") {
+            let (sim, station, _) = fixture()
+            // Both yards packed: a dozen of the pallet's own in storage, staging full of other work.
+            station.ledger.adopt(Ledger.Word(storage: Array(300..<312), deck: []), repo: "web")
+            station.ledger.adopt(Ledger.Word(storage: Array(100..<124), deck: Array(200..<248)), repo: "api")
+            let from = sim.palletSpot(station: station)
+            let route = sim.palletRoute(station: station, repo: "web", from: from)
+            expect(!route.isEmpty, "a way across was found through a crowded yard")
+            let standing = sim.palletStanding(station: station).crates
+            expect(sim.palletClearance(from, among: standing) >= 0, "it floats out clear of the rows")
+            var at = from, worst = 9.9, where_ = from
+            for leg in route {
+                let air = sim.palletClearance(at, to: leg, among: standing)
+                if air < worst { worst = air; where_ = leg }
+                at = leg
+            }
+            expect(worst >= 0, String(format: "no crate is inside the band it sweeps: %.3f short, on the leg to (%.2f, %.2f)",
+                                      worst, where_.x, where_.y))
+        }
+
+        test("walled in by the rows, a pallet waits rather than passing through them") {
+            let (sim, station, _) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: Array(300..<306), deck: []), repo: "web")
+            let from = sim.palletSpot(station: station)
+            // A body stood where the route was drawn is walked round; a crate in the aisle is not, so
+            // an aisle with one in it must simply not be offered as a way across.
+            let standing = sim.palletStanding(station: station).crates
+            let route = sim.palletRoute(station: station, repo: "web", from: from)
+            for leg in route {
+                expect(sim.palletClearance(from, to: leg, among: standing) >= 0, "every leg offered is a clear one")
+            }
+        }
+
+        test("a sleeper given something to do stands up where it lies before it walks anywhere") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .quarters)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
+            m.activity = .sleeping
+            m.napping = true
+            _ = step(sim, seconds: 2)
+            expect(m.lying, "asleep in the quarters, flat on its back")
+            let bedSpot = m.pos
+
+            sim.send(m, to: .lounge)
+            expect(m.risingUntil > 0, "roused: it is getting to its feet, not walking yet")
+            expect(!m.lying, "and it stands up at once, rather than waiting until it walks")
+            var moved = 0.0
+            _ = step(sim, seconds: 1.0, beat: {
+                moved = max(moved, ((m.pos.x - bedSpot.x) * (m.pos.x - bedSpot.x)
+                                    + (m.pos.y - bedSpot.y) * (m.pos.y - bedSpot.y)).squareRoot())
+            })
+            expect(moved < 0.05, String(format: "it stays where it lay while it rises: moved %.2f", moved))
+            _ = step(sim, seconds: 30, until: { m.place == .lounge && m.path.isEmpty })
+            expect(m.place == .lounge, "and then walks there")
+        }
+
         say(failures == 0 ? "simulation: all passed" : "simulation: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

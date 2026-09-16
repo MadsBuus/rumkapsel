@@ -54,5 +54,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 echo "built $APP"
-for a in "$@"; do [ "$a" = run ] && open -g "$APP"; done
+# Asked for by hand, so it comes to the front: a build you waited for is one you want to look at.
+for a in "$@"; do [ "$a" = run ] && open "$APP"; done
 exit 0

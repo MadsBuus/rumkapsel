@@ -181,6 +181,7 @@ final class Simulation<B: Body> {
         }
         // The order in hand owns the body's posture. A new order of another kind drops the old one's
         // leftovers, so nobody carries a fixture, a seat, a towel or a spot to shuffle to into the next thing.
+        rouse(m)   // an order of any kind gets a sleeper up before it is acted on
         if let old = m.current, !redirected, old.kindName != c.kindName { dropLeftovers(m, of: old) }
         m.current = c
         m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
@@ -196,8 +197,8 @@ final class Simulation<B: Body> {
     /// bench, the fixture it held, the towel; and a visit's place, which goes back to where the visit began.
     private func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
-        m.seated = false
-        m.onBench = false
+        m.seatedOnBowl = false
+        m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         m.fixture = nil
         switch old.kind {
@@ -290,7 +291,10 @@ final class Simulation<B: Body> {
         // panel asking for rest under a command in hand changes nothing.
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if place != .quarters { m.bed = nil; m.napping = false }
+        if place != .quarters {
+            rouse(m)
+            m.bed = nil; m.napping = false
+        }
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(bodies.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
@@ -329,6 +333,16 @@ final class Simulation<B: Body> {
     }
 
     func walk(_ m: B, to cell: Cell) { m.path = route(m, to: cell) }
+
+    /// On its feet before it goes anywhere. Lying down is worked out from the bed, the nap and the
+    /// place, so this has to run before any of the three is changed: a body already cleared of them
+    /// is not lying any more, and there is nothing left to say it should stand up first.
+    func rouse(_ m: B) {
+        guard m.lying, m.risingUntil == 0 else { return }
+        m.risingUntil = clock + 1.1
+        m.napping = false
+        m.bed = nil
+    }
 
     /// Spots taken by the other bodies on a station, as the pathfinder sees them: solid, like props.
     func crowd(around m: B, round blocker: String? = nil) -> Set<Cell> {
@@ -383,6 +397,7 @@ final class Simulation<B: Body> {
     /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
     func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
+        rouse(m)
         let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
         return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
     }
@@ -572,7 +587,7 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
-        if m.lying { m.lying = false; m.bed = nil }
+        if m.lying { m.napping = false; m.bed = nil }
         if m.place != place || m.path.isEmpty { send(m, to: place) }
         start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
@@ -621,7 +636,6 @@ final class Simulation<B: Body> {
         let hurried = m.current.flatMap { cargo[$0.id]?.hurry } ?? false
         let pacing = m.isPacing(at: clock)
         let speed = m.wedged ? 0 : m.isHauling ? (hurried ? 1.7 : 1.1) : (clock < m.strollUntil ? 1.0 : (m.busy ? 2.4 : (pacing ? 0.8 : 1.4)))
-        if m.lying, !m.path.isEmpty, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.lying = false; m.bed = nil }
         // A worker out of one shuttle stands by it while any other shuttle is coming down or unloading in
         // the bay, then walks in. A carrier on a job has its own wait for its crate's ship.
         if !m.onJob, station.hangarCells.contains(m.cell), flights.contains(where: { f in
@@ -631,6 +645,10 @@ final class Simulation<B: Body> {
         }) {
             m.waitingOn = Words.current.shipBeside
             return .waking
+        }
+        if m.risingUntil > 0 {
+            if clock < m.risingUntil { return .waking }
+            m.risingUntil = 0
         }
         if m.wakeUntil > 0 {
             if clock < m.wakeUntil { return .waking }
@@ -735,18 +753,18 @@ final class Simulation<B: Body> {
                     let standAt = m.phaseUntil - 0.7
                     let bowl = station.bowlSpot(bath: bath)
                     let f = station.bathFixtures(bath: bath)
-                    if !m.seated, clock < standAt, m.phaseUntil > 0 {
+                    if !m.seatedOnBowl, clock < standAt, m.phaseUntil > 0 {
                         // Sat square on the WC, facing straight out from the tank, wherever it stood.
                         let to = bowl - station.offset - m.pos
                         m.facing = atan2(0, -f.toiletCorner.y)
                         let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
-                        m.seated = true
+                        m.seatedOnBowl = true
                         m.seatOffset = SIMD2(across, ahead - 0.02)
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3)
-                    } else if m.seated, clock >= standAt {
-                        m.seated = false
+                    } else if m.seatedOnBowl, clock >= standAt {
+                        m.seatedOnBowl = false
                         cue(.flush(station: station.name, bowl: bowl, front: f.toiletCorner.y))
-                    } else if m.seated, clock >= m.nextFidgetAt {
+                    } else if m.seatedOnBowl, clock >= m.nextFidgetAt {
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
                         cue(.fidget(m.id))
                     }
@@ -760,7 +778,7 @@ final class Simulation<B: Body> {
                         cue(.towel(m.id, station: station.name, taken: true))
                     } else {
                         if m.drying { m.drying = false; cue(.towel(m.id, station: station.name, taken: false)) }
-                        m.seated = false
+                        m.seatedOnBowl = false
                         m.fixture = nil
                         var back = restPlace(m)
                         if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
@@ -778,10 +796,8 @@ final class Simulation<B: Body> {
                     if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
                     m.fetchSpot = nil
                     if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = station.gymStand(gym: gym, kind).facing }
-                    if m.workout == .bench { m.onBench = true }
                 }
                 if clock >= m.phaseUntil && settled && m.fetchSpot == nil {   // done: back to where it was
-                    m.onBench = false
                     var back = restPlace(m)
                     if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
                     visitDone(m, "gym")
@@ -838,14 +854,44 @@ final class Simulation<B: Body> {
         if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
         // Seats and beds draw a body in only while it has nothing else to do.
         if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
-            m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
+            let spot = station.couches[c]
+            // A couch stands against the wall it is drawn along, so a sitter looks into the room — and
+            // stands a shin's reach out from the couch, where its feet will be, rather than in it.
+            var stand = spot
+            if let lounge = station.rooms["kind:lounge"], !lounge.cells.isEmpty {
+                let xs = lounge.cells.map { Double($0.x) }, ys = lounge.cells.map { Double($0.y) }
+                let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
+                let d = mid - spot, far = (d.x * d.x + d.y * d.y).squareRoot()
+                if far > 0.01 {
+                    stand = spot + d / far * B.seatReach
+                    if m.onCouch { m.facing = atan2(d.x, d.y) }
+                }
+            }
+            m.pos += (stand - m.pos) * min(1, dt * 4)
         }
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
-            m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)
+            let spot = station.beds[b].pos
+            // Lying, it is on the mattress; on its feet or sitting on the edge, it is a shin's reach out
+            // from it, which is where a body stands to get into a bed and where it lands getting out.
+            // Either long side of a bunk can be sat on, so it uses the one it has business with: the
+            // side it is walking in from, or, once it is up and going somewhere, the side it is headed
+            // for. A bunk lies along its room, so its sides are the two across it.
+            let aim = m.path.first ?? m.pos
+            let outward = SIMD2(aim.x >= spot.x ? 1.0 : -1.0, 0)
+            let stand = spot + outward * B.seatReach
+            // At the edge with nothing else to do: it turns its back on the bunk, sits on it, and
+            // stretches out along it. The same move the other way round is what getting up is.
+            if !m.lying, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
+                let gap = stand - m.pos
+                if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
+                    m.beddingUntil = clock + 1.1
+                    m.facing = atan2(outward.x, outward.y)   // its back to the bunk, ready to sit down
+                }
+            }
+            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0 }
+            // It is on the mattress once it is lying on it, or once the sit is over and it is stretching.
+            let stretching = m.beddingUntil > 0 && m.beddingUntil - clock <= B.riseSit
+            m.pos += ((m.lying || stretching ? spot : stand) - m.pos) * min(1, dt * 4)
         }
-        let resting = m.path.isEmpty && m.state == .settled
-        if resting && (m.activity == .sleeping || m.napping) && m.place == .quarters { m.lying = true }
-        // On the bench: flat on the back along it; the walk step sits it up again when the turn is over.
-        if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, m.workout == .bench { m.lying = true }
     }
 }

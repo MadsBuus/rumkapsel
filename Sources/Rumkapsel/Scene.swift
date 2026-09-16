@@ -269,8 +269,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var userPitch = -Double.pi / 6
     var userPan = SIMD2<Double>(0, 0)
     var focused: String?
-    /// Under a theme of separate worlds, the station whose world is on show.
-    var shownWorld: String?
     private var lastSavedView = 0.0
     private var debris: [(SCNNode, SIMD2<Double>)] = []
     var lastPing = 0.0
@@ -738,7 +736,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 peerRoot.addChildNode(figure.node)
             }
             peerMinions[id] = (figure, target)
-            figure.setSleeping(m.asleep)
+            figure.setPose(m.asleep ? .flat(height: 0) : .standing)
             figure.setTool(m.asleep || m.waiting == true || !m.busy ? nil : .tablet)
             let cones = m.asleep ? 0 : (m.cones ?? 0)
             if figure.pyramids.count + figure.queuedCones.count != cones {

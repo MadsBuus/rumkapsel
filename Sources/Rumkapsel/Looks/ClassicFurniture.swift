@@ -40,9 +40,9 @@ extension Classic {
         let lxs = lounge.cells.map(\.x)
         for c in station.couches {
             let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1   // side walls run along z, the far wall along x
-            let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: 0.18, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
+            let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: Minion.couchSeat, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
             couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.45, 0.4)))
-            couch.position = v3(station.offset.x + c.x, 0.09, station.offset.y + c.y)
+            couch.position = v3(station.offset.x + c.x, Minion.couchSeat / 2, station.offset.y + c.y)
             let back = SCNNode(geometry: SCNBox(width: along ? 0.08 : 0.8, height: 0.22, length: along ? 0.8 : 0.08, chamferRadius: 0.02))
             back.geometry!.firstMaterial = couch.geometry!.firstMaterial
             back.position = v3(along ? (c.x < cx ? -0.11 : 0.11) : 0, 0.16, along ? 0 : 0.11)
@@ -226,10 +226,9 @@ extension Classic {
     /// scene moves it over its spot and keeps its height.
     static func bed(level: Int, floorTop: Double) -> SCNNode {
         if level == 0 {
-            let b = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72))
-            b.geometry!.firstMaterial = flat(NSColor(Colors.bed))
-            b.eulerAngles.x = -.pi / 2
-            b.position = v3(0, max(0.005, floorTop + 0.004), 0)
+            let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
+            b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))   // lit shading pulls it toward the floor; the upper bunk lifts its colour the same way
+            b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
             return b
         }
         let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))

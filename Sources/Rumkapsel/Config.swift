@@ -20,6 +20,10 @@ struct AppConfig: Codable, Equatable {
     var workOwners: [String] = ["Tattoodo"]
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
+    /// Whose GitHub account this is. Remembered because it does not change, and because asking costs a
+    /// subprocess that cannot answer until a repository has been found: without it the offices you have
+    /// checked out are labelled "me" for the first few seconds of every launch, and then relabelled.
+    var viewerLogin: String?
     /// The backstop: how often the whole board and every repository are read again. Changes arrive
     /// within seconds regardless, from the board's delta, the activity feeds and the predictive asks.
     var githubMinutes: Int = 5
@@ -104,8 +108,11 @@ struct AppConfig: Codable, Equatable {
         return name == "private" && !showPrivate ? "hidden" : name
     }
 
-    func crewEnabled(repo: String) -> Bool { showCrew && repos[repo]?.station != "hidden" }
-    func shared(repo: String) -> Bool { shareOnLAN && (repos[repo]?.share ?? false) }
+    /// Whether a repository is on the station at all, asked in one place so everything agrees.
+    func shown(repo: String) -> Bool { repos[repo]?.station != "hidden" }
+    func crewEnabled(repo: String) -> Bool { showCrew && shown(repo: repo) }
+    /// Hidden takes a repository off the network as well as off the floor.
+    func shared(repo: String) -> Bool { shareOnLAN && shown(repo: repo) && (repos[repo]?.share ?? false) }
 }
 
 /// Shared, mutable copy used by the scene; the settings window replaces it and notifies.
