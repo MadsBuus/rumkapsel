@@ -226,9 +226,16 @@ extension StationController {
     func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
         let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
-        let settling = world.stillLooking
+        // While the floor is still arriving, the view is pinned on the monolith at a fixed height and
+        // does not move at all. Nothing about a station is steady enough to frame in that moment — even
+        // the parts that are always there grow, since the hallway is dug outward as offices are placed —
+        // so there is nothing to compute: the middle of the station is where it has always been.
+        if world.stillLooking, let st = stations.min(by: { $0.name < $1.name }) {
+            let c = st.coreCenter
+            return (SIMD2(st.offset.x + Double(c.x), st.offset.y + Double(c.y)), SIMD2(18, 18))
+        }
         for st in stations {
-            let b = settling ? st.fixedBounds : st.bounds
+            let b = st.bounds
             for (x, z) in [(Double(b.min.x), Double(b.min.y)), (Double(b.max.x) + 1, Double(b.min.y)),
                            (Double(b.min.x), Double(b.max.y) + 1), (Double(b.max.x) + 1, Double(b.max.y) + 1)] {
                 let wx = x + st.offset.x, wz = z + st.offset.y
