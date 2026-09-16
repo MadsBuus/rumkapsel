@@ -179,11 +179,11 @@ final class Minion: Body {
             }
             n.addChildNode(band)
         case .tablet:
-            // A dark slab held nearly flat in front, screen glowing, top edge toward the chest.
+            // A dark slab propped up from the belly, screen glowing back at the face, far edge raised.
             let slab = SCNNode(geometry: SCNBox(width: 0.18, height: 0.012, length: 0.13, chamferRadius: 0))
             slab.geometry!.firstMaterial = dark
-            slab.position = v3(0, h * 0.28, d / 2 + 0.09)
-            slab.eulerAngles.x = 0.35
+            slab.position = v3(0, h * 0.26, d / 2 + 0.09)
+            slab.eulerAngles.x = -0.35
             let screen = SCNNode(geometry: SCNBox(width: 0.15, height: 0.004, length: 0.1, chamferRadius: 0))
             screen.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.85, 1.0)))
             screen.position = v3(0, 0.008, 0)
