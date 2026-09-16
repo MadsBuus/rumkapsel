@@ -257,7 +257,36 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 bolt.opacity = Double.random(in: 0.35...1)
             }
         }
-        // 11. lounge and crew
+        // 11. sitting: the one pose, on the two seats that use it
+        do {
+            let p = tile(i, "sit: couch / bowl"); i += 1
+            roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))
+            // On a couch, sat square where it stands: no offset, looking out into the room.
+            let couch = SCNNode(geometry: SCNBox(width: 0.7, height: 0.26, length: 0.4, chamferRadius: 0.04))
+            couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.55, 0.5)))
+            couch.position = v3(p.x - 0.55, 0.13, p.y + 0.12)
+            scene.rootNode.addChildNode(couch)
+            let a = minion(at: SIMD2(p.x - 0.55, p.y))
+            a.setSeated(true)
+            // On the bowl, stepped onto the seat from where it stood: the same pose, carried across.
+            let bowl = SCNNode(geometry: SCNBox(width: 0.24, height: 0.4, length: 0.3, chamferRadius: 0.03))
+            bowl.geometry!.firstMaterial = lit(.white)
+            bowl.position = v3(p.x + 0.55, 0.2, p.y + 0.1)
+            scene.rootNode.addChildNode(bowl)
+            let b = minion(at: SIMD2(p.x + 0.55, p.y))
+            b.setSeated(true, at: SIMD2(0, 0.1))
+            // Standing and sitting in turn, so the whole move is on show rather than its two ends.
+            var phase = 0
+            updaters.append { c, _ in
+                let k = Int(c / 3) % 2
+                if k != phase {
+                    phase = k
+                    a.setSeated(k == 0)
+                    b.setSeated(k == 0, at: SIMD2(0, 0.1))
+                }
+            }
+        }
+        // 12. lounge and crew
         do {
             let p = tile(i, "lounge + crew minion"); i += 1
             roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))
