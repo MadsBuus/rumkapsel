@@ -180,7 +180,21 @@ final class World {
     /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
     func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
-        return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
+        guard !demo, !room.key.hasPrefix("kind:") else { return false }
+        // Everything the floor came back with is provisional until it has been looked at today. It is
+        // last night's picture: right about most of it, and the only honest way to say so is to draw it
+        // low until GitHub has spoken for the repository, and then to keep it or let it go.
+        if !lookedAt(room.repo) { return true }
+        return room.worktree == nil && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
+    }
+
+    /// GitHub has answered for this repository over the wire in this run — not from last night's notes,
+    /// and not from a neighbour. Repositories the floor has not even found yet count as unlooked-at.
+    func lookedAt(_ repo: String?) -> Bool {
+        guard waitsForGitHub else { return true }
+        guard let repo else { return true }
+        let roots = repoRoots.filter { $0.value.repo == repo }.map(\.key)
+        return !roots.isEmpty && roots.contains { github.answered(repoRoot: $0) }
     }
 
     /// Someone is at work in a peer's office right now: a session awake in it on their machine.
@@ -734,11 +748,15 @@ final class World {
                                                      detail: e.detail, branch: e.branch, title: e.title, ready: isReady(repo))))
         }
         // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
+        let lookedBefore = repoRoots.keys.filter { github.answered(repoRoot: $0) }.count
         let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
         // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
         // the floor and must go from what next launch is told as well, or it comes back from the dead
         // every morning. Written when a repository first answers, and now and then after that.
+        if repoRoots.keys.filter({ github.answered(repoRoot: $0) }).count != lookedBefore {
+            events.append(.layoutChanged)   // one more repository looked at: its offices come up to full
+        }
         if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
             savedKnowledgeAt = Date()
             github.saveKnowledge(repoRoots.mapValues(\.repo))

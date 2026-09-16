@@ -668,7 +668,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func applySharing() {
         let cfg = ConfigStore.shared.current
         if cfg.shareOnLAN {
-            if !peers.isRunning { github.holdUntil = Date().addingTimeInterval(Double.random(in: 3...12)) }
             peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName)
         } else { peers.stop() }
     }

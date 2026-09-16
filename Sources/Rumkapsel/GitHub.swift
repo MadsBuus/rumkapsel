@@ -132,6 +132,12 @@ final class GitHubResolver {
     /// Anything at all known about anybody's open pull requests, from this run or the last.
     var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
 
+    /// Repository roots GitHub has answered for over the wire in this run. Remembered answers and a
+    /// neighbour's word do not count: this is what says a room has been looked at today, and so what
+    /// the floor dims until.
+    private var answeredLive: Set<String> = []
+    func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
+
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
         return openPRs[repoRoot]?.0
@@ -224,8 +230,9 @@ final class GitHubResolver {
             lock.lock()
             let changed = openPRs[repoRoot]?.0 != found
             openPRs[repoRoot] = (found, Date())
+            let first = answeredLive.insert(repoRoot).inserted
             lock.unlock()
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+            if changed || first { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
 
