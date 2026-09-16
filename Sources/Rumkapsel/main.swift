@@ -11,12 +11,14 @@ enum Scripted {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMenuDelegate {
     var window: NSWindow!
     var controller: StationController!
     private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
+    /// The focus submenu, kept so its stations can be filled in once there is a fleet to name.
+    var focusMenu: NSMenu!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
     var notesWindow: NSWindow?
@@ -99,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             controller.viewSize = controller.view.bounds.size
         }
         controller.view.postsFrameChangedNotifications = true
+        menuNeedsUpdate(focusMenu)
 
         if !window.setFrameUsingName("RumkapselMain"), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -207,9 +210,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
 
     private func buildMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem()
-        main.addItem(appItem)
-        let app = NSMenu()
+
+        /// A top-level menu, in the bar and ready to be filled.
+        func menu(_ title: String) -> NSMenu {
+            let item = NSMenuItem()
+            let sub = NSMenu(title: title)
+            item.submenu = sub
+            main.addItem(item)
+            return sub
+        }
+
+        // The application's own: what it is, keeping it current, and getting out.
+        let app = menu("rumkapsel")
         app.addItem(withTitle: "About rumkapsel", action: #selector(about), keyEquivalent: "")
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
         check.target = updater
@@ -218,28 +230,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
             app.addItem(withTitle: "What's New in \(v)…", action: #selector(openWhatsNew), keyEquivalent: "")
         }
-        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        let g = app.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
-        g.keyEquivalentModifierMask = [.command, .shift]
-        let sim = app.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
-        sim.keyEquivalentModifierMask = [.command, .shift]
-        app.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
-        app.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
         app.addItem(.separator())
-        musicItem = app.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
-        floatItem = app.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
-        floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
-        app.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
-        app.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "g")
-        for (title, key) in [("Focus All", "0"), ("Focus Station 1", "1"), ("Focus Station 2", "2"), ("Focus Station 3", "3"), ("Focus Station 4", "4")] {
-            let item = app.addItem(withTitle: title, action: #selector(focusStation(_:)), keyEquivalent: key)
-            item.keyEquivalentModifierMask = []
-        }
+        app.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         app.addItem(.separator())
         app.addItem(withTitle: "Hide", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = app
+
+        // The standard editing keys. Settings has fields to type organisations and a name into, and
+        // without these in the bar the system does not give them copy and paste.
+        let edit = menu("Edit")
+        for (title, selector, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z")] {
+            edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+        edit.addItem(.separator())
+        for (title, selector, key) in [("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"),
+                                       ("Select All", "selectAll:", "a")] {
+            edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+
+        // What the station looks like from here: where the camera is pointed, and the two toggles
+        // worth reaching for often enough to want a key.
+        let view = menu("View")
+        let focus = NSMenuItem(title: "Focus", action: nil, keyEquivalent: "")
+        focusMenu = NSMenu(title: "Focus")
+        focusMenu.delegate = self   // the stations are only known once there is a fleet, and they change
+        focus.submenu = focusMenu
+        view.addItem(focus)
+        view.addItem(.separator())
+        view.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
+        floatItem = view.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
+        floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
+        musicItem = view.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
+
+        // The station's dealings with the outside.
+        let station = menu("Station")
+        let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
+        refresh.keyEquivalentModifierMask = [.command, .shift]
+
+        // The tools for working on rumkapsel itself, out of the way of the ordinary path.
+        let develop = menu("Develop")
+        let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
+        g.keyEquivalentModifierMask = [.command, .shift]
+        let sim = develop.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
+        sim.keyEquivalentModifierMask = [.command, .shift]
+
+        let help = menu("Help")
+        help.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
+        help.addItem(withTitle: "Report a Bug…", action: #selector(reportBug), keyEquivalent: "")
+
         NSApp.mainMenu = main
+    }
+
+    /// The focus menu, filled as it is opened: one item per station the fleet actually has, by name.
+    /// A fleet of one station says so in one line, and nothing here has to be changed when the many
+    /// stations become rooms of a single one.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let all = menu.addItem(withTitle: "All Stations", action: #selector(focusStation(_:)), keyEquivalent: "0")
+        all.tag = 0
+        let names = controller?.fleet.ordered.map(\.name) ?? []
+        guard names.count > 1 else { return }
+        menu.addItem(.separator())
+        for (i, name) in names.enumerated() {
+            let item = menu.addItem(withTitle: name, action: #selector(focusStation(_:)), keyEquivalent: i < 9 ? "\(i + 1)" : "")
+            item.tag = i + 1
+        }
     }
 
     @objc func about() {
@@ -336,16 +391,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         settingsModel.pipelines = controller.pipelineRows
         settingsModel.knownLogins = Array(Set(controller.seenLogins).union(settingsModel.config.crewNames.keys)).sorted()
         settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
-        settingsModel.musicOn = controller.drone.isEnabled
-        settingsModel.floatOn = window.level == .floating
         if settingsWindow == nil {
             let view = SettingsView(model: settingsModel,
-                                    onMusic: { [weak self] on in self?.setMusic(on) },
-                                    onFloat: { [weak self] on in self?.setFloat(on) },
                                     onLaunchAtLogin: { on in
                                         if on { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
-                                    },
-                                    onCheckUpdates: { [weak self] in self?.updater.checkForUpdates(nil) })
+                                    })
             let w = NSWindow(contentViewController: NSHostingController(rootView: view))
             w.title = "rumkapsel settings"
             w.styleMask = [.titled, .closable]
@@ -396,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     @objc func refreshGitHub() { controller.refreshGitHub() }
 
     @objc func focusStation(_ sender: NSMenuItem) {
-        if let n = Int(sender.keyEquivalent), n > 0 { controller.focus(onIndex: n - 1) } else { controller.focus(on: nil) }
+        if sender.tag > 0 { controller.focus(onIndex: sender.tag - 1) } else { controller.focus(on: nil) }
     }
 
     @objc func toggleMusic() { setMusic(!controller.drone.isEnabled) }

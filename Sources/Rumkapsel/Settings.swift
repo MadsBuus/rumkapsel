@@ -12,18 +12,13 @@ final class SettingsModel: ObservableObject {
     @Published var pipelines: [PipelineRow] = []
     @Published var knownLogins: [String] = []
     @Published var launchAtLogin = false
-    @Published var musicOn = UserDefaults.standard.bool(forKey: "music")
-    @Published var floatOn = UserDefaults.standard.bool(forKey: "float")
 
     func commit() { ConfigStore.shared.update { $0 = config } }
 }
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
-    var onMusic: (Bool) -> Void
-    var onFloat: (Bool) -> Void
     var onLaunchAtLogin: (Bool) -> Void
-    var onCheckUpdates: () -> Void
 
     var body: some View {
         TabView {
@@ -182,8 +177,6 @@ struct SettingsView: View {
                 Text(credit).font(.caption).foregroundStyle(.secondary)
             }
             Divider()
-            Toggle("Music", isOn: $model.musicOn).onChange(of: model.musicOn) { onMusic($0) }
-            Toggle("Float on top of other windows", isOn: $model.floatOn).onChange(of: model.floatOn) { onFloat($0) }
             Toggle("Open at login", isOn: $model.launchAtLogin).onChange(of: model.launchAtLogin) { onLaunchAtLogin($0) }
             Divider()
             Stepper("Re-read the whole board and every repository every \(model.config.githubMinutes) min", value: $model.config.githubMinutes, in: 1...30)
@@ -197,8 +190,6 @@ struct SettingsView: View {
             HStack { Text("Shown to others as"); TextField("name", text: $model.config.shareName).frame(width: 180) }
                 .disabled(!model.config.shareOnLAN).opacity(model.config.shareOnLAN ? 1 : 0.5)
             Text("Only repositories ticked under Repositories are shared: the offices you have checked out, their branch names and package counts, and where minions stand. No paths or transcripts. Right-click an office someone else put on your station to kick it.").font(.caption).foregroundStyle(.secondary)
-            Divider()
-            Button("Check for Updates…") { onCheckUpdates() }
             Spacer()
             Text("Config file: \(AppConfig.url.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
