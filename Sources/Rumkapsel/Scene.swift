@@ -736,7 +736,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 peerRoot.addChildNode(figure.node)
             }
             peerMinions[id] = (figure, target)
-            figure.setSleeping(m.asleep)
+            figure.setPose(m.asleep ? .flat(height: 0) : .standing)
             figure.setTool(m.asleep || m.waiting == true || !m.busy ? nil : .tablet)
             let cones = m.asleep ? 0 : (m.cones ?? 0)
             if figure.pyramids.count + figure.queuedCones.count != cones {

@@ -22,6 +22,9 @@ final class Minion: Body {
     private(set) var wandLight: SCNNode?
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
+    /// What a body holds hangs here rather than on the box itself. Sitting shortens the box from the
+    /// top down, so the mount drops by what the top drops and every tool follows without knowing why.
+    private let hold = SCNNode()
 
     var queuedCones: [SCNNode] = []
     var pyramids: [SCNNode] = []
@@ -34,11 +37,8 @@ final class Minion: Body {
     /// The lean as drawn, eased toward the body's lean.
     var drawnLean = SIMD2<Double>(0, 0)
     /// What the figure is posed as right now, against what the body says it should be.
-    private var posedOnBench = false
-    private var posedSeated = false
-    private var posedLying = false
+    private var posed: Pose = .standing
     private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
-    private var posedSeatHeight = Minion.seat      // the height of the seat it is sat on
     private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
     private let visor: SCNNode
     /// The look's own figure in the box's place, when it has one; the box and its visor are then not drawn.
@@ -78,14 +78,27 @@ final class Minion: Body {
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
     }
     /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
-    private var staticSpot: SCNVector3 { posedSeated ? v3(posedSeat.x, posedSeatHeight + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9) : v3(0, bodyHeight * 0.3, 0) }
+    private var staticSpot: SCNVector3 {
+        guard case .seated(let h, _) = posed else { return v3(0, bodyHeight * 0.3, 0) }
+        return v3(posedSeat.x, h + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9)
+    }
     /// The top of the bowl, where a sitter's thighs rest.
     static let seat = 0.2
-    /// The top of a couch, which is lower than the bowl. A seat's own height, so that a body put down
-    /// on it lands on it: one height for every seat leaves a sitter hovering over the shorter one.
+    /// How much of its height a body keeps as torso once it sits; the legs make up the rest.
+    static let seatedTorso = 0.62
+    /// The top of a couch, lower than the bowl. Read by the prop and by the pose, so they cannot drift.
     static let couchSeat = 0.18
     /// How high the seat under this body is, by which seat it is on.
     var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
+
+    /// The one pose this body is in, from what it is doing. Flat beats sitting: a body on the bench is
+    /// both on a seat and on its back, and it is its back that shows.
+    var currentPose: Pose {
+        if onBench { return .flat(height: Minion.seat) }
+        if lying { return .flat(height: 0) }
+        if seated { return .seated(height: seatHeight, at: seatSpot) }
+        return .standing
+    }
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
@@ -116,6 +129,7 @@ final class Minion: Body {
             body.addChildNode(figure)
             look.pose(figure: figure, height: h, torso: h)
         }
+        body.addChildNode(hold)
         let tiltNode = SCNNode()
         tiltNode.addChildNode(body)
         tiltNode.addChildNode(legs)
@@ -168,7 +182,7 @@ final class Minion: Body {
             wandTip = own.childNode(withName: "wandTip", recursively: true)
             wandLight = own.childNode(withName: "wandLight", recursively: true)
             n.name = node.name
-            body.addChildNode(n)
+            hold.addChildNode(n)
             toolNode = n
             return
         }
@@ -309,7 +323,7 @@ final class Minion: Body {
             lightPivot = pivot
         }
         n.name = node.name
-        body.addChildNode(n)
+        hold.addChildNode(n)
         toolNode = n
     }
 
@@ -325,54 +339,84 @@ final class Minion: Body {
     }
 
     /// Flat on the back on the bench, arms up, or off it again.
-    func setBench(_ on: Bool) {
-        guard on != posedOnBench else { return }
-        posedOnBench = on
-        body.removeAllActions()
-        if on {
-            body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true), .move(to: v3(0, 0.2 + bodyDepth / 2, 0), duration: 0.5)]))
-        } else {
-            body.runAction(.group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true), .move(to: v3(0, bodyHeight / 2, 0), duration: 0.4)]))
-        }
+
+    /// How a body is held. Standing, sat on a seat of some height, or flat on its back — one answer,
+    /// because they are not things that can be true at once. Everything hung on the body follows from
+    /// this: the box's height, the face, whatever is held, the legs, the blur and the shadow.
+    enum Pose: Equatable {
+        case standing
+        case seated(height: Double, at: SIMD2<Double>)
+        case flat(height: Double)
     }
 
-    /// Sit down on the bowl, its middle at `offset` in the figure's own frame (x across, z ahead, so
-    /// behind when negative): the body bends into a sit, the torso upright on the seat, thighs out
-    /// in front and shins down to the floor. Or straighten and stand back up onto the spot.
-    func setSeated(_ on: Bool, at offset: SIMD2<Double> = SIMD2(0, 0), height: Double = Minion.seat) {
-        guard on != posedSeated else { return }
-        posedSeated = on
-        posedSeat = on ? offset : SIMD2(0, 0)
-        posedSeatHeight = on ? height : Minion.seat
+    /// Puts the figure into a pose. The only thing that moves the body node, so no two poses can fight
+    /// over it, and the one place to look for what any of them does.
+    func setPose(_ p: Pose) {
+        guard p != posed else { return }
+        let was = posed
+        posed = p
         body.removeAllActions()
-        let torso = bodyHeight * 0.62
-        let pose: SCNAction
-        if on {
-            pose = .group([.rotateTo(x: -0.1, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
-                           .move(to: v3(offset.x, height + torso / 2, offset.y), duration: 0.5)])
+
+        let torso = bodyHeight * Minion.seatedTorso
+        let seat: SIMD2<Double>, boxHeight: Double, pitch: Double, at: SCNVector3
+        switch p {
+        case .standing:
+            seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = 0
+            at = v3(0, bodyHeight / 2, 0)
+        case .seated(let height, let offset):
+            seat = offset; boxHeight = torso; pitch = -0.1
+            at = v3(offset.x, height + torso / 2, offset.y)
             legs.position = v3(offset.x, height, offset.y)
-        } else {
-            pose = .group([.rotateTo(x: 0, y: 0, z: 0, duration: 0.45, usesShortestUnitArc: true),
-                           .move(to: v3(0, bodyHeight / 2, 0), duration: 0.45)])
+        case .flat(let height):
+            seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = -.pi / 2
+            at = v3(0, height + bodyDepth / 2, 0)
         }
-        pose.timingMode = .easeOut
-        body.runAction(pose)
-        // The face keeps its place on the shorter box: a third of the way up, as on the full one.
-        visor.runAction(.move(to: v3(0, (on ? torso : bodyHeight) * 0.3, bodyDepth / 2 + 0.004), duration: on ? 0.5 : 0.45))
-        // The box itself shortens into a torso as the legs come out, and back to full height as they go.
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = on ? 0.5 : 0.45
-        if let figure {
-            look.pose(figure: figure, height: bodyHeight, torso: on ? torso : bodyHeight)   // legs of its own
+        posedSeat = seat
+        let sitting = boxHeight == torso
+
+        // Rising off the back is a move of its own: on its feet before it goes anywhere, and the height
+        // gained with the sitting up, so the body never turns at the height it was lying at.
+        if case .flat = was, case .standing = p {
+            let sitUp = SCNAction.group([.rotateTo(x: -0.75, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
+                                         .move(to: at, duration: 0.5)])
+            sitUp.timingMode = .easeOut
+            body.runAction(.sequence([sitUp, .wait(duration: 0.15),
+                                      .rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true)]))
         } else {
-            (body.geometry as? SCNBox)?.height = on ? torso : bodyHeight
-            legs.opacity = on ? 1 : 0
+            let t = Minion.poseSeconds(from: was, to: p)
+            let move = SCNAction.group([.rotateTo(x: pitch, y: 0, z: 0, duration: t, usesShortestUnitArc: true),
+                                        .move(to: at, duration: t)])
+            move.timingMode = .easeOut
+            body.runAction(move)
+        }
+
+        let t = Minion.poseSeconds(from: was, to: p)
+        // The box shortens from the top down, so whatever is held drops by what the crown drops.
+        hold.runAction(.move(to: v3(0, (boxHeight - bodyHeight) / 2, 0), duration: t))
+        // The face keeps its place on the box: a third of the way up, whatever its height.
+        visor.runAction(.move(to: v3(0, boxHeight * 0.3, bodyDepth / 2 + 0.004), duration: t))
+        // The box shortens into a torso as the legs come out, and back to full height as they go.
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = t
+        if let figure {
+            look.pose(figure: figure, height: bodyHeight, torso: boxHeight)   // legs of its own
+        } else {
+            (body.geometry as? SCNBox)?.height = boxHeight
+            legs.opacity = sitting ? 1 : 0
         }
         SCNTransaction.commit()
-        staticNode?.runAction(.move(to: staticSpot, duration: 0.5))
-        // The shadow goes with the body onto the seat, and back to the spot.
-        shadow.runAction(.move(to: v3(0.03 + posedSeat.x, 0.003, 0.02 + posedSeat.y), duration: on ? 0.5 : 0.45))
+        staticNode?.runAction(.move(to: staticSpot, duration: t))
+        shadow.runAction(.move(to: v3(0.03 + seat.x, 0.003, 0.02 + seat.y), duration: t))
     }
+
+    /// How long a change of pose takes: lying down is slower than sitting, standing up quicker than
+    /// going down.
+    private static func poseSeconds(from: Pose, to: Pose) -> Double {
+        if case .flat = to { return 0.7 }
+        if case .standing = to { return 0.45 }
+        return 0.5
+    }
+
 
     /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
     /// A towel over the shoulders, draped across the top of the body, or none.
@@ -391,29 +435,11 @@ final class Minion: Body {
     }
 
     func fidget() {
-        guard posedSeated, !body.hasActions else { return }
+        guard case .seated = posed, !body.hasActions else { return }
         let side = Bool.random() ? 0.08 : -0.08
         let over = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(side), duration: 0.18); over.timingMode = .easeInEaseOut
         let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut
         body.runAction(.sequence([over, .wait(duration: 0.3), back]))
     }
 
-    /// Tip over onto the back in the dorm, or stand back up.
-    func setSleeping(_ asleep: Bool) {
-        guard asleep != posedLying else { return }
-        posedLying = asleep
-        body.removeAllActions()
-        if asleep {
-            body.runAction(.group([.rotateTo(x: -.pi / 2, y: 0, z: 0, duration: 0.7, usesShortestUnitArc: true), .move(to: v3(0, bodyDepth / 2, 0), duration: 0.7)]))
-        } else {
-            // Sit up first, then straighten, then the legs can go. The rise off the mattress belongs to
-            // the sitting up, not to the straightening: lifted at the end, the body spends the whole of
-            // the turn at lying height, and anything that moved it then dragged it through the floor.
-            let sitUp = SCNAction.group([.rotateTo(x: -0.75, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
-                                         .move(to: v3(0, bodyHeight / 2, 0), duration: 0.5)])
-            sitUp.timingMode = .easeOut
-            let stand = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true)
-            body.runAction(.sequence([sitUp, .wait(duration: 0.15), stand]))
-        }
-    }
 }

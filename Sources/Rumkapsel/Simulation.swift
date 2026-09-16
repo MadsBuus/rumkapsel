@@ -383,8 +383,7 @@ final class Simulation<B: Body> {
     /// past someone standing in it, a doorway say, the walk goes that way and waits on them in step.
     func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
-        // Roused: somewhere to go is what ends a lie-down, so the moment for getting to its feet is
-        // here, where every walk on the station is worked out, whoever asked for it.
+        // Roused: somewhere to go is what ends a lie-down, and every walk is worked out here.
         if m.lying, m.wakeUntil == 0 { m.wakeUntil = clock + 1.1; m.napping = false; m.bed = nil }
         let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
         return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear

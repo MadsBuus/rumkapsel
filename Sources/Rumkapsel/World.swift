@@ -896,9 +896,8 @@ final class World {
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
             let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
-            // The rows leave the pallet's lane empty, but an untidy crate beside it may still lean over
-            // the line, and the lane is only as wide as the slab. A crate never leans into it: the nudge
-            // that would put its box in the lane is taken back to the edge of it.
+            // The rows leave the pallet's lane empty, but the lane is only as wide as the slab, so an
+            // untidy crate beside it could lean over the line. The nudge is taken back to the edge.
             var x = Double(cell.x) + side + jx
             if !lane.isEmpty, let lo = lane.map(\.x).min(), let hi = lane.map(\.x).max() {
                 let edge = 0.3   // a crate's own half, and a hair

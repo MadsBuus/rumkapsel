@@ -312,9 +312,7 @@ extension StationController {
     /// The figure drawn where the body is, held as the body says: sleeping, seated, on the bench, blurred
     /// in the bath; then the one little routine per activity, so you can tell at a glance what it is up to.
     private func pose(_ m: Minion, station: Station, dt: Double) {
-            m.setSleeping(m.lying)
-            m.setSeated(m.seated, at: m.seatSpot, height: m.seatHeight)
-            m.setBench(m.onBench)
+            m.setPose(m.currentPose)
             // What is drawn follows the order in hand, never a flag the last order left behind.
             let inBath = m.bathing && m.phaseKind == .act && m.path.isEmpty
             m.setStatic(inBath, frame: Int(clock * 12))

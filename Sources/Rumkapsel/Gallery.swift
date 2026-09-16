@@ -123,11 +123,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             roomFloor(at: p, color: NSColor(Colors.quarters))
             let bed = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72)); bed.geometry!.firstMaterial = flat(NSColor(Colors.bed)); bed.eulerAngles.x = -.pi / 2; bed.position = v3(p.x, 0.006, p.y)
             scene.rootNode.addChildNode(bed)
-            let m = minion(at: p); m.setSleeping(true)
+            let m = minion(at: p); m.setPose(.flat(height: 0))
             var phase = 0
             updaters.append { c, _ in
                 let k = Int(c / 3) % 2
-                if k != phase { phase = k; m.setSleeping(k == 0) }
+                if k != phase { phase = k; m.setPose(k == 0 ? .flat(height: 0) : .standing) }
             }
         }
         // 3. working routines
@@ -261,8 +261,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         do {
             let p = tile(i, "sit: couch / bowl"); i += 1
             roomFloor(at: p, color: NSColor(rgb: (0.40, 0.36, 0.30)))
-            // The seats are the station's own, at the station's own heights: a couch built here to a
-            // number of this tile's choosing would hide exactly the misfit this tile is here to show.
+            // The station's own seats, at its own heights: a couch sized to suit the picture would hide
+            // the very misfit this tile is here to show.
             func sitter(at spot: SIMD2<Double>, _ color: NSColor, seat: Double, width: Double, back: Double) -> Minion {
                 let pad = SCNNode(geometry: SCNBox(width: width, height: seat, length: 0.4, chamferRadius: 0.02))
                 pad.geometry!.firstMaterial = lit(color)
@@ -277,15 +277,16 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let a = sitter(at: SIMD2(p.x - 0.5, p.y), NSColor(rgb: (0.62, 0.45, 0.4)),
                            seat: Minion.couchSeat, width: 0.8, back: 0.22)
             let b = sitter(at: SIMD2(p.x + 0.5, p.y), .white, seat: Minion.seat, width: 0.3, back: 0.3)
-            a.setSeated(true, height: Minion.couchSeat)
-            b.setSeated(true, height: Minion.seat)
+            a.setTool(.tablet)   // reading on the couch: what a sitter most often has in its hands
+            a.setPose(.seated(height: Minion.couchSeat, at: SIMD2(0, 0)))
+            b.setPose(.seated(height: Minion.seat, at: SIMD2(0, 0)))
             var phase = 0
             updaters.append { c, _ in
                 let k = Int(c / 3) % 2
                 if k != phase {
                     phase = k
-                    a.setSeated(k == 0, height: Minion.couchSeat)
-                    b.setSeated(k == 0, height: Minion.seat)
+                    a.setPose(k == 0 ? .seated(height: Minion.couchSeat, at: SIMD2(0, 0)) : .standing)
+                    b.setPose(k == 0 ? .seated(height: Minion.seat, at: SIMD2(0, 0)) : .standing)
                 }
             }
         }

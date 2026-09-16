@@ -342,11 +342,9 @@ extension Simulation {
         beginUnload(m, station: station, p, back: false)
     }
 
-    /// What a hover pallet must not pass through: the crates standing on either yard's rows, and the
-    /// bodies on the floor. What is aboard it, what is in the air on its own wand and the pusher with
-    /// its hands on its edge are its own, and never in its way. The two are kept apart because they
-    /// call for different things: a crate stands where it stands and the way round it must be worked
-    /// out again, while a body walks on and is only worth waiting out.
+    /// What a hover pallet must not pass through: the crates on either yard's rows, and the bodies on
+    /// the floor. Its own cargo, its crate in the air and its pusher are not in its way. The two are
+    /// kept apart because a crate calls for a new route and a body only for waiting.
     func palletStanding(station: Station, _ p: PalletJob? = nil)
         -> (crates: [(at: SIMD2<Double>, half: Double)], crowd: [(at: SIMD2<Double>, half: Double)]) {
         let flying = p?.flight?.crate

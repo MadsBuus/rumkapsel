@@ -62,23 +62,20 @@ class Body {
         }
     }
     var hammerUp = false
-    /// Sat on the bowl, which the visit's own clock decides and so must be latched, with the seat's
-    /// middle at `seatOffset` in the body's own frame.
+    /// Sat on the bowl. Latched, because the visit's clock decides it and a body cannot read the clock.
     var seatedOnBowl = false
     var seatOffset = SIMD2<Double>(0, 0)
 
-    /// Sat down, wherever: on the bowl for its visit, or settled back on a couch in the lounge. A seat
-    /// is a seat — one pose, one animation, the offset all that differs.
+    /// Sat down on either seat: one pose, the offset and the height all that differ.
     var seated: Bool { seatedOnBowl || onCouch }
 
-    /// Settled onto a couch of the lounge with nothing to do: the couch draws a body in, and a body
-    /// drawn in is sitting on it. Asked of the order in hand, so standing up needs nothing remembered.
+    /// Settled onto a lounge couch with nothing to do.
     var onCouch: Bool {
         !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil
     }
 
-    /// Where the seat is, in the body's own frame: the bowl is stepped onto sideways, a couch is walked
-    /// up to and sat on square, so only the bowl has anything to offset by.
+    /// The seat's middle in the body's own frame. Only the bowl is stepped onto sideways; a couch is
+    /// walked up to and sat on square, so it needs no offset.
     var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     /// The shower's last beat: over at the rail with the towel before going.
     var drying = false
@@ -166,24 +163,20 @@ class Body {
     /// Carrying, delivering or leaving: holding something, not free for anything else.
     var onJob: Bool { current?.isJob ?? false }
 
-    /// Whether a body can be handed a chore this instant: it has none in hand, its arms are empty, it
-    /// stands in for nobody else, and whatever it is doing can be cut into. Every picker asks this one
-    /// question rather than listing the cases over again, so they cannot drift apart from each other —
-    /// and a doing that must not be cut into says so once, in its phases, instead of by name here.
-    /// Flat on its back: asleep in its own quarters, or on the bench in the middle of a turn. Asked of
-    /// the order in hand rather than kept beside it, so it cannot outlive the order that explains it —
-    /// which is how a carrier woken from bed used to lie down again at the crate.
+    /// Flat on its back: asleep in its own quarters, or on the bench mid-turn.
     var lying: Bool {
         if onBench { return true }
         return !onJob && path.isEmpty && state == .settled
             && (activity == .sleeping || napping) && place == .quarters
     }
 
-    /// On the weight bench, settled onto the fixture itself rather than still walking up to it.
+    /// On the weight bench, settled onto the fixture rather than still walking up to it.
     var onBench: Bool {
         exercising && workout == .bench && path.isEmpty && fetchSpot == nil && phaseKind == .act
     }
 
+    /// Free for a chore: nothing in hand, arms empty, standing in for nobody, and whatever it is doing
+    /// can be cut into. Every picker asks this, so none of them can drift from the others.
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
             && state != .leaving && wakeUntil == 0
