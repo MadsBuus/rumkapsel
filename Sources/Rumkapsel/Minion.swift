@@ -88,17 +88,33 @@ final class Minion: Body {
     static let seatedTorso = 0.62
     /// The top of a couch, lower than the bowl. Read by the prop and by the pose, so they cannot drift.
     static let couchSeat = 0.18
+    /// The top of a bunk's mattress: what a sleeper lies on and sits on the edge of to get up.
+    static let bedSeat = 0.12
     /// How high the seat under this body is, by which seat it is on.
     var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
 
+    /// How long of a rise is spent sitting on the edge before standing up.
+    static let riseSit = 0.55
+
     /// The one pose this body is in, from what it is doing. Flat beats sitting: a body on the bench is
     /// both on a seat and on its back, and it is its back that shows.
-    var currentPose: Pose {
+    ///
+    /// Getting up off a bunk is the one pose that is two: nobody rises from flat on their back straight
+    /// onto their feet. It swings round to sit on the edge of the mattress first, and stands from there.
+    func currentPose(at clock: Double) -> Pose {
         if onBench { return .flat(height: Minion.seat) }
-        if lying { return .flat(height: 0) }
+        if lying { return .flat(height: Minion.bedSeat) }
+        if risingUntil > clock {
+            return risingUntil - clock > Minion.riseSit
+                ? .seated(height: Minion.bedSeat, at: SIMD2(Minion.bedEdge, 0))
+                : .standing
+        }
         if seated { return .seated(height: seatHeight, at: seatSpot) }
         return .standing
     }
+
+    /// How far off the middle of the bunk its edge is: where a sitter puts itself on the way up.
+    static let bedEdge = 0.17
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
@@ -374,23 +390,12 @@ final class Minion: Body {
         posedSeat = seat
         let sitting = boxHeight == torso
 
-        // Rising off the back is a move of its own: on its feet before it goes anywhere, and the height
-        // gained with the sitting up, so the body never turns at the height it was lying at.
-        if case .flat = was, case .standing = p {
-            let sitUp = SCNAction.group([.rotateTo(x: -0.75, y: 0, z: 0, duration: 0.5, usesShortestUnitArc: true),
-                                         .move(to: at, duration: 0.5)])
-            sitUp.timingMode = .easeOut
-            body.runAction(.sequence([sitUp, .wait(duration: 0.15),
-                                      .rotateTo(x: 0, y: 0, z: 0, duration: 0.4, usesShortestUnitArc: true)]))
-        } else {
-            let t = Minion.poseSeconds(from: was, to: p)
-            let move = SCNAction.group([.rotateTo(x: pitch, y: 0, z: 0, duration: t, usesShortestUnitArc: true),
-                                        .move(to: at, duration: t)])
-            move.timingMode = .easeOut
-            body.runAction(move)
-        }
-
         let t = Minion.poseSeconds(from: was, to: p)
+        let move = SCNAction.group([.rotateTo(x: pitch, y: 0, z: 0, duration: t, usesShortestUnitArc: true),
+                                    .move(to: at, duration: t)])
+        move.timingMode = .easeOut
+        body.runAction(move)
+
         // The box shortens from the top down, so whatever is held drops by what the crown drops.
         hold.runAction(.move(to: v3(0, (boxHeight - bodyHeight) / 2, 0), duration: t))
         // The face keeps its place on the box: a third of the way up, whatever its height.
@@ -410,8 +415,10 @@ final class Minion: Body {
     }
 
     /// How long a change of pose takes: lying down is slower than sitting, standing up quicker than
-    /// going down.
+    /// going down. Swinging round to sit on the edge of a bunk is quicker still, because the standing
+    /// up has to follow it inside the moment the body is given to get up in.
     private static func poseSeconds(from: Pose, to: Pose) -> Double {
+        if case .flat = from, case .seated = to { return 0.45 }
         if case .flat = to { return 0.7 }
         if case .standing = to { return 0.45 }
         return 0.5

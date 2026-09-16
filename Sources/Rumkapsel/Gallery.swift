@@ -123,11 +123,19 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             roomFloor(at: p, color: NSColor(Colors.quarters))
             let bed = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72)); bed.geometry!.firstMaterial = flat(NSColor(Colors.bed)); bed.eulerAngles.x = -.pi / 2; bed.position = v3(p.x, 0.006, p.y)
             scene.rootNode.addChildNode(bed)
-            let m = minion(at: p); m.setPose(.flat(height: 0))
-            var phase = 0
+            let m = minion(at: p); m.setPose(.flat(height: Minion.bedSeat))
+            // The rise as the station runs it: flat, then sat on the edge of the mattress, then up.
+            // Driven by the same clock the body uses, so the tile cannot drift from the real thing.
+            var wokeAt = -1.0
             updaters.append { c, _ in
                 let k = Int(c / 3) % 2
-                if k != phase { phase = k; m.setPose(k == 0 ? .flat(height: 0) : .standing) }
+                if k == 1, wokeAt < 0 { wokeAt = c }
+                if k == 0, wokeAt >= 0 { wokeAt = -1; m.setPose(.flat(height: Minion.bedSeat)) }
+                guard wokeAt >= 0 else { return }
+                let left = 1.1 - (c - wokeAt)
+                m.setPose(left > Minion.riseSit
+                          ? .seated(height: Minion.bedSeat, at: SIMD2(Minion.bedEdge, 0))
+                          : .standing)
             }
         }
         // 3. working routines

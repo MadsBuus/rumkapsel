@@ -226,10 +226,9 @@ extension Classic {
     /// scene moves it over its spot and keeps its height.
     static func bed(level: Int, floorTop: Double) -> SCNNode {
         if level == 0 {
-            let b = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.72))
-            b.geometry!.firstMaterial = flat(NSColor(Colors.bed))
-            b.eulerAngles.x = -.pi / 2
-            b.position = v3(0, max(0.005, floorTop + 0.004), 0)
+            let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
+            b.geometry!.firstMaterial = lit(NSColor(Colors.bed))
+            b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
             return b
         }
         let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))
