@@ -1107,16 +1107,27 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let focus = targetFocus + userPan
         let kp = userDriving > 0 ? 1 - exp(-dt * 25) : k
         if userDriving > 0 { userDriving -= dt }
-        rig.position.x += (focus.x - Double(rig.position.x)) * kp
-        rig.position.z += (focus.y - Double(rig.position.z)) * kp
+        if floorSettling {
+            rig.position.x = focus.x; rig.position.z = focus.y   // pinned: nothing to ease toward
+        } else {
+            rig.position.x += (focus.x - Double(rig.position.x)) * kp
+            rig.position.z += (focus.y - Double(rig.position.z)) * kp
+        }
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        // Flying in: the height is asked for every frame while the floor arrives, so the approach is
-        // continuous rather than a step at each rebuild.
-        let wantScale = fitScale(half: floorSettling ? settlingHalf : targetHalf) / userZoom
-        let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
-        cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
+        // Flying in: the height is worked out from the time since the window opened and taken as it is,
+        // with nothing easing toward it. An eased camera chases its target by a fraction of whatever gap
+        // is left each frame, which is smooth only while the frames are even — and they are at their
+        // least even during a launch, with the floor being dug and GitHub being asked. A curve read off
+        // the clock lands where it should however the frames fall.
+        if floorSettling {
+            cameraNode.camera!.orthographicScale = fitScale(half: settlingHalf) / userZoom
+        } else {
+            let wantScale = fitScale(half: targetHalf) / userZoom
+            let scaleK = abs(userZoom - 1) > 0.001 || userZoomChanged ? 1 - exp(-dt * 14) : k
+            cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
+        }
         userZoomChanged = false
 
         for (n, vel) in debris {
