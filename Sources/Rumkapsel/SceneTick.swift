@@ -191,7 +191,13 @@ extension StationController {
             if !headless, hovered == "minion:" + m.id { continue }   // a cursor left over a headless run's window freezes nobody
             var posed = true
             switch simulation.stepWalk(m, station: station, dt: dt) {
-            case .waking: m.node.opacity = m.opacity; posed = false
+            case .waking:
+                // Holding still is not standing still to look at: a body getting to its feet is doing
+                // the one thing this moment was held open for, so it is posed even though it does not
+                // move. Nothing else runs — the furniture must not draw it anywhere while it rises.
+                m.node.opacity = m.opacity
+                pose(m, station: station, dt: dt)
+                continue
             case .walking, .wondering: break
             case .there:
                 switch simulation.stepThere(m, station: station, dt: dt) {
