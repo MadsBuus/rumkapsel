@@ -72,7 +72,7 @@ extension Simulation {
                 m.current = nil
                 send(m, to: m.place)   // the same rest, planned afresh from here
             } else {
-                m.seated = false
+                m.seatedOnBowl = false
                 m.fixture = nil
                 m.drying = false
                 finish(m)

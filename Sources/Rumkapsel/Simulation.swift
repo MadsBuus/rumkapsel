@@ -196,7 +196,7 @@ final class Simulation<B: Body> {
     /// bench, the fixture it held, the towel; and a visit's place, which goes back to where the visit began.
     private func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
-        m.seated = false
+        m.seatedOnBowl = false
         m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         m.fixture = nil
@@ -737,18 +737,18 @@ final class Simulation<B: Body> {
                     let standAt = m.phaseUntil - 0.7
                     let bowl = station.bowlSpot(bath: bath)
                     let f = station.bathFixtures(bath: bath)
-                    if !m.seated, clock < standAt, m.phaseUntil > 0 {
+                    if !m.seatedOnBowl, clock < standAt, m.phaseUntil > 0 {
                         // Sat square on the WC, facing straight out from the tank, wherever it stood.
                         let to = bowl - station.offset - m.pos
                         m.facing = atan2(0, -f.toiletCorner.y)
                         let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
-                        m.seated = true
+                        m.seatedOnBowl = true
                         m.seatOffset = SIMD2(across, ahead - 0.02)
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3)
-                    } else if m.seated, clock >= standAt {
-                        m.seated = false
+                    } else if m.seatedOnBowl, clock >= standAt {
+                        m.seatedOnBowl = false
                         cue(.flush(station: station.name, bowl: bowl, front: f.toiletCorner.y))
-                    } else if m.seated, clock >= m.nextFidgetAt {
+                    } else if m.seatedOnBowl, clock >= m.nextFidgetAt {
                         m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
                         cue(.fidget(m.id))
                     }
@@ -762,7 +762,7 @@ final class Simulation<B: Body> {
                         cue(.towel(m.id, station: station.name, taken: true))
                     } else {
                         if m.drying { m.drying = false; cue(.towel(m.id, station: station.name, taken: false)) }
-                        m.seated = false
+                        m.seatedOnBowl = false
                         m.fixture = nil
                         var back = restPlace(m)
                         if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
@@ -838,7 +838,15 @@ final class Simulation<B: Body> {
         if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 2) }
         // Seats and beds draw a body in only while it has nothing else to do.
         if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
-            m.pos += (station.couches[c] - m.pos) * min(1, dt * 4)
+            let spot = station.couches[c]
+            m.pos += (spot - m.pos) * min(1, dt * 4)
+            // A couch stands against the wall it is drawn along, so a sitter looks into the room.
+            if m.onCouch, let lounge = station.rooms["kind:lounge"], !lounge.cells.isEmpty {
+                let xs = lounge.cells.map { Double($0.x) }, ys = lounge.cells.map { Double($0.y) }
+                let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
+                let d = mid - spot
+                if (d.x * d.x + d.y * d.y).squareRoot() > 0.01 { m.facing = atan2(d.x, d.y) }
+            }
         }
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
             m.pos += (station.beds[b].pos - m.pos) * min(1, dt * 4)

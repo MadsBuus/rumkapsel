@@ -62,10 +62,24 @@ class Body {
         }
     }
     var hammerUp = false
-    /// The poses the simulation decides and the scene draws: flat on the back in bed or on the bench,
-    /// sat on the bowl (its middle at `seatOffset` in the body's own frame), or on the bench itself.
-    var seated = false
+    /// Sat on the bowl, which the visit's own clock decides and so must be latched, with the seat's
+    /// middle at `seatOffset` in the body's own frame.
+    var seatedOnBowl = false
     var seatOffset = SIMD2<Double>(0, 0)
+
+    /// Sat down, wherever: on the bowl for its visit, or settled back on a couch in the lounge. A seat
+    /// is a seat — one pose, one animation, the offset all that differs.
+    var seated: Bool { seatedOnBowl || onCouch }
+
+    /// Settled onto a couch of the lounge with nothing to do: the couch draws a body in, and a body
+    /// drawn in is sitting on it. Asked of the order in hand, so standing up needs nothing remembered.
+    var onCouch: Bool {
+        !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil
+    }
+
+    /// Where the seat is, in the body's own frame: the bowl is stepped onto sideways, a couch is walked
+    /// up to and sat on square, so only the bowl has anything to offset by.
+    var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     /// The shower's last beat: over at the rail with the towel before going.
     var drying = false
     var nextFidgetAt = 0.0
