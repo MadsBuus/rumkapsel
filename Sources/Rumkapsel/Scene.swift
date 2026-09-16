@@ -777,6 +777,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Which offices were last drawn as not yet looked at, so the lights can be brought up on the ones
     /// that have been without rebuilding the floor under them.
     private var drawnUnchecked: [String: Bool] = [:]
+    /// How dim an office is while it waits to be looked at.
+    static let unlitOffice = 0.55
 
     /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
     /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
