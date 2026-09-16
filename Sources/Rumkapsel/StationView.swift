@@ -226,8 +226,9 @@ extension StationController {
     func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
         let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
+        let settling = world.stillLooking
         for st in stations {
-            let b = st.bounds
+            let b = settling ? st.fixedBounds : st.bounds
             for (x, z) in [(Double(b.min.x), Double(b.min.y)), (Double(b.max.x) + 1, Double(b.min.y)),
                            (Double(b.min.x), Double(b.max.y) + 1), (Double(b.max.x) + 1, Double(b.max.y) + 1)] {
                 let wx = x + st.offset.x, wz = z + st.offset.y

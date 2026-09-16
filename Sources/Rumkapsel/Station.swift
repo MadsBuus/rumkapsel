@@ -968,6 +968,16 @@ final class Station {
                 Cell(x: cells.map(\.x).max() ?? 0, y: cells.map(\.y).max() ?? 0))
     }
 
+    /// What a station has whatever work is on it: the plaza and its hallway, and the yard it runs —
+    /// the bay it takes deliveries in, the deck, storage and the pad. Offices come and go around these,
+    /// so this is what to point a camera at while it is still being worked out what the offices are.
+    var fixedBounds: (min: Cell, max: Cell) {
+        let cells = corridorCells + coreCells + hangarCells + deckCells + storageCells + padCells
+        guard !cells.isEmpty else { return bounds }
+        return (Cell(x: cells.map(\.x).min() ?? 0, y: cells.map(\.y).min() ?? 0),
+                Cell(x: cells.map(\.x).max() ?? 0, y: cells.map(\.y).max() ?? 0))
+    }
+
     // MARK: persistence
 
     struct Saved: Codable {

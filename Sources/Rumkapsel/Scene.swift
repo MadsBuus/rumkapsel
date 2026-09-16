@@ -779,6 +779,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var drawnUnchecked: [String: Bool] = [:]
     /// Offices still waiting to be looked at, and where in the breath each sits.
     var breathing: [String: Double] = [:]
+    /// Whether the floor was still arriving last tick, so the one settling can be done when it stops.
+    private var wasLooking = true
 
     /// How bright a waiting office is just now. On the wall clock, not the station's: the station's
     /// stands still while the floor is still being worked out, which is exactly when this has something
@@ -823,6 +825,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // and the redraw that follows draws what it decided. The drawing itself decides nothing.
         reconcileYards()
         lightRooms()
+        // The floor has stopped arriving: frame it whole and settle everyone, once.
+        if wasLooking, !world.stillLooking {
+            wasLooking = false
+            focusNow(on: focused)
+            for st in fleet.stations.values { resettle(st) }
+        }
         if layoutDirty {
             layoutDirty = false; markersDirty = false
             rebuildStatic()
