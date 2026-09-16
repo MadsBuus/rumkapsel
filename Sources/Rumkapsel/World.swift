@@ -130,8 +130,7 @@ final class World {
     var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady && !knewAlready }
 
     /// The floor came back with last run's answers, so there is nothing to wait for. What arrives now
-    /// corrects a station already standing, and a room nothing vouches for yet is drawn low until
-    /// something does — which is what `isProvisional` has always meant.
+    /// corrects a station already standing, and a room nothing vouches for yet stays provisional.
     private var knewAlready: Bool { github.hasAnswers }
 
     /// Settings changed: forget the fleet and start again from the next scan.
@@ -305,9 +304,8 @@ final class World {
             // The shared offices go down first, so that two stations seeing the same pull requests dig
             // the same floor: yours are held until GitHub has spoken for the repository, by which time
             // its own offices are already placed. An office already on the floor is never held, and
-            // nothing waits forever — after a moment they go up regardless.
-            // Held as one floor, not one repository at a time: everything it knows about goes down
-            // together, so the wait is a wait and then a station, rather than a dribble with gaps.
+            // nothing waits forever — after a moment they go up regardless. The whole floor is held
+            // as one, not a repository at a time, so the wait ends in a station and not a dribble.
             let held = settling && station.rooms[home.key] == nil
             if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
                !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
@@ -417,7 +415,6 @@ final class World {
                 }
             }
         }
-        // Merged offices are hauled from the scan loop above; a second pass here would announce them twice.
         if changed { events.append(.layoutChanged) }
         return events
     }

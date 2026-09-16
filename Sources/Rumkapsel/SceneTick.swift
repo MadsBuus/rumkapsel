@@ -193,7 +193,7 @@ extension StationController {
             switch simulation.stepWalk(m, station: station, dt: dt) {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
-                // draw it anywhere while it rises. The mirror below still does, as it always does.
+                // draw it anywhere while it rises. The mirror below still runs.
                 m.mirror(station: station, clock: clock, dt: dt)
                 continue
             case .walking, .wondering: break

@@ -40,8 +40,7 @@ extension StationController {
 
     // MARK: the simulation's side of a body
 
-    /// The orders, the rest and the walks are the simulation's (`Simulation.swift`); the scene asks
-    /// for them here by the names it always used.
+    /// The orders, the rest and the walks are the simulation's (`Simulation.swift`); these forward to it.
     func start(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
     private func assign(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
     func handOver(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.handOver(m, c, announce: announce) }

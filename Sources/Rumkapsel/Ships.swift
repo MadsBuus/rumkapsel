@@ -351,7 +351,7 @@ extension Simulation {
                 // A rocket never launches empty. The load is over when every crate this rocket was
                 // given a carry for stands on the pad, and nothing of the repository is left on the
                 // rows or on anyone's arms. A release with no cargo at all — nothing was ever
-                // assigned — goes as soon as the rows are clear, as it always did.
+                // assigned — goes as soon as the rows are clear.
                 // Unnumbered crates of a repository share one truth key, so the count aboard can
                 // read short of what is really on the pad: the carries themselves are the second,
                 // exact witness, and both have to agree before the rocket may go.

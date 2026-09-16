@@ -478,8 +478,8 @@ final class SimulatorModel: ObservableObject {
                 button("Teammate: Merge PR", "Merge PR", leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
                 button("Teammate: Close PR", "Close PR (not merged)",
                        leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
-                // The close is seen on the open list and answered when the pull request is asked, but the
-                // activity feed has not caught up: the ordering that once carried a closed crate to storage.
+                // The close is seen on the open list and answered when the pull request is asked, but
+                // the activity feed has not caught up.
                 button("Teammate: Close PR (feed lags)", "Close PR (feed lags)",
                        leoOpenPR == nil ? "\(teammate) has no open pull request on \(repo)" : nil),
             ]),

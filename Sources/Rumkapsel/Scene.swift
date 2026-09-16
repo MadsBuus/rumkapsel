@@ -472,7 +472,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } }.sorted().joined()
         // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
         // while it still stands on the untested row, and the redraw then leaves it out as carried.
-        // The other way round drew it tested, and the carry lifted it off the tested stack and put it back.
         handle(world.applyGitHub(now: now))
         reconcileYards()
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
@@ -789,15 +788,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// How dim an office is while it waits to be looked at.
     static let unlitOffice = 0.55
-    /// How much floor the view takes in while a station is still arriving. One height, held: a fly-in
-    /// was tried and read badly, and until it is known why a launch drops frames the way it does, the
-    /// camera is better still than moving unevenly.
+    /// How much floor the view takes in while a station is still arriving: one height, held still,
+    /// since the frames of a launch are too uneven for the camera to move on.
     var settlingHalf: SIMD2<Double> { SIMD2(20, 20) }
 
     /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
-    /// tiles are already drawn, so this is a fade on what is there rather than a reason to build it
-    /// again — and building it again is what stopped the breathing being seen and made the whole floor
-    /// jump each time another repository answered.
+    /// tiles are already drawn, so this is a fade on what is there, never a reason to build them again.
     private func lightRooms() {
         for st in fleet.stations.values {
             for room in st.rooms.values where !room.key.hasPrefix("kind:") {
@@ -835,7 +831,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             rebuildStatic()
             if firstRun, !viewPinned { restoreView() }
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
-            // is about to grow again is the jitter, and none of it is wasted by waiting for the end.
+            // is about to grow again is the jitter.
             if !floorSettling { for st in fleet.stations.values { resettle(st) } }
             refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
@@ -1108,8 +1104,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
         // Nothing eases while the floor arrives: an eased camera closes a fraction of whatever gap is
-        // left each frame, which is smooth only while the frames are even, and a launch is when they are
-        // least even. The height is simply held until the station has stopped arriving.
+        // left each frame, which is smooth only while the frames are even, and a launch is when they
+        // are least even.
         if floorSettling {
             cameraNode.camera!.orthographicScale = fitScale(half: settlingHalf) / userZoom
         } else {

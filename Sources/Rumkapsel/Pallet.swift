@@ -414,8 +414,7 @@ extension Simulation {
 
     /// Where the pusher stands for a leg: behind the pallet on the leg's own axis, a step back from its
     /// edge, with the direction it is heading. Squarely behind is a crate row as often as not, so it
-    /// slides along the back edge to the nearest place that is clear floor it can be walked to, rather
-    /// than aiming at a stack and creeping the last stretch in a straight line through it.
+    /// slides along the back edge to the nearest clear floor it can walk to.
     func pushSpot(_ p: PalletJob, station: Station, toward target: SIMD2<Double>) -> (spot: SIMD2<Double>, dir: SIMD2<Double>, across: Double) {
         let d = target - p.spot
         let dir = abs(d.x) >= abs(d.y) ? SIMD2(d.x < 0 ? -1.0 : 1.0, 0.0) : SIMD2(0.0, d.y < 0 ? -1.0 : 1.0)

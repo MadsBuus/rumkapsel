@@ -189,7 +189,7 @@ class Body {
     }
 
     /// Free for a chore: nothing in hand, arms empty, standing in for nobody, and whatever it is doing
-    /// can be cut into. Every picker asks this, so none of them can drift from the others.
+    /// can be cut into. The one question every picker asks.
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
             && state != .leaving && wakeUntil == 0

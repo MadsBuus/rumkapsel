@@ -230,9 +230,8 @@ final class Station {
     /// The pad block's east column and top row: north of the deck in the classic plan; on the ground,
     /// west of it out toward the sea, with the causeway between.
     private var padOrigin: (x0: Int, r: Int) { padGap > 0 ? (yardX0 - Station.yardWide - padGap, 0) : (yardX0, -4) }
-    /// How many columns wide a yard block is. Six, not four: two of them are the pallet's lane, and a
-    /// four-wide yard that gave up two of its eight crate cells to that lane left the rows crowded and
-    /// the way past the slab down to a single stride at either end.
+    /// How many columns wide a yard block is: six, of which two are the pallet's lane, leaving four for
+    /// the crate rows and a full stride past the slab at either end.
     static let yardWide = 6
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
@@ -1092,8 +1091,8 @@ final class Fleet {
     func save() {
         guard persists else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
-        // Written away from the frame: a redraw happens while the station is being assembled, and a
-        // launch does a dozen of them. Encoding reads the model so it stays here; the disk does not.
+        // Written away from the frame: a redraw can happen while the station is being assembled.
+        // Encoding reads the model, so it stays here; the disk does not.
         guard let json = try? JSONEncoder().encode(s) else { return }
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
