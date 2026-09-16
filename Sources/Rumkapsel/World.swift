@@ -300,10 +300,19 @@ final class World {
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
-                if gone || cleared || orphan {
-                    if cleared { retired[key] = now }
+                // An office of three kinds, and they do not end the same way. One of yours is backed by
+                // a checkout on this disk and one of a neighbour's by their word over the network, and
+                // both last until the workspace itself is archived — a merged pull request says the work
+                // shipped, not that the desk was cleared. An office that is only GitHub's has nothing
+                // else to go on: the merge is the last anybody hears of it, since branches are left to
+                // die with their pull requests rather than deleted.
+                let mine = room.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
+                let lan = peerOffices[key] != nil
+                let ended = cleared && !mine && !lan
+                if gone || ended || orphan {
+                    if ended { retired[key] = now }
                     events.append(drop(station: station, room: room, announce: !firstRun,
-                                       reason: gone ? "worktree gone" : closed ? "closed, not merged" : cleared ? "merged and hauled" : "nobody's"))
+                                       reason: gone ? "workspace archived" : closed ? "closed, not merged" : ended ? "merged and hauled" : "nobody's"))
                     changed = true
                 }
             }
