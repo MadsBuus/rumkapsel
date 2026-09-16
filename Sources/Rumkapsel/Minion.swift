@@ -88,8 +88,9 @@ final class Minion: Body {
     static let seatedTorso = 0.62
     /// The top of a couch, lower than the bowl. Read by the prop and by the pose, so they cannot drift.
     static let couchSeat = 0.18
-    /// The top of a bunk's mattress: what a sleeper lies on and sits on the edge of to get up.
-    static let bedSeat = 0.12
+    /// The top of a bunk's mattress: what a sleeper lies on, and sits on to get up, so it stands at a
+    /// seat's height like the couch does rather than at a doormat's.
+    static let bedSeat = 0.18
     /// How high the seat under this body is, by which seat it is on.
     var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
 

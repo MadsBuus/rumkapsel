@@ -227,7 +227,7 @@ extension Classic {
     static func bed(level: Int, floorTop: Double) -> SCNNode {
         if level == 0 {
             let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
-            b.geometry!.firstMaterial = lit(NSColor(Colors.bed))
+            b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))   // lit shading pulls it toward the floor; the upper bunk lifts its colour the same way
             b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
             return b
         }
