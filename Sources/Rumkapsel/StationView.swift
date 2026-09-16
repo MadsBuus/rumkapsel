@@ -230,7 +230,7 @@ extension StationController {
         // does not move at all. Nothing about a station is steady enough to frame in that moment — even
         // the parts that are always there grow, since the hallway is dug outward as offices are placed —
         // so there is nothing to compute: the middle of the station is where it has always been.
-        if world.stillLooking, let st = stations.min(by: { $0.name < $1.name }) {
+        if floorSettling, let st = stations.min(by: { $0.name < $1.name }) {
             let c = st.coreCenter
             return (SIMD2(st.offset.x + Double(c.x), st.offset.y + Double(c.y)), SIMD2(18, 18))
         }

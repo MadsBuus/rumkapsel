@@ -401,6 +401,7 @@ extension StationController {
         }
         fadeIn = []
 
+        lastRebuildAt = CACurrentMediaTime()
         (targetFocus, targetHalf) = frame(for: shownStations)
         if let f = focused { focusNow(on: f) }
         fleet.save()

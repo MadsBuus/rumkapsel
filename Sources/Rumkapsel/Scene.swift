@@ -779,6 +779,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var drawnUnchecked: [String: Bool] = [:]
     /// Whether the floor was still arriving last tick, so the one settling can be done when it stops.
     private var wasLooking = true
+    /// When the floor was last rebuilt, on the wall clock.
+    var lastRebuildAt = CACurrentMediaTime()
+
+    /// The floor is still arriving, or has only just stopped. Answers from GitHub are not the end of it:
+    /// offices land after them, and minions after those, each a rebuild of its own. Holding until the
+    /// rebuilds go quiet is what "settled" has to mean, or the view is let go one step too early.
+    var floorSettling: Bool { world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5 }
 
     /// How dim an office is while it waits to be looked at.
     static let unlitOffice = 0.55
@@ -814,7 +821,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         reconcileYards()
         lightRooms()
         // The floor has stopped arriving: frame it whole and settle everyone, once.
-        if wasLooking, !world.stillLooking {
+        if wasLooking, !floorSettling {
             wasLooking = false
             focusNow(on: focused)
             for st in fleet.stations.values { resettle(st) }
@@ -825,7 +832,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if firstRun, !viewPinned { restoreView() }
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
             // is about to grow again is the jitter, and none of it is wasted by waiting for the end.
-            if !world.stillLooking { for st in fleet.stations.values { resettle(st) } }
+            if !floorSettling { for st in fleet.stations.values { resettle(st) } }
             refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
             markersDirty = false
