@@ -159,7 +159,7 @@ final class GitHubResolver {
         var out: [String: Knowledge] = [:]
         for (root, repo) in roots { if let k = knowledge(repoRoot: root, repo: repo) { out[root] = k } }
         guard !out.isEmpty, let json = try? JSONEncoder().encode(out) else { return }
-        try? json.write(to: GitHubResolver.cacheURL)
+        Fleet.writing.async { try? json.write(to: GitHubResolver.cacheURL) }
     }
 
     /// Last run's answers, taken the way a neighbour's are: `adopt` keeps whichever is newer, so a cache

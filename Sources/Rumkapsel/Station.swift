@@ -1090,11 +1090,16 @@ final class Fleet {
     }
 
     private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int] }
+    /// Where saving to disk happens, so that it never happens during a frame.
+    static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
     func save() {
         guard persists else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
-        if let json = try? JSONEncoder().encode(s) { try? json.write(to: Fleet.saveURL) }
+        // Written away from the frame: a redraw happens while the station is being assembled, and a
+        // launch does a dozen of them. Encoding reads the model so it stays here; the disk does not.
+        guard let json = try? JSONEncoder().encode(s) else { return }
+        Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
 
     func load() {
