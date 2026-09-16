@@ -107,7 +107,7 @@ final class World {
     private var scans = 0
     /// How many scans offices wait for GitHub's first word. A station with no network is still your
     /// station, so they go up regardless after this.
-    static let officeGraceScans = 16
+    static let officeGraceScans = 10
     /// Whether offices wait for GitHub at all. A real station does, so that the offices everyone can
     /// see are laid down before the ones only this machine knows about. Nothing scripted does: a
     /// scenario, a model test and the gallery all have to put a station up without a network, and a
@@ -120,8 +120,12 @@ final class World {
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
 
+    /// Every repository the floor has found has spoken. Not one of them: offices go down in one go or
+    /// not at all, since a floor that fills a repository at a time is a stutter with a pause in it.
+    var allReady: Bool { !repoRoots.isEmpty && repoRoots.values.allSatisfy { readyRepos.contains($0.repo) } }
+
     /// The floor is still waiting to hear from GitHub, and holding its offices back until it does.
-    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && readyRepos.isEmpty }
+    var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady }
 
     /// Settings changed: forget the fleet and start again from the next scan.
     func reset() {
@@ -267,8 +271,9 @@ final class World {
             // the same floor: yours are held until GitHub has spoken for the repository, by which time
             // its own offices are already placed. An office already on the floor is never held, and
             // nothing waits forever — after a moment they go up regardless.
-            let settling = waitsForGitHub && scans < World.officeGraceScans
-            let held = settling && !isReady(home.repo) && station.rooms[home.key] == nil
+            // Held as one floor, not one repository at a time: everything it knows about goes down
+            // together, so the wait is a wait and then a station, rather than a dribble with gaps.
+            let held = settling && station.rooms[home.key] == nil
             if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
                !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
                 let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:")
@@ -284,7 +289,7 @@ final class World {
                 // A floor still settling puts its offices up where they stand; a shuttle is for one that
                 // arrives on a station already at work.
                 events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id),
-                                            arrival: firstRun || settling ? .appear : .shuttle))
+                                            arrival: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle))
             }
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
