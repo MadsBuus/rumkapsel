@@ -45,7 +45,7 @@ struct Ledger: Codable {
         case slot(area: Spot.Area, cell: Cell, level: Int)
         /// On the arms, or spoken for by a carry that has not found its carrier yet (an empty name).
         case carried(by: String)
-        /// On the pallet: three rows of four, stacked when there are more than twelve.
+        /// On the pallet: two rows of four, stacked when there are more than eight.
         case pallet(row: Int, column: Int, level: Int)
     }
 

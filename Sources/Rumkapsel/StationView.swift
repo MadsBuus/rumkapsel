@@ -219,7 +219,6 @@ extension StationController {
         return SIMD2(Double(near.x) + Double(far.x - near.x) * t, Double(near.z) + Double(far.z - near.z) * t)
     }
 
-    /// Orthographic half-height that fits a footprint of the given span at the current aspect.
     /// Where the default isometric camera should look to centre these stations, and the half-extent
     /// they cover on screen (in ground units across, and along the view before the tilt foreshortens it).
     /// Each station's own footprint is projected, so an L-shaped fleet isn't framed by its empty corner.
@@ -227,9 +226,8 @@ extension StationController {
         let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
         // While the floor is still arriving, the view is pinned on the monolith at a fixed height and
-        // does not move at all. Nothing about a station is steady enough to frame in that moment — even
-        // the parts that are always there grow, since the hallway is dug outward as offices are placed —
-        // so there is nothing to compute: the middle of the station is where it has always been.
+        // does not move at all: nothing about a station is steady enough to frame in that moment, since
+        // even the hallway is dug outward as offices are placed. The monolith's own tile never moves.
         if floorSettling, let st = stations.min(by: { $0.name < $1.name }) {
             let c = st.coreCenter
             return (SIMD2(st.offset.x + Double(c.x), st.offset.y + Double(c.y)), settlingHalf)
@@ -244,8 +242,7 @@ extension StationController {
             }
         }
         // No station yet, which is the first frame of every launch: hold the height a station is
-        // watched from rather than closing right in. Framing nothing tightly shows the sky and the dust
-        // at six across, and then the camera has to travel once the floor turns up.
+        // watched from, so the camera has nowhere to travel once the floor turns up.
         guard lo.x.isFinite else { return (SIMD2(0, 0), settlingHalf) }
         let c = (lo + hi) / 2
         return (SIMD2(c.x * cos(yaw) + c.y * sin(yaw), -c.x * sin(yaw) + c.y * cos(yaw)), (hi - lo) / 2)

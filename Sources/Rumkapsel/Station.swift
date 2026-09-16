@@ -230,9 +230,8 @@ final class Station {
     /// The pad block's east column and top row: north of the deck in the classic plan; on the ground,
     /// west of it out toward the sea, with the causeway between.
     private var padOrigin: (x0: Int, r: Int) { padGap > 0 ? (yardX0 - Station.yardWide - padGap, 0) : (yardX0, -4) }
-    /// How many columns wide a yard block is. Six, not four: two of them are the pallet's lane, and a
-    /// four-wide yard that gave up two of its eight crate cells to that lane left the rows crowded and
-    /// the way past the slab down to a single stride at either end.
+    /// How many columns wide a yard block is: six, of which two are the pallet's lane, leaving four for
+    /// the crate rows and a full stride past the slab at either end.
     static let yardWide = 6
     private func yardBlock(_ index: Int) -> [Cell] {
         guard hasPad else { return [] }
@@ -391,12 +390,12 @@ final class Station {
     /// Tuning of the digging (`placeShape`): how far an arm is cheap to build on, and what a step of it costs after.
     static var armEasyReach = 6, armDearStep = 2, passageBonus = 16
 
-    /// Creates a room if missing. Returns true when the layout changed.
     @discardableResult
     /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
     /// on every launch and on every machine.
     static func shape(forKey key: String) -> [Cell] { baseShapes[Int(stableHash(key) % UInt64(baseShapes.count))] }
 
+    /// Creates a room if missing. Returns true when the layout changed.
     func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
@@ -457,7 +456,6 @@ final class Station {
         return d.neighbours.first(where: isCorridor)
     }
 
-    /// Walking between a room and the hallway is only allowed through the doorway.
     /// Which yard block, or the corridor, a cell belongs to; nil for rooms and the void.
     private func yardArea(_ c: Cell) -> String? {
         if let areas = yardAreaCache { return areas[c] }
@@ -496,6 +494,7 @@ final class Station {
         return out
     }
 
+    /// Walking between a room and the hallway is only allowed through the doorway.
     private func canStep(from a: Cell, to b: Cell) -> Bool {
         if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
             return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }
@@ -833,7 +832,6 @@ final class Station {
         return true
     }
 
-    /// Breadth-first path over walkable cells. Returns cells to visit, excluding `from`.
     // MARK: walking round things
 
     /// Props on the floor, as blocked spots on a finer grid: three steps to a cell side, so a minion
@@ -844,9 +842,6 @@ final class Station {
     static func cell(ofSub s: Cell) -> Cell { Cell(x: Int((Double(s.x) / Double(fine)).rounded()), y: Int((Double(s.y) / Double(fine)).rounded())) }
     static func point(ofSub s: Cell) -> SIMD2<Double> { SIMD2(Double(s.x) / Double(fine), Double(s.y) / Double(fine)) }
 
-    /// Waypoints from a position to a cell, threading between crates, boxes and pyramids. Ends on the
-    /// cell's centre when that is clear, else on the clearest spot in it. Falls back to wading through
-    /// on the coarse grid only when nothing is passable at all.
     /// A lane along a wall: a spot whose next spot over lies where a walk may not go. Kept off unless
     /// nothing else leads through, so walks run down the middle and never brush the walls.
     private func isEdge(_ s: Cell) -> Bool {
@@ -1096,8 +1091,8 @@ final class Fleet {
     func save() {
         guard persists else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
-        // Written away from the frame: a redraw happens while the station is being assembled, and a
-        // launch does a dozen of them. Encoding reads the model so it stays here; the disk does not.
+        // Written away from the frame: a redraw can happen while the station is being assembled.
+        // Encoding reads the model, so it stays here; the disk does not.
         guard let json = try? JSONEncoder().encode(s) else { return }
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }

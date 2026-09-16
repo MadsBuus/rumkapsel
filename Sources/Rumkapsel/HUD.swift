@@ -135,12 +135,10 @@ extension StationController {
     static let iconSize = CGSize(width: 18, height: 14)
     static let iconGap: CGFloat = 8
 
-    /// Nothing but rest in hand, and not at work: only then does a pick from the bubble go through, as with
-    /// the idle clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
-    /// Whether you may send this one somewhere. It asks what the simulation asks — whether the doing in
-    /// hand can be cut into — rather than a stricter question of its own: a minion on its way to the gym
-    /// is walking, and a walk can be turned round, so the row should not dim the moment it sets off.
-    /// A turn actually under way is another matter, and stays its own until it is over.
+    /// Whether you may send this one somewhere: nothing but rest in hand and not at work, as with the idle
+    /// clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
+    /// It asks what the simulation asks — whether the doing in hand can be cut into — so a minion walking
+    /// to the gym can still be turned round, while a turn under way stays its own until it is over.
     func canOrder(_ m: Minion) -> Bool {
         m.state == .settled && !m.busy && m.pending == nil && !m.hasLoad && !m.onJob
             && (m.current == nil || m.phaseKind.interruptible)

@@ -86,7 +86,7 @@ final class Minion: Body {
     static let seat = 0.2
     /// How much of its height a body keeps as torso once it sits; the legs make up the rest.
     static let seatedTorso = 0.62
-    /// The top of a couch, lower than the bowl. Read by the prop and by the pose, so they cannot drift.
+    /// The top of a couch, lower than the bowl. Read by both the prop and the pose.
     static let couchSeat = 0.18
     /// The top of a bunk's mattress: what a sleeper lies on, and sits on to get up, so it stands at a
     /// seat's height like the couch does rather than at a doormat's.
@@ -178,11 +178,11 @@ final class Minion: Body {
 
     var headHeight: Double { bodyHeight }
 
-    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
-    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     /// Where the hammer rests (about one o'clock seen from the side) and where it lands, as pitches of its grip.
     static let hammerRest = -1.05, hammerStrike = 0.55
 
+    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
+    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t
@@ -356,8 +356,6 @@ final class Minion: Body {
         toolNode?.childNodes.first?.childNode(withName: "tip", recursively: false)?.opacity = on ? 1 : 0.25
     }
 
-    /// Flat on the back on the bench, arms up, or off it again.
-
     /// How a body is held. Standing, sat on a seat of some height, or flat on its back — one answer,
     /// because they are not things that can be true at once. Everything hung on the body follows from
     /// this: the box's height, the face, whatever is held, the legs, the blur and the shadow.
@@ -369,9 +367,8 @@ final class Minion: Body {
 
     /// Copies what the body is onto the figure you see: its pose, where it stands, how solid it is.
     /// This is not work the body does — it is the picture catching up to the facts — so it runs for
-    /// every body every frame, whatever else that frame skips. It lives here rather than in the scene
-    /// so that anything drawing a minion draws it the one way: the gallery is a debugger for these
-    /// movements, and a debugger with an animation of its own would be worth nothing.
+    /// every body every frame, whatever else that frame skips. It lives here rather than in the scene,
+    /// so the gallery and the station draw a minion the one way.
     func mirror(station: Station, clock: Double, dt: Double) {
         setPose(currentPose(at: clock))
         // What is drawn follows the order in hand, never a flag the last order left behind.
@@ -401,9 +398,8 @@ final class Minion: Body {
             at = v3(0, bodyHeight / 2, 0)
         case .seated(let height, let offset):
             // A sitter's feet stay where it was standing and the rest of it goes back: the shins reach
-            // forward of the body, so the body sits that far behind the spot. Standing again is then
-            // nothing but the way back, and the torso comes up over the feet instead of the feet
-            // sliding in under the torso.
+            // forward of the body, so the body sits that far behind the spot. Standing again is the
+            // way back, the torso coming up over the feet.
             seat = offset; boxHeight = torso; pitch = -0.1
             let back = offset.y - Minion.seatReach
             at = v3(offset.x, height + torso / 2, back)

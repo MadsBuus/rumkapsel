@@ -373,7 +373,7 @@ extension Place {
 /// What the station's props and plots are doing: the pallet out and what rides on it, the offices
 /// ordered and the crates waiting in the bay. Where a crate itself is lives on its ledger row.
 struct StationTruth {
-    /// A crate's place on the pallet: three rows of four, counted from the floor of the pallet up.
+    /// A crate's place on the pallet: two rows of four, counted from the floor of the pallet up.
     struct PalletSlot: Equatable { var row: Int; var column: Int; var level: Int }
 
     /// The one hover pallet a station may have out, and what stands on it.

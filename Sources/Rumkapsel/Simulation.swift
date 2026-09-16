@@ -66,7 +66,7 @@ enum Cue {
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
 /// carry, an office delivery, anything later — goes through one lift and one set-down, so there is one
 /// lift on the station and one set-down. The arcs the scene draws and the phases the simulation times
-/// are both derived from these numbers and nowhere else, so the two cannot drift.
+/// are both derived from these numbers and nowhere else.
 enum Hands {
     /// The crate's two legs off its slot: back at its own height, then up onto the arms.
     static let liftFirst = 0.3, liftSecond = 0.35
@@ -84,8 +84,8 @@ enum Hands {
     static let level = 0.34
     /// An arm's length, and the slack either side of it.
     static let arm = 0.34, near = 0.28, far = 0.42
-    /// How long a crate takes to settle down a level when the one under it is taken away.
-    /// Low gravity in the yard: a crate with nothing under it any more takes its time coming down.
+    /// How long a crate takes to settle down a level when the one under it is taken away: low gravity
+    /// in the yard, so it takes its time coming down.
     static let settleSeconds = 2.0
 }
 
@@ -832,8 +832,8 @@ final class Simulation<B: Body> {
     }
 
     /// One frame of every body, with no scene in between: the walk, the quiet commands, the rest. What a
-    /// model-only run steps; the scene runs the same three steps itself, its own commands between the
-    /// walk and the settling, until those have moved in too.
+    /// model-only run steps; the scene runs the same three steps itself, with its own commands between
+    /// the walk and the settling.
     func stepBodies(dt: Double) {
         for m in Array(bodies.values) {
             guard let station = fleet.stations[m.station] else { bodies[m.id] = nil; continue }

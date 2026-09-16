@@ -146,7 +146,6 @@ final class GitHubResolver {
         return openPRs[repoRoot]?.0
     }
 
-    /// Everyone's open pull requests, every five minutes.
     /// Polls wait until this moment: a random hold at start-up so apps opening together on one
     /// network don't all ask GitHub at once, and the first one to answer feeds the rest.
     var holdUntil = Date.distantPast
@@ -204,6 +203,7 @@ final class GitHubResolver {
         if changed { DispatchQueue.main.async { self.onUpdate?() } }
     }
 
+    /// Everyone's open pull requests, every five minutes.
     func refreshOpenPRs(repoRoot: String) {
         if frozen { return }
         lock.lock()
@@ -430,13 +430,13 @@ final class GitHubResolver {
     private var deltaAt = Date.distantPast
     private var deltaSince: Date?
 
+    /// Which hundred of the not-shipped items the next delta asks by number.
+    private var deltaPage = 0
+
     /// The board's changes only: items updated since the last look, by search, every twenty seconds. A
     /// board grows, Shipped most of all, and the whole of it is read only as a backstop; what moved
     /// in the last while is a handful of items and one small query. Each moved item's linked pull
     /// requests are then expected to change, and asked.
-    /// Which hundred of the not-shipped items the next delta asks by number.
-    private var deltaPage = 0
-
     func refreshProjectDelta(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
@@ -576,10 +576,10 @@ final class GitHubResolver {
         return pipelines[repoRoot] ?? .configured
     }
 
-    /// Release pull requests that merged since the last poll, each returned once.
     /// A release merged that the scene has not launched yet: the deck must keep its crates for it.
     func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
 
+    /// Release pull requests that merged since the last poll, each returned once.
     func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
         lock.lock(); defer { lock.unlock() }
         let out = pendingLaunches; pendingLaunches = []; return out
