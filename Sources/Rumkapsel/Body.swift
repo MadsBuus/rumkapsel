@@ -81,6 +81,9 @@ class Body {
     var drying = false
     var nextFidgetAt = 0.0
     var wakeUntil = 0.0
+    /// Getting to its feet off a bed: it holds still until then, but unlike `wakeUntil` it is no bar to
+    /// being given something to do — standing up is usually the answer to an order, not a refusal of it.
+    var risingUntil = 0.0
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
     /// Who stood in the way on the last step, for the log.

@@ -338,8 +338,8 @@ final class Simulation<B: Body> {
     /// place, so this has to run before any of the three is changed: a body already cleared of them
     /// is not lying any more, and there is nothing left to say it should stand up first.
     func rouse(_ m: B) {
-        guard m.lying, m.wakeUntil == 0 else { return }
-        m.wakeUntil = clock + 1.1
+        guard m.lying, m.risingUntil == 0 else { return }
+        m.risingUntil = clock + 1.1
         m.napping = false
         m.bed = nil
     }
@@ -645,6 +645,10 @@ final class Simulation<B: Body> {
         }) {
             m.waitingOn = Words.current.shipBeside
             return .waking
+        }
+        if m.risingUntil > 0 {
+            if clock < m.risingUntil { return .waking }
+            m.risingUntil = 0
         }
         if m.wakeUntil > 0 {
             if clock < m.wakeUntil { return .waking }
