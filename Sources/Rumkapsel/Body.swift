@@ -166,10 +166,12 @@ class Body {
     /// Carrying, delivering or leaving: holding something, not free for anything else.
     var onJob: Bool { current?.isJob ?? false }
 
-    /// Flat on its back: asleep in its own quarters, or on the bench mid-turn.
+    /// Flat on its back: asleep in its own quarters, or on the bench mid-turn. A body getting to its
+    /// feet is not lying — that is the whole of what rising means, and the pose must change at the
+    /// moment it is roused, not when it finally sets off.
     var lying: Bool {
         if onBench { return true }
-        return !onJob && path.isEmpty && state == .settled
+        return risingUntil == 0 && !onJob && path.isEmpty && state == .settled
             && (activity == .sleeping || napping) && place == .quarters
     }
 

@@ -402,6 +402,7 @@ enum SimulationTests {
 
             sim.send(m, to: .lounge)
             expect(m.risingUntil > 0, "roused: it is getting to its feet, not walking yet")
+            expect(!m.lying, "and it stands up at once, rather than waiting until it walks")
             var moved = 0.0
             _ = step(sim, seconds: 1.0, beat: {
                 moved = max(moved, ((m.pos.x - bedSpot.x) * (m.pos.x - bedSpot.x)
