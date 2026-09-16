@@ -107,6 +107,10 @@ extension StationController {
         n.name = r.label
         n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
         rocketRoot.addChildNode(n)
+        // A rocket that was already standing there when the station came up fades in where it stands;
+        // one that arrives later has its own way of getting there and is left to it.
+        n.opacity = 0
+        n.runAction(.sequence([.wait(duration: Double.random(in: 0...0.5)), .fadeIn(duration: 1.2)]))
         return n
     }
 

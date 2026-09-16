@@ -173,6 +173,7 @@ final class Minion: Body {
         visor.name = node.name
         legs.name = node.name; thighs.name = node.name; shins.name = node.name
         node.opacity = 0
+        opacity = -Double.random(in: 0...0.9)   // a moment of its own before it begins to show
     }
 
     var headHeight: Double { bodyHeight }
