@@ -394,7 +394,7 @@ extension StationController {
             Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
         rebuildLabels()
-        rebuildMarkers()
+        timed("markers") { rebuildMarkers() }
         for key in fadeIn {
             for t in roomTiles[key] ?? [] { let o = t.opacity; t.opacity = 0; t.runAction(.fadeOpacity(to: o, duration: 2.5)) }
             if let l = roomLabels[key] { let o = l.opacity; l.opacity = 0; l.runAction(.fadeOpacity(to: o, duration: 2.5)) }

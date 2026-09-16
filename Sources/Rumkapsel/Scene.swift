@@ -123,11 +123,51 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+        let frameBegan = CACurrentMediaTime()
+        frameNo &+= 1
+        phases = []
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
-        for w in work { w() }
+        timed("handoff") { for w in work { w() } }
         // Wall time rather than the renderer's: a frame asked for by hand carries no timestamp.
         let now = CACurrentMediaTime()
+        guard Trace.frames else {
+            if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
+            return
+        }
+        // With RK_FRAMES set, a frame that took too long says so, and says what it spent the time on.
+        let gap = now - lastFrameAt
+        lastFrameAt = now
+        let began = frameBegan
         if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
+        let spent = CACurrentMediaTime() - began
+        if gap > Trace.slowFrame || spent > Trace.slowWork {
+            let worst = phases.filter { $0.seconds > 0.002 }.sorted { $0.seconds > $1.seconds }
+                .map { String(format: "%@ %.0fms", $0.name, $0.seconds * 1000) }.joined(separator: " ")
+            FileHandle.standardError.write(String(format: "frame gap %.0fms work %.0fms  %@\n",
+                                                  gap * 1000, spent * 1000, worst).data(using: .utf8)!)
+        }
+    }
+
+    /// What a frame spent its time on, while `RK_FRAMES` is set. Off, `timed` is the call it wraps.
+    enum Trace {
+        static let frames = ProcessInfo.processInfo.environment["RK_FRAMES"] != nil
+        static let slowFrame = 0.05, slowWork = 0.02
+    }
+    private var phases: [(name: String, seconds: Double)] = []
+    private var lastFrameAt = CACurrentMediaTime()
+    /// Which frame this is, and which frame last built the floor: the floor is built once a frame at
+    /// most. Everything that changes it asks for a redraw, and on a launch a dozen of those arrive
+    /// together — each one rebuilding every tile of every station, on the thread that is drawing.
+    private var frameNo = 0
+    private var lastFloorFrame = -1
+    private var lastGitHubFrame = -1
+
+    /// Runs `body`, noting how long it took when frames are being traced.
+    @discardableResult func timed<T>(_ name: String, _ body: () -> T) -> T {
+        guard Trace.frames else { return body() }
+        let t0 = CACurrentMediaTime()
+        defer { phases.append((name, CACurrentMediaTime() - t0)) }
+        return body()
     }
 
     let view: StationView
@@ -465,6 +505,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
     func onGitHubUpdate() {
+        // Every repository that answers says so, and on a launch they answer together: a dozen of these
+        // arrive in one frame, each taking the world's whole diff against GitHub. Once a frame is enough,
+        // since the one that runs sees everything that has landed by then.
+        if !headless {
+            guard lastGitHubFrame != frameNo else { return }
+            lastGitHubFrame = frameNo
+        }
         let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in
             let l = world.localState(r)
             let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
@@ -472,7 +519,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } }.sorted().joined()
         // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
         // while it still stands on the untested row, and the redraw then leaves it out as carried.
-        handle(world.applyGitHub(now: now))
+        timed("github") { handle(world.applyGitHub(now: now)) }
         reconcileYards()
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
@@ -501,7 +548,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var homes: [String: World.MinionHome] = [:]
         for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
         newRooms = [:]
-        let events = world.applyScan(result, now: now, minionHomes: homes)
+        let events = timed("scan") { world.applyScan(result, now: now, minionHomes: homes) }
         let firstRun = events.contains { if case .worldLoaded = $0 { return true }; return false }
         handle(events)
         let cfg = ConfigStore.shared.current
@@ -704,7 +751,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// stands their figures in whichever offices we happened to give them.
     func receivePeer(_ snap: PeerSnapshot) {
         world.peerName = peers.name
-        handle(world.applyPeer(snap, now: now))
+        timed("peer") { handle(world.applyPeer(snap, now: now)) }
         flushScene()
         flushDeliveries()
         placePeerMinions(snap)
@@ -818,25 +865,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func flushScene(firstRun: Bool = false) {
         // The world's word first, then the picture: the reconciler may hand out carries or move a count,
         // and the redraw that follows draws what it decided. The drawing itself decides nothing.
-        reconcileYards()
-        lightRooms()
+        timed("yards") { reconcileYards() }
+        timed("lights") { lightRooms() }
         // The floor has stopped arriving: frame it whole and settle everyone, once.
         if wasLooking, !floorSettling {
             wasLooking = false
             focusNow(on: focused)
-            for st in fleet.stations.values { resettle(st) }
+            timed("settle") { for st in fleet.stations.values { resettle(st) } }
         }
         if layoutDirty {
+            // One floor a frame. The rest of what is asked for keeps its place in the queue and is drawn
+            // on the next one, which is a frame late and not a second of the window frozen. A run with no
+            // window has no frames to spread the work over, so it does the lot as it comes.
+            if !headless {
+                guard lastFloorFrame != frameNo else { return }
+                lastFloorFrame = frameNo
+            }
             layoutDirty = false; markersDirty = false
-            rebuildStatic()
+            timed("floor") { rebuildStatic() }
             if firstRun, !viewPinned { restoreView() }
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
             // is about to grow again is the jitter.
-            if !floorSettling { for st in fleet.stations.values { resettle(st) } }
+            if !floorSettling { timed("settle") { for st in fleet.stations.values { resettle(st) } } }
             refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
         } else if markersDirty {
             markersDirty = false
-            rebuildMarkers()
+            timed("markers") { rebuildMarkers() }
         }
     }
 
@@ -1032,7 +1086,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             simulation.servicePallets()
             simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
-            refreshObstacles()
+            timed("obstacles") { refreshObstacles() }
             simulation.replanBlockedWalks()
         }
         simulation.stepShuttles()
