@@ -20,6 +20,8 @@ enum LookTests {
     private struct Claim {
         var drawn: [String] = []
         var classic: [String] = []
+        /// Whether the theme lets the scene letter its floor.
+        var letters = true
     }
 
     private static let claims: [Theme: Claim] = [
@@ -27,6 +29,9 @@ enum LookTests {
                                   "office", "station", "figure"]),
         .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold", "pallet"],
                        classic: ["tool", "message"]),
+        .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold",
+                                "pallet", "tool", "message"],
+                        letters: false),
     ]
 
     static func run() -> Never {
@@ -53,9 +58,8 @@ enum LookTests {
                     expect(drawn[piece] == false, "the look drew a \(piece) it says nothing about")
                 }
             }
-            test("\(theme.title) says whether it letters its floor") {
-                expect(Looks.current.writesOnFloor == (theme == .classic || theme == .kenney),
-                       "writesOnFloor is \(Looks.current.writesOnFloor)")
+            test("\(theme.title) letters its floor: \(claim.letters)") {
+                expect(Looks.current.writesOnFloor == claim.letters, "writesOnFloor is \(Looks.current.writesOnFloor)")
             }
         }
         Theme.pinnedForPlan = .classic
