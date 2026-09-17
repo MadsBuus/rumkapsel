@@ -11,7 +11,8 @@
 enum BakedPlans {
     static func forTheme(_ theme: Theme) -> [String] {
         switch theme {
-        case .classic: return [
+        // The Kingdom turns no knob the plan can see, so it is laid out on Classic's.
+        case .classic, .kingdom: return [
         """
         seed=42
         quarters=bath:-5,2;-5,3;-4,2;-4,3|gym:-6,4;-6,5;-5,4;-5,5;-4,4;-4,5|lounge:-4,-3;-4,-2;-4,-1;-3,-3;-3,-2;-3,-1;-2,-3;-2,-2;-2,-1|quarters:-2,2;-2,3;-2,4;-2,5;-1,2;-1,3;-1,4;-1,5

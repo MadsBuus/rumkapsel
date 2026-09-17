@@ -365,7 +365,23 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 scene.rootNode.addChildNode(box)
             }
         }
-        rig.position = v3(6.4, 0, 6.0)
+        // 14. the castle wall, as it is built and as it is merged: the same run of cells both ways, so a
+        // merge that loses the pieces shows up here rather than in the middle of a station.
+        do {
+            let p = tile(i, "castle wall + great ship"); i += 1
+            let cells: Set<Cell> = Set((0...2).flatMap { x in (0...1).map { Cell(x: x, y: $0) } })
+            let holder = KingdomLook().curtain(over: cells)
+            holder.scale = SCNVector3(0.42, 0.42, 0.42)
+            holder.position = v3(p.x - 0.75, 0.004, p.y - 0.3)
+            scene.rootNode.addChildNode(holder)
+            for (k, tall) in [false, true].enumerated() {
+                let ship = KingdomLook().rocket(color: tall ? teal : pink, tall: tall, cargo: tall ? 2 : 0)
+                ship.scale = SCNVector3(0.4, 0.4, 0.4)
+                ship.position = v3(p.x + 0.55, 0.004, p.y - 0.5 + Double(k) * 0.85)
+                scene.rootNode.addChildNode(ship)
+            }
+        }
+        rig.position = v3(6.4, 0, 7.2)
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
