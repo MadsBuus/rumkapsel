@@ -61,7 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
-            GitHubDiag.run(seconds: seconds)
+            let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
+            GitHubDiag.run(seconds: seconds, only: only)
         }
         // The scripted regression suite: no window, no station of its own, one after another.
         if let i = args.firstIndex(of: "--scenarios") {

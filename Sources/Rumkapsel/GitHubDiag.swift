@@ -7,7 +7,7 @@
 import Foundation
 
 enum GitHubDiag {
-    static func run(seconds: TimeInterval) -> Never {
+    static func run(seconds: TimeInterval, only: String? = nil) -> Never {
         GitHubResolver.diag = true
         let cfg = ConfigStore.shared.current
         let github = GitHubResolver()
@@ -15,7 +15,11 @@ enum GitHubDiag {
         // The same checkouts the station finds on its first run: every Conductor repository under ~/dev.
         let home = FileManager.default.homeDirectoryForCurrentUser
         var roots: [String] = []
-        if let repos = try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("conductor/workspaces").path) {
+        // One checkout named on the command line, for looking at a single repository's answers without
+        // asking GitHub about every other one on the desk.
+        if let only {
+            roots = [(only as NSString).expandingTildeInPath]
+        } else if let repos = try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("conductor/workspaces").path) {
             for repo in repos.sorted() {
                 let root = home.appendingPathComponent("dev/\(repo)").path
                 if FileManager.default.fileExists(atPath: root + "/.git") { roots.append(root) }
@@ -31,6 +35,9 @@ enum GitHubDiag {
             }
             for root in roots {
                 github.refreshReleases(repoRoot: root)
+                let p = github.pipeline(repoRoot: root)
+                say("\(root): \(p.trunk) · ships on \(p.ship) · \(p.source): \(p.why)"
+                    + (github.cargo(repoRoot: root).map { " · storage \($0.storageNumbers) deck \($0.deckNumbers)" } ?? ""))
                 github.refreshFeed(repoRoot: root)
                 github.refreshOpenPRs(repoRoot: root)
             }
