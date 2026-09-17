@@ -478,6 +478,8 @@ struct KingdomLook: Look {
     static let wallStone = NSColor(rgb: (0.72, 0.70, 0.66))
     static let wallShade = NSColor(rgb: (0.57, 0.55, 0.52))
     static let wallCap = NSColor(rgb: (0.80, 0.78, 0.74))
+    /// A house's wall inside the castle: limewashed daub between its timbers, not dressed stone.
+    static let plaster = NSColor(rgb: (0.87, 0.83, 0.74))
     /// A wall stands about a villager's height: enough to read as a castle from above, low enough that the
     /// floor, its signs and whoever is walking behind it are all still visible.
     static let wallHeight = 0.5
@@ -493,6 +495,10 @@ struct KingdomLook: Look {
         let key = "\(station.name)|\(inside.count)|\(inside.map { $0.x &* 31 &+ $0.y }.reduce(0, &+))"
         if let built = Self.walls[key] { return [built.clone()] }
         var open = Set<String>()
+        func leave(_ a: Cell, _ b: Cell) {
+            open.insert("\(a.x),\(a.y)|\(b.x - a.x),\(b.y - a.y)")
+            open.insert("\(b.x),\(b.y)|\(a.x - b.x),\(a.y - b.y)")
+        }
         for c in station.airlockCells {
             for d in [(0, -1), (0, 1), (1, 0), (-1, 0)] where !inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
                 open.insert("\(c.x),\(c.y)|\(d.0),\(d.1)")
@@ -504,7 +510,22 @@ struct KingdomLook: Look {
                 open.insert("\(c.x + d.0),\(c.y + d.1)|\(-d.0),\(-d.1)")
             }
         }
-        let built = curtain(over: inside, gaps: open)
+        // Every doorway the scene walks through stays open, and no tower stands on one.
+        var doors = Set<Cell>()
+        for (a, b) in station.yardDoorways { leave(a, b); doors.insert(a); doors.insert(b) }
+        for room in station.rooms.values {
+            guard let d = station.doorCell(of: room.key), let o = station.doorOutside(of: room.key) else { continue }
+            leave(d, o); doors.insert(d); doors.insert(o)
+        }
+
+        let wall = SCNNode()
+        wall.addChildNode(curtain(over: inside, gaps: open, clear: doors, merged: false))
+        // Each ward is walled as a room of its own, low enough to see over, open at its door.
+        for room in station.rooms.values where !room.cells.isEmpty {
+            wall.addChildNode(curtain(over: Set(room.cells), gaps: open, clear: doors, merged: false,
+                                      height: 0.26, towers: false))
+        }
+        let built = Self.merge(wall)
         Self.walls = Self.walls.filter { !$0.key.hasPrefix(station.name + "|") }
         Self.walls[key] = built
         return [built.clone()]
@@ -513,7 +534,8 @@ struct KingdomLook: Look {
     /// The curtain wall over a set of cells: a stretch of rampart on every edge that faces open ground, with
     /// towers at corners well apart. A straight run is one stone, not one a tile, so a long wall is cheap and
     /// has no seams down it.
-    func curtain(over inside: Set<Cell>, gaps: Set<String> = [], merged: Bool = true) -> SCNNode {
+    func curtain(over inside: Set<Cell>, gaps: Set<String> = [], clear: Set<Cell> = [], merged: Bool = true,
+                 height: Double? = nil, towers: Bool = true) -> SCNNode {
         let wall = SCNNode()
         // Every boundary edge, gathered by which way it faces and which line it lies on, so the ones in a row
         // can be drawn as one stretch.
@@ -535,12 +557,16 @@ struct KingdomLook: Look {
             for (from, to) in Self.stretches(along.sorted()) {
                 let mid = Double(from + to) / 2, length = Double(to - from) + 1
                 let at = northSouth ? SIMD2(mid, fixed + side * 0.56) : SIMD2(fixed + side * 0.56, mid)
-                wall.addChildNode(Self.rampart(at: at, length: length, along: northSouth))
+                wall.addChildNode(Self.rampart(at: at, length: length, along: northSouth, height: height ?? Self.wallHeight,
+                                               battlements: towers, stone: towers ? Self.wallStone : Self.plaster))
             }
         }
         var placed: [Cell] = []
-        for c in corners.sorted(by: { ($0.x, $0.y) < ($1.x, $1.y) }) {
-            guard !placed.contains(where: { abs($0.x - c.x) < 5 && abs($0.y - c.y) < 5 }) else { continue }
+        for c in towers ? corners.sorted(by: { ($0.x, $0.y) < ($1.x, $1.y) }) : [] where !clear.contains(c) {
+            _ = c
+        }
+        for c in (towers ? corners.sorted(by: { ($0.x, $0.y) < ($1.x, $1.y) }) : []) {
+            guard !clear.contains(c), !placed.contains(where: { abs($0.x - c.x) < 5 && abs($0.y - c.y) < 5 }) else { continue }
             placed.append(c)
             var out = SIMD2<Double>(0, 0)
             for d in [(0, -1), (1, 0), (0, 1), (-1, 0)] where !inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
@@ -590,18 +616,27 @@ struct KingdomLook: Look {
     private static var walls: [String: SCNNode] = [:]
 
     /// A stretch of curtain wall: a stone band on a shadowed foot, with merlons along its top.
-    private static func rampart(at p: SIMD2<Double>, length: Double, along northSouth: Bool) -> SCNNode {
+    private static func rampart(at p: SIMD2<Double>, length: Double, along northSouth: Bool, height: Double = wallHeight,
+                                battlements: Bool = true, stone: NSColor = wallStone) -> SCNNode {
         let n = SCNNode()
-        let thick = 0.2
+        let thick = battlements ? 0.2 : 0.13
         let w = northSouth ? length : thick, l = northSouth ? thick : length
-        let face = SCNNode(geometry: SCNBox(width: w, height: wallHeight, length: l, chamferRadius: 0))
-        face.geometry!.firstMaterial = lit(wallStone)
-        face.position = v3(0, wallHeight / 2, 0)
+        let face = SCNNode(geometry: SCNBox(width: w, height: height, length: l, chamferRadius: 0))
+        face.geometry!.firstMaterial = lit(stone)
+        face.position = v3(0, height / 2, 0)
         n.addChildNode(face)
         let foot = SCNNode(geometry: SCNBox(width: w + 0.08, height: 0.1, length: l + 0.08, chamferRadius: 0))
         foot.geometry!.firstMaterial = lit(wallShade)
         foot.position = v3(0, 0.05, 0)
         n.addChildNode(foot)
+        guard battlements else {
+            let cap = SCNNode(geometry: SCNBox(width: w + 0.04, height: 0.05, length: l + 0.04, chamferRadius: 0))
+            cap.geometry!.firstMaterial = lit(wood.darker(0.05))
+            cap.position = v3(0, height + 0.02, 0)
+            n.addChildNode(cap)
+            n.position = v3(p.x, 0, p.y)
+            return n
+        }
         let step = 0.42
         let count = max(1, Int((length / step).rounded()) - 1)
         for k in 0..<count {
@@ -609,7 +644,7 @@ struct KingdomLook: Look {
             let merlon = SCNNode(geometry: SCNBox(width: northSouth ? 0.24 : thick, height: 0.15,
                                                   length: northSouth ? thick : 0.24, chamferRadius: 0))
             merlon.geometry!.firstMaterial = lit(wallCap)
-            merlon.position = v3(northSouth ? t : 0, wallHeight + 0.075, northSouth ? 0 : t)
+            merlon.position = v3(northSouth ? t : 0, height + 0.075, northSouth ? 0 : t)
             n.addChildNode(merlon)
         }
         n.position = v3(p.x, 0, p.y)
@@ -897,9 +932,9 @@ struct KingdomLook: Look {
 
     func tileDetail(_ tile: Tile) -> SCNNode? {
         switch tile.floor {
-        case .hallway: return patch(tile, inset: 0.18, round: 0.2, Self.cobble, flags: true)
-        case .room: return patch(tile, inset: 0.07, round: 0.16, Self.ward(tile.color), flags: true)
-        case .fixed: return patch(tile, inset: 0.06, round: 0.16, Self.ward(tile.color).darker(0.08), flags: true)
+        case .hallway: return patch(tile, inset: 0.16, round: 0.24, Self.cobble, boards: false)
+        case .room: return patch(tile, inset: 0.02, round: 0.04, Self.ward(tile.color), boards: true)
+        case .fixed: return patch(tile, inset: 0.02, round: 0.04, Self.ward(tile.color).darker(0.06), boards: true)
         default: return nil
         }
     }
@@ -909,15 +944,16 @@ struct KingdomLook: Look {
         tile.childNode(withName: "patch", recursively: true)?.geometry?.firstMaterial?.diffuse.contents = Self.ward(color)
     }
 
-    /// A soft-edged patch over the tile that runs on into its owner's neighbours, with flagstones scored on it.
-    private func patch(_ tile: Tile, inset: Double, round: Double, _ color: NSColor, flags: Bool) -> SCNNode? {
+    /// A soft-edged patch over the tile that runs on into its owner's neighbours: floorboards laid in a room,
+    /// cobbles out on the street.
+    private func patch(_ tile: Tile, inset: Double, round: Double, _ color: NSColor, boards: Bool) -> SCNNode? {
         guard let shape = Shapes.patch(same: tile.same, inset: inset, round: round)?.copy() as? SCNGeometry,
               let ground = Shapes.node(shape, color, y: 0.002) else { return nil }
         ground.name = "patch"
         let holder = SCNNode()
         holder.eulerAngles.x = .pi / 2   // upright again under a plane tilted flat
         holder.addChildNode(ground)
-        if flags, let stones = flagstones(tile) { holder.addChildNode(stones) }
+        if let grain = boards ? floorboards(tile) : cobbles(tile) { holder.addChildNode(grain) }
         return holder
     }
 
@@ -929,59 +965,94 @@ struct KingdomLook: Look {
         stone.mixed(with: color, 0.42).darker(0.02)
     }
 
-    /// Flagstones scored into a tile: a few darker joints, their pattern following the cell so neighbouring
-    /// tiles do not repeat. Built once per pattern and shared.
-    private func flagstones(_ tile: Tile) -> SCNNode? {
-        let pattern = Int(tile.same % 4)
-        if let built = Self.paving["\(pattern)"] { return built.clone() }
+    /// Floorboards laid across a room: long boards with a joint between them, turned with the room so a ward
+    /// reads as the inside of a house rather than as a slab. Built once a pattern and shared.
+    private func floorboards(_ tile: Tile) -> SCNNode? {
+        let along = tile.same & 0b0000_0101 != 0 ? 0 : 1   // boards run the way the room is long
+        let key = "b\(along)"
+        if let built = Self.paving[key] { return built.clone() }
         let n = SCNNode()
-        let joint = flat(NSColor(rgb: (0.32, 0.31, 0.30)))
-        func score(_ x: Double, _ z: Double, _ w: Double, _ l: Double) {
-            let s = SCNNode(geometry: SCNBox(width: w, height: 0.003, length: l, chamferRadius: 0))
-            s.geometry!.firstMaterial = joint
-            s.opacity = 0.3
-            s.position = v3(x, 0.005, z)
-            n.addChildNode(s)
+        let joint = flat(NSColor(rgb: (0.33, 0.24, 0.16)))
+        for k in -2...2 {
+            let t = Double(k) * 0.24
+            let line = SCNNode(geometry: SCNBox(width: along == 0 ? 1.02 : 0.02, height: 0.003,
+                                                length: along == 0 ? 0.02 : 1.02, chamferRadius: 0))
+            line.geometry!.firstMaterial = joint
+            line.opacity = 0.5
+            line.position = v3(along == 0 ? 0 : t, 0.005, along == 0 ? t : 0)
+            n.addChildNode(line)
         }
-        score(0, -0.16 + Double(pattern) * 0.04, 0.9, 0.028)
-        score(0, 0.24 - Double(pattern) * 0.05, 0.9, 0.028)
-        score(-0.2 + Double(pattern) * 0.07, -0.34, 0.028, 0.34)
-        score(0.26 - Double(pattern) * 0.06, 0.06, 0.028, 0.46)
+        // The short ends of the boards, staggered so it does not read as one sheet.
+        for k in [-1, 1] {
+            let end = SCNNode(geometry: SCNBox(width: along == 0 ? 0.02 : 0.24, height: 0.003,
+                                               length: along == 0 ? 0.24 : 0.02, chamferRadius: 0))
+            end.geometry!.firstMaterial = joint
+            end.opacity = 0.4
+            end.position = v3(along == 0 ? Double(k) * 0.28 : Double(k) * 0.12, 0.005,
+                              along == 0 ? Double(k) * 0.12 : Double(k) * 0.28)
+            n.addChildNode(end)
+        }
         let built = n.flattenedClone()
-        Self.paving["\(pattern)"] = built
+        Self.paving[key] = built
+        return built.clone()
+    }
+
+    /// Cobbles on the street: a scatter of small stones, keyed to nothing so one tile is every tile.
+    private func cobbles(_ tile: Tile) -> SCNNode? {
+        if let built = Self.paving["cobble"] { return built.clone() }
+        let n = SCNNode()
+        for i in 0..<12 {
+            let h1 = Noise.hash(i, 3, seed: 61), h2 = Noise.hash(i, 7, seed: 62), h3 = Noise.hash(i, 11, seed: 63)
+            let s = 0.14 + h3 * 0.1
+            let stone = SCNNode(geometry: SCNBox(width: s, height: 0.003, length: s * 0.8, chamferRadius: 0.03))
+            stone.geometry!.firstMaterial = flat(Self.cobble.darker(0.06 + h3 * 0.08))
+            stone.eulerAngles.y = h1 * 6.28
+            stone.position = v3((h1 - 0.5) * 0.74, 0.005, (h2 - 0.5) * 0.74)
+            n.addChildNode(stone)
+        }
+        let built = n.flattenedClone()
+        Self.paving["cobble"] = built
         return built.clone()
     }
 
     /// Nothing is lettered on a castle's ground: a ward is known by the banner at its wall.
     var writesOnFloor: Bool { false }
 
-    /// The house's banner at the ward's outer wall: a pole, a long cloth in the repo's colour and the
-    /// office's name on it, so whose courtyard it is and what is being done there both read from across the
-    /// map without writing on the flagstones.
-    func dress(office room: Room, in station: Station) -> SCNNode? {
+    /// The house's banner at the ward's outer wall: a pole, a long cloth in the repo's colour, the issue
+    /// number across it and whoever is working there under it. A name will not fit on a banner and a number
+    /// will, so the number is what is flown; the banner carries the office's own name for the pointer, so it
+    /// is hovered and clicked like the ward it stands over.
+    func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
         guard let wall = Dressing.officeWall(room, in: station) else { return nil }
         let n = SCNNode()
-        let pole = SCNNode(geometry: SCNBox(width: 0.05, height: 1.3, length: 0.05, chamferRadius: 0))
+        let cloth = NSColor(room.color)
+        let pole = SCNNode(geometry: SCNBox(width: 0.05, height: 1.34, length: 0.05, chamferRadius: 0))
         pole.geometry!.firstMaterial = lit(Self.wood)
-        pole.position = v3(0, 0.65, 0)
+        pole.position = v3(0, 0.67, 0)
         n.addChildNode(pole)
-        let cloth = SCNNode(geometry: SCNBox(width: 0.4, height: 0.62, length: 0.02, chamferRadius: 0))
-        cloth.geometry!.firstMaterial = lit(NSColor(room.color))
-        cloth.position = v3(0.21, 0.9, 0)
-        n.addChildNode(cloth)
-        let fringe = SCNNode(geometry: SCNBox(width: 0.4, height: 0.08, length: 0.025, chamferRadius: 0))
-        fringe.geometry!.firstMaterial = lit(NSColor(room.color).darker(0.25))
-        fringe.position = v3(0.21, 0.56, 0)
-        n.addChildNode(fringe)
-        // The name, sewn across the cloth rather than cut into the floor.
-        let text = room.name
-        let c = (NSColor(room.color).usingColorSpace(.deviceRGB) ?? .gray)
-        let ink = c.brightnessComponent > 0.62 ? NSColor(rgb: (0.16, 0.14, 0.12)) : NSColor(rgb: (0.96, 0.94, 0.88))
-        let sign = floorSign(text.count > 14 ? String(text.prefix(13)) + "…" : text, color: ink, size: 0.1)
-        sign.node.eulerAngles.x = .pi / 2
-        sign.node.eulerAngles.y = .pi / 2
-        sign.node.position = v3(0.21, 0.9, 0.02)
-        n.addChildNode(sign.node)
+        let arm = SCNNode(geometry: SCNBox(width: 0.44, height: 0.04, length: 0.04, chamferRadius: 0))
+        arm.geometry!.firstMaterial = lit(Self.wood)
+        arm.position = v3(0.2, 1.3, 0)
+        n.addChildNode(arm)
+        let flag = SCNNode(geometry: SCNBox(width: 0.42, height: 0.66, length: 0.02, chamferRadius: 0))
+        flag.geometry!.firstMaterial = lit(cloth)
+        flag.position = v3(0.21, 0.95, 0)
+        n.addChildNode(flag)
+        let hem = SCNNode(geometry: SCNBox(width: 0.42, height: 0.07, length: 0.026, chamferRadius: 0))
+        hem.geometry!.firstMaterial = lit(cloth.darker(0.25))
+        hem.position = v3(0.21, 0.6, 0)
+        n.addChildNode(hem)
+        let c = cloth.usingColorSpace(.deviceRGB) ?? .gray
+        let ink = c.brightnessComponent > 0.62 ? NSColor(rgb: (0.15, 0.13, 0.11)) : NSColor(rgb: (0.97, 0.95, 0.9))
+        // Standing the sign upright undoes the turn that lays it on the floor, so it reads off the cloth.
+        func sewn(_ text: String, size: Double, y: Double) {
+            let made = floorSign(text, color: ink, size: size)
+            made.node.eulerAngles.x = .pi / 2
+            made.node.position = v3(0.21, y, 0.015)
+            n.addChildNode(made.node)
+        }
+        if let number = sign.number { sewn("\(number)", size: 0.2, y: 1.06) }
+        if let who = sign.who { sewn(String(who.prefix(7)), size: 0.1, y: 0.79) }
         n.eulerAngles.y = atan2(wall.out.x, wall.out.y)
         n.position = v3(Double(wall.cell.x) + wall.out.x * 0.34, 0, Double(wall.cell.y) + wall.out.y * 0.34)
         return n
