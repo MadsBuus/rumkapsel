@@ -43,6 +43,22 @@ enum LayoutTests {
             }
         }
 
+        test("offices fill from the nearest free slot, and a slot comes back when its office goes") {
+            let a = fresh()
+            for i in 0..<12 { place("task:repo\(i % 3)#\(200 + i)", on: a) }
+            let plan = a.floor
+            let taken = a.rooms.values.compactMap { r in r.cells.first.flatMap { plan.slotOf[$0] } }.sorted()
+            expect(taken == Array(taken.indices), "the first twelve offices took the first twelve slots: \(taken)")
+
+            // A slot freed by an office closing is the next one handed out, not one further along.
+            let middle = a.rooms.values.first { r in r.cells.first.flatMap { plan.slotOf[$0] } == 4 }
+            expect(middle != nil, "an office stands in slot 4")
+            let cells = middle!.cells
+            a.removeRoom(key: middle!.key)
+            place("task:repo0#999", on: a)
+            expect(a.rooms["task:repo0#999"]?.cells == cells, "the new office took the freed slot back")
+        }
+
         test("every baked plan is whole: the essentials are joined before any office, and lighting the slots in order never breaks the floor") {
             expect(!Floorplan.all().isEmpty, "there are baked plans: \(Floorplan.all().count)")
             for plan in Theme.allCases.flatMap({ Floorplan.all($0) }) {

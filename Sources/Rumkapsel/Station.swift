@@ -644,8 +644,9 @@ final class Station {
     private func takeSlot() -> [Cell] {
         for (i, slot) in floor.slots.enumerated() where !usedSlots.contains(i) {
             // A slot whose floor is spoken for — a room read back off disk that sat elsewhere — is
-            // passed over for good rather than tried again on every placement.
-            guard slot.cells.allSatisfy({ occupied[$0] == nil }) else { usedSlots.insert(i); continue }
+            // passed over, but not struck off: the room standing on it will not stand there for ever,
+            // and a slot retired for good is one the station never gets back.
+            guard slot.cells.allSatisfy({ occupied[$0] == nil }) else { continue }
             usedSlots.insert(i)
             light(slot.hall)
             return slot.cells

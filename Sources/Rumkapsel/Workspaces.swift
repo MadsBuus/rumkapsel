@@ -14,29 +14,39 @@ enum Workspaces {
         .appendingPathComponent("Library/Application Support/Claude/git-worktrees.json")
 
     private static var cachedAt: Date?
-    private static var released: Set<String> = []
+    private static var open: Set<String> = []
 
-    /// Workspaces the registry knows and nobody holds: archived, whatever is still on the disk. A path
-    /// the registry has never heard of is not in here — Conductor's are not registered, and a worktree
-    /// made by hand is nobody's business but the person who made it.
-    static func archived() -> Set<String> {
+    /// The workspaces the desktop app is holding. It drops the entry when a session is deleted and only
+    /// the lease when one is archived, so a path it does not name is neither: it is a directory left
+    /// behind. Ten worktrees on this checkout, four of them named.
+    private static func held() -> Set<String> {
         let at = (try? registry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        if let at, at == cachedAt { return released }
+        if let at, at == cachedAt { return open }
         cachedAt = at
         guard let data = try? Data(contentsOf: registry),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let all = root["worktrees"] as? [String: Any] else { released = []; return [] }
+              let all = root["worktrees"] as? [String: Any] else { open = []; return [] }
         var out: Set<String> = []
         for (_, v) in all {
             guard let w = v as? [String: Any], let path = w["path"] as? String else { continue }
-            if w["leasedBy"] is NSNull || w["leasedBy"] == nil { out.insert(path) }
+            if let l = w["leasedBy"], !(l is NSNull) { out.insert(path) }
         }
-        released = out
+        open = out
         return out
     }
 
-    /// Whether a workspace is still open: on the disk, and not handed back.
+    /// Whether a workspace is still somebody's.
+    ///
+    /// A worktree the desktop app made is under `.claude/worktrees`, and there the registry is the only
+    /// word that counts: archived drops the lease, deleted drops the entry, and neither touches the
+    /// directory. A subagent's worktree is not a workspace at all and never earns an office.
+    ///
+    /// Everything else — the checkout itself, a Conductor workspace, a worktree made by hand — is not in
+    /// the registry and never will be, so for those the directory is still the whole signal.
     static func isOpen(_ path: String) -> Bool {
-        FileManager.default.fileExists(atPath: path) && !archived().contains(path)
+        guard FileManager.default.fileExists(atPath: path) else { return false }
+        guard path.contains("/.claude/worktrees/") else { return true }
+        if (path as NSString).lastPathComponent.hasPrefix("agent-") { return false }
+        return held().contains(path)
     }
 }

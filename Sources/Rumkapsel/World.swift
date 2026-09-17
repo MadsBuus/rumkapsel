@@ -343,6 +343,23 @@ final class World {
                 if let w = room.worktree { github.refreshCommits(worktree: w) }
             }
         }
+        // One workspace, one office. An office is keyed by its branch until GitHub names a pull request
+        // for it and then by the number, and the room under the old key was being left where it stood —
+        // so a workspace with a pull request open had two offices on the floor, both of them live.
+        for station in fleet.stations.values {
+            var byWorkspace: [String: [Room]] = [:]
+            for room in station.rooms.values where !room.key.hasPrefix("kind:") {
+                if let w = room.worktree { byWorkspace[w, default: []].append(room) }
+            }
+            for (_, rooms) in byWorkspace where rooms.count > 1 {
+                // The one named for the pull request keeps the desk; it is the one the crates know.
+                let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
+                for room in rooms where room !== keep {
+                    events.append(drop(station: station, room: room, announce: false, reason: "one workspace, one office"))
+                    changed = true
+                }
+            }
+        }
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
