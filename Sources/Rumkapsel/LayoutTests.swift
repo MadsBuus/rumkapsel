@@ -22,12 +22,16 @@ enum LayoutTests {
             expect(a.dug == b.dug, "and the same hallway was dug: \(a.dugCount) and \(b.dugCount) cells")
         }
 
-        test("a room's shape follows its key, not the launch: the same key on an empty station takes the same cells twice") {
+        test("a room's shape is its slot's, not its key's: the same key on an empty station takes the same cells twice") {
             let a = fresh(), b = fresh()
             place("task:web#455", on: a); place("task:web#455", on: b)
             expect(a.rooms["task:web#455"]?.cells == b.rooms["task:web#455"]?.cells, "\(cells(a, "task:web#455")) against \(cells(b, "task:web#455"))")
-            let shapes = Set(keys.map { Station.shape(forKey: $0).count })
-            expect(shapes.count > 1, "and different keys draw different shapes: sizes \(shapes)")
+            // The plan holds the shapes, so a key no longer picks one — but the plan's own are varied.
+            let shapes = Set(Floorplan.forStation("work").slots.prefix(40).map { s -> [Cell] in
+                let mx = s.cells.map(\.x).min() ?? 0, my = s.cells.map(\.y).min() ?? 0
+                return s.cells.map { Cell(x: $0.x - mx, y: $0.y - my) }.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+            })
+            expect(shapes.count > 4, "and the plan draws more than one shape: \(shapes.count) in the first forty slots")
         }
 
         test("every room touches the corridor and none stands on reserved floor") {
@@ -39,14 +43,56 @@ enum LayoutTests {
             }
         }
 
+        test("offices fill from the nearest free slot, and a slot comes back when its office goes") {
+            let a = fresh()
+            for i in 0..<12 { place("task:repo\(i % 3)#\(200 + i)", on: a) }
+            let plan = a.floor
+            let taken = a.rooms.values.compactMap { r in r.cells.first.flatMap { plan.slotOf[$0] } }.sorted()
+            expect(taken == Array(taken.indices), "the first twelve offices took the first twelve slots: \(taken)")
+
+            // A slot freed by an office closing is the next one handed out, not one further along.
+            let middle = a.rooms.values.first { r in r.cells.first.flatMap { plan.slotOf[$0] } == 4 }
+            expect(middle != nil, "an office stands in slot 4")
+            let cells = middle!.cells
+            a.removeRoom(key: middle!.key)
+            place("task:repo0#999", on: a)
+            expect(a.rooms["task:repo0#999"]?.cells == cells, "the new office took the freed slot back")
+        }
+
+        test("every baked plan is whole: the essentials are joined before any office, and lighting the slots in order never breaks the floor") {
+            expect(!Floorplan.all().isEmpty, "there are baked plans: \(Floorplan.all().count)")
+            for plan in Theme.allCases.flatMap({ Floorplan.all($0) }) {
+                // Loading ran `check()`, which is where a bad bake stops the process. This states what it
+                // covers, and adds what a plan is for: a hundred slots, in order of their distance out.
+                expect(plan.slots.count >= 100, "plan \(plan.seed) has \(plan.slots.count) office slots")
+                // Slots open in rings out from the monolith, each ring sweeping round before the next
+                // begins — so the ring never goes back, though a slot's bearing does.
+                let rings = plan.slots.map(\.ring)
+                expect(zip(rings, rings.dropFirst()).allSatisfy { $0 <= $1 },
+                       "plan \(plan.seed) opens ring by ring outward, \(rings.first ?? 0) to \(rings.last ?? 0)")
+                for name in ["lounge", "quarters", "bath", "gym"] {
+                    expect(plan.quarters[name] != nil, "plan \(plan.seed) places the \(name)")
+                }
+                let hall = Set(plan.base) .union(plan.slots.flatMap(\.hall))
+                let rooms = Set(plan.slots.flatMap(\.cells)).union(plan.quarters.values.joined())
+                expect(hall.isDisjoint(with: rooms), "plan \(plan.seed): no office stands on hallway")
+            }
+        }
+
+        test("a station's plan follows its name, so two machines sharing a station draw the same floor") {
+            let a = Floorplan.forStation("work"), b = Floorplan.forStation("work")
+            expect(a.seed == b.seed, "the same name gives the same plan: \(a.seed) and \(b.seed)")
+            let names = ["work", "private", "team", "solo", "lab", "desk"]
+            expect(Set(names.map { Floorplan.forStation($0).seed }).count > 1, "and different names do not all get one plan")
+        }
+
         test("the hallway is one piece: every built cell is reached from the plaza, and the arms keep apart") {
             let a = fresh()
             let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
             let unreached = hall.filter { a.hallDistance(of: $0) == nil }
             expect(unreached.isEmpty, "unreached hallway: \(unreached.map { "\($0.x),\($0.y)" })")
-            let p = a.plan
-            let armsTouch = p.north.contains { n in p.east.contains { e in abs(n.x - e.x) <= 1 && abs(n.y - e.y) <= 1 } }
-            expect(!armsTouch, "the north and east arms never touch")
+            expect(a.floor.allHall.isDisjoint(with: Set(a.floor.slots.flatMap(\.cells))),
+                   "and no office of the plan stands where hallway will run")
         }
 
         test("two stations that placed one room differently agree once the lower name's cells are taken") {
@@ -76,8 +122,11 @@ enum LayoutTests {
             expect(a.dugCount > before, "hallway was dug for them: \(a.dugCount) cells")
             let hallway = Set(a.corridorCells + a.coreCells)
             for (k, r) in a.rooms { expect(!r.cells.contains(where: hallway.contains), "\(k) does not stand on the hallway") }
-            let far = Cell(x: (a.plan.east.last?.x ?? 0) + 3, y: 2)
-            expect(!a.rooms.values.contains { $0.cells.contains(far) }, "nothing was parked unplaced")
+            // An office takes a slot; the quarters take the places the plan keeps for them.
+            let kept = Set(a.floor.quarters.values.joined())
+            expect(a.rooms.values.allSatisfy { r in
+                r.cells.contains { a.floor.slotOf[$0] != nil } || r.cells.allSatisfy(kept.contains)
+            }, "every room took a place the plan holds; none was parked unplaced")
             let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
             let unreached = hall.filter { a.hallDistance(of: $0) == nil }
             expect(unreached.isEmpty, "and every dug cell is reached from the plaza: \(unreached.count) are not")

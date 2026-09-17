@@ -33,6 +33,14 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The colours a theme gives its repositories, in the order they are handed out. Classic's are the
+    /// game's, spread out to ten; a theme that draws the station as something else brings its own.
+    var repoColors: [RGB] {
+        switch self {
+        case .classic, .kenney: return Colors.classicRepos
+        }
+    }
+
     /// The words the station's parts and doings are called by in this theme.
     var vocabulary: Vocabulary { Vocabulary() }
 

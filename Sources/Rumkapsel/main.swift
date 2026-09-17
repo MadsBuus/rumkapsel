@@ -7,7 +7,7 @@ import SwiftUI
 /// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
 /// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
 enum Scripted {
-    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0.hasSuffix("-tests") }
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0.hasSuffix("-tests") }
 }
 
 @MainActor
@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
+        if args.contains("--dump-colors") { ColorDump.run() }
+        if let i = args.firstIndex(of: "--dump-floor") { FloorDump.run(theme: args.count > i + 1 ? args[i + 1] : "classic") }
         // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
         if args.contains("--idle-tests") { IdleTests.run() }
         // The walk step on its own: made-up bodies meeting on a made-up floor.

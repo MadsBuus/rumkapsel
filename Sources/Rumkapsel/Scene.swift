@@ -16,19 +16,34 @@ extension NSColor {
                        green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
                        blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t, alpha: 1)
     }
-    func darker(_ f: CGFloat) -> NSColor {
-        let c = usingColorSpace(.deviceRGB)!
-        return NSColor(calibratedRed: max(0, c.redComponent - f), green: max(0, c.greenComponent - f), blue: max(0, c.blueComponent - f), alpha: 1)
-    }
+    /// Shading, in the one way that keeps a colour the colour it was. Adding or subtracting the same
+    /// amount from red, green and blue does not: it flattens the ratios between them, which is what the
+    /// eye reads as hue, so a darkened orange comes out red and a lightened one comes out cream. These
+    /// move brightness and leave hue and saturation where they are — which is how the game shades, every
+    /// face of a crate the same colour at a different value.
+    func dimmed(_ f: CGFloat) -> NSColor { shaded(value: f) }
+    func darker(_ f: CGFloat) -> NSColor { shaded(value: 1 - f) }
     func lighter(_ f: CGFloat) -> NSColor {
         let c = usingColorSpace(.deviceRGB)!
-        return NSColor(calibratedRed: min(1, c.redComponent + f), green: min(1, c.greenComponent + f), blue: min(1, c.blueComponent + f), alpha: 1)
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        // Brightness has a ceiling, so past it a colour lightens by losing saturation — as paint does.
+        let want = b + f
+        let over = max(0, want - 1)
+        return NSColor(calibratedHue: h, saturation: max(0, s - over * 1.6), brightness: min(1, want), alpha: 1)
+    }
+
+    private func shaded(value f: CGFloat) -> NSColor {
+        let c = usingColorSpace(.deviceRGB)!
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return NSColor(calibratedHue: h, saturation: s, brightness: max(0, min(1, b * f)), alpha: 1)
     }
 }
 
 enum Palette {
     static let void = NSColor(rgb: (0.055, 0.067, 0.125))
-    static let corridor = NSColor(rgb: (0.47, 0.37, 0.31))
+    static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))   // #7E665A, the game's hallway floor
     static let core = NSColor(rgb: (0.13, 0.14, 0.18))
     static let minion = NSColor(rgb: (0.96, 0.96, 0.94))
     static let pyramid = NSColor(rgb: (0.98, 0.85, 0.35))
@@ -846,7 +861,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var floorSettling: Bool { world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5 }
 
     /// How dim an office is while it waits to be looked at.
-    static let unlitOffice = 0.55
+    static let unlitOffice = 0.75   // dim enough to read as unconfirmed, not so dim the colour goes
     /// How much floor the view takes in while a station is still arriving: one height, held still,
     /// since the frames of a launch are too uneven for the camera to move on.
     var settlingHalf: SIMD2<Double> { SIMD2(20, 20) }

@@ -279,7 +279,9 @@ final class World {
     /// The last prompt marker and count seen per session: a session's first answer is quiet here too.
     private var sessionPrompts: [String: (marker: String, count: Int)] = [:]
 
-    /// Every session touched today keeps its office alive; archived worktrees lose theirs.
+    /// Every session touched today keeps its office alive; archived workspaces lose theirs. Archived
+    /// means two different things: Conductor deletes the worktree, Claude Code leaves it and drops its
+    /// lease, and a station that watched only the disk kept an office for every workspace ever opened.
     func applyScan(_ result: ScanResult, now: Date, minionHomes: [String: MinionHome]) -> [WorldEvent] {
         var events: [WorldEvent] = []
         var changed = false
@@ -341,6 +343,23 @@ final class World {
                 if let w = room.worktree { github.refreshCommits(worktree: w) }
             }
         }
+        // One workspace, one office. An office is keyed by its branch until GitHub names a pull request
+        // for it and then by the number, and the room under the old key was being left where it stood —
+        // so a workspace with a pull request open had two offices on the floor, both of them live.
+        for station in fleet.stations.values {
+            var byWorkspace: [String: [Room]] = [:]
+            for room in station.rooms.values where !room.key.hasPrefix("kind:") {
+                if let w = room.worktree { byWorkspace[w, default: []].append(room) }
+            }
+            for (_, rooms) in byWorkspace where rooms.count > 1 {
+                // The one named for the pull request keeps the desk; it is the one the crates know.
+                let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
+                for room in rooms where room !== keep {
+                    events.append(drop(station: station, room: room, announce: false, reason: "one workspace, one office"))
+                    changed = true
+                }
+            }
+        }
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
@@ -348,7 +367,7 @@ final class World {
                 let merged = state == "MERGED"
                 // A checkout that went away still waits for its crate to reach storage: the office
                 // stays open until the haul lands, the way it does for any merged office.
-                let gone = (room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false) && !haulUnderway(office: key)
+                let gone = (room.worktree.map { !Workspaces.isOpen($0) } ?? false) && !haulUnderway(office: key)
                 // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED"
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
@@ -368,7 +387,7 @@ final class World {
                 // shipped, not that the desk was cleared. An office that is only GitHub's has nothing
                 // else to go on: the merge is the last anybody hears of it, since branches are left to
                 // die with their pull requests rather than deleted.
-                let mine = room.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
+                let mine = room.worktree.map { Workspaces.isOpen($0) } ?? false
                 let lan = peerOffices[key] != nil
                 let ended = cleared && !mine && !lan
                 if gone || ended || orphan {

@@ -166,7 +166,7 @@ extension StationController {
                     let checks = pr?.checks ?? ""
                     let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
                         : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
-                    let pkg = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color).lighter(0.1), band: light, size: size,
+                    let pkg = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size,
                                             blink: checks == "pending" && !closed)
                     pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     pkg.name = "box:" + key
@@ -290,7 +290,7 @@ extension StationController {
                     }
                     // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
                     // tint of the repository it came for, so a bump for ios still reads as ios.
-                    let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo)).lighter(0.1)
+                    let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
                     // In the yard the light is off, except green with a sticker on a tested crate, and
                     // the unscreened green of decon on what still waits there.
                     let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
