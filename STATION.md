@@ -114,7 +114,10 @@ since real stations mandate both.
   or main. A file .github/rumkapsel.json on the repository's default branch overrides both, for everyone.
   Releases come from the trunk, from staging, or from a release or hotfix branch. A repository with no
   releases and a workflow deploying on every push to its trunk ships on merge: the merged crate goes to
-  storage and straight up in a small rocket of its own. With staging a
+  storage and straight up in a small rocket of its own. One with no release branch and no such workflow,
+  but which tags what it ships, ships on tags: what the trunk has that the newest tag has not is waiting
+  in storage, and a tag nobody has seen before launches it. The newest tag is the newest by date, never
+  by name, and a tag that is not a version is not a release. With staging a
   repository's rocket loads from the deck, without from storage. The board fills its yard only if it
   moves work through the storage and QA columns, or its file says so; otherwise its yard comes from git.
 - Releases are made of pull requests. What git says a release carries is translated to tasks on the

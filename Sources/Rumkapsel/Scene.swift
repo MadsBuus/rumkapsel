@@ -1268,7 +1268,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return world.repoRoots.sorted { $0.value.repo < $1.value.repo }.compactMap { root, info in
             guard info.station == "work", seen.insert(info.repo).inserted else { return nil }
             let p = github.pipeline(repoRoot: root)
-            let flow = p.shipsOnMerge ? "\(p.trunk), ships on merge" : p.production.isEmpty ? "\(p.trunk), no releases" : [p.trunk, p.staging, p.production].filter { !$0.isEmpty }.joined(separator: " → ")
+            let flow = p.shipsOnMerge ? "\(p.trunk), ships on merge"
+                : p.shipsOnTag ? "\(p.trunk), ships on tags"
+                : p.production.isEmpty ? "\(p.trunk), no releases"
+                : [p.trunk, p.staging, p.production].filter { !$0.isEmpty }.joined(separator: " → ")
             return PipelineRow(id: info.repo, flow: flow, why: p.source == "settings" ? "not read yet" : p.why)
         }
     }

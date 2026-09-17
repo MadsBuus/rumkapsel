@@ -32,7 +32,8 @@ enum PipelineDetection {
     }
 
     static func detect(branches: Set<String>, merges: [Merge], file: ReleaseFile?,
-                       names: (trunk: String, staging: String, production: String), deploysOnPush: Bool = false) -> Pipeline {
+                       names: (trunk: String, staging: String, production: String), deploysOnPush: Bool = false,
+                       tagged: Bool = false) -> Pipeline {
         // A branch counts only if the repository still has it; with no branch list at all, any name will do.
         let exists: (String) -> Bool = { b in !b.isEmpty && (branches.isEmpty || branches.contains(b)) }
         let releaseLike: (String) -> Bool = { h in defaultReleaseBranches.contains { matches(h, $0) } }
@@ -88,6 +89,12 @@ enum PipelineDetection {
         var ship = "release"
         if production.isEmpty, deploysOnPush {
             ship = "merge"; source = "workflow"; why = "deploys on every push to \(trunk)"
+        }
+        // No release branch and no deploying workflow, but the repository tags what it ships: the tag is
+        // the release. Work merged since the newest tag is waiting; a new tag sends it. This is how a
+        // library, a command line tool or anything installed from a release ships.
+        if production.isEmpty, ship == "release", tagged {
+            ship = "tag"; source = "tags"; why = "no release branch: what is tagged on \(trunk) has shipped"
         }
 
         // The repository's own word, where it gives one.

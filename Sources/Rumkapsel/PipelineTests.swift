@@ -72,6 +72,24 @@ enum PipelineTests {
             expect(f.shipsOnMerge && f.source == "file", "the repository's file can say so")
         }
 
+        test("no release branch but tags on the trunk: the tag is the release, as rumkapsel's own is") {
+            let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names, tagged: true)
+            expect(p.shipsOnTag && p.trunk == "main" && p.source == "tags", "ships on tags from main, got \(p.ship) from \(p.trunk), \(p.source)")
+            expect(!p.shipsOnMerge && p.production.isEmpty, "a tag is not a production branch, and not a deploy on merge")
+            let q = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names)
+            expect(!q.shipsOnTag, "untagged, it waits for a release that never comes")
+            // Tags are what is left when nothing better is known: a repository that releases by branch,
+            // or deploys every push, ships that way however many tags it has lying about.
+            let r = PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                             merges: features("develop", 6) + times(M(base: "production", head: "staging"), 2) + times(M(base: "staging", head: "develop"), 2),
+                                             file: nil, names: names, tagged: true)
+            expect(!r.shipsOnTag && r.production == "production", "a repository with releases ships by release, tags or no tags")
+            let d = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names, deploysOnPush: true, tagged: true)
+            expect(d.shipsOnMerge, "a deploying workflow is the truer answer: it ships without anyone tagging")
+            let f = PipelineDetection.detect(branches: ["main"], merges: [], file: ReleaseFile(ship: "tag"), names: names)
+            expect(f.shipsOnTag && f.source == "file", "the repository's file can say so")
+        }
+
         test("no history: the branch names decide") {
             let p = PipelineDetection.detect(branches: ["develop", "staging", "production"], merges: [], file: nil, names: names)
             expect(flow(p) == "develop → staging → production", "got \(flow(p))")

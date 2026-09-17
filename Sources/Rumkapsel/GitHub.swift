@@ -50,6 +50,9 @@ struct ReleasePR: Equatable {
         return !name.isEmpty && base == name
     }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
+    /// Not a pull request at all: a tag on the trunk, which in a repository that ships by tagging is the
+    /// whole release. It has no number and nothing to review; it has already happened when it is seen.
+    var tag = false
 }
 
 /// A repository's own way to production: the branch work merges into, an optional staging branch
@@ -65,9 +68,12 @@ struct Pipeline: Equatable {
     /// Where this came from, "file", "history", "branches" or "settings", and in a few words why.
     var source: String = "settings"
     var why: String = ""
-    /// "merge" when every merge into the trunk deploys and ships at once; "release" when releases do.
+    /// "merge" when every merge into the trunk deploys and ships at once, "tag" when a tag on the trunk
+    /// is the release, "release" when a release pull request is.
     var ship: String = "release"
     var shipsOnMerge: Bool { ship == "merge" }
+    /// Shipped by tagging the trunk: no release branch, no release pull request, a tag and that is that.
+    var shipsOnTag: Bool { ship == "tag" }
     var hasStaging: Bool { !staging.isEmpty }
     func isReleaseHead(_ head: String) -> Bool {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
@@ -662,6 +668,26 @@ final class GitHubResolver {
         return releases[repoRoot]?.0
     }
 
+    /// The repository's newest tags, newest first, with when each was made. Read from git rather than the
+    /// API: a tag is pushed to the repository itself, whoever publishes the build and wherever it lands.
+    /// Newest is by date, never by name: v0.9.1 sorts after v0.41 and is years older.
+    static func tags(repoRoot: String, run: ([String], String) -> Data?) -> [(name: String, at: Date)] {
+        _ = run(["git", "fetch", "-q", "--tags", "origin"], repoRoot)
+        guard let out = run(["git", "for-each-ref", "--sort=-creatordate", "--count=8",
+                             "--format=%(refname:short)|%(creatordate:iso-strict)", "refs/tags"], repoRoot),
+              let text = String(data: out, encoding: .utf8) else { return [] }
+        let iso = ISO8601DateFormatter()
+        let all: [(name: String, at: Date)] = text.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "|", maxSplits: 1)
+            guard parts.count == 2, let at = iso.date(from: String(parts[1])) else { return nil }
+            return (String(parts[0]), at)
+        }
+        // A version is what a release is named. A tag put on something for another reason — a branch
+        // point kept, a bisect marked — is not a release and must not pass for the newest one.
+        let versions = all.filter { $0.name.firstMatch(of: #/^v?\d+(\.\d+)*$/#) != nil }
+        return versions.isEmpty ? all : versions
+    }
+
     /// Whether one of the repository's workflows, as the trunk has them, deploys on a push to the trunk.
     private func workflowsDeploy(onPushTo trunk: String, repoRoot: String) -> Bool {
         let ref = run(["git", "rev-parse", "--verify", "-q", "origin/\(trunk)"], cwd: repoRoot) != nil ? "origin/\(trunk)" : "HEAD"
@@ -922,6 +948,8 @@ final class GitHubResolver {
                 // No releases found: a workflow that deploys on every push to the trunk means every merge ships.
                 if detected.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: detected.trunk, repoRoot: repoRoot) {
                     detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
+                } else if detected.production.isEmpty, file?.ship == nil, !GitHubResolver.tags(repoRoot: repoRoot, run: run).isEmpty {
+                    detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, tagged: true)
                 }
                 pipe = detected
                 if answered { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
@@ -943,13 +971,23 @@ final class GitHubResolver {
                                            production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch))
                 }
             }
+            // A repository that ships by tagging: its newest tag is the release, and it has already
+            // happened. The tag stands in for a merged production release, so a rocket, a log line and
+            // the yard all read it the way they read any other.
+            if pipe.shipsOnTag, let newest = GitHubResolver.tags(repoRoot: repoRoot, run: run).first {
+                lock.lock(); let owner = owners[repoRoot]; lock.unlock()
+                let url = owner.map { "https://github.com/\($0)/releases/tag/\(newest.name)" } ?? ""
+                found.append(ReleasePR(number: 0, title: newest.name, base: trunk, head: newest.name, state: "MERGED",
+                                       url: url, labels: [], mergedAt: newest.at, production: true, staging: false, tag: true))
+            }
             // Cargo: PRs merged into trunk, split by the last staging and production releases.
             let iso = ISO8601DateFormatter()
             let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
-            // No release pipeline in this repository: nothing waits for a launch here.
-            let hasPipeline = !bases.isEmpty && (lastStaging != nil || lastProduction != nil)
+            // No release pipeline in this repository: nothing waits for a launch here. A tag is a pipeline
+            // of its own: everything merged since it is waiting for the next one.
+            let hasPipeline = (!bases.isEmpty && (lastStaging != nil || lastProduction != nil)) || pipe.shipsOnTag
             let floor = Date().addingTimeInterval(-30 * 24 * 3600)
             // Exact diff between branches when they all exist: pull request numbers named in the commits.
             func prNumbers(_ range: String) -> [Int]? {
@@ -976,6 +1014,15 @@ final class GitHubResolver {
                     newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
                     newCargo.deck = newCargo.deckNumbers.count
                     newCargo.storage = newCargo.storageNumbers.count
+                    exact = true
+                }
+            }
+            // Shipped by tagging: what the trunk has that the newest tag has not is waiting in storage.
+            if hasPipeline, !exact, pipe.shipsOnTag, let tag = found.first(where: \.tag)?.head {
+                _ = run(["git", "fetch", "-q", "origin", trunk], cwd: repoRoot)
+                if let storage = prNumbers("\(tag)..origin/\(trunk)") {
+                    newCargo.storageNumbers = storage
+                    newCargo.storage = storage.count
                     exact = true
                 }
             }
@@ -1010,6 +1057,11 @@ final class GitHubResolver {
             let previous = releases[repoRoot]?.0 ?? []
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
+            }
+            // A tag nobody has seen before is a launch. The first answer is taken quietly, like every
+            // other source's: whatever was tagged before this run had already shipped.
+            if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
+                pendingLaunches.append((repoRoot, tag))
             }
             let pipelineChanged = pipelines[repoRoot] != pipe
             let changed = previous != found || cargo[repoRoot] != newCargo || pipelineChanged

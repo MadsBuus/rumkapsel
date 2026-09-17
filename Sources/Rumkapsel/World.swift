@@ -528,7 +528,9 @@ final class World {
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
         let status = " · " + (pr.untested ? Words.current.holding : Words.current.cleared)
-        let label = "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
+        // A tag has no number and no branch it came from: it is a name and a moment.
+        let label = pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)\(status)"
+            : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
         return .rocketCommand(station: station.name, repo: repo, label: label, untested: pr.untested,
                               tall: pr.isProduction, cargo: cargoWaiting(station: station, repo: repo),
                               command: .rocket(stage, station: station.name, repo: repo))
@@ -553,7 +555,8 @@ final class World {
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
-            events.append(.log("\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
+            events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
+                                       : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
             events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
         }
         for (root, info) in repoRoots {
