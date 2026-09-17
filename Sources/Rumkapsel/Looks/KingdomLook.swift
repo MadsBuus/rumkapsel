@@ -43,13 +43,40 @@ struct KingdomLook: Look {
 
     func ground(under stations: [Station], into root: SCNNode) {
         Realm.survey(stations)
-        for station in stations { root.addChildNode(Site(station).world()) }
+        for station in stations {
+            let site = Site(station)
+            root.addChildNode(site.world())
+            site.ditch(into: root)
+        }
     }
 
     // MARK: the input
 
+    private static var pieces: [String: SetPiece] = [:]
+    private static var banners: [String: SCNNode] = [:]
+
+    /// A set piece kept against what it was built from. The floor round the yard and the bay changes rarely,
+    /// and the sampling that draws them is the dearest thing this look does.
+    private func kept(_ key: String, _ build: () -> SetPiece?) -> SetPiece? {
+        func copy(_ p: SetPiece) -> SetPiece {
+            var out = SetPiece()
+            for (area, nodes) in p.parts { out.parts[area] = nodes.map { $0.clone() } }
+            return out
+        }
+        if let had = Self.pieces[key] { return copy(had) }
+        guard let made = build() else { return nil }
+        Self.pieces = Self.pieces.filter { !$0.key.hasPrefix(key.prefix(while: { $0 != "|" }) + "|") }
+        Self.pieces[key] = made
+        return copy(made)
+    }
+
+
     func input(_ station: Station) -> SetPiece? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
+        return kept("in:\(station.name)|\(signature(station.hangarCells + station.airlockCells))") { self.builtInput(station) }
+    }
+
+    private func builtInput(_ station: Station) -> SetPiece? {
         let site = Site(station)
         var piece = SetPiece()
         let bay = Set(station.hangarCells), lock = Set(station.airlockCells)
@@ -176,6 +203,16 @@ struct KingdomLook: Look {
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? {
         guard station.hasPad else { return nil }
+        let cells = station.padCells + station.storageCells + station.deckCells + station.deconCells
+        return kept("out:\(station.name)|\(signature(cells))|\(deckInUse)") { self.builtOutput(station, deckInUse: deckInUse) }
+    }
+
+    /// What a run of cells is, for keeping a piece against: how many and where.
+    private func signature(_ cells: [Cell]) -> Int {
+        cells.reduce(cells.count) { $0 &* 31 &+ $1.x &* 7 &+ $1.y }
+    }
+
+    private func builtOutput(_ station: Station, deckInUse: Bool) -> SetPiece? {
         let site = Site(station)
         var piece = SetPiece()
         let all = Set(station.deconCells + station.storageCells + station.deckCells)
@@ -518,14 +555,27 @@ struct KingdomLook: Look {
             leave(d, o); doors.insert(d); doors.insert(o)
         }
 
+        // The curtain and each ward's wall are kept apart, so opening an office builds one wall rather than
+        // every wall on the station. Merging thousands of stones was the whole of a second-long redraw.
+        let outer = Self.walls["outer:\(station.name)|\(signature(Array(inside)))"] ?? {
+            let made = Self.merge(curtain(over: inside, gaps: open, clear: doors, merged: false))
+            Self.walls = Self.walls.filter { !$0.key.hasPrefix("outer:" + station.name + "|") }
+            Self.walls["outer:\(station.name)|\(signature(Array(inside)))"] = made
+            return made
+        }()
         let wall = SCNNode()
-        wall.addChildNode(curtain(over: inside, gaps: open, clear: doors, merged: false))
-        // Each ward is walled as a room of its own, low enough to see over, open at its door.
-        for room in station.rooms.values where !room.cells.isEmpty {
-            wall.addChildNode(curtain(over: Set(room.cells), gaps: open, clear: doors, merged: false,
-                                      height: 0.26, towers: false))
+        wall.addChildNode(outer.clone())
+        for room in station.rooms.values where !room.cells.isEmpty && !room.key.hasPrefix("kind:") {
+            let key = "room:\(station.name)|\(room.key)|\(signature(room.cells))"
+            let made = Self.walls[key] ?? {
+                let m = Self.merge(curtain(over: Set(room.cells), gaps: open, clear: doors, merged: false,
+                                           height: 0.26, towers: false))
+                Self.walls[key] = m
+                return m
+            }()
+            wall.addChildNode(made.clone())
         }
-        let built = Self.merge(wall)
+        let built = wall
         Self.walls = Self.walls.filter { !$0.key.hasPrefix(station.name + "|") }
         Self.walls[key] = built
         return [built.clone()]
@@ -1024,6 +1074,17 @@ struct KingdomLook: Look {
     /// is hovered and clicked like the ward it stands over.
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
         guard let wall = Dressing.officeWall(room, in: station) else { return nil }
+        let key = "\(sign.number ?? -1)|\(sign.who ?? "")|\(NSColor(room.color).description)"
+        let made = Self.banners[key] ?? built(banner: room, sign: sign)
+        Self.banners[key] = made
+        let n = made.clone()
+        n.eulerAngles.y = atan2(wall.out.x, wall.out.y)
+        n.position = v3(Double(wall.cell.x) + wall.out.x * 0.34, 0, Double(wall.cell.y) + wall.out.y * 0.34)
+        return n
+    }
+
+    /// The cloth and its lettering, which is text and therefore the dearest thing on it.
+    private func built(banner room: Room, sign: OfficeSign) -> SCNNode {
         let n = SCNNode()
         let cloth = NSColor(room.color)
         let pole = SCNNode(geometry: SCNBox(width: 0.05, height: 1.34, length: 0.05, chamferRadius: 0))
@@ -1053,8 +1114,6 @@ struct KingdomLook: Look {
         }
         if let number = sign.number { sewn("\(number)", size: 0.2, y: 1.06) }
         if let who = sign.who { sewn(String(who.prefix(7)), size: 0.1, y: 0.79) }
-        n.eulerAngles.y = atan2(wall.out.x, wall.out.y)
-        n.position = v3(Double(wall.cell.x) + wall.out.x * 0.34, 0, Double(wall.cell.y) + wall.out.y * 0.34)
         return n
     }
 
@@ -1265,9 +1324,13 @@ private struct Site {
         bayCenter = st.hasHangar ? st.hangarCenter : SIMD2(0, Double(st.bounds.max.y) + 12)
         quay = st.hasPad ? st.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
         shoreline = (st.hasPad ? Double(st.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) + 1.55
-        let b = st.bounds
-        lo = SIMD2(Double(b.min.x) - 26, Double(b.min.y) - 22)
-        hi = SIMD2(Double(b.max.x) + 26, Double(b.max.y) + 20)
+        // The landscape is laid out to a coarse grid, so a castle that grows a ward at a time crosses a
+        // boundary now and then rather than moving the whole world on every office.
+        let b = st.bounds, step = 8.0
+        func down(_ v: Int) -> Double { (Double(v) / step).rounded(.down) * step }
+        func up(_ v: Int) -> Double { (Double(v) / step).rounded(.up) * step }
+        lo = SIMD2(down(b.min.x) - 26, down(b.min.y) - 22)
+        hi = SIMD2(up(b.max.x) + 26, up(b.max.y) + 20)
         var road: [SIMD2<Double>] = []
         if st.hasHangar, let far = st.hangarCells.map(\.y).max() {
             var p = SIMD2(bayCenter.x, Double(far) + 0.5)
@@ -1365,12 +1428,36 @@ private struct Site {
         stride(from: 6, to: road.count, by: 5).map { road[$0] }
     }
 
+    /// The ditch round the wall, which is the one part of the ground that must follow a new ward. It is
+    /// sampled only where the floor is, so it costs a fraction of the landscape.
+    func ditch(into root: SCNNode) {
+        func band(_ grid: Shapes.Grid, _ level: Double, _ color: NSColor, _ y: Double) {
+            guard let n = Shapes.node(Shapes.fill(grid, level: level), color, y: y) else { return }
+            n.position.x += offset.x; n.position.z += offset.y
+            root.addChildNode(n)
+        }
+        // The moat: a ring of water in the ditch outside the wall, cut where the causeway and the road cross it.
+        // Only the ground within a few tiles of the wall can hold a ditch, so only that is sampled.
+        let b = station.bounds
+        let near = SIMD2(Double(b.min.x) - 5, Double(b.min.y) - 5), far = SIMD2(Double(b.max.x) + 5, Double(b.max.y) + 5)
+        let cut = Shapes.sample(from: near, to: far, step: 0.25) { p in
+            let d = toFloor(p)
+            guard d < 4 else { return -1 }
+            let ring = min(d - 1.15, 2.15 - d)
+            let crossing = max(1.3 - toRoad(p), 2.2 - Double(abs(p.x - shoreline) < 6 ? 0 : 9))
+            return min(ring, -crossing)
+        }
+        band(cut, -0.25, KingdomLook.dirtEdge.darker(0.1), -0.066)
+        band(cut, 0, KingdomLook.water.darker(0.18), -0.064)
+
+    }
+
     private static var worlds: [String: SCNNode] = [:]
 
     /// The world round the station: sea, shallows, foam, beach, meadow, road, woods, rocks and cottages. Built
     /// once for a floor and kept, so a redraw that did not move the floor does not rebuild it.
     func world() -> SCNNode {
-        let key = "\(station.name)|\(floor.count)|\(floor.map { $0.x &* 31 &+ $0.y }.reduce(0, &+))|\(offset.x),\(offset.y)|\(Realm.key.hashValue)"
+        let key = "\(station.name)|\(lo.x),\(lo.y),\(hi.x),\(hi.y)|\(offset.x),\(offset.y)"
         if let w = Site.worlds[key] { return w }
         let w = SCNNode()
         let sea = SCNNode(geometry: SCNPlane(width: hi.x - lo.x + 240, height: hi.y - lo.y + 240))
@@ -1392,17 +1479,6 @@ private struct Site {
         let road = ground.map { p, v in min(v - 0.4, -toRoad(p)) }
         layer(road, -0.64, KingdomLook.dirtEdge, -0.07)
         layer(road, -0.48, KingdomLook.dirt, -0.068)
-        // The moat: a ring of water in the ditch outside the wall, cut where the causeway and the road cross it.
-        let ditch = Shapes.sample(from: lo, to: hi, step: 0.25) { p in
-            let d = toFloor(p)
-            guard d < 4 else { return -1 }
-            let ring = min(d - 1.15, 2.15 - d)
-            let crossing = max(1.3 - toRoad(p), 2.2 - Double(abs(p.x - shoreline) < 6 ? 0 : 9))
-            return min(ring, -crossing)
-        }
-        layer(ditch, -0.25, KingdomLook.dirtEdge.darker(0.1), -0.066)
-        layer(ditch, 0, KingdomLook.water.darker(0.18), -0.064)
-
         let props = SCNNode()
         func put(_ name: String, _ pack: Kit.Pack, _ p: SIMD2<Double>, scale: Double, yaw: Double, tint: [String: NSColor] = [:]) {
             guard let n = Kit.node(name, from: pack, tint: tint) else { return }
