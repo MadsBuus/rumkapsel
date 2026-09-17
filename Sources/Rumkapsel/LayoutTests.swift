@@ -39,6 +39,33 @@ enum LayoutTests {
             }
         }
 
+        test("every baked plan is whole: the essentials are joined before any office, and lighting the slots in order never breaks the floor") {
+            expect(!Floorplan.all.isEmpty, "there are baked plans: \(Floorplan.all.count)")
+            for plan in Floorplan.all {
+                // Loading ran `check()`, which is where a bad bake stops the process. This states what it
+                // covers, and adds what a plan is for: a hundred slots, in order of their distance out.
+                expect(plan.slots.count >= 100, "plan \(plan.seed) has \(plan.slots.count) office slots")
+                // Slots open in rings out from the monolith, each ring sweeping round before the next
+                // begins — so the ring never goes back, though a slot's bearing does.
+                let rings = plan.slots.map(\.ring)
+                expect(zip(rings, rings.dropFirst()).allSatisfy { $0 <= $1 },
+                       "plan \(plan.seed) opens ring by ring outward, \(rings.first ?? 0) to \(rings.last ?? 0)")
+                for name in ["deck", "bay", "storage"] {
+                    expect(plan.blocks[name] != nil, "plan \(plan.seed) has its \(name)")
+                }
+                let hall = Set(plan.base) .union(plan.slots.flatMap(\.hall))
+                let rooms = Set(plan.slots.flatMap(\.cells))
+                expect(hall.isDisjoint(with: rooms), "plan \(plan.seed): no office stands on hallway")
+            }
+        }
+
+        test("a station's plan follows its name, so two machines sharing a station draw the same floor") {
+            let a = Floorplan.forStation("work"), b = Floorplan.forStation("work")
+            expect(a.seed == b.seed, "the same name gives the same plan: \(a.seed) and \(b.seed)")
+            let names = ["work", "private", "team", "solo", "lab", "desk"]
+            expect(Set(names.map { Floorplan.forStation($0).seed }).count > 1, "and different names do not all get one plan")
+        }
+
         test("the hallway is one piece: every built cell is reached from the plaza, and the arms keep apart") {
             let a = fresh()
             let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
