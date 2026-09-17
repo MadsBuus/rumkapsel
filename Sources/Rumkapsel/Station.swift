@@ -18,23 +18,50 @@ struct Cell: Hashable, Codable {
 struct RGB: Codable, Equatable {
     var r: Double, g: Double, b: Double
     var tuple: (Double, Double, Double) { (r, g, b) }
+
+    /// Shading that keeps the colour the colour it was: brightness moves, hue and saturation stay.
+    /// Adding or subtracting the same amount from red, green and blue flattens the ratios between them,
+    /// and the ratios are what the eye reads as a hue — a darkened orange comes out red.
+    func shaded(_ f: Double) -> RGB {
+        let hi = max(r, g, b), lo = min(r, g, b)
+        let want = min(1, max(0, hi * f))
+        guard hi > 0 else { return RGB(r: want, g: want, b: want) }
+        // Past full brightness a colour can only lighten by letting go of saturation, as paint does.
+        let over = max(0, hi * f - 1)
+        let sat = max(0, (hi - lo) / hi - over * 1.6)
+        let k = want * (1 - sat) 
+        return RGB(r: k + (r - lo) / max(hi - lo, 1e-9) * (want - k),
+                   g: k + (g - lo) / max(hi - lo, 1e-9) * (want - k),
+                   b: k + (b - lo) / max(hi - lo, 1e-9) * (want - k))
+    }
 }
 
 enum Colors {
+    /// The rooms the crew idle in: grey, in three steps so they are still told apart from each other.
+    static let idle = RGB(r: 0.40, g: 0.405, b: 0.425)
+    static let idleDim = RGB(r: 0.33, g: 0.335, b: 0.355)
+    static let idleLight = RGB(r: 0.48, g: 0.485, b: 0.505)
     static let hangar = RGB(r: 0.27, g: 0.42, b: 0.55)
     static let quarters = RGB(r: 0.46, g: 0.34, b: 0.44)
     static let bed = RGB(r: 0.33, g: 0.23, b: 0.32)
     /// Colours handed out to repositories, in order of first sighting.
-    /// The game's own, sampled off its screens, and nothing else. It has a handful and repeats them —
-    /// two rooms of the same colour are ordinary there — so a station does the same rather than inventing
-    /// hues to keep every repository apart. Twelve made-up colours read as mud next to six real ones.
-    static let repos: [RGB] = [
-        RGB(r: 0.808, g: 0.431, b: 0.212),   // #CE6E36  orange
-        RGB(r: 0.251, g: 0.459, b: 0.706),   // #4075B4  blue
-        RGB(r: 0.835, g: 0.647, b: 0.251),   // #D5A540  yellow
-        RGB(r: 0.671, g: 0.329, b: 0.522),   // #AB5485  magenta
-        RGB(r: 0.396, g: 0.655, b: 0.627),   // #65A7A0  teal
-        RGB(r: 0.522, g: 0.655, b: 0.267),   // #85A744  green
+    /// Classic's: the game's own six, sampled off its screens, then four more dropped into the widest
+    /// gaps they leave round the colour wheel. Six is what the game needs and ten is what a desk with ten
+    /// repositories on it needs; the four added keep the game's saturation and brightness so they sit
+    /// beside the six rather than in front of them. A theme may bring its own — see `Theme.repoColors`.
+    static var repos: [RGB] { Theme.forPlan.repoColors }
+
+    static let classicRepos: [RGB] = [
+        RGB(r: 0.808, g: 0.431, b: 0.212),   // #CE6E36  the game's orange
+        RGB(r: 0.835, g: 0.647, b: 0.251),   // #D5A540  its yellow
+        RGB(r: 0.522, g: 0.655, b: 0.267),   // #85A744  its green
+        RGB(r: 0.326, g: 0.680, b: 0.368),   // #53AD5E
+        RGB(r: 0.396, g: 0.655, b: 0.627),   // #65A7A0  its teal
+        RGB(r: 0.251, g: 0.459, b: 0.706),   // #4075B4  its blue
+        RGB(r: 0.426, g: 0.355, b: 0.740),   // #6D5BBD
+        RGB(r: 0.641, g: 0.378, b: 0.700),   // #A360B2
+        RGB(r: 0.671, g: 0.329, b: 0.522),   // #AB5485  its magenta
+        RGB(r: 0.760, g: 0.319, b: 0.363),   // #C2515D
     ]
 }
 
@@ -427,11 +454,14 @@ final class Station {
         // The quarters are the plan's, not the placement's: the plan puts them near the plaza and lights
         // them before any office opens, so the station can be slept in from the first frame. Their shapes
         // are their own — a dorm is two by four, not whatever tetromino a slot happens to be.
+        // Grey floors. A colour on this station means a repository, and the rooms the crew idle in are
+        // nobody's repository — giving them hues of their own spends the palette on places that do not
+        // need telling apart, and reads as two more projects.
         let named: [String: (plan: String, name: String, color: RGB, shape: [Cell])] = [
-            "kind:lounge":   ("lounge",   "lounge",   RGB(r: 0.40, g: 0.36, b: 0.30), Station.rect(3, 3)),
-            "kind:quarters": ("quarters", "sleeping", Colors.quarters,                Station.rect(2, 4)),
-            "kind:bath":     ("bath",     "bath",     RGB(r: 0.52, g: 0.66, b: 0.70), Station.rect(2, 2)),
-            "kind:gym":      ("gym",      "gym",      RGB(r: 0.38, g: 0.52, b: 0.42), Station.rect(3, 2)),
+            "kind:lounge":   ("lounge",   "lounge",   Colors.idle,        Station.rect(3, 3)),
+            "kind:quarters": ("quarters", "sleeping", Colors.idleDim,     Station.rect(2, 4)),
+            "kind:bath":     ("bath",     "bath",     Colors.idleLight,   Station.rect(2, 2)),
+            "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
         ]
         guard let it = named[key] else { return false }
         return ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture,
@@ -878,18 +908,38 @@ final class Fleet {
     /// another name already holds takes the next free one, names in alphabetical order.
     func color(forRepo repo: String) -> RGB {
         if repoColors[repo] == nil { repoColors[repo] = 0; assignColors() }
-        return Colors.repos[(repoColors[repo] ?? 0) % Colors.repos.count]
+        let i = repoColors[repo] ?? 0
+        let base = Colors.repos[i % Colors.repos.count]
+        // More repositories than the palette has colours, so the second and third to land on a hue take
+        // it darker and lighter. The game shades one colour rather than reaching for a new one, and a
+        // made-up seventh hue reads worse beside six real ones than a shade of one of them does.
+        switch i / Colors.repos.count {
+        case 0: return base
+        case 1: return base.shaded(0.60)     // darker first: a deep teal is further from mid teal than
+        default: return base.shaded(1.42)    // a pale one is, and crate faces lighten what they are given
+
+        }
     }
 
     private func assignColors() {
         let n = Colors.repos.count
+        // Three rounds of the palette: a hue on its own first, then the lighter shade of one, then the
+        // darker. A name keeps looking for the emptiest round rather than piling onto the first hue it
+        // hashes to, so eight repositories are eight colours and not six with two pairs of twins.
         var taken: [Int: String] = [:]
         for name in repoColors.keys.sorted() {
             var h: UInt64 = 14695981039346656037
             for b in name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
-            var i = Int(h % UInt64(n))
-            var tries = 0
-            while taken[i] != nil, tries < n { i = (i + 1) % n; tries += 1 }
+            let want = Int(h % UInt64(n))
+            var slot: Int?
+            for round in 0..<3 {
+                for step in 0..<n {
+                    let i = round * n + (want + step) % n
+                    if taken[i] == nil { slot = i; break }
+                }
+                if slot != nil { break }
+            }
+            let i = slot ?? want
             taken[i] = name
             repoColors[name] = i
         }

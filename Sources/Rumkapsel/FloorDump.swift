@@ -17,11 +17,17 @@ enum ColorDump {
             let hex = String(format: "#%02X%02X%02X", Int(c.r * 255), Int(c.g * 255), Int(c.b * 255))
             print(String(format: "  slot %2d  %@  %@", fleet.repoColors[r] ?? -1, hex, r))
         }
-        var used: [Int: Int] = [:]
-        for r in repos { used[(fleet.repoColors[r] ?? 0) % Colors.repos.count, default: 0] += 1 }
-        let shared = used.filter { $0.value > 1 }
-        print(shared.isEmpty ? "every repository has a slot to itself"
-                             : "slots shared: \(shared.map { "slot \($0.key) by \($0.value)" }.joined(separator: ", "))")
+        // What matters is whether two repositories end up the same colour, not the same hue: a hue is
+        // shared on purpose past the sixth repository, with the second and third taking it lighter and
+        // darker.
+        var used: [String: [String]] = [:]
+        for r in repos {
+            let c = fleet.color(forRepo: r)
+            used[String(format: "#%02X%02X%02X", Int(c.r * 255), Int(c.g * 255), Int(c.b * 255)), default: []].append(r)
+        }
+        let shared = used.filter { $0.value.count > 1 }
+        print(shared.isEmpty ? "every repository has a colour to itself"
+                             : "same colour: \(shared.map { "\($0.key) \($0.value.joined(separator: " and "))" }.joined(separator: ", "))")
         exit(0)
     }
 }
