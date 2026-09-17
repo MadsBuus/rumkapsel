@@ -26,7 +26,6 @@ struct KingdomLook: Look {
     static let planks = NSColor(rgb: (0.63, 0.49, 0.33))
     static let wood = NSColor(rgb: (0.5, 0.36, 0.23))
     static let straw = NSColor(rgb: (0.84, 0.73, 0.44))
-    static let villagers = ["a", "b", "c", "d", "e", "f"].flatMap { ["character-male-" + $0, "character-female-" + $0] }
     static var forestTint: [String: NSColor] {
         ["leafsDark": NSColor(rgb: (0.22, 0.45, 0.28)), "woodBarkDark": NSColor(rgb: (0.36, 0.26, 0.18)),
          "woodBark": NSColor(rgb: (0.45, 0.33, 0.22)), "woodInner": NSColor(rgb: (0.72, 0.58, 0.4))]
@@ -296,8 +295,8 @@ struct KingdomLook: Look {
         piece.add(fence.flattenedClone(), as: .pad)
         // Hay and barrels by the caravan yard's gate onto the road, and a lantern at the road's start.
         if let start = site.road.first {
-            let props: [(String, Kit.Pack, Double, SIMD2<Double>)] = [("box-large", .survival, 1.0, SIMD2(0.3, -1.6)), ("barrel", .survival, 0.9, SIMD2(0.6, 1.8)),
-                                                                     ("barrel", .survival, 0.8, SIMD2(0.2, 2.1)), ("lantern", .town, 0.34, SIMD2(-0.2, -1.2))]
+            let props: [(String, Kit.Pack, Double, SIMD2<Double>)] = [("crate", .pirate, 0.3, SIMD2(0.3, -1.6)), ("barrel", .pirate, 0.3, SIMD2(0.6, 1.8)),
+                                                                     ("barrel", .pirate, 0.28, SIMD2(0.2, 2.1)), ("lantern", .town, 0.34, SIMD2(-0.2, -1.2))]
             for (name, pack, scale, at) in props {
                 guard let n = Kit.node(name, from: pack) else { continue }
                 n.scale = SCNVector3(scale, scale, scale)
@@ -667,7 +666,7 @@ struct KingdomLook: Look {
             f.props.append(log)
         }
         for (x, z) in [(Double(xs.min()!) - 0.28, Double(zs.min()!) - 0.28), (Double(xs.max()!) + 0.1, Double(zs.min()!) - 0.3)] {
-            guard let barrel = Kit.node("barrel", from: .survival) else { continue }
+            guard let barrel = Kit.node("barrel", from: .pirate) else { continue }
             barrel.scale = SCNVector3(0.95, 0.95, 0.95)
             barrel.position = v3(o.x + x, 0, o.y + z)
             f.props.append(barrel)
