@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
+        // What each look promises to draw, since a look conforms by shape and can be unhooked in silence.
+        if args.contains("--look-tests") { LookTests.run() }
         if args.contains("--dump-colors") { ColorDump.run() }
         if let i = args.firstIndex(of: "--dump-floor") { FloorDump.run(theme: args.count > i + 1 ? args[i + 1] : "classic") }
         // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
