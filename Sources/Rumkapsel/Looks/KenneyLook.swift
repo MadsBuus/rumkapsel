@@ -19,27 +19,42 @@ struct KenneyLook: Look {
     /// The cape: a lawn, and the sea past the pads, its edge wandering rather than ruled. Every palm, rock
     /// and tuft is keyed to the cell it stands on in its own station's plan, so growing an office moves
     /// nothing that was already there.
+    /// The lawn and the coast, kept between redraws. Sampling the shoreline is the dearest thing this look
+    /// does and the coast does not move when an office opens, so it is laid out to a coarse grid: a fleet
+    /// that grows crosses a boundary now and then rather than cutting the sea afresh every time.
+    private static var coast: (key: String, node: SCNNode)?
+
     func ground(under stations: [Station], into root: SCNNode) {
         guard let fp = fleetFootprint(stations), let cape = Cape(stations) else { return }
-        let lo = SIMD2(cape.shore - 90, fp.lo.y - 46), hi = SIMD2(fp.hi.x + 40, fp.hi.y + 46)
-        let lawn = SCNNode(geometry: SCNPlane(width: hi.x - cape.shore + 8, height: hi.y - lo.y))
-        lawn.geometry!.firstMaterial = lit(Kit.grass)
-        lawn.eulerAngles.x = -.pi / 2
-        lawn.position = v3((cape.shore - 8 + hi.x) / 2, -0.06, (lo.y + hi.y) / 2)
-        root.addChildNode(lawn)
-
-        // One sampling of how far a point lies to landward of the coast, cut at four levels: the open sea,
-        // the shallows over it, the foam at the line itself, and the sand behind it.
-        let land = Shapes.sample(from: lo, to: hi, step: 0.5) { p in p.x - cape.shoreline(p.y) }
-        let bands: [(Shapes.Grid, NSColor, Double)] = [
-            (land.map { _, d in -d }, Kit.water, -0.05),
-            (land.map { _, d in min(-d, 2.6 + d) }, Kit.water.lighter(0.18), -0.045),
-            (land.map { _, d in min(0.5 - d, 0.5 + d) }, NSColor(rgb: (0.93, 0.97, 0.99)), -0.04),
-            (land.map { _, d in min(d, 1.5 - d) }, NSColor(rgb: (0.89, 0.83, 0.66)), -0.043),
-        ]
-        for (grid, color, y) in bands {
-            if let n = Shapes.node(Shapes.fill(grid), color, y: y) { root.addChildNode(n) }
-        }
+        let step = 8.0
+        func down(_ v: Double) -> Double { (v / step).rounded(.down) * step }
+        func up(_ v: Double) -> Double { (v / step).rounded(.up) * step }
+        let lo = SIMD2(down(cape.shore) - 90, down(fp.lo.y) - 46), hi = SIMD2(up(fp.hi.x) + 40, up(fp.hi.y) + 46)
+        let shore = down(cape.shore)
+        let key = "\(lo.x),\(lo.y),\(hi.x),\(hi.y),\(shore)"
+        let coast = Self.coast?.key == key ? Self.coast!.node : {
+            let holder = SCNNode()
+            let lawn = SCNNode(geometry: SCNPlane(width: hi.x - shore + 8, height: hi.y - lo.y))
+            lawn.geometry!.firstMaterial = lit(Kit.grass)
+            lawn.eulerAngles.x = -.pi / 2
+            lawn.position = v3((shore - 8 + hi.x) / 2, -0.06, (lo.y + hi.y) / 2)
+            holder.addChildNode(lawn)
+            // One sampling of how far a point lies to landward of the coast, cut at four levels: the open
+            // sea, the shallows over it, the foam at the line itself, and the sand behind it.
+            let land = Shapes.sample(from: lo, to: hi, step: 0.5) { p in p.x - cape.shoreline(p.y) }
+            let bands: [(Shapes.Grid, NSColor, Double)] = [
+                (land.map { _, d in -d }, Kit.water, -0.05),
+                (land.map { _, d in min(-d, 2.6 + d) }, Kit.water.lighter(0.18), -0.045),
+                (land.map { _, d in min(0.5 - d, 0.5 + d) }, NSColor(rgb: (0.93, 0.97, 0.99)), -0.04),
+                (land.map { _, d in min(d, 1.5 - d) }, NSColor(rgb: (0.89, 0.83, 0.66)), -0.043),
+            ]
+            for (grid, color, y) in bands {
+                if let n = Shapes.node(Shapes.fill(grid), color, y: y) { holder.addChildNode(n) }
+            }
+            Self.coast = (key, holder)
+            return holder
+        }()
+        root.addChildNode(coast)
 
         // Palms in groves behind the sand, scrub in thickets over the lawn, both thinning to bare ground
         // between: what stands on a cell, and how big and which way about, all follow from the cell itself.
@@ -47,12 +62,15 @@ struct KenneyLook: Look {
         let scrub = ["grass", "grass", "grass", "grass", "grass", "grass_large", "grass_large", "grass_large",
                      "plant_bush", "plant_bushLarge", "flower_yellowA", "flower_redA", "rock_smallA", "rock_smallB"]
         for z in Int(lo.y.rounded())...Int(hi.y.rounded()) {
+            // The water's edge runs along the row, so it is worked out once for the row rather than once
+            // for every cell in it: it is two runs of noise and there are two hundred cells to a row.
+            let edge = cape.shoreline(Double(z))
             for x in Int((cape.shore - 2).rounded())...Int(hi.x.rounded()) {
                 let p = SIMD2(Double(x), Double(z))
                 guard let home = cape.nearest(p), !home.claims(p, within: 1.4) else { continue }
                 let cell = home.cell(p)
                 let h = Noise.hash(cell.x, cell.y, seed: home.seed)
-                let d = p.x - cape.shoreline(p.y)
+                let d = p.x - edge
                 guard d > 1.4 else { continue }   // never in the water or on the wet sand
                 let q = SIMD2(Double(cell.x), Double(cell.y))
                 let grove = Noise.fbm(q, scale: 26, seed: 9)
