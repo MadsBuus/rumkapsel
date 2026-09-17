@@ -314,6 +314,95 @@ struct KenneyLook: Look {
         return props
     }
 
+    /// The Cape's own pieces where the classic station's read as another era: a console of the kit's own,
+    /// a shipping container for a crate, a service barrier round a release that is held, and a powered
+    /// flatbed for the pallet.
+    func console(color: NSColor) -> SCNNode? {
+        guard let desk = Kit.prop("desk_computer", scale: 0.7, yaw: .pi, color: color) else { return nil }
+        let n = SCNNode()
+        desk.position = v3(0, -0.5, 0.12)
+        n.addChildNode(desk)
+        let screen = SCNNode(geometry: SCNBox(width: 0.26, height: 0.18, length: 0.02, chamferRadius: 0.01))
+        screen.geometry!.firstMaterial = flat(color)
+        screen.name = "panel"
+        screen.position = v3(0, 0.02, 0.02)
+        n.addChildNode(screen)
+        return n
+    }
+
+    /// A shipping container: corrugated sides, a painted end in the repo's colour, and corner castings.
+    func crate(color: NSColor) -> SCNNode? {
+        let n = SCNNode()
+        let body = SCNNode(geometry: SCNBox(width: 0.5, height: 0.26, length: 0.34, chamferRadius: 0.01))
+        body.geometry!.firstMaterial = lit(color.darker(0.06))
+        body.position = v3(0, 0.13, 0)
+        n.addChildNode(body)
+        for k in -2...2 {
+            let rib = SCNNode(geometry: SCNBox(width: 0.02, height: 0.24, length: 0.35, chamferRadius: 0))
+            rib.geometry!.firstMaterial = lit(color.lighter(0.1))
+            rib.position = v3(Double(k) * 0.1, 0.13, 0)
+            n.addChildNode(rib)
+        }
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let casting = SCNNode(geometry: SCNBox(width: 0.07, height: 0.07, length: 0.07, chamferRadius: 0))
+            casting.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.74, 0.78)))
+            casting.position = v3(sx * 0.215, 0.235, sz * 0.135)
+            n.addChildNode(casting)
+        }
+        return n
+    }
+
+    /// A held release is fenced with service rails and a lamp at each post, rather than tape.
+    func hold(tall: Bool) -> SCNNode? {
+        let n = SCNNode()
+        let radius = 0.8
+        for k in 0..<4 {
+            let a = Double(k) / 4 * 2 * .pi + .pi / 4
+            let post = SCNNode(geometry: SCNBox(width: 0.06, height: 0.4, length: 0.06, chamferRadius: 0))
+            post.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.74, 0.78)))
+            post.position = v3(cos(a) * radius, 0.2, sin(a) * radius)
+            n.addChildNode(post)
+            let lamp = SCNNode(geometry: SCNBox(width: 0.08, height: 0.05, length: 0.08, chamferRadius: 0.01))
+            lamp.geometry!.firstMaterial = flat(NSColor(rgb: (0.98, 0.76, 0.2)))
+            lamp.position = v3(cos(a) * radius, 0.44, sin(a) * radius)
+            n.addChildNode(lamp)
+            let b = Double(k + 1) / 4 * 2 * .pi + .pi / 4
+            let from = SIMD2(cos(a) * radius, sin(a) * radius), to = SIMD2(cos(b) * radius, sin(b) * radius)
+            let mid = (from + to) / 2
+            for y in [0.18, 0.32] {
+                let rail = SCNNode(geometry: SCNBox(width: simd_distance(from, to), height: 0.03, length: 0.03, chamferRadius: 0))
+                rail.geometry!.firstMaterial = lit(NSColor(rgb: (0.84, 0.86, 0.88)))
+                rail.eulerAngles.y = atan2(-(to.y - from.y), to.x - from.x)
+                rail.position = v3(mid.x, y, mid.y)
+                n.addChildNode(rail)
+            }
+        }
+        return n
+    }
+
+    /// A powered flatbed: a plated deck on a chassis with a light bar, its bed where the classic one's is.
+    func pallet(color: NSColor) -> SCNNode? {
+        let n = SCNNode()
+        let deck = SCNNode(geometry: SCNBox(width: Props.palletWidth, height: 0.05, length: Props.palletDepth, chamferRadius: 0.01))
+        deck.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.65, 0.7)))
+        n.addChildNode(deck)
+        let chassis = SCNNode(geometry: SCNBox(width: Props.palletWidth - 0.14, height: 0.07, length: Props.palletDepth - 0.14, chamferRadius: 0))
+        chassis.geometry!.firstMaterial = lit(NSColor(rgb: (0.32, 0.35, 0.42)))
+        chassis.position = v3(0, -0.06, 0)
+        n.addChildNode(chassis)
+        for side in [-1.0, 1.0] {
+            let stripe = SCNNode(geometry: SCNBox(width: Props.palletWidth - 0.06, height: 0.02, length: 0.04, chamferRadius: 0))
+            stripe.geometry!.firstMaterial = flat(color)
+            stripe.position = v3(0, 0.03, side * (Props.palletDepth / 2 - 0.03))
+            n.addChildNode(stripe)
+        }
+        let bar = SCNNode(geometry: SCNBox(width: 0.2, height: 0.03, length: 0.05, chamferRadius: 0))
+        bar.geometry!.firstMaterial = flat(NSColor(rgb: (0.98, 0.76, 0.2)))
+        bar.position = v3(Props.palletWidth / 2 - 0.14, 0.05, 0)
+        n.addChildNode(bar)
+        return n
+    }
+
     /// A computer desk against an outer wall of the office's farthest cell from the door, its screen
     /// turned into the room, so whoever stands on that cell stands at it.
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
