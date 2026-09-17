@@ -667,7 +667,7 @@ struct KingdomLook: Look {
         }
         for (x, z) in [(Double(xs.min()!) - 0.28, Double(zs.min()!) - 0.28), (Double(xs.max()!) + 0.1, Double(zs.min()!) - 0.3)] {
             guard let barrel = Kit.node("barrel", from: .pirate) else { continue }
-            barrel.scale = SCNVector3(0.95, 0.95, 0.95)
+            barrel.scale = SCNVector3(0.3, 0.3, 0.3)
             barrel.position = v3(o.x + x, 0, o.y + z)
             f.props.append(barrel)
         }
@@ -805,8 +805,10 @@ struct KingdomLook: Look {
         case .tablet:
             let scroll = SCNNode(geometry: SCNBox(width: 0.17, height: 0.006, length: 0.12, chamferRadius: 0))
             scroll.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.9, 0.76)))
-            scroll.position = v3(0, h * 0.28, d / 2 + 0.09)
-            scroll.eulerAngles.x = 0.35
+            // The same hang as the classic slab: the near edge tucked at the belly and the far edge lifted,
+            // so the writing faces back at the reader. A positive pitch drops the far edge and reads wrong.
+            scroll.position = v3(0, h * 0.26, d / 2 + 0.09)
+            scroll.eulerAngles.x = -0.35
             for z in [-0.065, 0.065] {
                 let rod = SCNNode(geometry: faceted(SCNCylinder(radius: 0.014, height: 0.21), 6))
                 rod.geometry!.firstMaterial = lit(Self.wood)
