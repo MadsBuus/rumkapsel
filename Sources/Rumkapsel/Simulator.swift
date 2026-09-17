@@ -281,8 +281,10 @@ final class SimulatorModel: ObservableObject {
         defer { github.injectSilently = false; station.simulateGitHub() }
         for r in repos {
             let sent = launches.filter { $0.repo == r }.map(\.pr)
-            var open = offices.filter { $0.repo == r && $0.owner == .teammate && $0.prOpen }.map {
-                OpenPR(number: $0.number, title: $0.title, author: $0.who, isBot: false, branch: $0.branch,
+            // `gh pr list` returns everyone's, your own included: that is how the station learns whose
+            // work each crate is, so your own open pull requests belong in the answer too.
+            var open = offices.filter { $0.repo == r && ($0.owner == .teammate ? $0.prOpen : $0.pull?.state == "OPEN") }.map {
+                OpenPR(number: $0.number, title: $0.title, author: $0.owner == .me ? "me" : $0.who, isBot: false, branch: $0.branch,
                        url: "https://example.invalid/\(r)/\($0.number)", createdAt: $0.startedAt)
             }
             open += (botPRs[r] ?? []).map {

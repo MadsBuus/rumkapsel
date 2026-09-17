@@ -145,6 +145,13 @@ final class World {
 
     func crewName(_ login: String) -> String { ConfigStore.shared.current.crewNames[login] ?? login }
 
+    /// The issue an office is for, where its key says so: `task:repo#128`. A branch with no issue behind
+    /// it has none.
+    func taskNumber(_ room: Room) -> Int? {
+        guard room.key.hasPrefix("task:"), let hash = room.key.lastIndex(of: "#") else { return nil }
+        return Int(room.key[room.key.index(after: hash)...])
+    }
+
     /// The office key for a teammate's branch: the same key a local checkout of it would get.
     func crewKey(repo: String, branch: String) -> String { Home.from(repo: repo, branch: branch, cwd: "").key }
 
@@ -944,6 +951,8 @@ final class World {
         let repo: String; let number: Int; let index: Int; let cleared: Bool
         /// A bot's pull request, of unknown origin: grey, whichever yard it stands in.
         let alien: Bool
+        /// Your own work: strapped in white, so your crates pick out of a row of them.
+        var mine = false
         let group: Int; let column: Int; let level: Int
         let cell: Cell; let pos: SIMD3<Double>; let yaw: Double
         /// Not standing here: on its way in, its place spoken for. The rows do not draw it and nothing
@@ -1032,7 +1041,8 @@ final class World {
                 }
             }
             let pos = SIMD3(station.offset.x + x, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
-            out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien, group: s.group,
+            out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,
+                                mine: !e.crate.alien && github.isMine(repo: e.crate.repo, number: e.crate.number), group: s.group,
                                 column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
         }
         return out
@@ -1124,7 +1134,7 @@ final class World {
         while level > 0 && !taken.contains(level - 1) { level -= 1 }
         while taken.contains(level) { level += 1 }
         guard level != slot.level else { return slot }
-        return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, alien: slot.alien,
+        return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, alien: slot.alien, mine: slot.mine,
                         group: slot.group, column: slot.column, level: level, cell: slot.cell,
                         pos: SIMD3(slot.pos.x, Double(level) * 0.34, slot.pos.z), yaw: slot.yaw, carried: slot.carried)
     }

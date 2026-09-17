@@ -134,12 +134,17 @@ final class Room {
     var color: RGB
     var cells: [Cell]
     var lastActive: Date
+    /// When this office first stood, kept across launches: how old the work in it is. A room restored
+    /// from a save older than this was written takes the last it was worked in, which is the most that
+    /// save can say.
+    var openedAt: Date
     var branch: String?
     var repoRoot: String?
     var worktree: String?
 
-    init(key: String, name: String, repo: String?, color: RGB, cells: [Cell], lastActive: Date) {
+    init(key: String, name: String, repo: String?, color: RGB, cells: [Cell], lastActive: Date, openedAt: Date? = nil) {
         self.key = key; self.name = name; self.repo = repo; self.color = color; self.cells = cells; self.lastActive = lastActive
+        self.openedAt = openedAt ?? min(lastActive, Date())
     }
 }
 
@@ -431,13 +436,13 @@ final class Station {
 
 
     /// Creates a room if missing. Returns true when the layout changed.
-    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
+    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, openedAt: Date? = nil, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
         let cells = preferredCells.flatMap { adopt($0) ? $0 : nil } ?? takeSlot()
-        rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive)
+        rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive, openedAt: openedAt)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
         return true
@@ -552,7 +557,7 @@ final class Station {
     /// Renames a room in place, keeping its floor.
     func renameRoom(from old: String, to new: String, name: String) {
         guard let r = rooms[old], rooms[new] == nil else { return }
-        let nr = Room(key: new, name: name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
+        let nr = Room(key: new, name: name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive, openedAt: r.openedAt)
         nr.branch = r.branch; nr.repoRoot = r.repoRoot; nr.worktree = r.worktree
         rooms[old] = nil
         rooms[new] = nr
@@ -627,7 +632,7 @@ final class Station {
         var kept: [(Room, [Cell])] = []
         for (key, cells) in disputed { if let r = rooms[key] { kept.append((r, cells)); removeRoom(key: key) } }
         for (r, cells) in kept.sorted(by: { $0.0.key < $1.0.key }) {
-            ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, preferredCells: cells)
+            ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, openedAt: r.openedAt, preferredCells: cells)
             if let n = rooms[r.key] { n.branch = r.branch; n.repoRoot = r.repoRoot; n.worktree = r.worktree }
         }
         return true
@@ -807,11 +812,16 @@ final class Station {
         var stored: Int?
         var ledger: Ledger?
     }
-    struct SavedRoom: Codable { var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date; var worktree: String?; var branch: String?; var repoRoot: String? }
+    struct SavedRoom: Codable {
+        var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date
+        var worktree: String?; var branch: String?; var repoRoot: String?
+        var openedAt: Date? = nil
+    }
 
     var saved: Saved {
         Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
-            SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree, branch: $0.branch, repoRoot: $0.repoRoot)
+            SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree,
+                      branch: $0.branch, repoRoot: $0.repoRoot, openedAt: $0.openedAt)
         }, stored: storedBoxes, ledger: ledger)
     }
 
@@ -821,7 +831,7 @@ final class Station {
         ledger.forgetTransit()   // nobody was carrying anything when this launched
         for (key, r) in s.rooms where key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
-            let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive)
+            let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive, openedAt: r.openedAt ?? r.lastActive)
             room.worktree = r.worktree; room.branch = r.branch; room.repoRoot = r.repoRoot
             rooms[key] = room
             for c in r.cells { occupied[c] = key }

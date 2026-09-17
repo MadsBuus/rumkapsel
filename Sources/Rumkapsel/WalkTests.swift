@@ -61,6 +61,38 @@ enum WalkTests {
             expect(flips == 2, "one pass: in once, out once, got \(flips) changes")
         }
 
+        test("somebody standing where the walker is going is given up on, not passed the whole way") {
+            let m = body("a", 0, 0), o = body("b", 4.1, 0)   // standing on the far end of a long walk
+            m.path = [SIMD2(1, 0), SIMD2(2, 0), SIMD2(3, 0), SIMD2(4, 0)]
+            var sideways = 0.0
+            for _ in 0..<2000 where !m.path.isEmpty {
+                let was = m.pos
+                _ = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o])
+                if m.lean != .zero { sideways += ((m.pos.x - was.x) * (m.pos.x - was.x) + (m.pos.y - was.y) * (m.pos.y - was.y)).squareRoot() }
+            }
+            expect(m.path.isEmpty, "arrived: \(m.pos)")
+            expect(sideways < Walk.budget + 0.1, "gave up on the pass rather than crawling the walk sideways: \(sideways)")
+        }
+
+        test("somebody standing aside is not in the way: no turn, no slowing down") {
+            let m = body("a", 0, 0), o = body("b", 0.5, 0.8)   // a tile off the line
+            m.path = [SIMD2(2, 0)]
+            var near: Body?
+            for _ in 0..<20 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) ?? near }
+            expect(near == nil && m.lean == .zero, "walked straight past: lean \(m.lean)")
+        }
+
+        test("one given up on is left alone: the turn does not begin again a step later") {
+            let m = body("a", 0, 0), o = body("b", 4.1, 0)
+            m.path = [SIMD2(1, 0), SIMD2(2, 0), SIMD2(3, 0), SIMD2(4, 0)]
+            var states: [Bool] = []
+            for _ in 0..<2000 where !m.path.isEmpty {
+                states.append(Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) != nil)
+            }
+            let flips = zip(states, states.dropFirst()).filter { $0 != $1 }.count
+            expect(flips <= 2, "in once, out once, got \(flips) changes")
+        }
+
         say(failures == 0 ? "walk: all passed" : "walk: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

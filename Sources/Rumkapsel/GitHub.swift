@@ -237,7 +237,18 @@ final class GitHubResolver {
             let changed = openPRs[repoRoot]?.0 != found
             openPRs[repoRoot] = (found, Date())
             let first = answeredLive.insert(repoRoot).inserted
+            // Who is behind each one and what it is called: the list is where that is said plainest, and
+            // it stops saying it the moment the pull request merges, which is when the crate turns up.
+            var learned = false
+            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+                for pr in found where !pr.isBot {
+                    if note(repo: repo, number: pr.number, title: pr.title, author: pr.author, at: pr.createdAt) { learned = true }
+                    if let issue = tasks[repo]?[pr.number] { if note(repo: repo, number: issue, author: pr.author) { learned = true } }
+                }
+            }
+            let board = learned ? project : nil
             lock.unlock()
+            if let (items, at) = board { saveBoard(items, at: at) }
             if changed || first { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
@@ -309,7 +320,10 @@ final class GitHubResolver {
         let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
         return dir.appendingPathComponent("board.json")
     }
-    private struct SavedBoard: Codable { var items: [ProjectItem]; var at: Date; var owners: [String: String]?; var tasks: [String: [String: Int]]?; var yards: [String]? }
+    private struct SavedBoard: Codable {
+        var items: [ProjectItem]; var at: Date; var owners: [String: String]?; var tasks: [String: [String: Int]]?; var yards: [String]?
+        var works: [String: [String: WorkNote]]? = nil
+    }
     private static func loadBoardFile() -> SavedBoard? {
         guard let data = try? Data(contentsOf: boardURL) else { return nil }
         return try? JSONDecoder().decode(SavedBoard.self, from: data)
@@ -319,7 +333,10 @@ final class GitHubResolver {
         if frozen { return }
         let saved = SavedBoard(items: items, at: at, owners: owners,
                                tasks: tasks.mapValues { Dictionary(uniqueKeysWithValues: $0.map { (String($0.key), $0.value) }) },
-                               yards: boardYards.sorted())
+                               yards: boardYards.sorted(),
+                               // Numbers only ever climb, so the newest few hundred per repository are the
+                               // ones any crate can still be about; older notes are dropped rather than kept for ever.
+                               works: works.mapValues { Dictionary(uniqueKeysWithValues: $0.sorted { $0.key > $1.key }.prefix(500).map { (String($0.key), $0.value) }) })
         if let data = try? JSONEncoder().encode(saved) { try? data.write(to: GitHubResolver.boardURL) }
     }
 
@@ -330,6 +347,79 @@ final class GitHubResolver {
     /// and from the board's links, and kept with the board, since the board forgets a link on merge.
     private var tasks: [String: [Int: Int]] = (GitHubResolver.loadBoardFile()?.tasks ?? [:])
         .mapValues { Dictionary(uniqueKeysWithValues: $0.compactMap { k, v in Int(k).map { ($0, v) } }) }
+
+    // MARK: who and what
+
+    /// What is known about one numbered thing in a repository: what it is called, whose work it is and
+    /// when it first showed up. Every source knows a piece of this for a while and then forgets it — a
+    /// pull request leaves the open list on merge, the feed scrolls past, the board drops the link — so
+    /// what they say is written down here and kept with the board.
+    struct WorkNote: Codable, Equatable {
+        var title = ""
+        var author: String?
+        var at: Date?
+        var isEmpty: Bool { title.isEmpty && author == nil && at == nil }
+    }
+
+    /// By repository name, then number: a pull request's number and, where a pull request is done for an
+    /// issue, that issue's number too, since the crate on the floor is the issue where one is known.
+    private var works: [String: [Int: WorkNote]] = (GitHubResolver.loadBoardFile()?.works ?? [:])
+        .mapValues { Dictionary(uniqueKeysWithValues: $0.compactMap { k, v in Int(k).map { ($0, v) } }) }
+
+    /// Writes down what one source just said, without losing what another one knew: the first title, the
+    /// first author and the earliest time stand, since they are the ones nearest the work's own beginning.
+    /// Called with the lock held. True when anything was new, so the caller knows to save.
+    @discardableResult
+    private func note(repo: String, number: Int, title: String? = nil, author: String? = nil, at: Date? = nil) -> Bool {
+        guard !repo.isEmpty, number > 0 else { return false }
+        var w = works[repo]?[number] ?? WorkNote()
+        let before = w
+        if w.title.isEmpty, let title, !title.isEmpty { w.title = title }
+        if w.author == nil, let author, !author.isEmpty, author != "?" { w.author = author }
+        if let at, w.at == nil || at < w.at! { w.at = at }
+        guard w != before, !w.isEmpty else { return false }
+        works[repo, default: [:]][number] = w
+        return true
+    }
+
+    /// What is known about a numbered thing on the floor: the board's word first, since a crate is an
+    /// issue where the board tracks one, then what the pull requests said. Nil when nothing is known.
+    func work(repo: String, number: Int) -> WorkNote? {
+        lock.lock(); defer { lock.unlock() }
+        var w = works[repo]?[number] ?? WorkNote()
+        if let item = boardItem(repo: repo, number: number) {
+            if w.title.isEmpty { w.title = item.title }
+            if w.author == nil { w.author = item.assignees.first }
+        }
+        // An issue nobody wrote down: the work done for it was somebody's, and that is whose crate it is.
+        if w.title.isEmpty || w.author == nil {
+            for pull in (tasks[repo] ?? [:]).filter({ $0.value == number }).keys.sorted() {
+                guard let p = works[repo]?[pull] else { continue }
+                if w.title.isEmpty { w.title = p.title }
+                if w.author == nil { w.author = p.author }
+                if let a = p.at, w.at == nil || a < w.at! { w.at = a }
+            }
+        }
+        return w.isEmpty ? nil : w
+    }
+
+    /// The board's items by repository and number. A row of crates asks this one by one on every redraw,
+    /// so the list is turned into a lookup once per board read rather than walked each time.
+    private var boardIndex: [String: ProjectItem] = [:]
+    private var boardIndexAt: Date?
+    private func boardItem(repo: String, number: Int) -> ProjectItem? {
+        if boardIndexAt != project?.1 {
+            boardIndex = Dictionary((project?.0 ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
+            boardIndexAt = project?.1
+        }
+        return boardIndex["\(repo)#\(number)"]
+    }
+
+    /// Whether a numbered crate is your own work, as far as anything known says so.
+    func isMine(repo: String, number: Int) -> Bool {
+        guard let me = myLogin() else { return false }
+        return work(repo: repo, number: number)?.author == me
+    }
 
     private static func closes(_ o: [String: Any]) -> [Int] {
         ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
@@ -345,6 +435,22 @@ final class GitHubResolver {
         let snapshot = project
         lock.unlock()
         if known != issue, let (items, at) = snapshot { saveBoard(items, at: at) }
+    }
+
+    /// Who wrote a pull request and when, from any answer that carries them: written down for the crate
+    /// its merge will become, and for the issue it is done for, since a crate is the issue where the
+    /// board tracks one. Called without the lock.
+    private func noteAuthor(_ o: [String: Any], number: Int, repoRoot: String, issue: Int?) {
+        let login = ((o["author"] as? [String: Any])?["login"] as? String) ?? ""
+        let at = (o["createdAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+        lock.lock()
+        guard let owner = owners[repoRoot] else { lock.unlock(); return }
+        let repo = String(owner.split(separator: "/").last ?? "")
+        var learned = note(repo: repo, number: number, title: o["title"] as? String, author: login, at: at)
+        if let issue { learned = note(repo: repo, number: issue, author: login) || learned }
+        let snapshot = learned ? project : nil
+        lock.unlock()
+        if let (items, at) = snapshot { saveBoard(items, at: at) }
     }
 
     /// The task a pull request's work is for, if known.
@@ -710,7 +816,18 @@ final class GitHubResolver {
             let known = feeds[repoRoot]?.0
             let changed = known != events
             feeds[repoRoot] = (events, Date())
+            // The feed is the only source that still names the author of a pull request after it merged.
+            var learned = false
+            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+                for e in events where !e.isBot {
+                    guard let n = e.prNumber else { continue }
+                    let opened = e.kind == "pr_open" || e.kind == "issue_open"
+                    if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
+                }
+            }
+            let board = learned ? project : nil
             lock.unlock()
+            if let (items, at) = board { saveBoard(items, at: at) }
             // The doorbell: what the feed has that it did not have last time names what to ask about.
             if let known {
                 let newest = known.map(\.at).max() ?? .distantPast
@@ -873,10 +990,12 @@ final class GitHubResolver {
                     exact = true
                 }
             }
+            var merged: [Int: String] = [:]   // who merged work into the trunk: whose crate each one is
             if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", trunk, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
+                    if let login = (o["author"] as? [String: Any])?["login"] as? String { merged[n] = login }
                     // A bot's merge ships like anyone's: its parcel counts in the yard, grey, and rides the rocket.
                     if m < floor { continue }
                     if let lp = lastProduction, m <= lp { continue }                 // already shipped
@@ -885,6 +1004,9 @@ final class GitHubResolver {
                 }
             }
             lock.lock()
+            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+                for (n, login) in merged { note(repo: repo, number: n, author: login) }
+            }
             let previous = releases[repoRoot]?.0 ?? []
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
@@ -983,7 +1105,7 @@ final class GitHubResolver {
         trace("ask pull \(key)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove(key); lock.unlock() }
-            guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,closingIssuesReferences"], cwd: repoRoot),
+            guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,closingIssuesReferences"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
             var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
                                  state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
@@ -991,6 +1113,7 @@ final class GitHubResolver {
             pr.closes = GitHubResolver.closes(o)
             lock.lock(); pullsByNumber[key] = (pr, Date()); lock.unlock()
             noteTask(pr, repoRoot: repoRoot)
+            noteAuthor(o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
             DispatchQueue.main.async { self.onUpdate?() }
         }
     }
@@ -1097,9 +1220,10 @@ final class GitHubResolver {
                 pr.checks = checks
                 pr.closes = GitHubResolver.closes(o)
                 noteTask(pr, repoRoot: repoRoot)
+                noteAuthor(o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
                 return pr
             }
-            let fields = "number,title,state,reviewDecision,isDraft,url,statusCheckRollup,closingIssuesReferences"
+            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,statusCheckRollup,closingIssuesReferences"
             var answered = false   // a failed call is not "no pull request": keep what we knew
             if let out = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {

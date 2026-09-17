@@ -28,7 +28,9 @@ yet. The crate folds open and the office unfolds from it, tile by tile away from
 the plot is filled, then the name fades in. Until that moment there is nothing on the plot. Closing
 is the reverse: whoever is inside steps out to the doorway, the name fades, the floor rolls up tile
 by tile toward the door into a hex, and the hex drops away through the floor. Offices belong to whoever has the branch checked out; teammates' offices are darker
-and carry their name on the floor, mine carry mine. The **dorm**, **lounge** and **bath** stand
+and carry their name on the floor, mine carry mine. An office's hover says how old the work in it is
+and, when it has gone quiet, for how long: the age counts from the pull request or issue where GitHub
+says when that began, otherwise from when the office first stood here. The **dorm**, **lounge** and **bath** stand
 together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
 since real stations mandate both.
 
@@ -39,7 +41,9 @@ since real stations mandate both.
 - square strapped crate: a pull request. The plate on its side is a light: blinking while checks run,
   red when they fail, green when all is well; the whole crate turns red when the PR is closed unmerged.
   In storage and on the deck the light is off; a tested crate on the deck shows green and a sticker on
-  the lid. Storage looks a little unorganised, the deck ordered.
+  the lid, put on as it comes off the row rather than when it is set down again. A crate of your own
+  work is strapped in white, so yours pick out of a row of everyone's. Storage looks a little
+  unorganised, the deck ordered.
 - pyramid: the message a session is working on, one per session, on the cell nearest the door. Messages
   queued behind it stand in a row inward, translucent. A new message shrinks the old cone away; a session
   that waits for you has none.
@@ -87,7 +91,10 @@ since real stations mandate both.
   A walker who finds someone in its way, standing or coming, drifts a third of a tile to its own
   right, passes, and drifts back onto its line; the other does the same, so two meeting
   head-on pass without either stopping or planning again, in a doorway as anywhere. Nobody ever
-  stops for anybody: where the floor leaves no side to step to, two may overlap for a moment. Someone
+  stops for anybody: where the floor leaves no side to step to, two may overlap for a moment. The
+  pass is for somebody in the way, so somebody standing well off the line is walked past squarely,
+  and a pass that never resolves — somebody standing where the walker is going, somebody keeping
+  station alongside — is given up on after a stride or two rather than held the whole walk. Someone
   on a couch or in bed is on the furniture, off the walkway, and in nobody's way. Nobody settles in
   a doorway. Every timing on the station runs on the station clock, so holding space speeds all of
   it up alike.
@@ -98,7 +105,8 @@ since real stations mandate both.
 - A closed issue is finished work, whatever column the board left it in: it never makes an office.
 - An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue
   the pull request closes, the pull request's own number when it closes none. One crate per task,
-  however many pull requests it took; the crate's hover lists them, and its click opens the task.
+  however many pull requests it took; the crate's hover names the task, what it is called and whose
+  work it is, and its click opens the task.
 - Every repository has its own way to production, and nobody sets it up. It is read from what the
   repository did: the branch most work merges into is the trunk, the branch releases end in is
   production, and a branch released onward into production is staging. Where there is no history, the

@@ -239,12 +239,13 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
         // 7. packages
         do {
-            let p = tile(i, "package: open / merged / failing"); i += 1
+            let p = tile(i, "package: open / merged / failing / yours / tested"); i += 1
             roomFloor(at: p, color: pink)
-            let bands = [NSColor(rgb: (0.4, 0.82, 0.45)), NSColor(rgb: (0.6, 0.4, 0.9)), NSColor(rgb: (0.4, 0.82, 0.45))]
+            let bands = [NSColor(rgb: (0.4, 0.82, 0.45)), NSColor(rgb: (0.6, 0.4, 0.9)), NSColor(rgb: (0.4, 0.82, 0.45)),
+                         NSColor(rgb: (0.4, 0.82, 0.45)), NSColor(rgb: (0.45, 0.95, 0.5))]
             for (k, band) in bands.enumerated() {
-                let pkg = Props.package(color: pink.lighter(0.1), band: band, size: 0.5)
-                pkg.position = v3(p.x - 0.8 + Double(k) * 0.8, 0, p.y)
+                let pkg = Props.package(color: pink.lighter(0.1), band: band, size: 0.42, approved: k == 4, mine: k == 3)
+                pkg.position = v3(p.x - 1.16 + Double(k) * 0.58, 0, p.y)
                 if k == 2 {
                     let shell = SCNNode(geometry: SCNBox(width: 0.6, height: 0.5, length: 0.6, chamferRadius: 0)); shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2))); shell.opacity = 0.2
                     shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)]))); pkg.addChildNode(shell)

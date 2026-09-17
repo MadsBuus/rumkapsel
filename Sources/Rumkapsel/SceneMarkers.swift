@@ -66,6 +66,49 @@ extension StationController {
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 
+    /// Where an office's crate stands: a tile of its own, clear of the floor writing and of any cone in
+    /// the office, as far from the door as the office allows. Chosen once and kept, so a later redraw
+    /// never moves a crate somebody has already looked at; it is asked for again only if the office no
+    /// longer has that tile.
+    func packageCell(_ station: Station, _ room: Room) -> Cell {
+        let key = roomKey(station, room)
+        if let held = packageCells[key], room.cells.contains(held) { return held }
+        let cells = farCells(station, room)
+        var coned: Set<Cell> = []
+        for m in minions.values where m.station == station.name {
+            for n in m.pyramids + m.queuedCones {
+                let x = Double(n.worldPosition.x) - station.offset.x
+                let z = Double(n.worldPosition.z) - station.offset.y
+                coned.insert(Cell(x: Int(x.rounded()), y: Int(z.rounded())))
+            }
+        }
+        let cell = cells.first { !coned.contains($0) } ?? cells.first!
+        packageCells[key] = cell
+        return cell
+    }
+
+    /// A standing crate told what its pull request says now: the plate's colour and its blink, and the
+    /// shell round a failing one. Everything else about a crate is settled when it is built.
+    private func relight(_ pkg: SCNNode, light: NSColor, blink: Bool, failing: Bool, size: Double) {
+        if let plate = pkg.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
+            plate.geometry?.firstMaterial = flat(light)
+            let blinking = plate.action(forKey: "blink") != nil
+            if blink && !blinking { plate.runAction(Props.blinking(), forKey: "blink") }
+            if !blink && blinking { plate.removeAction(forKey: "blink"); plate.opacity = 1 }
+        }
+        let shell = pkg.childNodes.first { $0.geometry?.name == Props.shellName }
+        if failing, shell == nil {
+            let s = SCNNode(geometry: SCNBox(width: size * 1.2, height: size, length: size * 1.2, chamferRadius: 0))
+            s.geometry!.name = Props.shellName
+            s.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
+            s.opacity = 0.2
+            s.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
+            pkg.addChildNode(s)
+        } else if !failing, let s = shell {
+            s.removeFromParentNode()
+        }
+    }
+
     /// The yard reconciliation: the source's word against what stands on the floor, per repository.
     /// What can be carried is handed to carriers; counts are snapped only for the rest. It runs from
     /// the tick and before every redraw, never from the drawing itself: drawing decides nothing.
@@ -151,38 +194,48 @@ extension StationController {
                     "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(world.isDusty(room))",
                 ]).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
+                if packaged {
+                    // One crate for the pull request, and it stands for as long as the pull request does.
+                    // Commits landing, checks turning, a review coming in only re-light the crate that is
+                    // already there: it is never taken away and built again, or it would blink out of the
+                    // office every time GitHub answered, and the office would look packed twice over.
+                    let cell = packageCell(station, room)
+                    let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
+                    let closed = pr?.state == "CLOSED"
+                    let checks = pr?.checks ?? ""
+                    let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
+                        : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
+                    let blink = checks == "pending" && !closed
+                    // What a standing crate cannot be re-lit into, and what it can.
+                    let built = "\(closed)|\(room.color.r),\(room.color.g),\(room.color.b)"
+                    signatures[key] = "package"
+                    var pkg = packages[key]
+                    if let p = pkg, p.parent == nil || packageBuilt[key] != built { p.removeFromParentNode(); packages[key] = nil; pkg = nil }
+                    if pkg == nil {
+                        let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink)
+                        p.name = "box:" + key
+                        markerRoot.addChildNode(p)
+                        packages[key] = p
+                        packageBuilt[key] = built
+                        pkg = p
+                    }
+                    guard let p = pkg else { continue }
+                    // The cubes it was packed from go; the crate itself stays.
+                    drawn.filter { $0 !== p }.forEach { $0.removeFromParentNode() }
+                    let at = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
+                    if p.position.x != at.x || p.position.z != at.z { p.position = at }
+                    relight(p, light: light, blink: blink, failing: failing, size: size)
+                    p.opacity = undelivered.contains(key) || packing.contains(key) ? 0 : 1
+                    keep.insert(ObjectIdentifier(p))
+                    lastBoxCount[key] = 1
+                    continue
+                }
                 signatures[key] = signature
                 if markerSignatures[key] == signature, !drawn.isEmpty {
                     drawn.forEach { keep.insert(ObjectIdentifier($0)) }
                     continue
                 }
                 drawn.forEach { $0.removeFromParentNode() }
-                if packaged {
-                    // One crate for the pull request. Its plate is a light: blinking while checks run, red when they
-                    // fail, green when all is well; a closed one is red all over.
-                    let cell = cells.first!
-                    let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
-                    let closed = pr?.state == "CLOSED"
-                    let checks = pr?.checks ?? ""
-                    let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
-                        : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
-                    let pkg = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size,
-                                            blink: checks == "pending" && !closed)
-                    pkg.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
-                    pkg.name = "box:" + key
-                    pkg.opacity = undelivered.contains(key) || packing.contains(key) ? 0 : 1
-                    if failing {
-                        let shell = SCNNode(geometry: SCNBox(width: size * 1.2, height: size, length: size * 1.2, chamferRadius: 0))
-                        shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
-                        shell.opacity = 0.2
-                        shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
-                        pkg.addChildNode(shell)
-                    }
-                    markerRoot.addChildNode(pkg)
-                    keep.insert(ObjectIdentifier(pkg))
-                    lastBoxCount[key] = 1
-                    continue
-                }
                 // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = stableHash(key) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
@@ -266,7 +319,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "")
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -296,7 +349,7 @@ extension StationController {
                     let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien)
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien, mine: slot.mine)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name
@@ -315,6 +368,8 @@ extension StationController {
         // Whatever the floor no longer calls for goes. A crate waiting for its carrier stays: it is
         // spoken for, and the layout has already left its slot alone.
         for n in markerRoot.childNodes where !keep.contains(ObjectIdentifier(n)) && n.name != "haul" { n.removeFromParentNode() }
+        packages = packages.filter { $0.value.parent != nil }
+        packageBuilt = packageBuilt.filter { packages[$0.key] != nil }
         markerSignatures = signatures
         refreshObstacles()
     }
