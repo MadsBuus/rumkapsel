@@ -20,7 +20,9 @@ extension StationController {
             ("madplan", "\(home)/dev/madplan", .thinking, "main"),
         ]
         for (i, a) in acts.enumerated() {
-            let stationName = a.1.contains("/conductor/") ? "work" : "private"
+            // With the private station turned off there is one station, and everything lands on it.
+            let stationName = a.1.contains("/conductor/") && ConfigStore.shared.current.showPrivate ? "work"
+                            : ConfigStore.shared.current.showPrivate ? "private" : "work"
             let station = fleet.station(stationName)
             let h = Home.from(repo: a.0, branch: a.3, cwd: a.1)
             station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())

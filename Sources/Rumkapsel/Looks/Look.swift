@@ -83,8 +83,9 @@ protocol Look {
     func tileDetail(_ tile: Tile) -> SCNNode?
     /// Recolour a floor tile and whatever the look hung on it.
     func tint(tile: SCNNode, _ color: NSColor)
-    /// A prop for an office, in the station's own cells.
-    func dress(office room: Room, in station: Station) -> SCNNode?
+    /// A prop for an office, in the station's own cells. `sign` is what the scene would have written on the
+    /// floor, for a look that marks an office some other way.
+    func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode?
 
     // MARK: people, and anything else
 
@@ -94,6 +95,19 @@ protocol Look {
     func pose(figure: SCNNode, height: Double, torso: Double)
     /// Props for a station, in the station's own cells, in spots nobody stands on.
     func dress(station: Station) -> [SCNNode]
+    /// The panel a pallet is ordered at, or nil for the classic console.
+    func console(color: NSColor) -> SCNNode?
+    /// A crate of work, or nil for the classic crate. It is set down on a floor tile and stacked on its own
+    /// kind, so it should be about a tile wide and stand on the origin.
+    func crate(color: NSColor) -> SCNNode?
+    /// What stands round a release that is up but not cleared to go, or nil for the classic tape barrier.
+    func hold(tall: Bool) -> SCNNode?
+    /// The float that carries crates between the store and the deck, or nil for the classic pallet. The
+    /// scene sets crates into it by `Props.palletSlot`, so its bed must stay where the classic one's is.
+    func pallet(color: NSColor) -> SCNNode?
+    /// Whether the station's names are written on its floor. A look that says no carries them itself: the
+    /// Kingdom writes an office's on its banner instead.
+    var writesOnFloor: Bool { get }
     /// What a minion holds for `tool`, in its body's frame (`height` tall, `depth` deep), or nil for the classic
     /// piece. The scene swings a child named "swing" as it swings the hammer, turns one named "aim" as it turns
     /// the torch, blinks one named "tip", and lights "wandTip" and "wandLight" while a crate is in the air.
@@ -138,11 +152,16 @@ extension Look {
     func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
     func tileDetail(_ tile: Tile) -> SCNNode? { nil }
     func tint(tile: SCNNode, _ color: NSColor) { tile.geometry?.firstMaterial?.diffuse.contents = color }
-    func dress(office room: Room, in station: Station) -> SCNNode? { nil }
+    func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? { nil }
 
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
     func pose(figure: SCNNode, height: Double, torso: Double) {}
     func dress(station: Station) -> [SCNNode] { [] }
+    func console(color: NSColor) -> SCNNode? { nil }
+    func crate(color: NSColor) -> SCNNode? { nil }
+    func hold(tall: Bool) -> SCNNode? { nil }
+    func pallet(color: NSColor) -> SCNNode? { nil }
+    var writesOnFloor: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
     var workSparks: Bool { true }
     func message(color: NSColor, floor: NSColor) -> SCNNode? { nil }
@@ -163,6 +182,14 @@ struct Tile {
     let same: UInt8
     /// The eight neighbours in turn from z- round by x+: (dx, dz).
     static let around: [(Int, Int)] = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)]
+}
+
+/// What an office is known by: the issue it belongs to, who is working in it, and the whole name the scene
+/// would otherwise letter on its floor.
+struct OfficeSign {
+    let number: Int?
+    let who: String?
+    let name: String
 }
 
 /// A fixed area of the station, by the name the scene gives its nodes for the pointer and the clicks.

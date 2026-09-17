@@ -316,7 +316,7 @@ struct KenneyLook: Look {
 
     /// A computer desk against an outer wall of the office's farthest cell from the door, its screen
     /// turned into the room, so whoever stands on that cell stands at it.
-    func dress(office room: Room, in station: Station) -> SCNNode? {
+    func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
         guard let wall = Dressing.officeWall(room, in: station) else { return nil }
         let d = wall.out
         guard let desk = Kit.prop("desk_computer", scale: 0.8, yaw: atan2(-d.x, -d.y), color: NSColor(room.color)) else { return nil }
