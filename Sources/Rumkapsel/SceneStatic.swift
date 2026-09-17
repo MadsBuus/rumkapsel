@@ -380,7 +380,7 @@ extension StationController {
                 let dusty = world.isDusty(room)
                 let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
-                let full = world.isRemoteOnly(station, room) ? NSColor(room.color).darker(0.14) : NSColor(room.color)
+                let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
                 // Drawn from last night's notes and not yet confirmed today: dim until it is.
                 let unchecked = world.isUnchecked(station, room)
@@ -393,8 +393,10 @@ extension StationController {
                 let pending = undelivered.contains(key)
                 for (i, c) in ordered.enumerated() {
                     // Nothing on the plot before the office unfolds from its crate: no grey placeholder.
-                    var color = progress == 0 ? full.darker(0.32) : (i < tiled ? full : subfloor)
-                    if !powered { color = color.darker(0.2) }
+                    // An office with nothing done yet is its own colour, a touch down. It used to lose a
+                    // third off every channel, which took the palette with it.
+                    var color = progress == 0 ? full.dimmed(0.86) : (i < tiled ? full : subfloor)
+                    if !powered { color = color.dimmed(0.78) }
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }

@@ -1,91 +1,119 @@
 """Bake a plan into an activation order.
 
-An office is not drawn until it is needed, so the corridor that reaches it must not be drawn either.
-Each office therefore carries the hallway cells that first make it reachable: walk back from its door to
-whatever is already lit, by the shortest route the full plan allows. Light them in order and the lit
-floor is connected at every step, because each office only ever adds a run that touches what is there.
-The essentials are all lit from the start, so the station is whole before a single office opens.
-"""
-import json, math
-from collections import deque
-ns = {}; exec(open('/tmp/claude-502/floor/radial.py').read(), ns)
-plan, CX, CY, W, H = ns['plan'], ns['CX'], ns['CY'], ns['W'], ns['H']
+An office is not drawn until it is needed, so the hallway that reaches it must not be drawn either. Each
+office carries the run of hallway that first makes it reachable: walk back from its door to whatever is
+already lit, by the shortest route the plan allows. Light them in order and the lit floor is connected at
+every step, because an office only ever adds a run that touches what is there.
 
-def bake(seed):
-    hall, slots, fixed = plan(seed)
-    lit = set()
-    # The base: the hub ring and every run that reaches an essential. Grown from the hub through the
-    # corridor until each block has its door, so nothing in the fixed half waits on an office.
-    want = {n: {p for x, y in cs for p in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)) if p in hall}
-            for n, cs in fixed.items() if n != "core"}
-    start = min(hall, key=lambda c: math.hypot(c[0]-CX, c[1]-CY))
-    prev, q = {start: None}, deque([start])
+The base — the plaza, the fixed arms, the runs to the yard and the bay, and the quarters — is lit before
+a single office opens, so the station is whole from the start.
+"""
+import json, math, sys
+from collections import deque
+ns = {}; exec(open('/tmp/claude-502/floor/floorplan.py').read(), ns)
+
+def bake(theme, seed):
+    hall, slots, quarters, fixed, mono, ring = ns['plan'](theme, seed)
+    # Everything the base must reach, traced back to the plaza through the hallway, so the base is a tree
+    # rooted there and is connected by how it is built rather than by luck.
+    prev, q = {}, deque()
+    for c in hall:
+        if abs(c[0]) <= 1 and abs(c[1]) <= 1: prev[c] = None; q.append(c)
     while q:
         c = q.popleft()
         for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
             n = (c[0]+a, c[1]+b)
             if n in hall and n not in prev: prev[n] = c; q.append(n)
-    assert len(prev) == len(hall), "the plan's corridor is not one piece"
-    # Every cell the base wants is traced back to the hub, so the base is a tree rooted there and is
-    # connected because of how it is built, not because the pieces happened to meet.
-    seeds = {c for c in hall if math.hypot(c[0]-CX, c[1]-CY) <= ns['HUB'] + 0.5}
-    for name, doors in want.items():
-        assert doors, f"{name} has no door"
-        seeds.add(min(doors, key=lambda p: math.hypot(p[0]-CX, p[1]-CY)))
-    for c in seeds:
+    assert len(prev) == len(hall), f"{theme} {seed}: the hallway is not one piece"
+
+    lit = set()
+    # The yard is entered through the deck's doorway, not off the hallway: storage, the pad and decon
+    # have no door of their own and are not meant to. So each block lights whatever hallway it does
+    # touch, and the test afterwards is that every one of them is reachable, through the yard or not.
+    for name, cells in list(fixed.items()) + list(quarters.items()):
+        doors = [p for x, y in cells for p in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)) if p in hall]
+        if not doors: continue
+        c = min(doors, key=lambda p: math.hypot(*p))
         while c is not None and c not in lit: lit.add(c); c = prev[c]
+    for c in hall:
+        if abs(c[0]) <= 1 and abs(c[1]) <= 1: lit.add(c)
+
+    blocks = {p for v in fixed.values() for p in v} | {p for v in quarters.values() for p in v}
+    floor = lit | blocks
+    seen, q = {mono}, deque([mono])
+    while q:
+        c = q.popleft()
+        for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+            n = (c[0]+a, c[1]+b)
+            if n in floor and n not in seen: seen.add(n); q.append(n)
+    for name, cells in list(fixed.items()) + list(quarters.items()):
+        assert set(cells) & seen, f"{theme} {seed}: {name} cannot be walked to before any office opens"
+
+    # Order the slots by how far they are on foot, not as the crow flies. A slot tucked behind the deck
+    # is a few tiles from the monolith and a long walk round it, and opening it early puts an office
+    # somewhere nobody can see and everybody has to walk to.
+    walk = {}
+    q = deque(c for c in hall if abs(c[0]) <= 1 and abs(c[1]) <= 1)
+    for c in q: walk[c] = 0
+    while q:
+        c = q.popleft()
+        for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+            n = (c[0]+a, c[1]+b)
+            if n in hall and n not in walk: walk[n] = walk[c] + 1; q.append(n)
+    def steps(cells):
+        d = [walk[p] for x, y in cells for p in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)) if p in walk]
+        return min(d) if d else 10**6
+    slots.sort(key=lambda cs: (steps(cs) // 3,
+                               math.atan2(sum(y for _, y in cs)/len(cs), sum(x for x, _ in cs)/len(cs))))
 
     out = []
-    for cells, _ in slots:                      # slots already come in radial order
+    for cells in slots:
         doors = [p for x, y in cells for p in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)) if p in hall]
-        pv, q = {p: None for p in lit}, deque(lit)
-        hit = next((d for d in doors if d in lit), None)      # already reachable: it costs no hallway
-        while q and hit is None:
-            c = q.popleft()
-            for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
-                n = (c[0]+a, c[1]+b)
-                if n in hall and n not in pv:
-                    pv[n] = c; q.append(n)
-                    if n in doors: hit = n; break
-        assert hit is not None, "an office cannot be reached through the corridor"
-        run, c = [], hit
-        while c is not None and c not in lit: run.append(c); c = pv[c]
+        hit = next((d for d in doors if d in lit), None)
+        if hit is None:
+            pv, q = {p: None for p in lit}, deque(lit)
+            while q and hit is None:
+                c = q.popleft()
+                for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+                    n = (c[0]+a, c[1]+b)
+                    if n in hall and n not in pv:
+                        pv[n] = c; q.append(n)
+                        if n in doors: hit = n; break
+            assert hit is not None, f"{theme} {seed}: an office cannot be reached"
+            run, c = [], hit
+            while c is not None and c not in lit: run.append(c); c = pv[c]
+        else:
+            run = []
         lit |= set(run)
-        cx = sum(x for x, _ in cells)/len(cells); cy = sum(y for _, y in cells)/len(cells)
-        out.append({"cells": sorted(cells), "hall": sorted(run),
-                    "ring": round(math.hypot(cx-CX, cy-CY)/3)})
-    return {"seed": seed, "size": [W, H], "centre": [CX, CY],
-            "fixed": {n: sorted(cs) for n, cs in fixed.items()},
-            "base": sorted(lit - {p for o in out for p in o["hall"]}),
-            "offices": out}
+        out.append({"cells": sorted(cells), "hall": sorted(run), "ring": steps(cells) // 3})
+    return {"theme": theme, "seed": seed, "quarters": {k: sorted(v) for k, v in quarters.items()},
+            "fixed": {k: sorted(v) for k, v in fixed.items()},
+            "base": sorted(lit - {p for o in out for p in o["hall"]}), "offices": out}
 
 def check(p):
     """Light them one at a time and prove the floor is whole at every step."""
     lit = set(map(tuple, p["base"]))
-    blocks = {tuple(c) for cs in p["fixed"].values() for c in cs}
+    rooms = {tuple(c) for v in p["quarters"].values() for c in v}
     for i, o in enumerate(p["offices"]):
         lit |= {tuple(c) for c in o["hall"]}
-        walk = lit | blocks
+        floor = lit | rooms | {tuple(c) for v in p.get("fixed", {}).values() for c in v}
         seen, q = {next(iter(lit))}, deque([next(iter(lit))])
         while q:
             c = q.popleft()
             for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
                 n = (c[0]+a, c[1]+b)
-                if n in walk and n not in seen: seen.add(n); q.append(n)
+                if n in floor and n not in seen: seen.add(n); q.append(n)
         assert not (lit - seen), f"hallway broke at office {i}"
         assert any((c[0]+a, c[1]+b) in lit for c in map(tuple, o["cells"])
-                   for a, b in ((1,0),(-1,0),(0,1),(0,-1))), f"office {i} has no door when it opens"
-        assert all(tuple(c) not in lit for c in o["cells"]), f"office {i} sits on the hallway"
-    for n, cs in p["fixed"].items():
-        if n == "core": continue
-        base = set(map(tuple, p["base"]))
-        assert any((c[0]+a, c[1]+b) in base for c in map(tuple, cs) for a, b in ((1,0),(-1,0),(0,1),(0,-1))), \
-            f"{n} is not connected before any office opens"
+                   for a, b in ((1,0),(-1,0),(0,1),(0,-1))), f"office {i} opens with no door"
+        assert all(tuple(c) not in lit and tuple(c) not in rooms for c in o["cells"]), f"office {i} overlaps"
     return len(lit)
 
-plans = []
-for seed in (25, 27, 4, 16):
-    p = bake(seed); n = check(p); plans.append(p)
-    print(f"seed {seed}: {len(p['offices'])} offices, base {len(p['base'])} hall cells, "
-          f"{n} lit at full, {sum(1 for o in p['offices'] if not o['hall'])} offices needing no new hallway")
-json.dump(plans, open('/tmp/claude-502/floor/plans.json','w'))
+if __name__ == "__main__":
+    plans = []
+    picked = json.load(open('/tmp/claude-502/floor/picked.json'))
+    for theme, seeds in picked.items():
+        for seed in seeds:
+            p = bake(theme, seed); n = check(p); plans.append(p)
+            print(f"{theme} {seed}: {len(p['offices'])} offices, base {len(p['base'])} hall, {n} lit at full")
+    json.dump(plans, open('/tmp/claude-502/floor/plans.json', 'w'))

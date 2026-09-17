@@ -3,20 +3,24 @@
 The station's floor is drawn here, offline, and baked into `Sources/Rumkapsel/BakedPlans.swift`. Nothing in
 the app plans a floor at run time any more: it reads a baked plan and lights slots as offices arrive.
 
-    python3 floor/radial.py     # nothing on its own — the generator, imported by the others
-    python3 floor/bake.py       # bakes the chosen seeds into plans.json, checking each step
-    python3 floor/export.py     # turns plans.json into BakedPlans.swift
-    python3 floor/drawr.py 25 27 4 16     # a sheet of finished plans
-    python3 floor/stages.py 25            # one plan at 0, 6, 18, 40, 70 and 100 offices
+    .build/debug/Rumkapsel --dump-floor classic > floor/classic.json
+    .build/debug/Rumkapsel --dump-floor kenney  > floor/kenney.json
+    python3 floor/bake.py                  # bakes the picked seeds and writes BakedPlans.swift
+    python3 floor/draws.py classic 42 43 41 37    # a sheet of finished plans
 
-`radial.py` grows a plan: the monolith in a plaza, a hallway ring round it with the living quarters on it,
-the deck west and the bay south, and offices filling outward wherever they fit. The southwest is kept clear
-past the first ring, because the deck run and the bay need that ground and crate traffic should not queue.
-Corridor is grown only where an office actually lands, and any arm that came back empty is taken up again.
+`floorplan.py` grows a plan around a floor it does not own. The yard, the airlock, the bay and the plaza's
+two fixed arms are dumped out of the app itself, so there is no second copy of them here to drift from the
+first — and because a theme moves them (Kenney stands its pad out on a causeway), a plan belongs to a theme.
+
+Around that it lays spokes and partial rings out from the plaza, places the quarters first and nearest, and
+fills with tetromino offices. Hallway is grown only where an office actually lands, and an arm that came
+back empty is taken up again. Nothing is laid past the hull: the airlock pierces it and the bay floats
+outside in space, so the whole southern quadrant is not floor to build on.
 
 `bake.py` turns a plan into an activation order. Each office carries the run of hallway that first reaches
 it, so lighting them in order leaves the floor connected at every step — checked there, and again in Swift
 when a plan loads (`Floorplan.check`).
 
-Seeds 25, 27, 4 and 16 are the ones baked. They were picked out of forty on offices placed, corridor per
-office, loops, and the walk from the bay.
+Four seeds are baked per theme, picked out of fifty-odd on offices placed, hallway per office, loops, the
+walk from the plaza, and striping — hallway cells sitting in a straight run of eight or more, which is what
+makes a plan read as a grid rather than a station.
