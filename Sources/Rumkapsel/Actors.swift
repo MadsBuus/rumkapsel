@@ -69,7 +69,7 @@ extension StationController {
         guard let station = fleet.stations[name], let anchor = hangarAnchors[name], slot < station.hangarSlots.count else { return }
         let local = station.hangarSlots[slot] - station.hangarCenter
         let color = station.rooms[String(key.dropFirst(name.count + 1))]?.color ?? fleet.color(forRepo: repo)
-        let box = Props.crate(color: NSColor(color))
+        let box = Looks.current.crate(color: NSColor(color)) ?? Props.crate(color: NSColor(color))
         box.position = v3(local.x, 0.09, local.y)
         box.opacity = 0
         box.name = "room:" + key
@@ -99,7 +99,7 @@ extension StationController {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
         if r.untested {
-            let deco = Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
+            let deco = Looks.current.hold(tall: r.tall) ?? Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
             deco.name = "hold"
             n.addChildNode(deco)
         }

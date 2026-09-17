@@ -258,7 +258,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let p = tile(i, "shuttle + crate"); i += 1
             roomFloor(at: p, color: NSColor(Colors.hangar))
             let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01))); ring.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18)); ring.position = v3(p.x, 0.006, p.y); scene.rootNode.addChildNode(ring)
-            let crate = Props.crate(color: teal); crate.position = v3(p.x, 0.09, p.y); crate.opacity = 0; scene.rootNode.addChildNode(crate)
+            let crate = Looks.current.crate(color: teal) ?? Props.crate(color: teal); crate.position = v3(p.x, 0.09, p.y); crate.opacity = 0; scene.rootNode.addChildNode(crate)
             let ship = SCNNode()
             let hull = SCNNode(geometry: SCNBox(width: 0.7, height: 0.14, length: 0.4, chamferRadius: 0.03)); hull.geometry!.firstMaterial = lit(NSColor(rgb: (0.85, 0.86, 0.9))); ship.addChildNode(hull)
             let cockpit = SCNNode(geometry: SCNBox(width: 0.2, height: 0.1, length: 0.2, chamferRadius: 0.02)); cockpit.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.75, 1.0))); cockpit.position = v3(0.16, 0.11, 0); ship.addChildNode(cockpit)
@@ -278,7 +278,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             roomFloor(at: p, color: NSColor(rgb: (0.24, 0.26, 0.32)))
             let small = Props.rocket(color: amber, tall: false); small.position = v3(p.x - 0.7, 0, p.y); scene.rootNode.addChildNode(small)
             let tall = Props.rocket(color: teal, tall: true, cargo: 8); tall.position = v3(p.x + 0.5, 0, p.y)
-            tall.addChildNode(Props.holdDecoration(around: SIMD3(0, 0, 0), tall: true)); scene.rootNode.addChildNode(tall)
+            tall.addChildNode(Looks.current.hold(tall: true) ?? Props.holdDecoration(around: SIMD3(0, 0, 0), tall: true)); scene.rootNode.addChildNode(tall)
         }
         // 10. monolith with lightning
         do {
@@ -347,7 +347,25 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let border = SCNNode(geometry: SCNPlane(width: 0.15, height: 1.0)); border.geometry!.firstMaterial = flat(Palette.void); border.eulerAngles.x = -.pi / 2; border.position = v3(p.x - 0.15, 0.005, p.y - 0.5); scene.rootNode.addChildNode(border)
             let dot = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12)); dot.geometry!.firstMaterial = flat(Palette.void); dot.eulerAngles.x = -.pi / 2; dot.position = v3(p.x - 0.7, 0.006, p.y + 0.5); scene.rootNode.addChildNode(dot)
         }
-        rig.position = v3(6.4, 0, 5.0)
+        // 13. what a look may draw instead of the scene's own pieces
+        do {
+            let p = tile(i, "look's own: pallet / console / crate"); i += 1
+            let cart = Looks.current.pallet(color: amber) ?? Props.pallet(color: amber)
+            cart.scale = SCNVector3(0.8, 0.8, 0.8)
+            cart.position = v3(p.x - 0.75, 0.22, p.y + 0.15)
+            scene.rootNode.addChildNode(cart)
+            let desk = Looks.current.console(color: teal) ?? Props.console(color: teal)
+            desk.scale = SCNVector3(1.1, 1.1, 1.1)
+            desk.position = v3(p.x + 0.25, 0.55, p.y - 0.55)
+            scene.rootNode.addChildNode(desk)
+            for (k, c) in [pink, teal, amber].enumerated() {
+                let box = Looks.current.crate(color: c) ?? Props.crate(color: c)
+                box.scale = SCNVector3(0.85, 0.85, 0.85)
+                box.position = v3(p.x + 0.45 + Double(k) * 0.05, 0.004 + Double(k) * 0.26, p.y + 0.45 - Double(k) * 0.05)
+                scene.rootNode.addChildNode(box)
+            }
+        }
+        rig.position = v3(6.4, 0, 6.0)
     }
 
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {

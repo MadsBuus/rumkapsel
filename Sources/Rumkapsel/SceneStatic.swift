@@ -298,7 +298,7 @@ extension StationController {
             if station.hasPad, !station.storageCells.isEmpty {
                 // The storage console: a small panel on the wall by the doorway, where a pallet is ordered.
                 let (cell, facing) = station.storageConsole
-                let console = Props.console(color: NSColor(rgb: (0.4, 0.72, 0.9)))
+                let console = Looks.current.console(color: NSColor(rgb: (0.4, 0.72, 0.9))) ?? Props.console(color: NSColor(rgb: (0.4, 0.72, 0.9)))
                 console.position = v3(station.offset.x + Double(cell.x) + facing.x * 0.46, 0.5, station.offset.y + Double(cell.y) + facing.y * 0.46)
                 console.eulerAngles.y = atan2(-facing.x, -facing.y)   // hung on the wall, face turned into the room
                 console.name = "storage:" + station.name
@@ -418,9 +418,11 @@ extension StationController {
                     }
                 }
                 roomTiles[key] = tiles
-                if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station) {
+                if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, in: station)) {
                     prop.position.x += station.offset.x; prop.position.z += station.offset.y
-                    prop.name = "station:" + station.name
+                    // The office's own name, so a look that marks it instead of lettering the floor is
+                    // hovered and clicked like the office it stands for.
+                    prop.name = "room:" + roomKey(station, room)
                     if provisional { prop.opacity = 0.38 }
                     staticRoot.addChildNode(prop)
                 }
@@ -462,6 +464,13 @@ extension StationController {
         fleet.save()
     }
 
+    /// What an office is known by: its issue number, whoever is in it, and the name that would be written.
+    private func sign(for room: Room, in station: Station) -> OfficeSign {
+        let digits = room.name.drop { !$0.isNumber }.prefix { $0.isNumber }
+        return OfficeSign(number: Int(digits), who: world.occupant(of: roomKey(station, room)),
+                          name: StationController.displayName(room))
+    }
+
     private static func displayName(_ room: Room) -> String {
         switch room.key {
         case "kind:quarters": return Words.current.dorm
@@ -492,6 +501,8 @@ extension StationController {
             labelRoot.addChildNode(node)
             floorLabels.append((node, yaw))
         }
+        // A look may keep the floor clear of lettering and carry the names some other way.
+        guard Looks.current.writesOnFloor else { return }
         for station in fleet.stations.values {
             let ox = station.offset.x, oz = station.offset.y
             let name = floorText(station.name, color: Palette.text, size: 1.0, maxWidth: 10, lines: 1)

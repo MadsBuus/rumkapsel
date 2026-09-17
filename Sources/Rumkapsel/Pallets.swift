@@ -74,7 +74,7 @@ extension StationController {
 
     /// A pallet just out: the slab by the near wall and its shadow, both fading in on the clock.
     private func makePalletView(_ p: PalletJob, station: Station) -> PalletView {
-        let node = Props.pallet(color: NSColor(fleet.color(forRepo: p.repo)))
+        let node = Looks.current.pallet(color: NSColor(fleet.color(forRepo: p.repo))) ?? Props.pallet(color: NSColor(fleet.color(forRepo: p.repo)))
         node.opacity = 0
         node.name = "pallet:" + station.name
         propRoot.addChildNode(node)
