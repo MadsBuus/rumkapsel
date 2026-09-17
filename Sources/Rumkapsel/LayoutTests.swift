@@ -22,12 +22,16 @@ enum LayoutTests {
             expect(a.dug == b.dug, "and the same hallway was dug: \(a.dugCount) and \(b.dugCount) cells")
         }
 
-        test("a room's shape follows its key, not the launch: the same key on an empty station takes the same cells twice") {
+        test("a room's shape is its slot's, not its key's: the same key on an empty station takes the same cells twice") {
             let a = fresh(), b = fresh()
             place("task:web#455", on: a); place("task:web#455", on: b)
             expect(a.rooms["task:web#455"]?.cells == b.rooms["task:web#455"]?.cells, "\(cells(a, "task:web#455")) against \(cells(b, "task:web#455"))")
-            let shapes = Set(keys.map { Station.shape(forKey: $0).count })
-            expect(shapes.count > 1, "and different keys draw different shapes: sizes \(shapes)")
+            // The plan holds the shapes, so a key no longer picks one — but the plan's own are varied.
+            let shapes = Set(Floorplan.forStation("work").slots.prefix(40).map { s -> [Cell] in
+                let mx = s.cells.map(\.x).min() ?? 0, my = s.cells.map(\.y).min() ?? 0
+                return s.cells.map { Cell(x: $0.x - mx, y: $0.y - my) }.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+            })
+            expect(shapes.count > 4, "and the plan draws more than one shape: \(shapes.count) in the first forty slots")
         }
 
         test("every room touches the corridor and none stands on reserved floor") {

@@ -41,9 +41,16 @@ enum Colors {
     static let idle = RGB(r: 0.40, g: 0.405, b: 0.425)
     static let idleDim = RGB(r: 0.33, g: 0.335, b: 0.355)
     static let idleLight = RGB(r: 0.48, g: 0.485, b: 0.505)
+    /// What stands in the idle rooms: grey too, in three steps so a couch is not its floor. Only the
+    /// plants and the books keep a colour of their own in there.
+    static let furniture = RGB(r: 0.46, g: 0.465, b: 0.485)
+    static let furnitureDim = RGB(r: 0.36, g: 0.365, b: 0.385)
+    static let furnitureLight = RGB(r: 0.55, g: 0.555, b: 0.575)
     static let hangar = RGB(r: 0.27, g: 0.42, b: 0.55)
-    static let quarters = RGB(r: 0.46, g: 0.34, b: 0.44)
-    static let bed = RGB(r: 0.33, g: 0.23, b: 0.32)
+    /// The dorm and what stands in it: grey like the rest of the idle rooms. The mattress sits a step
+    /// lighter than the floor it is on, so it still reads as a bed rather than a patch of floor.
+    static let quarters = RGB(r: 0.37, g: 0.375, b: 0.395)
+    static let bed = RGB(r: 0.52, g: 0.525, b: 0.545)
     /// Colours handed out to repositories, in order of first sighting.
     /// Classic's: the game's own six, sampled off its screens, then four more dropped into the widest
     /// gaps they leave round the colour wheel. Six is what the game needs and ten is what a desk with ten
@@ -370,12 +377,6 @@ final class Station {
     static func rect(_ w: Int, _ h: Int) -> [Cell] {
         (0..<w).flatMap { x in (0..<h).map { y in Cell(x: x, y: y) } }
     }
-    /// Symmetric bars, blocks and T shapes, like the real station.
-    private static let baseShapes: [[Cell]] = [
-        rect(2, 3), rect(2, 4), rect(3, 3), rect(2, 2), rect(3, 2), rect(2, 5),
-        rect(3, 2) + [Cell(x: 1, y: 2), Cell(x: 1, y: 3)],
-        rect(3, 1) + [Cell(x: 1, y: 1), Cell(x: 1, y: 2)],
-    ]
 
     init(name: String) {
         self.name = name
@@ -427,13 +428,7 @@ final class Station {
         }
     }
 
-    /// Tuning of the digging (`placeShape`): how far an arm is cheap to build on, and what a step of it costs after.
-    static var armEasyReach = 6, armDearStep = 2, passageBonus = 16
 
-    @discardableResult
-    /// The shape a room takes when nothing else says: by its key through the stable hash, so it is the same
-    /// on every launch and on every machine.
-    static func shape(forKey key: String) -> [Cell] { baseShapes[Int(stableHash(key) % UInt64(baseShapes.count))] }
 
     /// Creates a room if missing. Returns true when the layout changed.
     func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
@@ -574,17 +569,6 @@ final class Station {
         forgetFloorPlan()
     }
 
-    private func rotations(of shape: [Cell]) -> [[Cell]] {
-        var out: [[Cell]] = []
-        var cur = shape
-        for _ in 0..<4 {
-            let minX = cur.map(\.x).min()!, minY = cur.map(\.y).min()!
-            let norm = cur.map { Cell(x: $0.x - minX, y: $0.y - minY) }.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
-            if !out.contains(norm) { out.append(norm) }
-            cur = cur.map { Cell(x: -$0.y, y: $0.x) }
-        }
-        return out
-    }
 
     /// Takes a peer's placement as is. Two machines with the same station draw the same floor, so what
     /// arrives is almost always one of our own slots, and taking it is marking the slot and lighting the
@@ -680,29 +664,6 @@ final class Station {
         dug.append(contentsOf: fresh)
     }
 
-    /// A room shows a straight wall to the hallway: a T with its notch against the corridor
-    /// would leave a dark closet between the room, the hallway and its neighbours.
-    private func flatTowardsCorridor(_ cells: [Cell]) -> Bool { flatTowards(cells, hallway: blocks.hallway) }
-
-    private func flatTowards(_ cells: [Cell], hallway: Set<Cell>) -> Bool {
-        let set = Set(cells)
-        let minX = cells.map(\.x).min()!, maxX = cells.map(\.x).max()!
-        let minY = cells.map(\.y).min()!, maxY = cells.map(\.y).max()!
-        for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
-            guard cells.contains(where: { let n = Cell(x: $0.x + dx, y: $0.y + dy); return hallway.contains(n) && n != plan.monolith }) else { continue }
-            // The whole edge line facing that direction must be part of the room.
-            let edge: [Cell]
-            if dx == 0 {
-                let y = dy > 0 ? maxY : minY
-                edge = (minX...maxX).map { Cell(x: $0, y: y) }
-            } else {
-                let x = dx > 0 ? maxX : minX
-                edge = (minY...maxY).map { Cell(x: x, y: $0) }
-            }
-            if !edge.allSatisfy({ set.contains($0) }) { return false }
-        }
-        return true
-    }
 
     // MARK: walking round things
 

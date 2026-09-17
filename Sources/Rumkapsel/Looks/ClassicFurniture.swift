@@ -23,11 +23,11 @@ extension Classic {
         let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
         // A low coffee table: a thin top on two side panels, with a magazine left on it.
         let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
-        table.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.42, 0.3)))
+        table.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
         table.position = v3(station.offset.x + cx, 0.2, station.offset.y + cy)
         for lx in [-0.4, 0.4] {
             let panel = SCNNode(geometry: SCNBox(width: 0.03, height: 0.19, length: 0.34, chamferRadius: 0))
-            panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.32, 0.24)))
+            panel.geometry!.firstMaterial = lit(NSColor(Colors.furnitureDim))
             panel.position = v3(lx, -0.1, 0)
             table.addChildNode(panel)
         }
@@ -41,7 +41,7 @@ extension Classic {
         for c in station.couches {
             let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1   // side walls run along z, the far wall along x
             let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: Minion.couchSeat, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
-            couch.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.45, 0.4)))
+            couch.geometry!.firstMaterial = lit(NSColor(Colors.furnitureLight))
             couch.position = v3(station.offset.x + c.x, Minion.couchSeat / 2, station.offset.y + c.y)
             let back = SCNNode(geometry: SCNBox(width: along ? 0.08 : 0.8, height: 0.22, length: along ? 0.8 : 0.08, chamferRadius: 0.02))
             back.geometry!.firstMaterial = couch.geometry!.firstMaterial
@@ -69,7 +69,7 @@ extension Classic {
         }
         f.props.append(pot)
         let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
-        shelf.geometry!.firstMaterial = lit(NSColor(rgb: (0.5, 0.4, 0.32)))
+        shelf.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
         shelf.position = v3(station.offset.x + Double(xs.max()!), 0.16, station.offset.y + Double(ys.min()!) - 0.32)
         for i in 0..<4 {
             let book = SCNNode(geometry: SCNBox(width: 0.08, height: 0.2, length: 0.14, chamferRadius: 0))
@@ -214,9 +214,9 @@ extension Classic {
         bag.addChildNode(sack); bag.addChildNode(chain)
         f.fixtures.append(bag)
         f.bag = bag
-        // The mat: a dark square on the floor.
+        // The mat: a pale square on the floor.
         let mat = SCNNode(geometry: SCNBox(width: 0.7, height: 0.012, length: 0.7, chamferRadius: 0))
-        mat.geometry!.firstMaterial = flat(NSColor(rgb: (0.26, 0.4, 0.34)))
+        mat.geometry!.firstMaterial = flat(NSColor(Colors.furnitureLight))
         mat.position = v3(spots[3].x, 0.006, spots[3].y)
         f.fixtures.append(mat)
         return f

@@ -279,7 +279,9 @@ final class World {
     /// The last prompt marker and count seen per session: a session's first answer is quiet here too.
     private var sessionPrompts: [String: (marker: String, count: Int)] = [:]
 
-    /// Every session touched today keeps its office alive; archived worktrees lose theirs.
+    /// Every session touched today keeps its office alive; archived workspaces lose theirs. Archived
+    /// means two different things: Conductor deletes the worktree, Claude Code leaves it and drops its
+    /// lease, and a station that watched only the disk kept an office for every workspace ever opened.
     func applyScan(_ result: ScanResult, now: Date, minionHomes: [String: MinionHome]) -> [WorldEvent] {
         var events: [WorldEvent] = []
         var changed = false
@@ -348,7 +350,7 @@ final class World {
                 let merged = state == "MERGED"
                 // A checkout that went away still waits for its crate to reach storage: the office
                 // stays open until the haul lands, the way it does for any merged office.
-                let gone = (room.worktree.map { !FileManager.default.fileExists(atPath: $0) } ?? false) && !haulUnderway(office: key)
+                let gone = (room.worktree.map { !Workspaces.isOpen($0) } ?? false) && !haulUnderway(office: key)
                 // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED"
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
@@ -368,7 +370,7 @@ final class World {
                 // shipped, not that the desk was cleared. An office that is only GitHub's has nothing
                 // else to go on: the merge is the last anybody hears of it, since branches are left to
                 // die with their pull requests rather than deleted.
-                let mine = room.worktree.map { FileManager.default.fileExists(atPath: $0) } ?? false
+                let mine = room.worktree.map { Workspaces.isOpen($0) } ?? false
                 let lan = peerOffices[key] != nil
                 let ended = cleared && !mine && !lan
                 if gone || ended || orphan {
