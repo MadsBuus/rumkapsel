@@ -1,10 +1,10 @@
-// Kenney Kingdom: every station a harbour village in a world of its own, drawn in the layers of THEMES.md.
-// The world is a coast that curls into a cove round the bay, shallows and foam, meadow, deep woods and a few
-// cottages, all keyed to where they stand, so a village that grows only clears the ground round it. The input
-// is a stone quay in the cove with a jetty for every landing slot and a causeway out to it; the output a yard
-// of customs, granary, market and caravan yard, with a road leading west out of the world, down which releases
-// leave as ox carts. The center is a stone keep; the idle areas a tavern fire, a well corner, a training yard
-// and straw beds; the growth zone dirt paths and tilled fields with soft edges. Built from Kenney's kits (CC0).
+// Kenney Kingdom: the station as a walled castle on the sea, drawn in the layers of THEMES.md.
+// The curtain wall follows the station's own outline, so the castle's shape is the floor plan's and it gains a
+// stretch whenever an office opens; offices are flagstoned wards under the house's banner and hallways are
+// cobbled. The output is a harbour outside the walls, where a release lies at the quay as a great ship and
+// casts off for the open water; the input a caravan gate on the road, where a new office arrives by wagon. The
+// center is a keep with four turrets. The ground round it is planned in rings: the ditch and its moat against
+// the wall, an open sward, then woods well back, with a hamlet along the road. Built from Kenney's kits (CC0).
 
 import AppKit
 import SceneKit
@@ -141,7 +141,7 @@ struct KingdomLook: Look {
         shaft.geometry!.firstMaterial = lit(Self.wood)
         shaft.position = v3(0.72, 0.26, 0)
         cart.addChildNode(shaft)
-        if let ox = Kit.node("cube-pet", from: .cubePets) {
+        if let ox = Kit.node("animal-cow", from: .cubePets) {
             ox.scale = SCNVector3(0.5, 0.5, 0.5)
             ox.eulerAngles.y = -.pi / 2
             ox.position = v3(1.1, 0, 0)
@@ -194,16 +194,41 @@ struct KingdomLook: Look {
         let pad = Set(station.padCells)
         if !pad.isEmpty {
             let west = station.padCells.map(\.x).min()!
+            let rows = Set(station.padCells.map(\.y))
             // The whole quay is walked on, so the water lies beyond it rather than under it: the basin comes
             // up to the west edge, where the wall stands open, and the boards run to the water's edge.
             if let stone = site.blob(pad, grow: 0.42, Self.stoneEdge, y: -0.006, wobble: 0.05) { piece.add(stone, as: .pad) }
             if let boards = site.blob(pad, grow: 0.3, Self.planks, y: 0.001, wobble: 0) { piece.add(boards, as: .pad) }
-            let rows = Set(station.padCells.map(\.y))
             for y in rows {
                 let seam = SCNNode(geometry: SCNBox(width: 6.4, height: 0.004, length: 0.05, chamferRadius: 0))
                 seam.geometry!.firstMaterial = flat(Self.wood)
                 seam.position = v3(site.offset.x + Double(west) + 2.5, 0.004, site.offset.y + Double(y) + 0.5)
                 piece.add(seam, as: .pad)
+            }
+            // A crane at the quay head, and goods waiting to go aboard.
+            if let mid = rows.sorted().dropFirst(rows.count / 2).first {
+                let crane = SCNNode()
+                let mast = SCNNode(geometry: SCNBox(width: 0.12, height: 1.15, length: 0.12, chamferRadius: 0))
+                mast.geometry!.firstMaterial = lit(Self.wood)
+                mast.position = v3(0, 0.58, 0)
+                crane.addChildNode(mast)
+                let jib = SCNNode(geometry: SCNBox(width: 0.95, height: 0.08, length: 0.08, chamferRadius: 0))
+                jib.geometry!.firstMaterial = lit(Self.wood)
+                jib.position = v3(-0.4, 1.12, 0)
+                crane.addChildNode(jib)
+                let rope = SCNNode(geometry: SCNBox(width: 0.02, height: 0.42, length: 0.02, chamferRadius: 0))
+                rope.geometry!.firstMaterial = lit(Self.wood.darker(0.3))
+                rope.position = v3(-0.82, 0.9, 0)
+                crane.addChildNode(rope)
+                crane.position = v3(site.offset.x + Double(west) + 0.4, 0, site.offset.y + Double(mid))
+                piece.add(crane, as: .pad)
+                for (k, name) in ["barrel", "box", "box-large"].enumerated() {
+                    guard let n = Kit.node(name, from: .survival) else { continue }
+                    n.scale = SCNVector3(0.75, 0.75, 0.75)
+                    n.eulerAngles.y = Double(k) * 0.7
+                    n.position = v3(site.offset.x + Double(west) + 1.1 + Double(k) * 0.45, 0.01, site.offset.y + Double(mid) + 0.7)
+                    piece.add(n, as: .pad)
+                }
             }
             // Bollards along the wharf's outer edge, and a crate or two waiting to go aboard.
             for c in pad.filter({ $0.x == west }) {
@@ -348,24 +373,88 @@ struct KingdomLook: Look {
 
     // MARK: the center
 
-    /// A stone keep with windows and a high roof, on a round stone square.
+    /// The keep: a square donjon on a stone motte, four corner turrets standing above its battlements, a
+    /// great door at its foot and the king's banner at the top. It is the first thing the eye finds, so it is
+    /// built rather than borrowed.
     func monolith() -> SCNNode {
-        guard let base = Kit.node("tower-square-base", from: .castle), let storey = Kit.node("tower-square-mid-windows", from: .castle),
-              let top = Kit.node("tower-square-top-roof-high", from: .castle) else { return Classic.monolith() }
         let n = SCNNode()
-        let square = SCNNode(geometry: faceted(SCNCylinder(radius: 1.25, height: 0.02), 8))
-        square.geometry!.firstMaterial = flat(Self.stone)
-        square.position = v3(0, 0.006, 0)
-        n.addChildNode(square)
-        let s = 0.74
-        for (i, part) in [base, storey, top].enumerated() {
-            part.scale = SCNVector3(s, s, s)
-            part.position = v3(0, Double(i) * 1.01 * s, 0)
-            n.addChildNode(part)
+        let block = 1.35, tall = 1.75
+        let motte = SCNNode(geometry: faceted(SCNCylinder(radius: 1.35, height: 0.16), 8))
+        motte.geometry!.firstMaterial = lit(Self.stoneEdge)
+        motte.position = v3(0, 0.08, 0)
+        n.addChildNode(motte)
+        let apron = SCNNode(geometry: faceted(SCNCylinder(radius: 1.2, height: 0.2), 8))
+        apron.geometry!.firstMaterial = lit(Self.stone)
+        apron.position = v3(0, 0.14, 0)
+        n.addChildNode(apron)
+        let shaft = SCNNode(geometry: SCNBox(width: block, height: tall, length: block, chamferRadius: 0.02))
+        shaft.geometry!.firstMaterial = lit(Self.wallStone)
+        shaft.position = v3(0, 0.22 + tall / 2, 0)
+        n.addChildNode(shaft)
+        // A string course, then the battlements the wall-walk runs behind.
+        let course = SCNNode(geometry: SCNBox(width: block + 0.12, height: 0.08, length: block + 0.12, chamferRadius: 0))
+        course.geometry!.firstMaterial = lit(Self.wallShade)
+        course.position = v3(0, 0.22 + tall, 0)
+        n.addChildNode(course)
+        for side in 0..<4 {
+            let a = Double(side) * .pi / 2
+            for k in -1...1 {
+                let merlon = SCNNode(geometry: SCNBox(width: 0.2, height: 0.17, length: 0.16, chamferRadius: 0))
+                merlon.geometry!.firstMaterial = lit(Self.wallCap)
+                merlon.eulerAngles.y = a
+                merlon.position = v3(cos(a) * (block / 2 + 0.02) - sin(a) * Double(k) * 0.42,
+                                     0.22 + tall + 0.12,
+                                     -sin(a) * (block / 2 + 0.02) - cos(a) * Double(k) * 0.42)
+                n.addChildNode(merlon)
+            }
         }
+        // Four turrets, each carried a little past the keep's own top.
+        for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+            let turret = SCNNode()
+            let h = tall + 0.62
+            let drum = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: h), 8))
+            drum.geometry!.firstMaterial = lit(Self.wallStone)
+            drum.position = v3(0, h / 2, 0)
+            turret.addChildNode(drum)
+            let cap = SCNNode(geometry: faceted(SCNCylinder(radius: 0.31, height: 0.09), 8))
+            cap.geometry!.firstMaterial = lit(Self.wallCap)
+            cap.position = v3(0, h + 0.045, 0)
+            turret.addChildNode(cap)
+            for k in 0..<6 {
+                let a = Double(k) / 6 * 2 * .pi
+                let merlon = SCNNode(geometry: SCNBox(width: 0.11, height: 0.13, length: 0.11, chamferRadius: 0))
+                merlon.geometry!.firstMaterial = lit(Self.wallCap)
+                merlon.eulerAngles.y = a
+                merlon.position = v3(cos(a) * 0.26, h + 0.13, sin(a) * 0.26)
+                turret.addChildNode(merlon)
+            }
+            turret.position = v3(sx * block / 2, 0.22, sz * block / 2)
+            n.addChildNode(turret)
+        }
+        // Tall windows on every face, and the great door at the foot.
+        for side in 0..<4 {
+            let a = Double(side) * .pi / 2
+            for k in [-0.3, 0.3] {
+                for y in [0.95, 1.5] {
+                    let light = SCNNode(geometry: SCNBox(width: 0.13, height: 0.3, length: 0.05, chamferRadius: 0))
+                    light.geometry!.firstMaterial = lit(NSColor(rgb: (0.2, 0.22, 0.28)))
+                    light.eulerAngles.y = a
+                    light.position = v3(cos(a) * (block / 2 + 0.01) - sin(a) * k, y, -sin(a) * (block / 2 + 0.01) - cos(a) * k)
+                    n.addChildNode(light)
+                }
+            }
+        }
+        let door = SCNNode(geometry: SCNBox(width: 0.34, height: 0.46, length: 0.06, chamferRadius: 0.1))
+        door.geometry!.firstMaterial = lit(Self.wood.darker(0.15))
+        door.position = v3(0, 0.45, block / 2 + 0.01)
+        n.addChildNode(door)
+        let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.52, length: 0.04, chamferRadius: 0))
+        pole.geometry!.firstMaterial = lit(Self.wood)
+        pole.position = v3(0, 0.22 + tall + 0.3, 0)
+        n.addChildNode(pole)
         if let banner = Kit.node("flag-banner-long", from: .castle) {
-            banner.scale = SCNVector3(0.32, 0.32, 0.32)
-            banner.position = v3(0.36, 0.55, 0)
+            banner.scale = SCNVector3(0.3, 0.3, 0.3)
+            banner.position = v3(0.1, 0.22 + tall + 0.12, 0)
             n.addChildNode(banner)
         }
         return n
@@ -894,7 +983,8 @@ struct KingdomLook: Look {
 private struct Site {
     let station: Station
     let offset: SIMD2<Double>
-    /// Every floor cell but the airlock's and the bay's: the ground the village stands on.
+    /// Every floor cell but the airlock's, the bay's and the quay's: the ground the castle stands on. The
+    /// quay is left out so the water can come right up to it rather than being pushed off by dry land.
     let floor: Set<Cell>
     let bayCenter: SIMD2<Double>
     /// The line the coast wanders about, in x: just past the quay's outer edge, so the sea lies beyond the
@@ -911,7 +1001,7 @@ private struct Site {
     init(_ st: Station) {
         station = st
         offset = st.offset
-        floor = Set(st.allCells).subtracting(st.airlockCells).subtracting(st.hangarCells)
+        floor = Set(st.allCells).subtracting(st.airlockCells).subtracting(st.hangarCells).subtracting(st.padCells)
         bayCenter = st.hasHangar ? st.hangarCenter : SIMD2(0, Double(st.bounds.max.y) + 12)
         quay = st.hasPad ? st.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
         shoreline = (st.hasPad ? Double(st.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) - 0.4
@@ -1046,12 +1136,12 @@ private struct Site {
         let ditch = Shapes.sample(from: lo, to: hi, step: 0.25) { p in
             let d = toFloor(p)
             guard d < 4 else { return -1 }
-            let ring = min(d - 1.05, 2.5 - d)
+            let ring = min(d - 1.15, 2.15 - d)
             let crossing = max(1.3 - toRoad(p), 2.2 - Double(abs(p.x - shoreline) < 6 ? 0 : 9))
             return min(ring, -crossing)
         }
         layer(ditch, -0.25, KingdomLook.dirtEdge.darker(0.1), -0.066)
-        layer(ditch, 0, KingdomLook.water, -0.064)
+        layer(ditch, 0, KingdomLook.water.darker(0.18), -0.064)
 
         let props = SCNNode()
         func put(_ name: String, _ pack: Kit.Pack, _ p: SIMD2<Double>, scale: Double, yaw: Double, tint: [String: NSColor] = [:]) {
