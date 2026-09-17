@@ -417,11 +417,13 @@ extension StationController {
         }
     }
 
-    /// A tested crate crosses the aisle to the tested row on someone's arms. Anything stacked on top of
-    /// it is moved aside first, one carry each, and those go first.
+    /// A tested crate crosses the aisle to the tested row on someone's arms, wearing its tested tag from
+    /// the moment it is lifted. Anything stacked on top of it is moved aside first, one carry each, and
+    /// those go first.
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
         for command in world.carryToTested(station: station, repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
+            if crate.number == number { tagOnLift.insert(command.id) }
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 node.removeFromParentNode()

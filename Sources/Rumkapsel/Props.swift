@@ -28,7 +28,7 @@ enum Props {
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
     /// a square strapped crate is a pull request, a pyramid is a session input.
-    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false, blink: Bool = false) -> SCNNode {
+    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false, blink: Bool = false, mine: Bool = false) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
@@ -36,33 +36,54 @@ enum Props {
         let body = SCNNode(geometry: box)
         body.position = v3(0, h / 2, 0)
         n.addChildNode(body)
-        // Strap groove: a slightly proud ring in a deeper shade, flush like a real crate strap.
+        // Strap groove: a slightly proud ring in a deeper shade, flush like a real crate strap. Your own
+        // work is strapped in white instead: the crate is already its repository's colour, and a second
+        // colour there would read as another repository.
+        let strapColor = mine ? Palette.mine : color.darker(0.3)
         let strap = SCNBox(width: size * 1.02, height: h * 0.16, length: size * 1.02, chamferRadius: 0)
-        strap.materials = [flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.22)), flat(color.darker(0.3))]
+        strap.materials = mine
+            ? [flat(strapColor), flat(strapColor.darker(0.12)), flat(strapColor), flat(strapColor.darker(0.12)), flat(strapColor.lighter(0.1)), flat(strapColor)]
+            : [flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.22)), flat(color.darker(0.3))]
         let s = SCNNode(geometry: strap)
         s.position = v3(0, h / 2, 0)
         n.addChildNode(s)
         // Status plate on the front face, like a lock, so it reads from the side whatever is stacked above.
+        // The geometry is named, not the node: a redraw finds the plate by it and re-lights the crate
+        // rather than building a new one, while the node stays nameless so a hover still finds the crate.
         let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
+        plate.geometry!.name = Props.plateName
         plate.geometry!.firstMaterial = flat(band)
         plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
-        if blink { plate.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.5), .fadeOpacity(to: 1, duration: 0.5)]))) }
+        if blink { plate.runAction(Props.blinking()) }
         n.addChildNode(plate)
-        if approved {
-            // Passed QA: a pale sticker on the lid with a green mark.
-            let sticker = SCNNode(geometry: SCNBox(width: size * 0.42, height: 0.012, length: size * 0.42, chamferRadius: 0))
-            sticker.geometry!.firstMaterial = flat(NSColor(rgb: (0.93, 0.95, 0.9)))
-            sticker.position = v3(-size * 0.1, h + 0.006, size * 0.1)
-            sticker.eulerAngles.y = 0.2
-            n.addChildNode(sticker)
-            let mark = SCNNode(geometry: SCNBox(width: size * 0.22, height: 0.012, length: size * 0.22, chamferRadius: 0))
-            mark.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.85, 0.45)))
-            mark.position = v3(0, 0.006, 0)
-            mark.eulerAngles.y = .pi / 4
-            sticker.addChildNode(mark)
-        }
+        if approved { n.addChildNode(tag(size: size)) }
         n.addChildNode(foot(size: size * 1.3))
         return n
+    }
+
+    /// The name on a crate's status plate geometry, and on the shell round a failing one.
+    static let plateName = "crate-plate"
+    static let shellName = "crate-shell"
+
+    /// The blink a plate carries while checks run.
+    static func blinking() -> SCNAction {
+        .repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.5), .fadeOpacity(to: 1, duration: 0.5)]))
+    }
+
+    /// Passed QA: a pale sticker on the lid with a green mark. Placed on a crate of this size, whether
+    /// the crate is being built or the tag is slapped on one that already stands, in a carrier's arms.
+    static func tag(size: Double) -> SCNNode {
+        let h = size * 0.8
+        let sticker = SCNNode(geometry: SCNBox(width: size * 0.42, height: 0.012, length: size * 0.42, chamferRadius: 0))
+        sticker.geometry!.firstMaterial = flat(NSColor(rgb: (0.93, 0.95, 0.9)))
+        sticker.position = v3(-size * 0.1, h + 0.006, size * 0.1)
+        sticker.eulerAngles.y = 0.2
+        let mark = SCNNode(geometry: SCNBox(width: size * 0.22, height: 0.012, length: size * 0.22, chamferRadius: 0))
+        mark.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.85, 0.45)))
+        mark.position = v3(0, 0.006, 0)
+        mark.eulerAngles.y = .pi / 4
+        sticker.addChildNode(mark)
+        return sticker
     }
 
     /// A hexagonal crate in the repo colour: the order for a new office.

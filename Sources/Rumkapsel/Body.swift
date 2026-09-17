@@ -144,6 +144,10 @@ class Body {
     var lean = SIMD2<Double>(0, 0)
     /// Who is being passed, held from the first sight of them until they are clearly behind, so a pass never flickers.
     var passingId: String?
+    /// How far the walker has come since this pass began, and who it has given up on: a pass that never
+    /// ends is dropped so the figure walks its way again rather than sideways for the rest of the walk.
+    var passWalked = 0.0
+    var passedId: String?
     var bathDue = 0.0          // clock when a visit is owed, 0 when none
     var busySince = 0.0
     var wasBusy = false

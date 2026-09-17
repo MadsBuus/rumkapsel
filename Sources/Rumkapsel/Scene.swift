@@ -52,6 +52,9 @@ enum Palette {
     static let alien = NSColor(rgb: (0.58, 0.6, 0.66))
     /// The light on decon's hatch and on an unscreened object's plate.
     static let alienLight = NSColor(rgb: (0.5, 0.95, 0.55))
+    /// Your own work: the straps on a crate whose pull request is yours. Near white, because the crate
+    /// itself is already its repository's colour and a second colour there would read as another repo.
+    static let mine = NSColor(rgb: (0.95, 0.96, 0.93))
     static let text = NSColor(rgb: (0.85, 0.87, 0.92))
     static let dim = NSColor(rgb: (0.5, 0.53, 0.6))
 }
@@ -253,6 +256,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
     /// come out the same, so drawing the floor twice costs nothing and moves nothing.
     var markerSignatures: [String: String] = [:]
+    /// The one crate an office with a pull request has on its floor, by room key, with what it was built
+    /// from: it stays where it stands for as long as the pull request does, and a redraw only re-lights it.
+    var packages: [String: SCNNode] = [:]
+    var packageBuilt: [String: String] = [:]
+    /// The tile each office's crate was given, kept so nothing drawn later moves it.
+    var packageCells: [String: Cell] = [:]
     /// Crates under way, by node: the one table that moves a crate's picture.
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
     /// The cells the furniture covers, per station, and the static root's size when that was read.
@@ -281,6 +290,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
+    /// Carries whose crate has passed QA: the tested tag goes on as the crate comes off the row, by the
+    /// hands that carry it, not when it is set down again across the aisle.
+    var tagOnLift: Set<Int> = []
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -1055,7 +1067,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // My own office with a worker in it: the crate does not appear by itself. The worker
             // clears the cones and packs it at the office's package slot.
             if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && !$0.hasLoad && !$0.onJob }),
-               let st = fleet.stations[m.station], let room = st.rooms[roomKey], let cell = farCells(st, room).first {
+               let st = fleet.stations[m.station], let room = st.rooms[roomKey] {
+                let cell = packageCell(st, room)
                 let key = m.station + "|" + roomKey
                 packing.insert(key)
                 markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 0 }

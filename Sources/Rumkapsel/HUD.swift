@@ -316,8 +316,32 @@ extension StationController {
         while eventLabels.count > 5 { eventLabels.removeLast().0.removeFromParent() }
     }
 
+    /// A span in the shortest words that still say it: 40m, 2h, 3d, 5w. Under a minute is "just now".
+    static func span(_ seconds: TimeInterval) -> String {
+        let s = max(0, seconds)
+        if s < 60 { return "just now" }
+        if s < 3600 { return "\(Int(s / 60))m" }
+        if s < 48 * 3600 { return "\(Int(s / 3600))h" }
+        if s < 21 * 24 * 3600 { return "\(Int(s / (24 * 3600)))d" }
+        return "\(Int(s / (7 * 24 * 3600)))w"
+    }
+
+    /// How old the work in an office is, and how long since anything happened in it. The age counts from
+    /// the pull request or issue where GitHub has said when that began, otherwise from when the office
+    /// first stood here, which is the most this machine can know.
+    private func roomAge(station: Station, room: Room) -> String? {
+        guard !room.key.hasPrefix("kind:") else { return nil }
+        var opened = room.openedAt
+        if let repo = room.repo, let issue = world.taskNumber(room), let at = github.work(repo: repo, number: issue)?.at { opened = min(opened, at) }
+        let now = Date()
+        let quiet = now.timeIntervalSince(room.lastActive)
+        let age = StationController.span(now.timeIntervalSince(opened)) + " old"
+        return quiet < 15 * 60 ? age : age + " · quiet " + StationController.span(quiet)
+    }
+
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
+        if let age = roomAge(station: station, room: room) { parts.append(age) }
         if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
         let local = world.localState(room)
         if local.local { parts.append(local.commits == 0 ? "local branch, nothing committed · a research session" : "local branch, \(local.commits) commits not pushed") }
@@ -437,11 +461,17 @@ extension StationController {
             let waiting = fleet.stations[name]?.ledger.allCrates.filter { $0.alien && $0.placed == .decon }.count ?? 0
             infoLabel.text = Words.current.deconHover + " · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
-            let parts = h.split(separator: "|")
-            let repo = String(parts[1])
+            let repo = String(h.split(separator: "|")[1])
             let prs = github.pulls(repo: repo, task: n)
             let what = prs.isEmpty ? "PR #\(n)" : "issue #\(n) · " + prs.map { "PR #\($0)" }.joined(separator: ", ")
-            infoLabel.text = "\(repo) · \(what) · \(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging") · click to open"
+            var parts = ["\(repo) · \(what)"]
+            // What the crate holds and whose it is: the number alone says nothing on a row of them.
+            let work = github.work(repo: repo, number: n)
+            if let title = work?.title, !title.isEmpty { parts.append(title) }
+            if let author = work?.author { parts.append("by " + world.crewName(author) + (author == github.myLogin() ? " · yours" : "")) }
+            parts.append(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging")
+            parts.append("click to open")
+            infoLabel.text = parts.joined(separator: " · ")
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
             let parts = (fleet.stations[name]?.stored ?? [:]).filter { $0.value > 0 }.sorted { $0.key < $1.key }.map { "\($0.value) \($0.key)" }

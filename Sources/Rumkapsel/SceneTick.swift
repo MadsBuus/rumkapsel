@@ -220,13 +220,25 @@ extension StationController {
             node.removeFromParentNode()
             cargoNodes[id] = nil
         }
+        tagOnLift = tagOnLift.filter { simulation.cargo[$0] != nil }   // a carry called off owes no tag
     }
 
     /// The node on the arms follows the body's word: lifted when a load appears, sent down its arc when
     /// the set-down begins, and put where the landing says when the load leaves.
     func mirrorLoad(_ m: Minion) {
         if let load = m.load {
-            if m.carried == nil, let node = nodeFor(load, m) { lift(m, node); m.arcStarted = false }
+            if m.carried == nil, let node = nodeFor(load, m) {
+                lift(m, node)
+                m.arcStarted = false
+                // The tested tag is slapped on as it comes off the row: that is the moment QA passed it.
+                if let id = m.current?.id, tagOnLift.remove(id) != nil, node.childNode(withName: "tag", recursively: false) == nil {
+                    let tag = Props.tag(size: 0.38)
+                    tag.name = "tag"
+                    tag.scale = SCNVector3(0.01, 1, 0.01)
+                    tag.runAction(.scale(to: 1, duration: 0.25))
+                    node.addChildNode(tag)
+                }
+            }
             if let node = m.carried, m.phaseKind == .setDown, m.phaseUntil > 0, !m.arcStarted, let on = m.settingDownOn {
                 m.arcStarted = true
                 setDown(m, node, to: on.pos, yaw: on.yaw, level: on.level)
