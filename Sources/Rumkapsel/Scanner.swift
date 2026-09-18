@@ -38,7 +38,7 @@ struct SessionInfo {
     let activity: Activity
     let area: String?
     let title: String?
-    let branch: String?
+    var branch: String?
     let toolCount: Int
     let isSubagent: Bool
     let cwdExists: Bool
@@ -107,6 +107,10 @@ final class TranscriptScanner {
                     cwdExists: fm.fileExists(atPath: cwd), promptCount: parsed.promptCount, queuedCount: max(0, parsed.queued), eventMarkers: parsed.markers))
             }
         }
+        // One checkout is on one branch: the session that wrote last says which. An older session in the
+        // same place still names the branch it last saw, and would put up an office of its own for it.
+        let current = Dictionary(grouping: result.sessions, by: \.cwd).compactMapValues { $0.max { $0.lastModified < $1.lastModified }?.branch }
+        for i in result.sessions.indices { if let b = current[result.sessions[i].cwd] { result.sessions[i].branch = b } }
         return result
     }
 

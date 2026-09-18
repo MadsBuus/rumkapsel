@@ -20,12 +20,15 @@ enum Workspaces {
     /// the lease when one is archived, so a path it does not name is neither: it is a directory left
     /// behind. Ten worktrees on this checkout, four of them named.
     private static func held() -> Set<String> {
-        let at = (try? registry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        // Asked of the disk each time: a URL keeps the first answer it got, and the registry would never change again.
+        let at = (try? FileManager.default.attributesOfItem(atPath: registry.path))?[.modificationDate] as? Date
         if let at, at == cachedAt { return open }
-        cachedAt = at
+        guard FileManager.default.fileExists(atPath: registry.path) else { cachedAt = at; open = []; return [] }
+        // Caught half-written: the last whole answer stands until the next change.
         guard let data = try? Data(contentsOf: registry),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let all = root["worktrees"] as? [String: Any] else { open = []; return [] }
+              let all = root["worktrees"] as? [String: Any] else { return open }
+        cachedAt = at
         var out: Set<String> = []
         for (_, v) in all {
             guard let w = v as? [String: Any], let path = w["path"] as? String else { continue }
