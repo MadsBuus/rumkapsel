@@ -981,8 +981,12 @@ final class Fleet {
     /// Where saving to disk happens, so that it never happens during a frame.
     static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
+    /// Whether the saved layout has been read. A save before that has nothing to say and would write an
+    /// empty fleet over the layout it is about to load: every office gone, and teammates' offices shuttled back in.
+    private var loaded = false
+
     func save() {
-        guard persists else { return }
+        guard persists, loaded else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
         // Written away from the frame: a redraw can happen while the station is being assembled.
         // Encoding reads the model, so it stays here; the disk does not.
@@ -991,6 +995,7 @@ final class Fleet {
     }
 
     func load() {
+        loaded = true
         guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
