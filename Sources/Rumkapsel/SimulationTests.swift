@@ -260,6 +260,52 @@ enum SimulationTests {
             } else { expect(false, "the carry is still queued") }
         }
 
+        test("a crate a walk cannot get any closer to is reached with the last shuffle, not waited on for good") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            let commands = sim.world.carryToDeck(station: station, repo: "web", numbers: [440])
+            guard case .carry(_, let from, _)? = commands.first?.kind else { return expect(false, "a carry") }
+            let at = SIMD2(from.pos.x - station.offset.x, from.pos.z - station.offset.y)
+            let crateCell = Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))
+            // One step off diagonally, and every other floor cell round the crate with something on its middle.
+            let own = [Cell(x: crateCell.x + 1, y: crateCell.y + 1), Cell(x: crateCell.x - 1, y: crateCell.y + 1),
+                       Cell(x: crateCell.x + 1, y: crateCell.y - 1), Cell(x: crateCell.x - 1, y: crateCell.y - 1)].first { station.walkable.contains($0) }
+            guard let own else { return expect(false, "a floor cell diagonal to the crate") }
+            m.pos = SIMD2(Double(own.x), Double(own.y))
+            for c in station.walkable where c != own && abs(c.x - crateCell.x) <= 3 && abs(c.y - crateCell.y) <= 3 {
+                station.obstacles.insert(Cell(x: c.x * Station.fine, y: c.y * Station.fine))
+            }
+            for c in commands { sim.carry(c, onDone: {}) }
+            sim.scheduleCarries()
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            expect(step(sim, seconds: 30, until: { m.load == .crate(crate) }, beat: { sim.reconcileBodies() }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(!gaveUp, "never gave up")
+        }
+
+        test("a crate left just off the floor, its office gone from under it, is still fetched") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            // A tile north of the northernmost floor: where an office stood a moment ago.
+            let north = station.walkable.map(\.y).min()!
+            let x = station.walkable.filter { $0.y == north }.map(\.x).min()!
+            let spot = Spot(area: .office, station: "work", owner: "gone", label: "gone", cell: Cell(x: x, y: north - 1),
+                            pos: SIMD3(station.offset.x + Double(x), 0.12, station.offset.y + Double(north - 1)))
+            expect(!station.walkable.contains(spot.cell), "the crate lies off the floor")
+            for c in sim.world.carryToDeck(station: station, repo: "web", numbers: [440]) { sim.carry(c.from(spot), onDone: {}) }
+            sim.scheduleCarries()
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }, beat: { sim.reconcileBodies() }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(!gaveUp, "never gave up")
+        }
+
         test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

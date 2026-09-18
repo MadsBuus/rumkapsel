@@ -342,7 +342,7 @@ extension StationController {
     private func roomInfo(station: Station, room: Room) -> String {
         var parts = [room.name]
         if let age = roomAge(station: station, room: room) { parts.append(age) }
-        if room.key.hasPrefix("proj:") { parts.append("no branch yet · /start-issue or /grab-issue builds the office") }
+        if room.key.hasPrefix("proj:") { parts.append("no branch yet · checking one out builds the office") }
         let local = world.localState(room)
         if local.local { parts.append(local.commits == 0 ? "local branch, nothing committed · a research session" : "local branch, \(local.commits) commits not pushed") }
         if let info = world.crewRoomInfo[roomKey(station, room)] {

@@ -454,7 +454,13 @@ final class Simulation<B: Body> {
         // bit is a shuffle, and a cell it already stands on is never walked to again.
         if dist > 0.9, let st = fleet.stations[m.station] {
             let stand = standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
-            if m.path.isEmpty, m.cell != stand { m.path = route(m, to: stand); return false }
+            // A walk that can get no closer, a cell short (someone standing on the one way through a small
+            // office), leaves the rest to the shuffle rather than a body waiting there for good.
+            if m.path.isEmpty, m.cell != stand {
+                let path = route(m, to: stand)
+                let end = path.last.map { Cell(x: Int($0.x.rounded()), y: Int($0.y.rounded())) } ?? m.cell
+                if end != m.cell || dist > 1.6 { m.path = path; return false }
+            }
         }
         guard m.path.isEmpty else { return false }
         guard dist < Hands.near || dist > Hands.far else { return true }
@@ -475,9 +481,10 @@ final class Simulation<B: Body> {
             }
             return n
         }
-        if blocked(cell) == 0 { return cell }
+        if blocked(cell) == 0, st.walkable.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
-        return options.min { blocked($0) < blocked($1) } ?? cell
+        // Nothing walkable beside it (the floor it stood on went with its office): the nearest floor there is.
+        return options.min { blocked($0) < blocked($1) } ?? st.nearestFloor(to: SIMD2(Double(cell.x), Double(cell.y))) ?? cell
     }
 
     /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
