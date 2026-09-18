@@ -285,6 +285,27 @@ enum SimulationTests {
             expect(!gaveUp, "never gave up")
         }
 
+        test("a crate left just off the floor, its office gone from under it, is still fetched") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            // A tile north of the northernmost floor: where an office stood a moment ago.
+            let north = station.walkable.map(\.y).min()!
+            let x = station.walkable.filter { $0.y == north }.map(\.x).min()!
+            let spot = Spot(area: .office, station: "work", owner: "gone", label: "gone", cell: Cell(x: x, y: north - 1),
+                            pos: SIMD3(station.offset.x + Double(x), 0.12, station.offset.y + Double(north - 1)))
+            expect(!station.walkable.contains(spot.cell), "the crate lies off the floor")
+            for c in sim.world.carryToDeck(station: station, repo: "web", numbers: [440]) { sim.carry(c.from(spot), onDone: {}) }
+            sim.scheduleCarries()
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }, beat: { sim.reconcileBodies() }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(!gaveUp, "never gave up")
+        }
+
         test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
