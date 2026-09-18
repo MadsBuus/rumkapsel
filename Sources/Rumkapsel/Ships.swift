@@ -322,7 +322,10 @@ extension Simulation {
         r.phase = 0
         r.assigned = []   // a new stage orders its own cargo; what is already aboard stays aboard
         r.pending = []
-        issue(command, by: "rocket", announce: true)
+        // Nothing left to load: everything is aboard already, and the rocket goes straight on to steam.
+        var empty = false
+        if case .rocket(.load(0), _, _) = command.kind { empty = true }
+        issue(command, by: "rocket", announce: !empty)
         beginRocketPhase(r)
     }
 
