@@ -7,12 +7,14 @@ import Foundation
 enum Theme: String, CaseIterable, Identifiable {
     case classic
     case kenney
+    case kingdom
 
     var id: String { rawValue }
     var title: String {
         switch self {
         case .classic: return "Classic"
         case .kenney: return "Kenney Space Center"
+        case .kingdom: return "Kenney Kingdom"
         }
     }
 
@@ -21,6 +23,7 @@ enum Theme: String, CaseIterable, Identifiable {
         switch self {
         case .classic: return nil
         case .kenney: return "Kenney Space Center draws the station with the Space Kit, the Modular Space Kit and the Nature Kit by Kenney (kenney.nl, CC0)."
+        case .kingdom: return "Kenney Kingdom draws the station as a walled castle on the sea, with the Castle, Fantasy Town, Nature, Pirate, Survival and Hexagon kits and Cube Pets by Kenney (kenney.nl, CC0)."
         }
     }
 
@@ -28,7 +31,7 @@ enum Theme: String, CaseIterable, Identifiable {
     /// the ground. The only way a theme reaches the floor plan.
     var padGap: Int {
         switch self {
-        case .classic: return 0
+        case .classic, .kingdom: return 0
         case .kenney: return 5
         }
     }
@@ -38,11 +41,36 @@ enum Theme: String, CaseIterable, Identifiable {
     var repoColors: [RGB] {
         switch self {
         case .classic, .kenney: return Colors.classicRepos
+        case .kingdom: return Colors.heraldry
         }
     }
 
     /// The words the station's parts and doings are called by in this theme.
-    var vocabulary: Vocabulary { Vocabulary() }
+    var vocabulary: Vocabulary {
+        var v = Vocabulary()
+        guard self == .kingdom else { return v }
+        v.bay = "caravans"; v.airlock = "gate"; v.pad = "harbour"; v.storage = "granary"; v.deck = "market"; v.decon = "customs"
+        v.dorm = "inn"; v.lounge = "tavern"; v.bath = "bathhouse"
+        v.theBay = "the caravan gate"; v.theAirlock = "the gate"; v.thePad = "the harbour"; v.theRocket = "the ship"
+        v.inStorage = "the granary"; v.theDeck = "the market"; v.testedRow = "the market, stamped row"; v.testDeck = "market"
+        v.inDecon = "customs"; v.theMonolith = "the keep"; v.theDorm = "the inn"; v.theCouch = "the tavern bench"
+        v.theBath = "the bathhouse"; v.theGym = "the training yard"
+        v.lookRound = "taking a stroll through the castle"; v.leaving = "leaving the castle through the gate"
+        v.inbound = "a caravan on the road with"; v.stow = "stacking a sheaf for the commit"; v.pack = "loading a crate for the pull request"
+        v.asleep = "asleep at the inn"; v.console = "off to the granary ledger with a quill"; v.pallet = "the handcart"
+        v.qaWalk = "inspecting the stalls at the market"
+        v.crate = "barrel"; v.crates = "barrels"; v.loadInto = "aboard the ship"; v.standingBy = "moored at the quay"
+        v.steaming = "loaded and made fast"; v.liftingOff = "casting off"; v.launchedTo = "sailed for"; v.onThePad = "at the harbour"
+        v.holding = "untested, held at the quay"; v.cleared = "cleared to sail"
+        v.kicked = "sent"; v.kickedOff = "away from the castle"; v.unidentified = "unmarked goods"; v.ejected = "turned away at customs"
+        v.clearedDecon = "cleared customs, into the granary"; v.toStorage = "goods to the granary"; v.toDeck = "off to market"
+        v.atMonolith = "in the keep"; v.foldsAway = "its crate folds away on the quay"; v.shipLeaving = "the caravan to pull away"
+        v.shipBeside = "a caravan drawing up beside"; v.lightsOn = "lanterns lit"
+        v.monolithHover = "the keep: scholars and messengers"; v.bayHover = "caravan gate · new offices arrive here by road"
+        v.padHover = "harbour · release pull requests wait here; merging sends the ship"
+        v.deconHover = "customs · dependabot and friends wait here"
+        return v
+    }
 
     /// The theme the plan is laid out for: the config's, unless a test pins one.
     static var pinnedForPlan: Theme?

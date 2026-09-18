@@ -21,6 +21,8 @@ struct Scatter {
 enum Kit {
     enum Pack: String {
         case space = "space-kit", modular = "modular-space-kit", nature = "nature-kit"
+        case castle = "castle-kit", town = "fantasy-town-kit", hexagon = "hexagon-kit"
+        case pirate = "pirate-kit", survival = "survival-kit", cubePets = "cube-pets"
     }
 
     private static var prototypes: [String: SCNNode] = [:]

@@ -220,6 +220,7 @@ enum Looks {
         switch theme {
         case .classic: current = ClassicLook()
         case .kenney: current = KenneyLook()
+        case .kingdom: current = KingdomLook()
         }
     }
 }
