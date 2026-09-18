@@ -39,26 +39,7 @@ struct SettingsView: View {
 
     private var stations: some View {
         page {
-            Text("Split sessions into stations").font(.headline)
-            Picker("", selection: $model.config.stationRule) {
-                Text("One station for everything").tag("none")
-                Text("Conductor workspaces are work, the rest private").tag("conductor")
-                Text("Repositories owned by these organisations are work").tag("owner")
-            }
-            .pickerStyle(.radioGroup)
-            .labelsHidden()
-            HStack {
-                Text("Work organisations")
-                TextField("comma separated", text: Binding(
-                    get: { model.config.workOwners.joined(separator: ", ") },
-                    set: { model.config.workOwners = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
-                    .frame(width: 260)
-            }
-            .disabled(model.config.stationRule != "owner")
-            .opacity(model.config.stationRule == "owner" ? 1 : 0.5)
-            Divider()
-            Toggle("Show the private station", isOn: Binding(get: { model.config.showPrivate }, set: { model.config.showPrivateStation = $0 }))
-                .disabled(model.config.stationRule == "none").opacity(model.config.stationRule == "none" ? 0.5 : 1)
+            Text("The station").font(.headline)
             Toggle("Show teammates' branches and pull requests on the work station", isOn: $model.config.showCrew)
             Toggle("Show repository titles across the top", isOn: Binding(get: { model.config.showTitles }, set: { model.config.showRepoTitles = $0 }))
             Text("Hide a repository under Repositories to keep it off the station entirely.").font(.caption).foregroundStyle(.secondary)

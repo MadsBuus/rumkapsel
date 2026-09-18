@@ -12,11 +12,10 @@ enum AppSupport {
 /// Everything the user can tune, persisted as JSON in Application Support.
 struct AppConfig: Codable, Equatable {
     struct RepoOverride: Codable, Equatable {
-        var station: String = "auto"   // auto, work, private, hidden
+        var station: String = "auto"   // auto or hidden; "private" from before there was one station reads as hidden
         var crew: Bool = true          // unused since 0.18, kept so old config files still decode
         var share: Bool = false        // visible to other rumkapsels on the local network
     }
-    var stationRule: String = "none"          // conductor, owner, none
     var workOwners: [String] = ["Tattoodo"]
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
@@ -29,11 +28,9 @@ struct AppConfig: Codable, Equatable {
     var githubMinutes: Int = 5
     var sleepMinutes: Int = 5
     var showCrew: Bool = true
-    /// The private station, and the repository titles across the top: shown unless turned off.
-    /// Optional so config files from before they existed still decode.
-    var showPrivateStation: Bool?
+    /// The repository titles across the top: shown unless turned off. Optional so config files from before
+    /// it existed still decode.
     var showRepoTitles: Bool?
-    var showPrivate: Bool { showPrivateStation ?? true }
     var showTitles: Bool { showRepoTitles ?? true }
     /// The look the station is drawn in, by `Theme` name; classic when unset or unknown.
     var themeName: String?
@@ -76,8 +73,6 @@ struct AppConfig: Codable, Equatable {
             return c
         }
         var c = AppConfig()
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        c.stationRule = FileManager.default.fileExists(atPath: home.appendingPathComponent("conductor/workspaces").path) ? "conductor" : "none"
         // Carry over the old crew.json names if present.
         let crewURL = url.deletingLastPathComponent().appendingPathComponent("crew.json")
         if let data = try? Data(contentsOf: crewURL), let names = try? JSONDecoder().decode([String: String].self, from: data) { c.crewNames = names }
@@ -92,24 +87,15 @@ struct AppConfig: Codable, Equatable {
         if let data = try? enc.encode(self) { try? data.write(to: AppConfig.url) }
     }
 
-    /// Station for a session: an explicit repo override first, then the rule.
+    /// Where a session goes: the station, unless its repository is kept off it. There is only ever one.
     func station(cwd: String, owner: String?, repo: String) -> String {
-        let name: String
-        if let o = repos[repo], o.station != "auto" { name = o.station }
-        else {
-            switch stationRule {
-            case "conductor": name = cwd.contains("/conductor/") ? "work" : "private"
-            case "owner":
-                let owners = Set(workOwners.map { $0.lowercased() })
-                name = (owner.map { owners.contains($0) } ?? false) || cwd.contains("/conductor/") ? "work" : "private"
-            default: name = "work"
-            }
-        }
-        return name == "private" && !showPrivate ? "hidden" : name
+        shown(repo: repo) ? "work" : "hidden"
     }
 
     /// Whether a repository is on the station at all, asked in one place so everything agrees.
-    func shown(repo: String) -> Bool { repos[repo]?.station != "hidden" }
+    /// A repository once sent to the private station is kept off it, as it was while that station was
+    /// hidden: it is read as hidden rather than rewritten, so loading a config never changes it.
+    func shown(repo: String) -> Bool { !["hidden", "private"].contains(repos[repo]?.station ?? "auto") }
     func crewEnabled(repo: String) -> Bool { showCrew && shown(repo: repo) }
     /// Hidden takes a repository off the network as well as off the floor.
     func shared(repo: String) -> Bool { shareOnLAN && shown(repo: repo) && (repos[repo]?.share ?? false) }

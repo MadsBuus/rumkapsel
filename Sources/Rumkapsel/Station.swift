@@ -847,7 +847,7 @@ final class Fleet {
     /// The simulator runs on a made-up fleet: it must not read or write the saved layout.
     var persists = true
 
-    static let order = ["work", "private"]
+    static let order = ["work"]
 
     private static var saveURL: URL {
         let dir = AppSupport.root
@@ -930,22 +930,14 @@ final class Fleet {
 
     var ordered: [Station] { Fleet.order.compactMap { stations[$0] } }
 
-    /// Work sits on the top row; private sits below work, keeping the whole fleet squarish rather than a long strip.
+    /// Each station laid out along one row, a few tiles apart. There is one, so it sits at the origin.
     func arrange() {
         var x = 0.0
-        var rowMaxY = 0.0
-        for s in ordered where s.name != "private" {
+        for s in ordered {
             let b = s.bounds
             if x > 0 { x += 3 }
             s.offset = SIMD2(x - Double(b.min.x), 0)
             x += Double(b.max.x - b.min.x + 1)
-            rowMaxY = max(rowMaxY, Double(b.max.y))
-        }
-        if let p = stations["private"] {
-            let b = p.bounds
-            let anchor = stations["work"] ?? ordered.first
-            let ax = anchor.map { $0.offset.x + Double($0.bounds.min.x) } ?? 0
-            p.offset = SIMD2(ax - Double(b.min.x) + 4, rowMaxY + 6 - Double(b.min.y))
         }
     }
 
@@ -979,8 +971,9 @@ final class Fleet {
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors
         assignColors()   // by name, whatever order an older save gave them
-        let showPrivate = ConfigStore.shared.current.showPrivate
-        for (name, s) in saved.stations where name != "crew" && (name != "private" || showPrivate) {
+        // A private station saved before there was only one is left behind; its sessions come back on the
+        // station with their next scan.
+        for (name, s) in saved.stations where name != "crew" && name != "private" {
             let station = Station(name: name)
             station.restore(s)
             station.ensureFixedRoom(.quarters)
