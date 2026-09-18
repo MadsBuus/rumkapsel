@@ -16,28 +16,42 @@ struct KenneyLook: Look {
     /// On the ground there is nothing to drift.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { [] }
 
-    /// The cape: a lawn, and the sea past the pads, its edge wandering rather than ruled. Every palm, rock
-    /// and tuft is keyed to the cell it stands on in its own station's plan, so growing an office moves
-    /// nothing that was already there.
-    /// The lawn and the coast, kept between redraws. Sampling the shoreline is the dearest thing this look
-    /// does and the coast does not move when an office opens, so it is laid out to a coarse grid: a fleet
-    /// that grows crosses a boundary now and then rather than cutting the sea afresh every time.
+    /// How far past the fleet the ground is known, and how far the fog then takes to close in.
+    static let reach = 13.0, fade = 5.0
+
+    /// The lawn, the coast and the fog round them, kept between redraws: none of it moves when an office
+    /// opens, and cutting the coast is the dearest thing this look does.
     private static var coast: (key: String, node: SCNNode)?
 
+    /// The cape: a lawn and the sea past the pads, its edge wandering rather than ruled, known only as far
+    /// as the station reaches. Past that the ground fades into fog, and the fog draws back as the station
+    /// grows, a grid square at a time, so the world is only built where somebody can see it. Every palm,
+    /// rock and tuft is keyed to the cell it stands on in its own station's plan, so growing an office
+    /// moves nothing that was already there.
     func ground(under stations: [Station], into root: SCNNode) {
         guard let fp = fleetFootprint(stations), let cape = Cape(stations) else { return }
-        let step = 8.0
-        func down(_ v: Double) -> Double { (v / step).rounded(.down) * step }
-        func up(_ v: Double) -> Double { (v / step).rounded(.up) * step }
-        let lo = SIMD2(down(cape.shore) - 90, down(fp.lo.y) - 46), hi = SIMD2(up(fp.hi.x) + 40, up(fp.hi.y) + 46)
+        let grid = 8.0, reach = Self.reach, fade = Self.fade
+        func down(_ v: Double) -> Double { (v / grid).rounded(.down) * grid }
+        func up(_ v: Double) -> Double { (v / grid).rounded(.up) * grid }
+        // What is known: the fleet's extent to the grid, so the fog lifts a square at a time, not an office.
+        let known = (lo: SIMD2(down(fp.lo.x), down(fp.lo.y)), hi: SIMD2(up(fp.hi.x), up(fp.hi.y)))
+        let margin = reach + fade + 2
+        let lo = known.lo - SIMD2(repeating: margin), hi = known.hi + SIMD2(repeating: margin)
+        /// How far into the fog a point is: its distance past what is known, with a wander so the edge of
+        /// the explored ground is not a rectangle.
+        func unexplored(_ p: SIMD2<Double>) -> Double {
+            let past = simd_length(simd_max(simd_max(known.lo - p, p - known.hi), SIMD2(repeating: 0)))
+            return past + (Noise.fbm(p, scale: 9, seed: 41) - 0.5) * 4
+        }
         let shore = down(cape.shore)
-        let key = "\(lo.x),\(lo.y),\(hi.x),\(hi.y),\(shore)"
+        let key = "\(known.lo.x),\(known.lo.y),\(known.hi.x),\(known.hi.y),\(shore)"
         let coast = Self.coast?.key == key ? Self.coast!.node : {
             let holder = SCNNode()
-            let lawn = SCNNode(geometry: SCNPlane(width: hi.x - shore + 8, height: hi.y - lo.y))
+            let lawnFrom = max(lo.x, shore - 8)
+            let lawn = SCNNode(geometry: SCNPlane(width: hi.x - lawnFrom, height: hi.y - lo.y))
             lawn.geometry!.firstMaterial = lit(Kit.grass)
             lawn.eulerAngles.x = -.pi / 2
-            lawn.position = v3((shore - 8 + hi.x) / 2, -0.06, (lo.y + hi.y) / 2)
+            lawn.position = v3((lawnFrom + hi.x) / 2, -0.06, (lo.y + hi.y) / 2)
             holder.addChildNode(lawn)
             // One sampling of how far a point lies to landward of the coast, cut at four levels: the open
             // sea, the shallows over it, the foam at the line itself, and the sand behind it.
@@ -51,22 +65,32 @@ struct KenneyLook: Look {
             for (grid, color, y) in bands {
                 if let n = Shapes.node(Shapes.fill(grid), color, y: y) { holder.addChildNode(n) }
             }
+            // The fog: veils in the colour of the sky laid one over the next as the ground runs out, so the
+            // known world thins into it rather than ending at a line, and the last is solid.
+            let fog = Shapes.sample(from: lo, to: hi, step: 0.5) { p in unexplored(p) }
+            for (k, level) in [reach, reach + fade * 0.35, reach + fade * 0.7, reach + fade].enumerated() {
+                guard let n = Shapes.node(Shapes.fill(fog, level: level), Kit.sky, y: -0.02 + Double(k) * 0.002) else { continue }
+                n.opacity = k == 3 ? 1 : 0.34
+                holder.addChildNode(n)
+            }
             Self.coast = (key, holder)
             return holder
         }()
         root.addChildNode(coast)
 
         // Palms in groves behind the sand, scrub in thickets over the lawn, both thinning to bare ground
-        // between: what stands on a cell, and how big and which way about, all follow from the cell itself.
+        // between, and none out in the fog: what stands on a cell, and how big and which way about, all
+        // follow from the cell itself.
         let palms = ["tree_palm", "tree_palmTall", "tree_palmBend", "tree_palmDetailedShort"]
         let scrub = ["grass", "grass", "grass", "grass", "grass", "grass_large", "grass_large", "grass_large",
                      "plant_bush", "plant_bushLarge", "flower_yellowA", "flower_redA", "rock_smallA", "rock_smallB"]
         for z in Int(lo.y.rounded())...Int(hi.y.rounded()) {
             // The water's edge runs along the row, so it is worked out once for the row rather than once
-            // for every cell in it: it is two runs of noise and there are two hundred cells to a row.
+            // for every cell in it.
             let edge = cape.shoreline(Double(z))
-            for x in Int((cape.shore - 2).rounded())...Int(hi.x.rounded()) {
+            for x in Int(max(lo.x, cape.shore - 2).rounded())...Int(hi.x.rounded()) {
                 let p = SIMD2(Double(x), Double(z))
+                guard unexplored(p) < reach - 1 else { continue }
                 guard let home = cape.nearest(p), !home.claims(p, within: 1.4) else { continue }
                 let cell = home.cell(p)
                 let h = Noise.hash(cell.x, cell.y, seed: home.seed)
