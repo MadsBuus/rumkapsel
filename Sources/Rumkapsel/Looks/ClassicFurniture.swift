@@ -49,12 +49,12 @@ extension Classic {
             couch.addChildNode(back)
             f.props.append(couch)
         }
-        // A potted plant in one corner and a low shelf in another: somewhere to look at.
+        // A potted plant and a low shelf against the back wall, clear of the side couches' ends: somewhere to look at.
         let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
         // A square pot with a few flat leaves fanned out on a thin stem.
         let pot = SCNNode(geometry: SCNBox(width: 0.2, height: 0.16, length: 0.2, chamferRadius: 0))
         pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
-        pot.position = v3(station.offset.x + Double(xs.min()!) - 0.28, 0.08, station.offset.y + Double(ys.min()!) - 0.28)
+        pot.position = v3(station.offset.x + Double(xs.min()!) + 0.3, 0.08, station.offset.y + Double(ys.min()!) - 0.3)
         let stem = SCNNode(geometry: SCNBox(width: 0.03, height: 0.3, length: 0.03, chamferRadius: 0))
         stem.geometry!.firstMaterial = lit(NSColor(rgb: (0.25, 0.45, 0.28)))
         stem.position = v3(0, 0.22, 0)
@@ -70,7 +70,7 @@ extension Classic {
         f.props.append(pot)
         let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
         shelf.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
-        shelf.position = v3(station.offset.x + Double(xs.max()!), 0.16, station.offset.y + Double(ys.min()!) - 0.32)
+        shelf.position = v3(station.offset.x + Double(xs.max()!) - 0.3, 0.16, station.offset.y + Double(ys.min()!) - 0.32)
         for i in 0..<4 {
             let book = SCNNode(geometry: SCNBox(width: 0.08, height: 0.2, length: 0.14, chamferRadius: 0))
             book.geometry!.firstMaterial = lit(NSColor(Colors.repos[i % Colors.repos.count]))

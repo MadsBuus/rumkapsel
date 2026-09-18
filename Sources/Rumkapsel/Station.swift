@@ -276,15 +276,15 @@ final class Station {
         guard let end = plan.south.last else { return .zero }
         return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2)
     }
-    /// Landing slots across the bay's back row, two tiles apart.
+    /// Landing slots across the middle of the bay, two tiles apart.
     var hangarSlots: [SIMD2<Double>] {
         guard let end = plan.south.last else { return [] }
-        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 3) }
+        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 2) }
     }
-    /// Where a carrier stands to wait for a slot's crate: the middle row, a tile in front of the slot.
+    /// Where a carrier stands to wait for a slot's crate: the row by the hatch, a tile in front of the slot.
     func bayStand(slot: Int) -> Cell {
         guard let end = plan.south.last else { return coreCenter }
-        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 2)
+        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 1)
     }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
