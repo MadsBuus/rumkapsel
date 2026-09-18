@@ -1253,7 +1253,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             for m in Array(minions.values) { despawn(m) }
             world.reset()
-            if !cfg.showPrivate { fleet.removeStation(named: "private") }   // off the floor; back with its next session when shown again
             github.intervalMinutes = cfg.githubMinutes
             layoutDirty = true
             rebuildStatic()
