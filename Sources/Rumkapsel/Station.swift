@@ -276,15 +276,15 @@ final class Station {
         guard let end = plan.south.last else { return .zero }
         return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2)
     }
-    /// Landing slots across the bay's back row, two tiles apart.
+    /// Landing slots across the middle of the bay, two tiles apart.
     var hangarSlots: [SIMD2<Double>] {
         guard let end = plan.south.last else { return [] }
-        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 3) }
+        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 2) }
     }
-    /// Where a carrier stands to wait for a slot's crate: the middle row, a tile in front of the slot.
+    /// Where a carrier stands to wait for a slot's crate: the row by the hatch, a tile in front of the slot.
     func bayStand(slot: Int) -> Cell {
         guard let end = plan.south.last else { return coreCenter }
-        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 2)
+        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 1)
     }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
@@ -435,6 +435,16 @@ final class Station {
     }
 
     var allCells: [Cell] { Array(walkable) }
+
+    /// The floor cell nearest a point: where a body left standing off the floor steps back to, and where
+    /// a crate put down off it lands. Nil only on a station with no floor at all.
+    func nearestFloor(to p: SIMD2<Double>) -> Cell? {
+        walkable.min { a, b in
+            let da = (Double(a.x) - p.x) * (Double(a.x) - p.x) + (Double(a.y) - p.y) * (Double(a.y) - p.y)
+            let db = (Double(b.x) - p.x) * (Double(b.x) - p.x) + (Double(b.y) - p.y) * (Double(b.y) - p.y)
+            return da != db ? da < db : (a.x, a.y) < (b.x, b.y)
+        }
+    }
 
     func cells(of place: Place) -> [Cell] {
         switch place {
@@ -971,8 +981,12 @@ final class Fleet {
     /// Where saving to disk happens, so that it never happens during a frame.
     static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
+    /// Whether the saved layout has been read. A save before that has nothing to say and would write an
+    /// empty fleet over the layout it is about to load: every office gone, and teammates' offices shuttled back in.
+    private var loaded = false
+
     func save() {
-        guard persists else { return }
+        guard persists, loaded else { return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
         // Written away from the frame: a redraw can happen while the station is being assembled.
         // Encoding reads the model, so it stays here; the disk does not.
@@ -981,6 +995,7 @@ final class Fleet {
     }
 
     func load() {
+        loaded = true
         guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }

@@ -45,14 +45,12 @@ extension Simulation {
         case .carry(let crate, let from, _):
             guard cargo[c.id] != nil else { finish(m); return }
             var spot = from
-            if m.load == .crate(crate) {
+            if m.load == .crate(crate), let st = fleet.stations[m.station] {
+                let behind = dropPoint(m, station: st)
                 dropLoad(m)   // the crate lies an arm's length behind, on the way it came: the next carrier reaches it without passing the body
-                let behind = SIMD2(m.pos.x - sin(m.facing) * Hands.arm, m.pos.y - cos(m.facing) * Hands.arm)
                 let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
-                if let st = fleet.stations[m.station] {
-                    spot = Spot(area: from.area, station: from.station, owner: from.owner, label: from.label, cell: cell,
-                                pos: SIMD3(st.offset.x + behind.x, 0.12, st.offset.y + behind.y))
-                }
+                spot = Spot(area: from.area, station: from.station, owner: from.owner, label: from.label, cell: cell,
+                            pos: SIMD3(st.offset.x + behind.x, 0.12, st.offset.y + behind.y))
             }
             cargo[c.id]?.command = c.from(spot)   // the same order, the same id: only where it starts moved
             cargo[c.id]?.carrier = nil

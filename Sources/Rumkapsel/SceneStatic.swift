@@ -343,6 +343,7 @@ extension StationController {
                     let mark = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
                     mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
                     mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
+                    mark.name = "bay:" + station.name
                     staticRoot.addChildNode(mark)
                 }
             }
@@ -501,6 +502,34 @@ extension StationController {
             labelRoot.addChildNode(node)
             floorLabels.append((node, yaw))
         }
+        // The corner of a room a label goes in: the front one, unless something of the room's own stands
+        // on it — a couch, a landing pad — and then the next corner that is clear. Props by footprint, in world space.
+        func corner(of cells: [Cell], width: Double, height: Double, station: Station, clearOf names: Set<String>) -> SIMD2<Double> {
+            let o = SIMD2(station.offset.x, station.offset.y)
+            let props: [(lo: SIMD2<Double>, hi: SIMD2<Double>)] = staticRoot.childNodes.filter { names.contains($0.name ?? "") }.map { n in
+                let (lo, hi) = n.boundingBox
+                let pts = [lo.x, hi.x].flatMap { x in [lo.z, hi.z].map { z in staticRoot.convertPosition(SCNVector3(x, 0, z), from: n) } }
+                return (SIMD2(Double(pts.map(\.x).min()!), Double(pts.map(\.z).min()!)), SIMD2(Double(pts.map(\.x).max()!), Double(pts.map(\.z).max()!)))
+            }
+            let x0 = Double(cells.map(\.x).min()!), x1 = Double(cells.map(\.x).max()!)
+            let y0 = Double(cells.map(\.y).min()!), y1 = Double(cells.map(\.y).max()!)
+            let half = SIMD2(width / 2, height / 2)
+            let front = y1 + 0.42 - half.y, back = y0 - 0.42 + half.y, right = x1 + 0.42 - half.x, left = x0 - 0.42 + half.x
+            let midX = (x0 + x1) / 2, midY = (y0 + y1) / 2
+            // The corners first, then the middle of each side; failing all of them, whichever is least covered.
+            let options = [SIMD2(right, front), SIMD2(left, front), SIMD2(right, back), SIMD2(left, back),
+                           SIMD2(midX, front), SIMD2(right, midY), SIMD2(left, midY), SIMD2(midX, back)].map { $0 + o }
+            func covered(_ c: SIMD2<Double>) -> Double {
+                props.reduce(0) { sum, p in
+                    let w = min(c.x + half.x, p.hi.x) - max(c.x - half.x, p.lo.x), h = min(c.y + half.y, p.hi.y) - max(c.y - half.y, p.lo.y)
+                    return sum + max(0, w) * max(0, h)
+                }
+            }
+            return options.enumerated().min { a, b in
+                let ca = covered(a.element), cb = covered(b.element)
+                return ca != cb ? ca < cb : a.offset < b.offset
+            }!.element
+        }
         // A look may keep the floor clear of lettering and carry the names some other way.
         guard Looks.current.writesOnFloor else { return }
         for station in fleet.stations.values {
@@ -536,9 +565,8 @@ extension StationController {
             if station.hasHangar {
                 let hangarLabel = floorSign(Words.current.bay, color: NSColor(Colors.hangar).lighter(0.18), size: 0.36)
                 hangarLabel.node.position.y = 0.012
-                let hc = station.hangarCells
-                let corner = SIMD2(Double(hc.map(\.x).max()!) + 0.42 - hangarLabel.width / 2, Double(hc.map(\.y).max()!) + 0.42 - hangarLabel.height / 2)
-                add(hangarLabel.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                add(hangarLabel.node, yaw: 0, center: corner(of: station.hangarCells, width: hangarLabel.width, height: hangarLabel.height,
+                                                             station: station, clearOf: ["bay:" + station.name]))
                 let airlockLabel = floorSign(Words.current.airlock, color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
                 airlockLabel.node.position.y = 0.012
                 if let a = station.airlockInner.first {
@@ -569,11 +597,10 @@ extension StationController {
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
                     let label = floorSign(text, color: accent, size: 0.36)
                     label.node.position.y = 0.012
-                    // Tucked into the far corner of the floor, clear of beds and rings.
-                    let maxY = room.cells.map(\.y).max()!
-                    let maxX = room.cells.filter { $0.y == maxY }.map(\.x).max()!
-                    let corner = SIMD2(Double(maxX) + 0.42 - label.width / 2, Double(maxY) + 0.42 - label.height / 2)
-                    add(label.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                    // Tucked into a corner of the floor, clear of the room's own furniture.
+                    let key = roomKey(station, room)
+                    add(label.node, yaw: 0, center: corner(of: room.cells, width: label.width, height: label.height,
+                                                           station: station, clearOf: ["room:" + key, "gym:" + key]))
                     label.node.name = "room:" + roomKey(station, room)
                     roomLabels[roomKey(station, room)] = label.node
                     continue
