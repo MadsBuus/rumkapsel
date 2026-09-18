@@ -98,7 +98,8 @@ final class TranscriptScanner {
                     parsed = parseTail(url: url)
                     cache[path] = (mtime, parsed)
                 }
-                guard let cwd = parsed.cwd else { continue }
+                guard let seen = parsed.cwd else { continue }
+                let cwd = checkout(of: seen)
                 let repo = repoInfo(for: cwd)
                 let isSub = url.deletingLastPathComponent() != project
                 result.sessions.append(SessionInfo(
@@ -112,6 +113,23 @@ final class TranscriptScanner {
         let current = Dictionary(grouping: result.sessions, by: \.cwd).compactMapValues { $0.max { $0.lastModified < $1.lastModified }?.branch }
         for i in result.sessions.indices { if let b = current[result.sessions[i].cwd] { result.sessions[i].branch = b } }
         return result
+    }
+
+    /// The checkout a directory lies in: the nearest folder holding a `.git`, or the directory itself when
+    /// none does. A session that changed directory into `Sources/` is still the session of its workspace,
+    /// and the workspace is what the desktop app leases and what an office stands for.
+    private var checkoutCache: [String: String] = [:]
+    func checkout(of cwd: String) -> String {
+        if let c = checkoutCache[cwd] { return c }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var dir = URL(fileURLWithPath: cwd)
+        var found = cwd
+        while dir.path.count > 1 && dir.path != home {
+            if FileManager.default.fileExists(atPath: dir.appendingPathComponent(".git").path) { found = dir.path; break }
+            dir.deleteLastPathComponent()
+        }
+        checkoutCache[cwd] = found
+        return found
     }
 
     /// The repository a directory belongs to, seeing through git worktrees (Conductor workspaces).
