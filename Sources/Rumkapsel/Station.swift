@@ -436,6 +436,16 @@ final class Station {
 
     var allCells: [Cell] { Array(walkable) }
 
+    /// The floor cell nearest a point: where a body left standing off the floor steps back to, and where
+    /// a crate put down off it lands. Nil only on a station with no floor at all.
+    func nearestFloor(to p: SIMD2<Double>) -> Cell? {
+        walkable.min { a, b in
+            let da = (Double(a.x) - p.x) * (Double(a.x) - p.x) + (Double(a.y) - p.y) * (Double(a.y) - p.y)
+            let db = (Double(b.x) - p.x) * (Double(b.x) - p.x) + (Double(b.y) - p.y) * (Double(b.y) - p.y)
+            return da != db ? da < db : (a.x, a.y) < (b.x, b.y)
+        }
+    }
+
     func cells(of place: Place) -> [Cell] {
         switch place {
         case .core: return coreCells.filter { $0 != plan.monolith }

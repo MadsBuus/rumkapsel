@@ -27,11 +27,21 @@ extension Simulation {
     /// behind where the body stands, on the way it came, never in the way ahead.
     func dropLoad(_ m: B) {
         guard m.hasLoad, let station = fleet.stations[m.station] else { return }
-        let behind = SIMD3(station.offset.x + m.pos.x - sin(m.facing) * Hands.arm, 0.12, station.offset.y + m.pos.y - cos(m.facing) * Hands.arm)
+        let at = dropPoint(m, station: station)
+        let behind = SIMD3(station.offset.x + at.x, 0.12, station.offset.y + at.y)
         m.load = nil
         m.settingDownOn = nil
         m.landing = Body.Landing(pos: behind, yaw: nil, dropped: true)
         world.dropped(by: m.id)
+    }
+
+    /// Where a dropped crate lies: an arm's length behind the body, or on the nearest floor when that is
+    /// off it, so whoever comes for it next can reach it.
+    func dropPoint(_ m: B, station: Station) -> SIMD2<Double> {
+        let behind = SIMD2(m.pos.x - sin(m.facing) * Hands.arm, m.pos.y - cos(m.facing) * Hands.arm)
+        let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
+        guard !station.walkable.contains(cell), let floor = station.nearestFloor(to: behind) else { return behind }
+        return SIMD2(Double(floor.x), Double(floor.y))
     }
 
     /// Whatever was on the arms is simply gone: delivered by someone else, or the crate no more.

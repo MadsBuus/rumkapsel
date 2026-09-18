@@ -210,6 +210,56 @@ enum SimulationTests {
             } else { expect(false, "the carry is still a carry") }
         }
 
+        test("a carrier left off the floor with a crate on its arms steps back onto it and delivers") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            for c in sim.world.carryToDeck(station: station, repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
+            sim.scheduleCarries()
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
+            // The floor it stood on is gone: an office archived under it, say.
+            let north = station.walkable.map(\.y).min()! - 4
+            m.pos = SIMD2(Double(station.walkable.filter { $0.y == north + 4 }.map(\.x).min()!), Double(north))
+            m.path = []
+            expect(!station.walkable.contains(m.cell), "off the floor at \(m.cell.x),\(m.cell.y)")
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            _ = step(sim, seconds: 90, until: { m.current?.crate == nil }, beat: { sim.reconcileBodies() })
+            expect(!gaveUp, "never gave up")
+            expect(sim.world.crate(crate)?.area == .deck, "down on the deck: \(String(describing: sim.world.crate(crate)?.at))")
+            expect(station.walkable.contains(m.cell), "and back on the floor at \(m.cell.x),\(m.cell.y)")
+        }
+
+        test("a carrier giving up off the floor drops the crate on the nearest floor, not in space") {
+            let (sim, station, m) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            for c in sim.world.carryToDeck(station: station, repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
+            sim.scheduleCarries()
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
+            let north = station.walkable.map(\.y).min()! - 4
+            m.pos = SIMD2(Double(station.walkable.filter { $0.y == north + 4 }.map(\.x).min()!), Double(north))
+            m.path = []
+            m.wedged = true
+            var gaveUp = false
+            let was = sim.onEvent
+            sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
+            _ = step(sim, seconds: 30, until: { gaveUp }, beat: { sim.reconcileBodies() })
+            expect(gaveUp, "gave up, wedged")
+            if let landing = m.landing {
+                let cell = Cell(x: Int((landing.pos.x - station.offset.x).rounded()), y: Int((landing.pos.z - station.offset.y).rounded()))
+                expect(station.walkable.contains(cell), "the crate lies on the floor at \(cell.x),\(cell.y)")
+            } else { expect(false, "the crate was put down") }
+            if case .carry(_, let from, _)? = sim.cargo.values.first?.command.kind {
+                expect(station.walkable.contains(from.cell), "and the carry starts again from the floor: \(from.cell.x),\(from.cell.y)")
+            } else { expect(false, "the carry is still queued") }
+        }
+
         test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

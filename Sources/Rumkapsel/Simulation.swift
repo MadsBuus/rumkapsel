@@ -398,8 +398,15 @@ final class Simulation<B: Body> {
     func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
         rouse(m)
-        let clear = station.path(from: m.pos, to: cell, avoiding: crowd(around: m, round: blocker))
-        return clear.isEmpty ? station.path(from: m.pos, to: cell) : clear
+        // Left standing where the floor went away under it: straight back onto the nearest floor, and on from there.
+        var from = m.pos, back: [SIMD2<Double>] = []
+        if !station.walkable.contains(m.cell), let floor = station.nearestFloor(to: m.pos) {
+            from = SIMD2(Double(floor.x), Double(floor.y))
+            back = [from]
+            if floor == cell { return back }
+        }
+        let clear = station.path(from: from, to: cell, avoiding: crowd(around: m, round: blocker))
+        return back + (clear.isEmpty ? station.path(from: from, to: cell) : clear)
     }
 
     /// The floor changed under a walk, a crate or a pallet arrived in the way: the walk is planned again
