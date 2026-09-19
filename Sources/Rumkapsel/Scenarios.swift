@@ -304,6 +304,27 @@ enum Scenarios {
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
         }),
 
+        // The station half alone: no merge on GitHub, no board item moved. A repository without a
+        // staging area, so the crate goes from storage straight aboard; the deck's shared cell has a
+        // geometry bug of its own (two repositories' columns half a tile apart) that a QA carry walks into.
+        Scenario("the stage panel alone: said stored, cleared and shipped, the crate goes from storage up", [
+            ("Target: ios#298", 4.8),
+            ("Repo: No staging", 4.8),
+            ("Open PR", 32),
+            ("Stage: stored", 128),      // the record's word hauls the crate
+            ("Stage: cleared", 96),      // the rocket loads it, from storage
+            ("Stage: shipped", 4.8),     // and goes, with that crate and no other
+        ], tail: 224, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            // ios#280 was on the board in QA, never said shipped: it stays behind.
+            let stored = Scenario.crates(sim, "storage", "ios")
+            return stored == 1 ? nil : "\(stored) ios crates left in storage; #280 alone should be"
+        }),
+
         Scenario("production release: mark tested, merge, the rocket lifts", [
             ("Target: web#455", 4.8),
             ("Release: Production opens", 48),

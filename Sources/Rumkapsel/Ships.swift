@@ -402,7 +402,14 @@ extension Simulation {
         let source = loadSource(r)
         let repo = r.repo
         let yard: Yard = source == "deck" ? .deck : .storage
-        let numbers = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
+        // A load before the launch takes everything cleared to go, as it always did. A launch that has
+        // to load first takes what the record says shipped, where it says so for any of them: a release
+        // ships what was waiting for it, a stage said for one crate ships that crate and leaves the rest.
+        let standing = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
+        func shipped(_ n: Int) -> Bool? { world.works.find(repo: repo, crate: n).map { r in r.stage.map { $0 >= .shipped } ?? true } }
+        var launching = false   // the record, not the rows: a crate aboard is off the rows before the rocket has gone
+        if case .rocket(.launch, _, _) = r.command.kind { launching = world.works.records(repo: repo).contains { r in r.stage.map { $0 >= .shipped } ?? false } }
+        let numbers = launching ? standing.filter { shipped($0) ?? true } : standing
         guard !numbers.isEmpty else { return }
         for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
             guard let crate = command.crate else { continue }

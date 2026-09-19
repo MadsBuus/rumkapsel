@@ -435,15 +435,12 @@ extension StationController {
 
     /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
     func assignTester(station: Station, free: [Minion]) {
-        var cargoOnDeck = station.staged.values.reduce(0, +) > 0
-        if ConfigStore.shared.current.project != nil {
-            // With a board, QA is done once every crate on the deck is marked ready to ship.
-            // What came through decon is never QA's: on the deck it counts as tested from the start.
-            cargoOnDeck = world.repoRoots.contains { root, info in
-                guard info.station == station.name, let c = github.cargo(repoRoot: root) else { return false }
-                let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
-                return c.deckNumbers.filter { !alien.contains($0) }.count > c.clearedNumbers.filter { !alien.contains($0) }.count
-            }
+        // QA is done once every crate on the deck is cleared, by the record's word. What came through
+        // decon is never QA's: on the deck it counts as tested from the start.
+        let cargoOnDeck = station.staged.values.reduce(0, +) > 0 && world.repoRoots.contains { _, info in
+            guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
+            let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
+            return world.works.records(repo: info.repo).contains { r in r.stage == .qa && !(r.number.map(alien.contains) ?? false) }
         }
         let cleared = simulation.rockets.values.contains { $0.station == station.name && $0.isSteaming }
         let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty

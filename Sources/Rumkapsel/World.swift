@@ -23,7 +23,6 @@ final class World {
     /// How long a session outside Conductor keeps its office.
     static let roomsWindow: TimeInterval = 12 * 3600
 
-    private static let trunkBranches: Set<String> = ["develop", "staging", "main", "master", "production"]
 
     // MARK: model state
 
@@ -818,7 +817,7 @@ final class World {
         var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" && cfg.crewEnabled(repo: info.repo) {
-            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !World.trunkBranches.contains(pr.branch) { open.append((info.repo, pr)) }
+            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !Work.longLived.contains(pr.branch) { open.append((info.repo, pr)) }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
         // Issues the board says are in development, assigned to someone else: offices too, even before a pull request.
@@ -1253,9 +1252,9 @@ final class World {
         // One word per crate: the deck's count carries the cleared ones too, and QA said after cleared would take them back.
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
-        // Cleared is the record's word, whoever said it: the board's column, the release's label, or nothing here to clear.
-        let cleared = works.records(repo: repo).filter { r in r.stage.map { $0 >= .cleared } ?? false }.compactMap(\.number)
-        station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: cleared, updated: c.updated), repo: repo)
+        // The ledger hears the record, not the counts: where each piece of work is by the record's word,
+        // whoever said it, and when it was last moved on. The counts above were only signals into it.
+        station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.
         guard truth.pallets[station.name]?.repo != repo,
@@ -1271,6 +1270,25 @@ final class World {
             station.ledger.snap(repo: repo, number: crate.number)
         }
         return .snapped
+    }
+
+    /// The record's word about a repository's crates, in the yard's terms: stored is storage, QA and
+    /// cleared are the deck, shipped is gone, and a crate is cleared from cleared on.
+    func yardWord(repo: String, station: Station) -> Ledger.Word {
+        var word = Ledger.Word(storage: [], deck: [])
+        // Without a staging area there is no deck: QA and cleared work waits in storage like the rest.
+        let deck = stagingIsDeck(station: station.name, repo: repo)
+        for r in works.records(repo: repo) {
+            guard let n = r.number, let stage = r.stage else { continue }
+            switch stage {
+            case .stored: word.storage.append(n)
+            case .qa, .cleared: if deck { word.deck.append(n) } else { word.storage.append(n) }
+            default: continue
+            }
+            if stage >= .cleared { word.cleared.append(n) }
+            if let at = r.stagedAt { word.updated[n] = at }
+        }
+        return word
     }
 
     // MARK: places, asked for

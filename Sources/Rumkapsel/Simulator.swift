@@ -128,6 +128,8 @@ final class SimulatorModel: ObservableObject {
     /// The one office everything acts on, by uid.
     @Published var target = ""
     @Published var column = ""
+    /// Who the stage panel speaks as: the station hears a stage by the rules, so the source matters.
+    @Published var stageSource: Source = .board
     @Published var speed = 1.0
     @Published var paused = false
     @Published private(set) var offices: [SimOffice] = []
@@ -497,6 +499,9 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Leave", "Leave", peerHere ? nil : "\(peerName) is not here"),
                 button("Peer: Kick office", "Kick this office", office == nil ? "no office picked" : nil),
             ]),
+            // The station half on its own: a stage said straight to the record, no integration played.
+            Group(id: "Stage", note: "Says a stage to the record as the source picked, by the rules; the floor reacts. No GitHub, no board.", buttons:
+                Stage.allCases.filter { $0 >= .ready }.map { button("Stage: \($0)", "→ \($0)", office == nil ? "no office picked" : nil) }),
             Group(id: "Board", note: nil, buttons: [
                 button("Board: Move", "Move \(office.map { "\($0.repo)#\($0.number)" } ?? "the issue") to \(column)",
                        office.flatMap(boardItem) == nil ? "the target has no issue on the board"
@@ -583,6 +588,15 @@ final class SimulatorModel: ObservableObject {
     /// Every button's work. Nothing here checks whether it applies: `press` did that.
     private func run(_ name: String) {
         let repo = targetRepo
+        if name.hasPrefix("Stage: "), let stage = Stage.allCases.first(where: { "\($0)" == String(name.dropFirst(7)) }), let o = office {
+            let works = station.world.works
+            let record = works.find(repo: o.repo, issue: o.number) ?? works.find(repo: o.repo, pull: o.number)
+                ?? works.note(repo: o.repo, branch: o.branch, issue: o.number)
+            works.report(record, stage, by: stageSource, at: station.now)
+            note("sim", "\(o.repo)#\(o.number) → \(stage) · \(stageSource.rawValue) · now \(record.stage.map { "\($0)" } ?? "-")")
+            pushScan()   // nothing else changed that the station watches: its own sessions again, so it looks
+            return
+        }
         switch name {
 
         // Me
@@ -977,6 +991,11 @@ struct SimulatorPanel: View {
                             if g.id == "Board" {
                                 Picker("", selection: $model.column) {
                                     ForEach(model.columns, id: \.self) { Text($0).tag($0) }
+                                }.labelsHidden().controlSize(.small)
+                            }
+                            if g.id == "Stage" {
+                                Picker("", selection: $model.stageSource) {
+                                    ForEach(Source.allCases, id: \.self) { Text($0.title).tag($0) }
                                 }.labelsHidden().controlSize(.small)
                             }
                             ForEach(g.buttons) { b in
