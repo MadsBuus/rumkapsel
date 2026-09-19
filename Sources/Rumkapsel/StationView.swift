@@ -202,6 +202,7 @@ extension StationController {
         focused = nil
         following = nil
         userDriving = 0.5
+        userTookView = true
         let yaw = viewYaw + userYaw
         let unitsPerPixel = 2 * cameraNode.camera!.orthographicScale / Double(max(1, viewSize.height))
         let right = SIMD2(cos(yaw), -sin(yaw))
