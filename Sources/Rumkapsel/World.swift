@@ -466,6 +466,17 @@ final class World {
                     if let repo = room.repo { works.note(repo: repo, branch: change.branch, issue: change.pr.closes.first, pull: change.pr.number, pullState: change.pr.state) }
                 }
             }
+            // The pull request's own word: open is ready, merged is stored, closed unmerged is back to working.
+            for station in fleet.stations.values {
+                for room in station.rooms.values where room.branch == change.branch {
+                    guard let repo = room.repo, let r = works.find(repo: repo, pull: change.pr.number) else { continue }
+                    switch change.pr.state {
+                    case "OPEN": works.report(r, .ready, by: .pulls)
+                    case "MERGED": works.report(r, .stored, by: .pulls)
+                    default: works.report(r, .working, by: .pulls)
+                    }
+                }
+            }
             let who = Work(repo: "", branch: change.branch).label
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
@@ -779,7 +790,8 @@ final class World {
             changed = true
         }
         for (repo, pr) in open where !pr.isBot && !isKicked(sk + crewKey(repo: repo, branch: pr.branch)) {
-            works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN")
+            let record = works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN")
+            works.report(record, .ready, by: .pulls, at: pr.createdAt)   // every pass: the office may have been the board's first
             let home = Work(repo: repo, branch: pr.branch).home
             let key = home.key
             let name = home.name
@@ -793,7 +805,6 @@ final class World {
                 if isReady(repo) {
                     events.append(.officeOpened(station: station.name, key: key, source: .github(pr.author), arrival: .shuttle))
                     events.append(.pullRequestOpened(repo: repo, number: pr.number, author: pr.author, roomKey: key))
-                    if let r = works.find(repo: repo, pull: pr.number) { works.report(r, .ready, by: .pulls, at: pr.createdAt) }
                 }
             }
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
@@ -802,6 +813,7 @@ final class World {
         }
         for (repo, it, login) in boardOffices where !isKicked(sk + Work(repo: repo, issue: it.number).officeKey) {
             let key = Work(repo: repo, issue: it.number).officeKey
+            works.note(repo: repo, issue: it.number, pull: it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") })
             let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.rooms[key] == nil {
@@ -817,7 +829,6 @@ final class World {
                 }
             }
             let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
-            works.note(repo: repo, issue: it.number, pull: prNumber)
             // What the pull request told us earlier, its branch and number, outlives the board's guess.
             let known = crewRoomInfo[sk + key]
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? Work.guessedBranch(issue: it.number), prNumber: prNumber ?? known?.prNumber,
