@@ -53,6 +53,8 @@ final class World {
     /// The crate each merged office's package became, by office key ("station|roomKey"), from the
     /// moment its haul was ordered. Whether it has left is read off the crate's row, never a flag.
     private(set) var officeCrates: [String: CrateRef] = [:]
+    /// Every piece of work by every name it goes by; see `WorkBook`.
+    let works = WorkBook()
 
     // MARK: a crate's row, from the floor's side
 
@@ -442,6 +444,11 @@ final class World {
         }
         events += applyBoardMoves()
         for change in github.takeStateChanges() {
+            for station in fleet.stations.values {
+                for room in station.rooms.values where room.branch == change.branch {
+                    if let repo = room.repo { works.note(repo: repo, branch: change.branch, issue: change.pr.closes.first, pull: change.pr.number, pullState: change.pr.state) }
+                }
+            }
             let who = Work(repo: "", branch: change.branch).label
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
@@ -461,16 +468,14 @@ final class World {
     /// A session's office, unless that office was merged and cleared while the session lingers on the
     /// branch: then the minion waits in the lounge rather than rebuilding the office every scan.
     func homeFor(_ s: SessionInfo, station: String) -> Home {
-        var home = Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd)
         // A branch names an office until GitHub says which pull request it is, and after that the pull
         // request does. Otherwise the same work is one office here, under the branch it is checked out
         // on, and another from GitHub under its number — and neither knows about the other, so the
         // rules that keep your own office standing never see the remote one at all. A branch named
         // `gh-N/…` already arrives as `#N`; this is for every branch that is not.
-        if home.issue == nil, let branch = s.branch, let root = s.repoRoot,
-           let pr = github.pull(branch: branch, repoRoot: root), pr.state == "OPEN" {
-            home = Work(repo: s.repo, branch: branch, pull: pr.number).home
-        }
+        let pr = s.branch.flatMap { b in s.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+        let home = works.note(repo: s.repo, branch: s.branch, folder: s.cwd, issue: pr?.closes.first, pull: pr?.number, pullState: pr?.state)
+            .work(branch: s.branch).home
         if let at = retired["\(station)|\(home.key)"], Date().timeIntervalSince(at) < World.holdWindow {
             return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
         }
@@ -748,8 +753,9 @@ final class World {
             events.append(drop(station: station, room: room, announce: isReady(room.repo), reason: "pull request closed"))
             changed = true
         }
-        for (repo, pr) in open where !pr.isBot && !isKicked(sk + Home.from(repo: repo, branch: pr.branch, cwd: "").key) {
-            let home = Home.from(repo: repo, branch: pr.branch, cwd: "")
+        for (repo, pr) in open where !pr.isBot && !isKicked(sk + crewKey(repo: repo, branch: pr.branch)) {
+            works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN")
+            let home = Work(repo: repo, branch: pr.branch).home
             let key = home.key
             let name = home.name
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
@@ -784,6 +790,7 @@ final class World {
                 }
             }
             let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
+            works.note(repo: repo, issue: it.number, pull: prNumber)
             // What the pull request told us earlier, its branch and number, outlives the board's guess.
             let known = crewRoomInfo[sk + key]
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? Work.guessedBranch(issue: it.number), prNumber: prNumber ?? known?.prNumber,
@@ -897,6 +904,7 @@ final class World {
         var live: Set<String> = []
         var disputed: [(key: String, cells: [Cell])] = []
         for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
+            works.note(repo: o.repo, branch: o.branch, pull: o.pull, pullState: o.pullState)
             let key = sk + o.key
             live.insert(key)
             let before = peerOffices[key]?[snap.name]
@@ -1310,7 +1318,8 @@ final class World {
         let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
         guard let prNumber = pull?.number ?? crewRoomInfo[key]?.prNumber, prNumber > 0 else { nothingToHaul.insert(key); return [] }
         let issue = pull?.closes.first ?? github.task(repo: repo, pull: prNumber) ?? Work.number(inOfficeKey: room.key)
-        guard let number = Work(repo: repo, branch: room.branch, issue: issue, pull: prNumber).number else { return [] }
+        let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: issue, pull: prNumber, pullState: pull?.state)
+        guard let number = record.number else { return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }

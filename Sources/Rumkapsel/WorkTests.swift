@@ -63,6 +63,47 @@ enum WorkTests {
             expect(w.name.hasPrefix("#7 a very long"), "whole words kept, got \(w.name)")
         }
 
+        test("one record, whoever saw it first: a folder, then a branch, then a pull request, then an issue") {
+            let book = WorkBook()
+            let first = book.note(repo: "web", folder: "/w/search")
+            expect(first.work().officeKey == "proj:web", "a folder alone names nothing yet")
+            let named = book.note(repo: "web", branch: "feature/search", folder: "/w/search")
+            expect(named === first && named.work().officeKey == "task:web/feature/search", "the branch joins the folder's record")
+            let opened = book.note(repo: "web", branch: "feature/search", pull: 460, pullState: "OPEN")
+            expect(opened === first && opened.work().officeKey == "task:web#460", "the pull request names it once open")
+            let linked = book.note(repo: "web", issue: 128, pull: 460)
+            expect(linked === first && linked.number == 128 && linked.work().officeKey == "task:web#460", "the issue is the crate; the office keeps the pull request's name")
+            expect(book.find(repo: "web", issue: 128) === first && book.find(folder: "/w/search") === first, "found by any name")
+            expect(book.count == 1, "one record, got \(book.count)")
+        }
+
+        test("a board issue and a checkout of its branch are one record, whichever came first") {
+            let book = WorkBook()
+            let board = book.note(repo: "api", issue: 5158, pull: 77)
+            let checkout = book.note(repo: "api", branch: "gh-5158/offerings-gate", folder: "/w/api")
+            expect(board === checkout && book.count == 1, "one record")
+            expect(checkout.work().officeKey == "task:api#5158" && checkout.number == 5158, "named by the issue")
+            expect(book.find(officeKey: "task:api#5158", repo: "api") === board, "found by the office key")
+        }
+
+        test("a pull request that closes stops naming the office; the branch does again") {
+            let book = WorkBook()
+            let r = book.note(repo: "web", branch: "feature/x", pull: 9, pullState: "OPEN")
+            expect(r.work().officeKey == "task:web#9", "open: by number")
+            book.note(repo: "web", pull: 9, pullState: "MERGED")
+            expect(r.work().officeKey == "task:web/feature/x" && r.number == 9, "merged: the office by branch, the crate still #9")
+        }
+
+        test("two records that turn out to be one fold together, the older keeping its id") {
+            let book = WorkBook()
+            let a = book.note(repo: "web", branch: "feature/x")
+            let b = book.note(repo: "web", pull: 9)
+            expect(a !== b && book.count == 2, "two, until a name joins them")
+            let c = book.note(repo: "web", branch: "feature/x", pull: 9)
+            expect(c === a && book.count == 1 && book.find(repo: "web", pull: 9) === a, "one, under the older id")
+            expect(a.pulls[9] == "OPEN" && a.branches == ["feature/x"], "with both names")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

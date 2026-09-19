@@ -82,3 +82,94 @@ struct Work: Hashable {
         return String(out.prefix(limit))
     }
 }
+
+/// Every piece of work the station has heard of, by every name it goes by. A record is made the first
+/// time work is seen, from whatever saw it: a checkout folder, a branch, a pull request or a board issue,
+/// and each source that comes after adds the names it knows. Two records that turn out to share a name are
+/// one piece of work, and become one record. The floor asks here, never a source, for what work a name means.
+final class WorkBook {
+    final class Record {
+        let id: Int
+        let repo: String
+        var branches: Set<String> = []
+        var folders: Set<String> = []
+        /// The issue the work is for, as a pull request's `closes #N` or the board said.
+        var issue: Int?
+        /// Pull requests by number, with the state each was last heard in.
+        var pulls: [Int: String] = [:]
+
+        init(id: Int, repo: String) { self.id = id; self.repo = repo }
+
+        /// The issue a branch is named for, `gh-N/…`: the one name that is on the office from the start.
+        var branchIssue: Int? { branches.lazy.compactMap(Work.issue(inBranch:)).min() }
+        /// The work as the floor names it now: the branch's issue, else the open pull request, else the
+        /// branch. A pull request that closed or merged no longer names the office; the branch does again,
+        /// as it always has, so a session lingering on a merged branch is where it was. The branch asked
+        /// for is used when the record has several, so a session is named by the one it is on.
+        func work(branch preferred: String? = nil) -> Work {
+            let branch = preferred.flatMap { branches.contains($0) ? $0 : nil } ?? branches.sorted().first
+            let open = pulls.filter { $0.value == "OPEN" }.keys.min()
+            return Work(repo: repo, branch: branch, issue: branchIssue, pull: open)
+        }
+        /// The crate's number: the issue the work is for, else the branch's, else its pull request.
+        var number: Int? { issue ?? branchIssue ?? pulls.keys.min() }
+    }
+
+    private var records: [Int: Record] = [:]
+    private var byBranch: [String: Int] = [:]   // "repo|branch"
+    private var byFolder: [String: Int] = [:]
+    private var byIssue: [String: Int] = [:]    // "repo#N"
+    private var byPull: [String: Int] = [:]     // "repo!N"
+    private var nextId = 1
+
+    func find(repo: String, branch: String) -> Record? { byBranch["\(repo)|\(branch)"].flatMap { records[$0] } }
+    func find(folder: String) -> Record? { byFolder[folder].flatMap { records[$0] } }
+    func find(repo: String, issue: Int) -> Record? { byIssue["\(repo)#\(issue)"].flatMap { records[$0] } }
+    func find(repo: String, pull: Int) -> Record? { byPull["\(repo)!\(pull)"].flatMap { records[$0] } }
+    /// The record behind an office key as the floor writes it today, `task:repo#N` or `task:repo/branch`.
+    func find(officeKey key: String, repo: String) -> Record? {
+        if let n = Work.number(inOfficeKey: key) { return find(repo: repo, issue: n) ?? find(repo: repo, pull: n) }
+        guard key.hasPrefix("task:\(repo)/") else { return nil }
+        return find(repo: repo, branch: String(key.dropFirst("task:\(repo)/".count)))
+    }
+
+    /// Writes down what a source knows about one piece of work, and answers with its record. Any name
+    /// that is already someone's finds that record; the rest are added to it. Names that belong to two
+    /// records fold them into one, the older keeping its id.
+    @discardableResult
+    func note(repo: String, branch: String? = nil, folder: String? = nil, issue: Int? = nil, pull: Int? = nil, pullState: String? = nil) -> Record {
+        var found: [Record] = []
+        if let branch, !Work.notWork.contains(branch) {
+            if let r = find(repo: repo, branch: branch) { found.append(r) }
+            if let n = Work.issue(inBranch: branch), let r = find(repo: repo, issue: n) { found.append(r) }
+        }
+        if let folder, let r = find(folder: folder) { found.append(r) }
+        if let issue, let r = find(repo: repo, issue: issue) { found.append(r) }
+        if let pull, let r = find(repo: repo, pull: pull) { found.append(r) }
+        let record: Record
+        if let first = found.min(by: { $0.id < $1.id }) {
+            record = first
+            for other in found where other.id != record.id { merge(other, into: record) }
+        } else {
+            record = Record(id: nextId, repo: repo); nextId += 1
+            records[record.id] = record
+        }
+        if let branch, !Work.notWork.contains(branch) { record.branches.insert(branch); byBranch["\(repo)|\(branch)"] = record.id }
+        if let folder { record.folders.insert(folder); byFolder[folder] = record.id }
+        if let issue { record.issue = record.issue ?? issue; byIssue["\(repo)#\(issue)"] = record.id }
+        if let n = record.branchIssue { byIssue["\(repo)#\(n)"] = record.id }
+        if let pull { record.pulls[pull] = pullState ?? record.pulls[pull] ?? "OPEN"; byPull["\(repo)!\(pull)"] = record.id }
+        return record
+    }
+
+    private func merge(_ other: Record, into record: Record) {
+        for b in other.branches { record.branches.insert(b); byBranch["\(record.repo)|\(b)"] = record.id }
+        for f in other.folders { record.folders.insert(f); byFolder[f] = record.id }
+        if let i = other.issue { record.issue = record.issue ?? i; byIssue["\(record.repo)#\(i)"] = record.id }
+        if let n = other.branchIssue { byIssue["\(record.repo)#\(n)"] = record.id }
+        for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }
+        records[other.id] = nil
+    }
+
+    var count: Int { records.count }
+}
