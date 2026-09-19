@@ -50,7 +50,8 @@ since real stations mandate both.
   queued behind it stand in a row inward, translucent. A new message shrinks the old cone away; a session
   that waits for you has none.
 - pallet: a staging release being assembled
-- rocket: a production release; steam means loaded and waiting, a hold ring means untested
+- rocket: a production release; steam means loaded and waiting, the service tower beside it means untested:
+  it stays attached until the rocket is cleared, and a rocket ready to go stands alone
 - nothing is round; everything has flat sides
 
 ## Things are heavy

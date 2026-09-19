@@ -282,35 +282,10 @@ enum Props {
         return n
     }
 
-    /// A red-and-white tape barrier with a service tower: the release is up but not cleared to fly.
+    /// The service tower beside a rocket that is up but not cleared to fly: it stays attached until the
+    /// rocket is cleared, and a rocket ready to go stands alone, as on a real pad.
     static func holdDecoration(around center: SIMD3<Double>, tall: Bool) -> SCNNode {
         let n = SCNNode()
-        let red = flat(NSColor(rgb: (0.9, 0.2, 0.2))), white = flat(NSColor(rgb: (0.95, 0.95, 0.95)))
-        let radius = 0.72, postH = 0.32
-        for k in 0..<4 {
-            let a = Double(k) * .pi / 2 + .pi / 4
-            let post = SCNNode(geometry: SCNBox(width: 0.05, height: postH, length: 0.05, chamferRadius: 0))
-            post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            post.position = v3(center.x + cos(a) * radius, postH / 2, center.z + sin(a) * radius)
-            n.addChildNode(post)
-            // Tape between this post and the next, striped in short segments.
-            let b = a + .pi / 2
-            let p0 = SIMD2(center.x + cos(a) * radius, center.z + sin(a) * radius)
-            let p1 = SIMD2(center.x + cos(b) * radius, center.z + sin(b) * radius)
-            let segs = 6
-            for i in 0..<segs {
-                let t0 = Double(i) / Double(segs), t1 = Double(i + 1) / Double(segs)
-                let m0 = p0 + (p1 - p0) * t0, m1 = p0 + (p1 - p0) * t1
-                let mid = (m0 + m1) / 2
-                let d = m1 - m0
-                let len = (d.x * d.x + d.y * d.y).squareRoot()
-                let seg = SCNNode(geometry: SCNBox(width: len, height: 0.06, length: 0.012, chamferRadius: 0))
-                seg.geometry!.firstMaterial = i % 2 == 0 ? red : white
-                seg.position = v3(mid.x, postH * 0.8, mid.y)
-                seg.eulerAngles.y = -atan2(d.y, d.x)
-                n.addChildNode(seg)
-            }
-        }
         // The service tower: a steel lattice beside the rocket, as a real pad has, with cross-bracing
         // between the legs, a work platform every so often, and a swing arm out to the rocket at the top.
         // Grey steel, a red beacon on top; nothing wooden stands on a launch pad.
