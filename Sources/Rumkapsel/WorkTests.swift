@@ -148,6 +148,30 @@ enum WorkTests {
             expect(book.count == 1, "one record, got \(book.count)")
         }
 
+        test("a workflow without QA or cleared hears neither; one detected from a pipeline says which") {
+            var w = Workflow(); w.qa = nil; w.cleared = nil
+            let r = WorkBook.Record(id: 1, repo: "web")
+            _ = r.hear(Signal(stage: .stored, by: .pulls, at: at(0)), workflow: w)
+            expect(r.hear(Signal(stage: .qa, by: .board, at: at(1)), workflow: w) == nil && r.stage == .stored, "QA is not a stage here")
+            expect(r.hear(Signal(stage: .cleared, by: .board, at: at(2)), workflow: w) == nil, "nor cleared")
+            expect(r.hear(Signal(stage: .shipped, by: .git, at: at(3)), workflow: w)?.to == .shipped, "shipped is")
+            let tags = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: "tag"), board: false)
+            expect(tags.qa == nil && tags.shipped == [.git, .board], "ships on tags: no QA, git says shipped")
+            let ours = Workflow.detected(pipeline: Pipeline(trunk: "develop", staging: "staging", production: "production"), board: true)
+            expect(ours.qa?.first == .board && ours.cleared?.first == .board, "with a board and staging, the board is first in line")
+            let merges = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: "merge"), board: false)
+            expect(merges.qa == nil && merges.cleared == nil && merges.shipped == [.git], "every merge ships: nothing to clear")
+        }
+
+        test("the workflow's order decides who may take work back") {
+            var w = Workflow(); w.qa = [.pulls, .board]
+            let r = WorkBook.Record(id: 1, repo: "web")
+            _ = r.hear(Signal(stage: .qa, by: .board, at: at(0)), workflow: w)
+            expect(r.hear(Signal(stage: .stored, by: .board, at: at(1)), workflow: w) == nil, "the board is not first in line for QA in this repository")
+            _ = r.hear(Signal(stage: .qa, by: .pulls, at: at(2)), workflow: w)
+            expect(r.hear(Signal(stage: .stored, by: .pulls, at: at(3)), workflow: w)?.back == true, "pull requests are")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

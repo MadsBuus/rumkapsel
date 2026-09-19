@@ -16,17 +16,6 @@ enum Stage: Int, Comparable, CaseIterable, CustomStringConvertible {
 enum Source: String, CaseIterable {
     case session, git, pulls, board, deploy, neighbour
 
-    /// Who is first in line for each stage: the source whose change of word may take work back a
-    /// stage, and whose word the hover quotes. The default order; a repository may reorder it one day.
-    static let inLine: [Stage: [Source]] = [
-        .inbound: [.session, .pulls, .board, .neighbour],
-        .working: [.session, .neighbour],
-        .ready: [.pulls],
-        .stored: [.board, .pulls, .git],
-        .qa: [.board, .deploy, .pulls],
-        .cleared: [.board, .deploy, .pulls],
-        .shipped: [.board, .deploy, .pulls, .git],
-    ]
 }
 
 /// One source's word about one piece of work.
@@ -46,10 +35,12 @@ struct Transition {
 }
 
 extension WorkBook.Record {
-    /// Hears a source's word by the two rules of STAGES.md. Forward, the furthest word wins whoever
-    /// said it first. Back, only the source first in line for the stage the work is at may take it,
-    /// and only by changing its own word: a source that has not caught up says nothing.
-    func hear(_ s: Signal) -> Transition? {
+    /// Hears a source's word by the two rules of STAGES.md, under the repository's workflow. Forward,
+    /// the furthest word wins whoever said it first. Back, only the source first in line for the stage
+    /// the work is at may take it, and only by changing its own word: a source that has not caught up
+    /// says nothing. A stage the repository does without is not heard at all.
+    func hear(_ s: Signal, workflow: Workflow = Workflow()) -> Transition? {
+        guard workflow.has(s.stage) else { return nil }
         let before = words[s.by]
         words[s.by] = s.stage
         guard let current = stage else {
@@ -60,7 +51,7 @@ extension WorkBook.Record {
             stage = s.stage; stagedAt = s.at; stagedBy = s.by
             return Transition(from: current, to: s.stage, by: s.by, at: s.at)
         }
-        if s.stage < current, Source.inLine[current]?.first == s.by, let before, before >= current {
+        if s.stage < current, workflow.inLine(current)?.first == s.by, let before, before >= current {
             stage = s.stage; stagedAt = s.at; stagedBy = s.by
             return Transition(from: current, to: s.stage, by: s.by, at: s.at)
         }

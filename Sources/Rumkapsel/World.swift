@@ -108,6 +108,13 @@ final class World {
         default: works.report(record, .working, by: .pulls, at: at)
         }
     }
+    /// A repository's workflow: set by hand, else detected from its pipeline and whether a board follows it.
+    func workflow(repo: String) -> Workflow {
+        if let w = ConfigStore.shared.current.repos[repo]?.workflow { return w }
+        let root = repoRoots.first { $0.value.repo == repo }?.key
+        let pipeline = root.map { github.pipeline(repoRoot: $0) } ?? .configured
+        return Workflow.detected(pipeline: pipeline, board: ConfigStore.shared.current.project != nil)
+    }
     /// Where the record says an office's work is. The floor acts on this, not on any one source.
     func stage(office key: String, repo: String?) -> Stage? { repo.flatMap { works.find(officeKey: key, repo: $0) }?.stage }
 
@@ -359,6 +366,7 @@ final class World {
         if firstRun {
             didLoadLayout = true
             // The record shadows the floor for now; the trace is where the two are compared.
+            works.workflow = { [weak self] repo in self?.workflow(repo: repo) ?? Workflow() }
             works.onTransition = { [weak self] r, t in
                 let who = r.number.map { "#\($0)" } ?? r.work().label
                 StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")

@@ -160,9 +160,12 @@ final class WorkBook {
         return record
     }
 
+    /// The workflow of a repository, asked when a word is heard; every stage, every source, until set.
+    var workflow: (String) -> Workflow = { _ in Workflow() }
+
     /// A source's word about a piece of work, by the rules in `Stage`; the trace hears any change.
     func report(_ record: Record, _ stage: Stage, by source: Source, at: Date = Date()) {
-        if let t = record.hear(Signal(stage: stage, by: source, at: at)) { onTransition?(record, t) }
+        if let t = record.hear(Signal(stage: stage, by: source, at: at), workflow: workflow(record.repo)) { onTransition?(record, t) }
     }
 
     /// The record behind an office key as the floor writes it today, `task:repo#N` or `task:repo/branch`.

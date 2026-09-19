@@ -1267,7 +1267,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var out: [String: RepoDetail] = [:]
         for (root, info) in world.repoRoots.sorted(by: { $0.key < $1.key }) where out[info.repo] == nil {
             let p = github.detectedPipeline(repoRoot: root)
-            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root), detected: p.source == "settings" ? nil : p)
+            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root), detected: p.source == "settings" ? nil : p,
+                                        workflow: world.workflow(repo: info.repo))
         }
         return out
     }
