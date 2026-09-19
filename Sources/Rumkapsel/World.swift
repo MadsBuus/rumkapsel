@@ -73,6 +73,7 @@ final class World {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
         var launches: Set<String> = []
+        var toDeck: [String: [Int]] = [:]
         for (record, t) in transitions {
             switch t.to {
             case .ready:
@@ -83,6 +84,19 @@ final class World {
                 if let number = record.pulls.keys.min() {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
+            case .qa where t.from != nil:
+                // To the staging area, once the crate stands in storage and no pallet has the repository.
+                guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
+                      let number = record.number, isReady(record.repo) else { continue }
+                guard station.hasPad, !station.deckCells.isEmpty, github.pipeline(repoRoot: info.key).hasStaging else { continue }
+                let row = station.ledger[record.repo, number]
+                if row?.placed == .deck || row?.heading == .deck { continue }
+                let pallet = truth.pallets[station.name]?.repo == record.repo || truth.palletQueue[station.name]?.contains { $0.repo == record.repo } == true
+                guard row?.placed == .storage, !(row?.inTransit ?? false), !pallet else { waiting.append((record, t)); continue }
+                toDeck[station.name + "|" + record.repo, default: []].append(number)
+            case .cleared where t.from != nil:
+                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
+                events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
             case .shipped where t.from != nil:
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let station = fleet.stations[info.station] else { continue }
                 launches.insert(info.station + "|" + info.repo)
@@ -91,6 +105,12 @@ final class World {
             }
         }
         transitions = waiting
+        for (key, numbers) in toDeck.sorted(by: { $0.key < $1.key }) {
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard let station = fleet.stations[parts[0]] else { continue }
+            let commands = carryToDeck(station: station, repo: parts[1], numbers: numbers)
+            if !commands.isEmpty { events.append(.carryToDeck(station: station.name, repo: parts[1], commands: commands)) }
+        }
         // One launch per repository per pass, however many pieces of work went up in it.
         for key in launches.sorted() {
             guard let station = fleet.stations[String(key.split(separator: "|")[0])] else { continue }
@@ -1233,18 +1253,18 @@ final class World {
         // One word per crate: the deck's count carries the cleared ones too, and QA said after cleared would take them back.
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
-        station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: c.clearedNumbers, updated: c.updated), repo: repo)
+        // Cleared is the record's word, whoever said it: the board's column, the release's label, or nothing here to clear.
+        let cleared = works.records(repo: repo).filter { r in r.stage.map { $0 >= .cleared } ?? false }.compactMap(\.number)
+        station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: cleared, updated: c.updated), repo: repo)
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.
         guard truth.pallets[station.name]?.repo != repo,
               truth.palletQueue[station.name]?.contains(where: { $0.repo == repo }) != true else { return .waiting }
         let open = station.ledger.disagreements(repo: repo)
         guard !open.isEmpty else { return .snapped }
-        let toDeck = open.filter { $0.placed == .storage && $0.wanted == .deck }.map(\.number)
-        if !toDeck.isEmpty, station.hasPad, !station.deckCells.isEmpty, github.pipeline(repoRoot: root).hasStaging {
-            let commands = carryToDeck(station: station, repo: repo, numbers: toDeck)
-            if !commands.isEmpty { return .carryToDeck(commands) }
-        }
+        // A crate the source wants on the deck is carried there on the record's word, in the drain; what
+        // is left disagreeing here is snapped, and a crate on its way keeps its carry.
+        if open.contains(where: { $0.placed == .storage && $0.wanted == .deck && $0.heading == .deck }) { return .waiting }
         let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
         for crate in open {
             if launching, crate.placed == .deck { continue }   // the rocket takes these; the source's word comes after
