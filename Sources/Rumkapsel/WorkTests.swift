@@ -172,6 +172,16 @@ enum WorkTests {
             expect(r.hear(Signal(stage: .stored, by: .pulls, at: at(3)), workflow: w)?.back == true, "pull requests are")
         }
 
+        test("the first word of a piece of work is history; the next change is news") {
+            let r = WorkBook.Record(id: 1, repo: "web")
+            _ = r.hear(Signal(stage: .stored, by: .pulls, at: at(0)))
+            expect(r.quiet, "found merged: quiet")
+            _ = r.hear(Signal(stage: .stored, by: .git, at: at(1)))
+            expect(r.quiet, "the same stage said again is still not news")
+            _ = r.hear(Signal(stage: .qa, by: .board, at: at(2)))
+            expect(!r.quiet, "a change is news")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

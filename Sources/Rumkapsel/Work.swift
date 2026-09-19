@@ -110,6 +110,9 @@ final class WorkBook {
         var stage: Stage?
         var stagedAt: Date?
         var stagedBy: Source?
+        /// Whether the stage it is at was the first word ever heard of it: history, not news. A merged
+        /// office found standing at launch is placed, not carried; the next change is news again.
+        var quiet = false
         var words: [Source: Stage] = [:]
 
         init(id: Int, repo: String) { self.id = id; self.repo = repo }
