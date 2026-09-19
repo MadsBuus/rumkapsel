@@ -193,7 +193,15 @@ extension StationController {
             let foot = SIMD3(base.x + towerX + 0.12, at.y + 0.1, base.z + 0.02)
             let top = SIMD3(foot.x, base.y + hatchAt.y, foot.z)
             let door = base + hatchAt
-            hatch.runAction(.sequence([.wait(duration: 1.3), .scale(to: 0.05, duration: 0.2), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
+            // The door opens on the black of the hold as the crate reaches it, and closes white behind it.
+            if let door = hatch.childNode(withName: "door", recursively: false) {
+                let shut = door.geometry?.firstMaterial
+                let open = flat(NSColor(rgb: (0.04, 0.04, 0.05)))
+                door.runAction(.sequence([.wait(duration: 1.2), .run { $0.geometry?.firstMaterial = open },
+                                          .wait(duration: 0.9), .run { $0.geometry?.firstMaterial = shut }]))
+            } else {
+                hatch.runAction(.sequence([.wait(duration: 1.3), .scale(to: 0.05, duration: 0.2), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
+            }
             moveCrate(b, legs: [MotionLeg(to: foot, seconds: 0.4, ease: .easeOut),
                                 MotionLeg(to: top, seconds: 0.9, ease: .easeInOut, scale: 0.5),
                                 MotionLeg(to: door, seconds: 0.5, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
