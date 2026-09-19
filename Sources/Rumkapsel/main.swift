@@ -399,8 +399,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     @objc func openSettings() {
         settingsModel.config = ConfigStore.shared.current
         settingsModel.knownRepos = controller.knownRepos
-        settingsModel.pipelines = controller.pipelineRows
-        settingsModel.knownLogins = Array(Set(controller.seenLogins).union(settingsModel.config.crewNames.keys)).sorted()
+        settingsModel.details = controller.repoDetails
+        settingsModel.people = controller.seenPeople
         settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
         if settingsWindow == nil {
             let view = SettingsView(model: settingsModel,

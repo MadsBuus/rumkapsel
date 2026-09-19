@@ -21,6 +21,30 @@ struct ReleaseFile: Codable, Equatable {
     var ship: String?
 }
 
+extension Pipeline {
+    /// The branches set by hand for this repository in Settings, over what was detected.
+    func overridden(by b: AppConfig.Branches?) -> Pipeline {
+        guard let b else { return self }
+        var p = self
+        p.trunk = b.trunk; p.staging = b.staging; p.production = b.production
+        p.source = "override"; p.why = "set in Settings"
+        if !b.production.isEmpty, p.ship == "merge" || p.ship == "tag" { p.ship = "release" }
+        return p
+    }
+
+    /// The way to production in a few words, for Settings.
+    var flow: String {
+        shipsOnMerge ? "\(trunk), ships on merge"
+            : shipsOnTag ? "\(trunk), ships on tags"
+            : production.isEmpty ? "\(trunk), no releases"
+            : [trunk, staging, production].filter { !$0.isEmpty }.joined(separator: " → ")
+    }
+
+    static func override(forRoot root: String) -> AppConfig.Branches? {
+        ConfigStore.shared.current.repos[URL(fileURLWithPath: root).lastPathComponent]?.branches
+    }
+}
+
 enum PipelineDetection {
     struct Merge: Equatable { let base: String; let head: String }
 
