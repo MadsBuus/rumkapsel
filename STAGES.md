@@ -118,6 +118,20 @@ Defaults, first in line first:
 A repository can reorder a stage, or switch a signal off, in Settings; this table is only where it
 starts.
 
+## Testing, split the same way
+
+The stage is the seam, and the tests fall either side of it.
+
+- **The station** reacts to transitions and nothing else, so the simulator feeds transitions: a panel
+  with one button per stage per piece of work, "web #430 → cleared, by board", and the floor answers.
+  It no longer has to play GitHub, invent board items or set a pipeline to get a crate onto the staging
+  area, and it can press combinations no integration would produce. The scenario suite becomes station
+  reactions only, the one part that needs the scene.
+- **An integration** is a mapping from what it reads to signals: a feed event, a pull request's state, a
+  board column, a tag, a deployment. That is a table of inputs and the signals each must produce, tested
+  with no station at all, like `--work-tests` and `--pipeline-tests`; the `stage` trace is its assertion
+  format. Board lag, a merge remembered across a relaunch, a card moved early: all of it lives here.
+
 ## Worked example: our own setup
 
 Develop → staging → production, a board with In Development / Ready for staging / QA / Ready to ship /
