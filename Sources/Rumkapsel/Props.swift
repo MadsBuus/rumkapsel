@@ -256,7 +256,7 @@ enum Props {
             let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
             fin.geometry!.firstMaterial = lit(color)
             // The plate's centre, placed so that leaning by `lean` puts its top inner corner inside the hull.
-            fin.position = v3(0, 0.12 + finH * 0.45, r * 0.55 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
+            fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
             fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
