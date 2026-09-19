@@ -481,10 +481,14 @@ final class Simulation<B: Body> {
             }
             return n
         }
-        if blocked(cell) == 0, st.walkable.contains(cell) { return cell }
+        // A crate row is never stood on, however empty the spot: two repositories share a row cell as two
+        // columns half a tile apart, and a body between them is inside one of them. The aisle beside it is.
+        let rows = st.crateRows
+        if blocked(cell) == 0, st.walkable.contains(cell), !rows.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
+        let aisle = options.filter { !rows.contains($0) }
         // Nothing walkable beside it (the floor it stood on went with its office): the nearest floor there is.
-        return options.min { blocked($0) < blocked($1) } ?? st.nearestFloor(to: SIMD2(Double(cell.x), Double(cell.y))) ?? cell
+        return (aisle.isEmpty ? options : aisle).min { blocked($0) < blocked($1) } ?? st.nearestFloor(to: SIMD2(Double(cell.x), Double(cell.y))) ?? cell
     }
 
     /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
