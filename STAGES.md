@@ -115,8 +115,23 @@ Defaults, first in line first:
 | Cleared | board column · environment approval · pull request label |
 | Shipped | board column · deployment to production · release into the production branch · tag · merge, where every merge deploys |
 
-A repository can reorder a stage, or switch a signal off, in Settings; this table is only where it
-starts.
+## The workflow is the repository's
+
+The table above is the default; the workflow itself belongs to each repository, and it is these
+questions, one per stage, each answered by a list of signals in the order they are first in line:
+
+| Question | Answers a repository can give |
+|---|---|
+| When is work **stored**? | a pull request merges · the board says so · a merge on the trunk |
+| Does it go through **QA**? | a release into staging · a deployment to a staging environment · the board's column · **no**: stored goes straight to the rocket |
+| When is it **cleared** to ship? | the board's column · the pull request approved and green · a label · an environment approval · **always**: there is no cleared, the rocket never waits |
+| When has it **shipped**? | a release into production · a production deployment · a tag · the board's column · every merge |
+| Whose pull requests are **outside** work? | bots · anyone not a member or collaborator · nobody |
+
+Most of it is detected, as the pipeline is today (STAGES.md's defaults are what detection fills in),
+and `.github/rumkapsel.json` can say it for everyone; Settings shows the answers per repository and
+lets one be changed. An answer of "no" or "always" is a stage switched off, and the station simply
+has one room fewer for that repository's work to pass through.
 
 ## Testing, split the same way
 
