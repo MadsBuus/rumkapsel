@@ -10,6 +10,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
     private let pitchNode = SCNNode()
     private let cameraNode = SCNNode()
     private var yaw = 0.0, pitch = -Double.pi / 5, zoom = 1.0, pan = SIMD2<Double>(0, 0)
+    /// Where each tile stands, by its title, so `--tile rockets` can put the camera on one for a snapshot.
+    private var tiles: [(title: String, at: SIMD2<Double>)] = []
     private var clock = 0.0, lastTime = 0.0
     private var updaters: [(Double, Double) -> Void] = []   // (clock, dt)
     private let drone = Drone()
@@ -50,6 +52,12 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             pan -= (SIMD2(cos(y), -sin(y)) * dx - SIMD2(-sin(y), -cos(y)) * dy) * upp
         }
         build()
+        // `--tile <words>`: the camera on the first tile whose title has the words, close up.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--tile"), args.count > i + 1, let t = tiles.first(where: { $0.title.contains(args[i + 1]) }) {
+            pan = SIMD2(t.at.x - 6.4, t.at.y - 5.0)
+            zoom = 3.5
+        }
     }
 
     // MARK: exhibits
@@ -65,6 +73,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         let label = floorText(title, color: Palette.text, size: 0.28, maxWidth: 2.6, lines: 1)
         label.node.position = v3(x - 1.3 + label.width / 2, 0.01, z + 1.5 + label.height / 2)
         scene.rootNode.addChildNode(label.node)
+        tiles.append((title, SIMD2(x, z)))
         return SIMD2(x, z)
     }
 
