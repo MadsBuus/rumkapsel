@@ -1,6 +1,39 @@
-## What's new in 0.45
+## What's new in 0.46
 
-- A project office's hover says a branch builds the office, not which of our own skills makes one. The /*-issue skills are ours; the station is anyone's.
-- A crate whose office went from under it is still fetched. A haul to storage outlives its office, but the crate then lies off the floor, and the place to stand for it was its own cell, which no walk can reach: every carrier sent for it stalled wherever it was and gave up, over and over. The place to stand is now the nearest floor when nothing beside the crate is walkable, and the shuffle that ends an approach only covers the last cell and a half, never a stretch of open space.
-- A carrier that can walk no closer to a crate takes the last of the way as the shuffle it already ends every approach with. In a four-cell office with a message's cone on the one cell by the package, the walk settled for the cell the carrier already stood on and it waited there, a cell short, until it gave up; three carriers in a row did the same with a merged crate bound for storage.
-- A session that changed directory into its checkout keeps its office. Its last recorded directory was Sources/Rumkapsel inside the worktree, and the desktop app leases the worktree itself, so the office counted as archived on every scan and was put straight back: a thousand times in an hour. A session's directory is now the checkout it lies in, the nearest folder holding a .git.
+- Pull requests read as an integration that only reports; a merged office found at launch is placed, not carried
+- A plain tower with a lift rail, and a conveyor that carries the crates, small, into the hatch
+- The hatch is white like the hull with a seam round it, and a black hole while a crate goes in
+- One gangway from the tower to the hatch, and it swings back once the rocket is loaded
+- Cargo goes up the service tower and in through a hatch high on the payload section
+- The one-time framing when the floor has arrived leaves a view already being driven alone
+- An engine bell under the hull, and the legs splayed out at the foot: they leaned in, like the fins had
+- A rocket stands on a launch mount, not on landing legs
+- The fins sit closer in on the hull
+- A tail fin hugs the hull at the top and flares out at the foot; it leaned the other way
+- The tape goes: the service tower alone says held, as on a real pad
+- The service tower: steel lattice, platforms, a swing arm, in place of a wooden ladder
+- Your crate is strapped in white from the moment it is packed, and a label cannot re-tape a rocket the record has cleared
+- WIRING.md: what has folded into the record, and the one thing still inline
+- Whose work it is, what it is called and where it is on GitHub are the record's
+- Nobody stands on a crate row: a carrier works from the aisle beside it
+- The register tells pull requests from issues; the workflow can be set by hand
+- The stage panel's scenario is green: waiting stage changes are tried on the tick, and a launch loads what the record says shipped
+- The simulator's Stage panel: a stage said straight to the record, and a scenario that drives the yard with it alone
+- The QA minion, the bot rule and the trunk list read one place each
+- The ledger hears the record, not the counts
+- WIRING.md: what decides each stage now, and what is still to fold in
+- QA and Cleared are the record's word: crates go to the staging area and across it on its transitions
+- Shipped is the record's word: a rocket waits wherever work is waiting, and goes up when the record says so
+- A repository's workflow: detected from its pipeline and board, the record's rules read it, Settings shows it
+- STAGES.md: the workflow is the repository's, one question per stage
+- Ready is the record's word: stage changes become station events in one place
+- STAGES.md: the tests split at the stage, the station's reactions from the integrations' mappings
+- Stored is the record's word: an office's crate is hauled when the record says so
+- The record hears teammates' work and a pull request closing
+- Every piece of work has a stage, and the record shadows the floor
+- Every piece of work has one record, by every name it goes by
+- One rule for what a piece of work is called, wherever it was heard of
+- Neighbours talk in station terms: stages and identities, never another station's integration data
+- The stages a piece of work goes through, and how the code decides them today
+- Settings reorganised around each repository, and a repository's colour comes from its name
+- A session in an archived workspace no longer puts its office back. The scan counted any session whose directory was still on disk, and the desktop app leaves an archived worktree's directory behind, so a subagent's recent transcript there raised the office on every scan and the archived-workspace rule took it down again. A session now counts only while its workspace is open, and the registry cache it asks takes a lock, since the scan asks from its own queue.
