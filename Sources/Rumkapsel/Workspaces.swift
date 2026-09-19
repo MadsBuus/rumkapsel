@@ -15,11 +15,14 @@ enum Workspaces {
 
     private static var cachedAt: Date?
     private static var open: Set<String> = []
+    /// Asked from the scan's queue and from the frame's.
+    private static let lock = NSLock()
 
     /// The workspaces the desktop app is holding. It drops the entry when a session is deleted and only
     /// the lease when one is archived, so a path it does not name is neither: it is a directory left
     /// behind. Ten worktrees on this checkout, four of them named.
     private static func held() -> Set<String> {
+        lock.lock(); defer { lock.unlock() }
         // Asked of the disk each time: a URL keeps the first answer it got, and the registry would never change again.
         let at = (try? FileManager.default.attributesOfItem(atPath: registry.path))?[.modificationDate] as? Date
         if let at, at == cachedAt { return open }
