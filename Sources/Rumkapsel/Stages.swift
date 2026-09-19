@@ -44,15 +44,15 @@ extension WorkBook.Record {
         let before = words[s.by]
         words[s.by] = s.stage
         guard let current = stage else {
-            stage = s.stage; stagedAt = s.at; stagedBy = s.by
+            stage = s.stage; stagedAt = s.at; stagedBy = s.by; quiet = true
             return Transition(from: nil, to: s.stage, by: s.by, at: s.at)
         }
         if s.stage > current {
-            stage = s.stage; stagedAt = s.at; stagedBy = s.by
+            stage = s.stage; stagedAt = s.at; stagedBy = s.by; quiet = false
             return Transition(from: current, to: s.stage, by: s.by, at: s.at)
         }
         if s.stage < current, workflow.inLine(current)?.first == s.by, let before, before >= current {
-            stage = s.stage; stagedAt = s.at; stagedBy = s.by
+            stage = s.stage; stagedAt = s.at; stagedBy = s.by; quiet = false
             return Transition(from: current, to: s.stage, by: s.by, at: s.at)
         }
         return nil

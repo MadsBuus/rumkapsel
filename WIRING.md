@@ -177,5 +177,7 @@ Names (5, 6) go through `Work` and the register `WorkBook`, one record per piece
 alias. Folded in since: the ledger hears the record rather than the counts (its rows keep the station's
 side, where a crate stands); GitHub's pull→issue table serves the hover only; the crew-room table is down
 to an office's state; one bot rule; one trunk list; the workflow is a repository's, detected and
-editable. Still inline: the merge blocks' state detection, which reports to the record but has not moved
-into an integration of its own.
+editable; and the reading of a pull request's state, your own office's by branch, a teammate's from the
+feed, then by number, then by branch, is `PullRequests` (`Integrations/`), which reads and reports and
+decides nothing. A piece of work whose first word is already stored, a merged office found at launch,
+is placed and not carried: history, not news.

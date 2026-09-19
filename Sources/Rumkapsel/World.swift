@@ -56,6 +56,8 @@ final class World {
     private(set) var officeCrates: [String: CrateRef] = [:]
     /// Every piece of work by every name it goes by; see `WorkBook`.
     let works = WorkBook()
+    /// What GitHub's pull requests say, read for the record; see `PullRequests`.
+    var pulls: PullRequests { PullRequests(github: github) }
     /// Stage changes heard since the last pass, waiting to become station events; see `stationEvents`.
     private var transitions: [(record: WorkBook.Record, t: Transition)] = []
 
@@ -138,11 +140,7 @@ final class World {
     /// unmerged is back to working. Said on every pass, so a state remembered from last run counts too.
     func report(pullState state: String?, record: WorkBook.Record?, at: Date = Date()) {
         guard let state, let record else { return }
-        switch state {
-        case "OPEN": works.report(record, .ready, by: .pulls, at: at)
-        case "MERGED": works.report(record, .stored, by: .pulls, at: at)
-        default: works.report(record, .working, by: .pulls, at: at)
-        }
+        works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
     }
     /// Whether a piece of work is yours: your own checkout of it, or the record says you are its author.
     func isMine(office key: String) -> Bool {
@@ -507,7 +505,7 @@ final class World {
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
-                let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+                let pull = pulls.pull(ownOffice: room)
                 let state = pull?.state
                 if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state)) }
                 // Merged is the record's word, whoever said it: the pull request, the board's column or git history.
@@ -899,20 +897,8 @@ final class World {
             // authority on which. The feed may already say; otherwise it is asked, and until it answers
             // nothing moves: a crate that was never merged work must not be carried to storage.
             var hauling = false
-            let branch = known?.work().branch ?? known?.branches.sorted().first ?? ""
             let root = repoRoots.first { $0.value.repo == room.repo }?.key
-            var state: String?
-            if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }) { state = "CLOSED" }
-            else if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_merge" && $0.e.branch == branch }) { state = "MERGED" }
-            else if let root, let number = known?.pulls.keys.min() {
-                // By number: the office may have lived on as a board office, whose branch is only a guess.
-                github.refresh(pull: number, repoRoot: root)
-                if github.pullAnswered(number: number, repoRoot: root) { state = github.pull(number: number, repoRoot: root)?.state }
-            } else if let root {
-                github.refresh(branch: branch, repoRoot: root)
-                if github.pullAnswered(branch: branch, repoRoot: root) { state = github.pull(branch: branch, repoRoot: root)?.state ?? "CLOSED" }
-            } else { state = "MERGED" }   // no checkout of the repository here: nothing to ask, and nothing on the floor to carry
-            guard let state else { continue }
+            guard let state = pulls.state(crewOffice: room, known: known, repoRoot: root, feed: feed) else { continue }
             if let repo = room.repo { report(pullState: state, record: known?.pulls.keys.min().map { works.note(repo: repo, pull: $0, pullState: state) } ?? known) }
             crewRoomInfo[key]?.state = state
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
@@ -1518,12 +1504,15 @@ final class World {
         let repo = room.repo ?? "work"
         // A crate is a task: the issue the pull request closes when it closes one, else the pull request
         // itself. With no pull request known there is nothing the yard could hold.
-        let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+        let pull = pulls.pull(ownOffice: room)
         let known = works.find(officeKey: room.key, repo: repo)
         guard let prNumber = pull?.number ?? known?.pulls.keys.min(), prNumber > 0 else { nothingToHaul.insert(key); return [] }
         // Git history names pull requests and the board names issues; the register knows which is which.
         let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull?.closes.first, pull: prNumber, pullState: pull?.state)
         guard let number = record.number else { return [] }
+        // Found merged at launch, or merged while the app was closed: history, not news. The crate takes
+        // its place in the rows from the record's word, and the office is free to clear; nothing is carried.
+        if record.quiet { nothingToHaul.insert(key); return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         works.report(record, .stored, by: .pulls)
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
