@@ -108,6 +108,7 @@ final class World {
             }
         }
         transitions = waiting
+        if !launches.isEmpty { assignPads() }   // a launch needs a slot: it takes one now
         for (key, numbers) in toDeck.sorted(by: { $0.key < $1.key }) {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             guard let station = fleet.stations[parts[0]] else { continue }
@@ -723,6 +724,7 @@ final class World {
     func applyReleases() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var launched: Set<String> = []
+        assignPads()
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
             let pr = launch.pr
@@ -750,7 +752,7 @@ final class World {
                 // once every piece of it is cleared, or at once where nothing clears here.
                 let w = waiting(repo: info.repo, station: station.name)
                 guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !mergeLaunches.contains(key),
-                      !github.pipeline(repoRoot: root).shipsOnMerge else { continue }   // a merge's rocket is its own, one per merge
+                      !github.pipeline(repoRoot: root).shipsOnMerge, padSlotOf[key] != nil else { continue }   // a merge's rocket is its own, one per merge
                 let cleared = clearedToLoad(repo: info.repo, station: station.name)
                 events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                    station: station, repo: info.repo, waiting: w.count, cleared: cleared))
@@ -1328,10 +1330,58 @@ final class World {
     /// Where a crate for a rocket goes: at the foot of that repository's own rocket, in front of it,
     /// and the carrier stands on the tile in front of that. The rocket's place on the pad is the same
     /// rule the scene draws it by: repositories with a rocket, in name order, on the pad's slots.
-    static let padSlotOffsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
+    /// Where rockets stand on a pad: the four spots there always were, then more of the same spacing where
+    /// the pad has room for them, each a rocket's width and its tower from the next.
+    static let padSlotOffsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2),
+                                                   SIMD2(1.3, 1.2), SIMD2(-1.3, 1.2), SIMD2(2.6, 0), SIMD2(-2.6, 0), SIMD2(2.6, 1.2), SIMD2(-2.6, 1.2)]
+    func padSlots(station: Station) -> [SIMD2<Double>] {
+        let cells = station.padCells
+        guard let x0 = cells.map(\.x).min(), let x1 = cells.map(\.x).max(), let y0 = cells.map(\.y).min(), let y1 = cells.map(\.y).max() else { return [.zero] }
+        let c = station.padCenter
+        let fits = World.padSlotOffsets.map { c + $0 }.filter { p in
+            Int(p.x.rounded()) >= x0 && Int(p.x.rounded()) <= x1 && Int(p.y.rounded()) >= y0 && Int(p.y.rounded()) <= y1
+        }
+        return fits.isEmpty ? [c] : fits
+    }
+
+    /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one
+    /// takes the lowest free; with the pad full, one going up or with a release open takes the slot of the
+    /// one standing longest with neither, and that one steps off until a slot frees.
+    private(set) var padSlotOf: [String: Int] = [:]
+
+    /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
+    func assignPads() {
+        let wanted = padRockets()
+        for key in padSlotOf.keys where !wanted.contains(key) { padSlotOf[key] = nil }
+        for station in fleet.stations.values {
+            let prefix = station.name + "|"
+            let count = padSlots(station: station).count
+            func urgent(_ key: String) -> Bool {
+                if mergeLaunches.contains(key) || rocketBusy(key) { return true }
+                let repo = String(key.dropFirst(prefix.count))
+                return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
+            }
+            let keys = wanted.filter { $0.hasPrefix(prefix) }.sorted { a, b in urgent(a) != urgent(b) ? urgent(a) : a < b }
+            for key in keys where padSlotOf[key] == nil {
+                let taken = Set(padSlotOf.filter { $0.key.hasPrefix(prefix) }.values)
+                if let free = (0..<count).first(where: { !taken.contains($0) }) { padSlotOf[key] = free; continue }
+                // Full: an urgent one takes a slot from a standing one that is not, by name.
+                guard urgent(key), let victim = padSlotOf.keys.filter({ $0.hasPrefix(prefix) && !urgent($0) }).sorted().last else { continue }
+                padSlotOf[key] = padSlotOf.removeValue(forKey: victim)
+            }
+        }
+    }
+    /// The rockets with a slot on a station's pad, in slot order.
+    func padOrder(station: Station) -> [String] {
+        padSlotOf.filter { $0.key.hasPrefix(station.name + "|") }.sorted { $0.value < $1.value }.map(\.key)
+    }
+    /// Every rocket that has a slot, on every station.
+    func padKeys() -> Set<String> { Set(padSlotOf.keys) }
+
     func padSpot(station: Station, repo: String) -> Spot {
-        let slot = padRockets().sorted().firstIndex(of: station.name + "|" + repo) ?? 0
-        let pc = station.padCenter + World.padSlotOffsets[slot % World.padSlotOffsets.count]
+        let slots = padSlots(station: station)
+        let slot = padSlotOf[station.name + "|" + repo] ?? 0
+        let pc = slots[slot % slots.count]
         // The foot: a tile's length before the hull, so the tile it rounds to is clear of the rocket and the
         // carrier can stand on it, an arm's length back, and the crate goes down between them and the hull.
         let foot = SIMD2(pc.x, pc.y + 1.05)

@@ -28,10 +28,9 @@ extension StationController {
         }
         // A rocket on its pad is walked round, never through: its hull is an obstacle, the hull alone,
         // not the fins, the hold's ring or the steam, so its foot stays reachable for loading.
-        let rocketKeys = simulation.rockets.keys.sorted()
         for (key, r) in simulation.rockets {
             guard let st = fleet.stations[r.station] else { continue }
-            let at = padPosition(station: st, slot: (rocketKeys.firstIndex(of: key) ?? 0) % 4)
+            let at = padPosition(station: st, slot: padSlot(station: st, key: key))
             let p = SIMD2(Double(at.x) - st.offset.x, Double(at.z) - st.offset.y)
             let hull = 0.3, f = Double(Station.fine)
             for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {

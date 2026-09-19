@@ -431,7 +431,7 @@ extension Simulation {
 
     /// Pads whose release is gone lose their rocket; one standing by is sized to the pile.
     func refreshRockets() {
-        let live = world.padRockets()
+        let live = world.padKeys()   // a rocket without a slot on the pad steps off it until one frees
         for (key, r) in rockets {
             guard let st = fleet.stations[r.station] else { continue }
             if !live.contains(key), !r.isBusy {

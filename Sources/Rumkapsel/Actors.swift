@@ -90,10 +90,12 @@ extension StationController {
 
     /// Where a rocket stands on the pad, by slot, as the pad is now.
     func padPosition(station: Station, slot: Int) -> SCNVector3 {
-        let offsets: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(1.3, 0), SIMD2(-1.3, 0), SIMD2(0, 1.2)]
-        let pc = station.padCenter + offsets[slot % offsets.count]
+        let slots = world.padSlots(station: station)
+        let pc = slots[slot % slots.count]
         return v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
     }
+    /// A rocket's slot on its pad, by the world's one rule for who stands where.
+    func padSlot(station: Station, key: String) -> Int { world.padSlotOf[key] ?? 0 }
 
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
@@ -120,10 +122,9 @@ extension StationController {
     /// next slot; one standing by grows with what it will carry and stands where the pad is now; once
     /// it is loading it keeps the size it had, and the steam and the flame stay where they are.
     func drawRockets() {
-        let keys = simulation.rockets.keys.sorted()
         for (key, r) in simulation.rockets {
             guard let st = fleet.stations[r.station] else { continue }
-            let slot = (keys.firstIndex(of: key) ?? 0) % 4
+            let slot = padSlot(station: st, key: key)
             guard let v = rocketViews[key] else {
                 rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), cargo: r.cargo, untested: r.untested)
                 continue
