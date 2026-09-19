@@ -98,10 +98,12 @@ extension StationController {
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
-        if r.untested {
-            let deco = Looks.current.hold(tall: r.tall) ?? Props.holdDecoration(around: SIMD3(0, 0, 0), tall: r.tall)
-            deco.name = "hold"
-            n.addChildNode(deco)
+        // A look with a hold of its own shows it while the rocket is held; the classic pad has its
+        // service tower beside the rocket all the while it stands, lit red while held.
+        if let own = Looks.current.hold(tall: r.tall) {
+            if r.untested { own.name = "hold"; n.addChildNode(own) }
+        } else {
+            Props.attachTower(to: n, tall: r.tall, held: r.untested)
         }
         n.position = padPosition(station: station, slot: slot)
         n.name = r.label
@@ -148,9 +150,23 @@ extension StationController {
     func play(rocket cue: Cue) {
         switch cue {
         case .rocketLoading(let key):
-            rocketViews[key]?.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
+            // Cleared: a look's own hold comes down; the tower stays for the loading, its beacon goes dark.
+            if let hold = rocketViews[key]?.node.childNode(withName: "hold", recursively: false) {
+                if let beacon = hold.childNode(withName: "beacon", recursively: true) {
+                    beacon.geometry?.firstMaterial = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
+                } else { hold.removeFromParentNode() }
+            }
         case .liftOff(let key):
-            if let node = rocketViews[key]?.node { liftOff(node) }
+            if let node = rocketViews[key]?.node {
+                // The tower stays on the pad: it is let go of the rocket a moment before the climb.
+                if let hold = node.childNode(withName: "hold", recursively: false) {
+                    hold.removeFromParentNode()
+                    hold.position = node.position
+                    rocketRoot.addChildNode(hold)
+                    hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
+                }
+                liftOff(node)
+            }
         case .steam(let key):
             if let node = rocketViews[key]?.node { addSteam(to: node) }
         case .rocketGone(let key):
@@ -160,12 +176,23 @@ extension StationController {
             // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
             guard let b = cargoNodes[command] else { return }
             let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
-            let hull = SIMD3(at.x, at.y + 0.22, at.z - 0.45)
-            if let hatch = rocketViews[key]?.node.childNode(withName: "hatch", recursively: true) {
-                hatch.runAction(.sequence([.scale(to: 0.05, duration: 0.2), .wait(duration: 0.8), .scale(to: 1, duration: 0.2)]))
+            guard let rocket = rocketViews[key]?.node, let hatch = rocket.childNode(withName: "hatch", recursively: true) else {
+                moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z), seconds: 0.3, ease: .easeOut),
+                                    MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z - 0.45), seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
+                return
             }
-            moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z), seconds: 0.3, ease: .easeOut),
-                                MotionLeg(to: hull, seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
+            // Up the service tower and in through the hatch: to the tower's foot, up its face to the swing
+            // arm, across the arm and in, shrinking as it goes, since the rocket is far too small for it.
+            let base = SIMD3(Double(rocket.position.x), Double(rocket.position.y), Double(rocket.position.z))
+            let towerX = rocket.childNode(withName: "tower", recursively: true).map { Double($0.position.x) } ?? 0.44
+            let hatchAt = SIMD3(Double(hatch.position.x), Double(hatch.position.y), Double(hatch.position.z))
+            let foot = SIMD3(base.x + towerX + 0.12, at.y + 0.1, base.z + 0.02)
+            let top = SIMD3(foot.x, base.y + hatchAt.y, foot.z)
+            let door = base + hatchAt
+            hatch.runAction(.sequence([.wait(duration: 1.3), .scale(to: 0.05, duration: 0.2), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
+            moveCrate(b, legs: [MotionLeg(to: foot, seconds: 0.4, ease: .easeOut),
+                                MotionLeg(to: top, seconds: 0.9, ease: .easeInOut, scale: 0.5),
+                                MotionLeg(to: door, seconds: 0.5, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
         default: break
         }
     }

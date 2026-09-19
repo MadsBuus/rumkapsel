@@ -215,11 +215,34 @@ enum Props {
         let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
-        // The loading hatch: a small dark plate at the foot on the deck side, where crates go in.
-        let hatch = SCNNode(geometry: SCNBox(width: r * 1.1, height: 0.2, length: 0.02, chamferRadius: 0))
-        hatch.geometry!.firstMaterial = dark
-        hatch.position = v3(0, 0.22, r + 0.005)
+        // The loading hatch on the deck side, where crates go in: a door set into the hull, a frame a
+        // shade darker than the panel, the panel a shade lighter than the frame, a latch bar across it,
+        // and two hinge knuckles down one side. The frame is sunk into the hull so it never floats.
+        let hatch = SCNNode()
         hatch.name = "hatch"
+        let frameW = r * 0.9, frameH = 0.2
+        let frame = SCNNode(geometry: SCNBox(width: frameW, height: frameH, length: 0.03, chamferRadius: 0))
+        frame.geometry!.firstMaterial = dark
+        frame.position = v3(0, 0, -0.012)
+        hatch.addChildNode(frame)
+        let panel = SCNNode(geometry: SCNBox(width: frameW - 0.03, height: frameH - 0.03, length: 0.02, chamferRadius: 0))
+        panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.32, 0.38)))
+        panel.position = v3(0, 0, 0.004)
+        hatch.addChildNode(panel)
+        let latch = SCNNode(geometry: SCNBox(width: frameW * 0.45, height: 0.016, length: 0.014, chamferRadius: 0))
+        latch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
+        latch.position = v3(frameW * 0.08, 0, 0.02)
+        hatch.addChildNode(latch)
+        for dy in [-0.055, 0.055] {
+            let hinge = SCNNode(geometry: SCNBox(width: 0.02, height: 0.03, length: 0.02, chamferRadius: 0))
+            hinge.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
+            hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
+            hatch.addChildNode(hinge)
+        }
+        // High on the payload section, under the portholes, on the side the service tower stands: cargo goes
+        // up the tower and in here. The hull has six flat sides and this is the middle of one, at the apothem.
+        hatch.position = v3(r * 0.866 + 0.003, 0.12 + h * 0.6, 0)
+        hatch.eulerAngles.y = .pi / 2
         n.addChildNode(hatch)
         // Body, a slightly wider lower stage, and a nose cone in the repo colour.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
@@ -247,30 +270,42 @@ enum Props {
             port.eulerAngles.y = a
             n.addChildNode(port)
         }
-        // Four swept fins and an engine nozzle.
+        // Four tail fins and an engine nozzle. A fin hugs the hull at the top and flares out at the foot:
+        // a plate leaning in, its top edge buried in the lower stage, its bottom outer corner near the pad.
         for k in 0..<4 {
             let pivot = SCNNode()
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
-            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: r * 2.4, length: r * 1.5, chamferRadius: 0))
+            let finH = r * 2.6, finL = r * 1.3, lean = 0.42
+            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
             fin.geometry!.firstMaterial = lit(color)
-            fin.position = v3(0, 0.12 + r * 1.0, r + r * 0.55)
-            fin.eulerAngles.x = 0.35
+            // The plate's centre, placed so that leaning by `lean` puts its top inner corner inside the hull.
+            fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
+            fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
         }
-        let nozzle = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14)))
-        nozzle.geometry!.firstMaterial = dark
-        nozzle.position = v3(0, 0.05, 0)
-        n.addChildNode(nozzle)
-        // Landing legs so it stands on the pad.
+        // The engine: a throat under the hull opening into a bell, its mouth just off the pad.
+        let throat = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.35, height: 0.04)))
+        throat.geometry!.firstMaterial = dark
+        throat.position = v3(0, 0.11, 0)
+        n.addChildNode(throat)
+        let bell = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.35, bottomRadius: r * 0.75, height: 0.09)))
+        bell.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.36)))
+        bell.position = v3(0, 0.055, 0)
+        n.addChildNode(bell)
+        // Landing legs, splayed out at the foot: the knee on the hull above the fin roots, the pad out on the ground.
         for k in 0..<3 {
             let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
-            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.22, length: 0.03, chamferRadius: 0))
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3 + .pi / 3   // none in front of the hatch
+            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
             leg.geometry!.firstMaterial = dark
-            leg.position = v3(0, 0.1, r * 1.1)
-            leg.eulerAngles.x = 0.5
+            leg.position = v3(0, 0.11, r * 1.15)
+            leg.eulerAngles.x = -0.55
             pivot.addChildNode(leg)
+            let foot = SCNNode(geometry: SCNBox(width: 0.06, height: 0.02, length: 0.06, chamferRadius: 0))
+            foot.geometry!.firstMaterial = dark
+            foot.position = v3(0, 0.01, r * 1.15 + 0.12 * sin(0.55))
+            pivot.addChildNode(foot)
             n.addChildNode(pivot)
         }
         let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
@@ -282,53 +317,85 @@ enum Props {
         return n
     }
 
-    /// A red-and-white tape barrier with a gantry ladder: the release is up but not cleared to fly.
-    static func holdDecoration(around center: SIMD3<Double>, tall: Bool) -> SCNNode {
+    /// The service tower beside a rocket that is up but not cleared to fly: it stays attached until the
+    /// rocket is cleared, and a rocket ready to go stands alone, as on a real pad.
+    /// The service tower stood beside a rocket, its swing arm at the rocket's hatch: on the pad from the
+    /// moment the rocket stands to the moment it goes. Lit red while the rocket is held.
+    static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
+        let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.position.y) }
+        let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
+        deco.name = "hold"
+        rocket.addChildNode(deco)
+    }
+
+    static func holdDecoration(around center: SIMD3<Double>, tall: Bool, armAt: Double? = nil, held: Bool = true) -> SCNNode {
         let n = SCNNode()
-        let red = flat(NSColor(rgb: (0.9, 0.2, 0.2))), white = flat(NSColor(rgb: (0.95, 0.95, 0.95)))
-        let radius = 0.72, postH = 0.32
-        for k in 0..<4 {
-            let a = Double(k) * .pi / 2 + .pi / 4
-            let post = SCNNode(geometry: SCNBox(width: 0.05, height: postH, length: 0.05, chamferRadius: 0))
-            post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.3, 0.35)))
-            post.position = v3(center.x + cos(a) * radius, postH / 2, center.z + sin(a) * radius)
-            n.addChildNode(post)
-            // Tape between this post and the next, striped in short segments.
-            let b = a + .pi / 2
-            let p0 = SIMD2(center.x + cos(a) * radius, center.z + sin(a) * radius)
-            let p1 = SIMD2(center.x + cos(b) * radius, center.z + sin(b) * radius)
-            let segs = 6
-            for i in 0..<segs {
-                let t0 = Double(i) / Double(segs), t1 = Double(i + 1) / Double(segs)
-                let m0 = p0 + (p1 - p0) * t0, m1 = p0 + (p1 - p0) * t1
-                let mid = (m0 + m1) / 2
-                let d = m1 - m0
-                let len = (d.x * d.x + d.y * d.y).squareRoot()
-                let seg = SCNNode(geometry: SCNBox(width: len, height: 0.06, length: 0.012, chamferRadius: 0))
-                seg.geometry!.firstMaterial = i % 2 == 0 ? red : white
-                seg.position = v3(mid.x, postH * 0.8, mid.y)
-                seg.eulerAngles.y = -atan2(d.y, d.x)
-                n.addChildNode(seg)
-            }
-        }
-        // Gantry: a tower with rungs beside the rocket.
-        let h = tall ? 1.7 : 1.1
+        // The service tower: a steel lattice beside the rocket, as a real pad has, with cross-bracing
+        // between the legs, a work platform every so often, and a swing arm out to the rocket at the top.
+        // Grey steel, a red beacon on top; nothing wooden stands on a launch pad.
+        // As tall as the hatch it serves needs it, and a little over.
+        let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
+        let armY = armAt ?? h - 0.12
+        let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
         let tower = SCNNode()
-        for dz in [-0.08, 0.08] {
-            let rail = SCNNode(geometry: SCNBox(width: 0.04, height: h, length: 0.04, chamferRadius: 0))
-            rail.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.55, 0.2)))
-            rail.position = v3(0, h / 2, dz)
-            tower.addChildNode(rail)
+        let w = 0.18, leg = 0.025
+        for (dx, dz) in [(-w / 2, -w / 2), (w / 2, -w / 2), (-w / 2, w / 2), (w / 2, w / 2)] {
+            let l = SCNNode(geometry: SCNBox(width: leg, height: h, length: leg, chamferRadius: 0))
+            l.geometry!.firstMaterial = steel
+            l.position = v3(dx, h / 2, dz)
+            tower.addChildNode(l)
         }
-        var y = 0.15
-        while y < h {
-            let rung = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 0.2, chamferRadius: 0))
-            rung.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.55, 0.2)))
-            rung.position = v3(0, y, 0)
-            tower.addChildNode(rung)
-            y += 0.18
+        let bay = 0.22
+        var y = bay
+        var level = 0
+        while y < h - 0.02 {
+            // Horizontal braces round the four sides, and a diagonal across each, alternating direction.
+            for side in 0..<4 {
+                let along = side % 2 == 0
+                let brace = SCNNode(geometry: SCNBox(width: along ? w : leg * 0.8, height: leg * 0.8, length: along ? leg * 0.8 : w, chamferRadius: 0))
+                brace.geometry!.firstMaterial = steel
+                let off = (side < 2 ? -1.0 : 1.0) * w / 2
+                brace.position = along ? v3(0, y, off) : v3(off, y, 0)
+                tower.addChildNode(brace)
+                let diagLen = (w * w + bay * bay).squareRoot()
+                let diag = SCNNode(geometry: SCNBox(width: diagLen, height: leg * 0.6, length: leg * 0.6, chamferRadius: 0))
+                diag.geometry!.firstMaterial = dark
+                diag.position = along ? v3(0, y - bay / 2, off) : v3(off, y - bay / 2, 0)
+                let tilt = atan2(bay, w) * ((level + side) % 2 == 0 ? 1 : -1)
+                diag.eulerAngles = along ? SCNVector3(0, 0, tilt) : SCNVector3(0, .pi / 2, tilt)
+                tower.addChildNode(diag)
+            }
+            // A work platform every other bay: a grating that sticks out towards the rocket.
+            if level % 2 == 1 {
+                let deck = SCNNode(geometry: SCNBox(width: w + 0.16, height: 0.02, length: w + 0.04, chamferRadius: 0))
+                deck.geometry!.firstMaterial = dark
+                deck.position = v3(-0.08, y + 0.01, 0)
+                tower.addChildNode(deck)
+                let rail = SCNNode(geometry: SCNBox(width: w + 0.16, height: 0.012, length: 0.012, chamferRadius: 0))
+                rail.geometry!.firstMaterial = steel
+                rail.position = v3(-0.08, y + 0.09, (w + 0.04) / 2)
+                tower.addChildNode(rail)
+            }
+            y += bay; level += 1
         }
-        tower.position = v3(center.x + 0.32, 0, center.z + 0.02)
+        // The swing arm at the top, out to the rocket's side, with the umbilical's box on its end.
+        let armLen = 0.3
+        let arm = SCNNode(geometry: SCNBox(width: armLen, height: 0.04, length: 0.06, chamferRadius: 0))
+        arm.geometry!.firstMaterial = steel
+        arm.position = v3(-w / 2 - armLen / 2 + 0.02, armY, 0)
+        tower.addChildNode(arm)
+        let umbilical = SCNNode(geometry: SCNBox(width: 0.06, height: 0.08, length: 0.08, chamferRadius: 0))
+        umbilical.geometry!.firstMaterial = dark
+        umbilical.position = v3(-w / 2 - armLen + 0.04, armY - 0.02, 0)
+        tower.addChildNode(umbilical)
+        // A beacon on top: lit red while the rocket is held, dark once it is cleared.
+        let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
+        beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark
+        beacon.name = "beacon"
+        beacon.position = v3(0, h + 0.025, 0)
+        tower.addChildNode(beacon)
+        tower.position = v3(center.x + 0.44, 0, center.z + 0.02)
+        tower.name = "tower"
         n.addChildNode(tower)
         return n
     }

@@ -82,7 +82,9 @@ With sharing on, rumkapsels on the same network merge their work stations into o
 
 ## Flags
 
-`--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits.
+`--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits. `--gallery`
+opens the gallery of props and poses; `--gallery --tile rockets --snapshot out.png` puts the camera on the
+tile whose title has those words, close up, for a picture of one thing.
 
 `--simulator` opens the simulator window on its own: a real station with the scanner, GitHub and the
 network switched off, driven by a panel of buttons that write made-up facts through the same entry
