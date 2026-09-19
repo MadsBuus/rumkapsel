@@ -297,6 +297,7 @@ extension Simulation {
         if let r = rockets[key] {
             r.label = label
             if r.stage.rank == 0 { r.cargo = cargo; r.untested = untested }   // only one standing by is resized
+            if !untested { r.untested = false }   // cleared is never taken back off a rocket that has loaded
             guard stage.rank > r.stage.rank else { return }
             take(r, command)
             return

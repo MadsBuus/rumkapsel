@@ -212,12 +212,13 @@ extension StationController {
                         : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
                     let blink = checks == "pending" && !closed
                     // What a standing crate cannot be re-lit into, and what it can.
-                    let built = "\(closed)|\(room.color.r),\(room.color.g),\(room.color.b)"
+                    let mine = world.isMine(office: key)   // strapped in white from the moment it is packed, like yours in the rows
+                    let built = "\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)"
                     signatures[key] = "package"
                     var pkg = packages[key]
                     if let p = pkg, p.parent == nil || packageBuilt[key] != built { p.removeFromParentNode(); packages[key] = nil; pkg = nil }
                     if pkg == nil {
-                        let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink)
+                        let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink, mine: mine)
                         p.name = "box:" + key
                         markerRoot.addChildNode(p)
                         packages[key] = p
