@@ -1494,8 +1494,8 @@ final class World {
         // itself. With no pull request known there is nothing the yard could hold.
         let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
         guard let prNumber = pull?.number ?? crewRoomInfo[key]?.prNumber, prNumber > 0 else { nothingToHaul.insert(key); return [] }
-        let issue = pull?.closes.first ?? github.task(repo: repo, pull: prNumber) ?? Work.number(inOfficeKey: room.key)
-        let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: issue, pull: prNumber, pullState: pull?.state)
+        // Git history names pull requests and the board names issues; the register knows which is which.
+        let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull?.closes.first, pull: prNumber, pullState: pull?.state)
         guard let number = record.number else { return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         works.report(record, .stored, by: .pulls)

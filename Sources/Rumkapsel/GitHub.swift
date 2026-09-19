@@ -318,9 +318,6 @@ final class GitHubResolver {
         // Releases are made of pull requests; the floor shows tasks. Where the link is known, translate.
         if let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
-            c.storageNumbers = asTasks(c.storageNumbers, repo: repo)
-            c.deckNumbers = asTasks(c.deckNumbers, repo: repo)
-            c.clearedNumbers = asTasks(c.clearedNumbers, repo: repo)
             c.storage = c.storageNumbers.count; c.deck = c.deckNumbers.count
         }
         return c
@@ -481,12 +478,6 @@ final class GitHubResolver {
     func pulls(repo: String, task: Int) -> [Int] {
         lock.lock(); defer { lock.unlock() }
         return (tasks[repo] ?? [:]).filter { $0.value == task }.map(\.key).sorted()
-    }
-    /// Git history names pull requests; on the floor a crate is its task where one is known.
-    private func asTasks(_ numbers: [Int], repo: String) -> [Int] {
-        var out: [Int] = []
-        for n in numbers { let t = tasks[repo]?[n] ?? n; if !out.contains(t) { out.append(t) } }
-        return out
     }
     /// A repository's name just learned: written down with the board so the next launch starts knowing it.
     private func learned(owner: String, repoRoot: String) {
