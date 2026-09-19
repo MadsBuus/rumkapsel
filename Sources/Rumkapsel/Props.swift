@@ -365,29 +365,31 @@ enum Props {
                 diag.eulerAngles = along ? SCNVector3(0, 0, tilt) : SCNVector3(0, .pi / 2, tilt)
                 tower.addChildNode(diag)
             }
-            // A work platform every other bay: a grating that sticks out towards the rocket.
-            if level % 2 == 1 {
-                let deck = SCNNode(geometry: SCNBox(width: w + 0.16, height: 0.02, length: w + 0.04, chamferRadius: 0))
-                deck.geometry!.firstMaterial = dark
-                deck.position = v3(-0.08, y + 0.01, 0)
-                tower.addChildNode(deck)
-                let rail = SCNNode(geometry: SCNBox(width: w + 0.16, height: 0.012, length: 0.012, chamferRadius: 0))
-                rail.geometry!.firstMaterial = steel
-                rail.position = v3(-0.08, y + 0.09, (w + 0.04) / 2)
-                tower.addChildNode(rail)
-            }
             y += bay; level += 1
         }
-        // The swing arm at the top, out to the rocket's side, with the umbilical's box on its end.
+        // The one gangway, from the tower to the hatch: a walkway with a rail each side, hinged at the
+        // tower's face so it swings back along the tower once the rocket is loaded.
         let armLen = 0.3
-        let arm = SCNNode(geometry: SCNBox(width: armLen, height: 0.04, length: 0.06, chamferRadius: 0))
-        arm.geometry!.firstMaterial = steel
-        arm.position = v3(-w / 2 - armLen / 2 + 0.02, armY, 0)
-        tower.addChildNode(arm)
-        let umbilical = SCNNode(geometry: SCNBox(width: 0.06, height: 0.08, length: 0.08, chamferRadius: 0))
-        umbilical.geometry!.firstMaterial = dark
-        umbilical.position = v3(-w / 2 - armLen + 0.04, armY - 0.02, 0)
-        tower.addChildNode(umbilical)
+        let hinge = SCNNode()
+        hinge.name = "arm"
+        hinge.position = v3(-w / 2 + 0.02, armY - 0.1, 0)
+        let walk = SCNNode(geometry: SCNBox(width: armLen, height: 0.02, length: 0.1, chamferRadius: 0))
+        walk.geometry!.firstMaterial = dark
+        walk.position = v3(-armLen / 2, 0, 0)
+        hinge.addChildNode(walk)
+        for dz in [-0.05, 0.05] {
+            let rail = SCNNode(geometry: SCNBox(width: armLen, height: 0.012, length: 0.012, chamferRadius: 0))
+            rail.geometry!.firstMaterial = steel
+            rail.position = v3(-armLen / 2, 0.07, dz)
+            hinge.addChildNode(rail)
+            for k in 0..<3 {
+                let post = SCNNode(geometry: SCNBox(width: 0.01, height: 0.07, length: 0.01, chamferRadius: 0))
+                post.geometry!.firstMaterial = steel
+                post.position = v3(-armLen * (0.15 + 0.35 * Double(k)), 0.035, dz)
+                hinge.addChildNode(post)
+            }
+        }
+        tower.addChildNode(hinge)
         // A beacon on top: lit red while the rocket is held, dark once it is cleared.
         let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
         beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark

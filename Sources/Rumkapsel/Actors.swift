@@ -168,7 +168,11 @@ extension StationController {
                 liftOff(node)
             }
         case .steam(let key):
-            if let node = rocketViews[key]?.node { addSteam(to: node) }
+            if let node = rocketViews[key]?.node {
+                addSteam(to: node)
+                // Loaded and ready: the swing arm comes off the hatch and folds back along the tower.
+                node.childNode(withName: "arm", recursively: true)?.runAction(.rotateBy(x: 0, y: .pi / 2, z: 0, duration: 2))
+            }
         case .rocketGone(let key):
             rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
         case .intoHold(let key, let command):
