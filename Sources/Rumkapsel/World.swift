@@ -72,6 +72,7 @@ final class World {
     func stationEvents() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
+        var launches: Set<String> = []
         for (record, t) in transitions {
             switch t.to {
             case .ready:
@@ -82,12 +83,26 @@ final class World {
                 if let number = record.pulls.keys.min() {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
+            case .shipped where t.from != nil:
+                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let station = fleet.stations[info.station] else { continue }
+                launches.insert(info.station + "|" + info.repo)
+                _ = station
             default: break
             }
         }
         transitions = waiting
+        // One launch per repository per pass, however many pieces of work went up in it.
+        for key in launches.sorted() {
+            guard let station = fleet.stations[String(key.split(separator: "|")[0])] else { continue }
+            let repo = String(key.split(separator: "|", maxSplits: 1)[1])
+            if mergeLaunches.contains(key) { continue }   // its own small rocket is already going up
+            events.append(launchLabels.removeValue(forKey: key)
+                          ?? wish(.launch, station: station, repo: repo, waiting: cargoWaiting(station: station, repo: repo), cleared: true))
+        }
         return events
     }
+    /// The launch a merged release wrote on the rocket, for the drain to send up with the record's word.
+    private var launchLabels: [String: WorldEvent] = [:]
 
     /// A source's word about the work an office holds, for the record. The station does not act on the
     /// record yet: it shadows what the floor does, and the trace says where the two part ways.
@@ -616,9 +631,33 @@ final class World {
         return open.first { $0.isProduction || (!hasProduction && !github.pipeline(repoRoot: root).hasStaging) }
     }
 
-    /// Pads that should hold a rocket right now, as "station|repo".
+    /// The work of a repository the next rocket is for: what is cleared or in QA when the repository has
+    /// a staging area, and what is stored besides when it has not.
+    func waiting(repo: String, station: String) -> [WorkBook.Record] {
+        let from: Stage = stagingIsDeck(station: station, repo: repo) ? .qa : .stored
+        return works.records(repo: repo).filter { r in r.stage.map { $0 >= from && $0 < .shipped } ?? false }
+    }
+    /// Whether the rocket may load a repository's waiting work: all of it cleared, or nothing to clear here.
+    func clearedToLoad(repo: String, station: String) -> Bool {
+        let w = waiting(repo: repo, station: station)
+        return !w.isEmpty && (!workflow(repo: repo).has(.cleared) || w.allSatisfy { $0.stage.map { $0 >= .cleared } ?? false })
+    }
+
+    /// Pads that should hold a rocket right now, as "station|repo": a release open, a merge going up, or
+    /// work waiting for a release in a repository that has a way to ship.
     func padRockets() -> Set<String> {
-        Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
+        var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
+        for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
+            && !github.pipeline(repoRoot: root).shipsOnMerge && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
+        return pads
+    }
+
+    /// A rocket for work waiting with no release opened for it yet: what is stored since the last one went.
+    private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
+        let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
+        let label = "rocket:|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
+        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: true, cargo: n,
+                              command: .rocket(stage, station: station.name, repo: repo))
     }
 
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
@@ -650,21 +689,31 @@ final class World {
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
-            for c in station.ledger.crates(of: info.repo) where c.placed == .pad || (c.placed == .deck && !stagingIsDeck(station: station.name, repo: info.repo)) {
-                report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date())
-            }
+            // The release ships what was waiting for it; the launch itself follows from the record.
+            for r in waiting(repo: info.repo, station: station.name) { works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
+            for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
                                        : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
-            events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
+            launchLabels[info.station + "|" + info.repo] = wish(.launch, station: station, repo: info.repo, pr: pr)
         }
         for (root, info) in repoRoots {
             guard let station = fleet.stations[info.station], github.openReleases(repoRoot: root) != nil else { continue }
             let quiet = !releasesSeen.contains(root)
             releasesSeen.insert(root)
-            guard let pr = padRelease(root: root) else { continue }
             let key = info.station + "|" + info.repo
             guard !launched.contains(key) else { continue }
+            guard let pr = padRelease(root: root) else {
+                // No release opened yet: work waiting for one has a rocket standing all the same, loaded
+                // once every piece of it is cleared, or at once where nothing clears here.
+                let w = waiting(repo: info.repo, station: station.name)
+                guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !mergeLaunches.contains(key),
+                      !github.pipeline(repoRoot: root).shipsOnMerge else { continue }   // a merge's rocket is its own, one per merge
+                let cleared = clearedToLoad(repo: info.repo, station: station.name)
+                events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
+                                   station: station, repo: info.repo, waiting: w.count, cleared: cleared))
+                continue
+            }
             let mark = "\(key)|\(pr.number)|\(pr.untested)"
             if quiet { announcedReleases.insert(mark) }
             if !announcedReleases.contains(mark) {
@@ -675,7 +724,7 @@ final class World {
             }
             // Untested, or not for production: the rocket only stands there. Cleared: it takes the cargo aboard.
             let cleared = pr.isProduction && !pr.untested
-            if cleared { for c in station.ledger.crates(of: info.repo) where c.placed == .deck { report(crate: c.number, repo: info.repo, .cleared, by: .pulls) } }
+            if cleared { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr))
         }

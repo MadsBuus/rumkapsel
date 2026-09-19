@@ -38,7 +38,8 @@ struct Workflow: Codable, Equatable {
         w.qa = p.hasStaging ? (board ? [.board, .deploy, .pulls] : [.deploy, .pulls]) : nil
         // Without a board nothing clears a crate on its own; the release's label clears the lot, which is
         // the pull request's word. A repository that ships every merge has nothing to clear.
-        w.cleared = p.shipsOnMerge ? nil : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
+        // A repository that ships every merge or by tagging has nothing that clears a crate: nothing waits.
+        w.cleared = p.shipsOnMerge || p.shipsOnTag ? nil : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
         w.stored = board ? [.board, .pulls, .git] : [.pulls, .git]
         w.shipped = p.shipsOnMerge ? [.git] : p.shipsOnTag ? [.git, .board] : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
         return w

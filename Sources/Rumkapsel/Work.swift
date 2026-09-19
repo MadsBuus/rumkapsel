@@ -219,4 +219,6 @@ final class WorkBook {
     }
 
     var count: Int { records.count }
+    /// Every piece of work of a repository, by id.
+    func records(repo: String) -> [Record] { records.values.filter { $0.repo == repo }.sorted { $0.id < $1.id } }
 }
