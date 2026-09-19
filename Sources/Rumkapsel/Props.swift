@@ -247,14 +247,17 @@ enum Props {
             port.eulerAngles.y = a
             n.addChildNode(port)
         }
-        // Four swept fins and an engine nozzle.
+        // Four tail fins and an engine nozzle. A fin hugs the hull at the top and flares out at the foot:
+        // a plate leaning in, its top edge buried in the lower stage, its bottom outer corner near the pad.
         for k in 0..<4 {
             let pivot = SCNNode()
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
-            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: r * 2.4, length: r * 1.5, chamferRadius: 0))
+            let finH = r * 2.6, finL = r * 1.3, lean = 0.42
+            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
             fin.geometry!.firstMaterial = lit(color)
-            fin.position = v3(0, 0.12 + r * 1.0, r + r * 0.55)
-            fin.eulerAngles.x = 0.35
+            // The plate's centre, placed so that leaning by `lean` puts its top inner corner inside the hull.
+            fin.position = v3(0, 0.12 + finH * 0.45, r * 0.55 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
+            fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
         }
