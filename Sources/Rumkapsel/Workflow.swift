@@ -45,6 +45,9 @@ struct Workflow: Codable, Equatable {
         return w
     }
 
+    /// The list with one source moved to the front: "the board first", the rest as they were.
+    static func first(_ s: Source, in list: [Source]) -> [Source] { [s] + list.filter { $0 != s } }
+
     /// The answers in a few words each, for the settings window.
     var summary: [(question: String, answer: String)] {
         func list(_ s: [Source]?) -> String { s.map { $0.map(\.title).joined(separator: ", ") } ?? "" }

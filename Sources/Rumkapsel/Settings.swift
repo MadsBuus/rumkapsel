@@ -200,12 +200,31 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let workflow = detail?.workflow {
+                let byHand = model.config.repos[repo]?.workflow != nil
                 Section {
-                    ForEach(workflow.summary, id: \.question) { row in
-                        LabeledContent(row.question, value: row.answer)
+                    if byHand {
+                        stagePicker("Stored when", repo, workflow, \.stored)
+                        optionalStagePicker("QA", repo, workflow, \.qa, off: "none: stored goes straight to the rocket")
+                        optionalStagePicker("Cleared when", repo, workflow, \.cleared, off: "always: the rocket never waits")
+                        stagePicker("Shipped when", repo, workflow, \.shipped)
+                        Picker("Outside work", selection: Binding(
+                            get: { workflow.outside },
+                            set: { v in var w = workflow; w.outside = v; model.config.repos[repo, default: .init()].workflow = w; model.commit() })) {
+                            Text("bots").tag(Workflow.Outside.bots)
+                            Text("bots and anyone not on the team").tag(Workflow.Outside.strangers)
+                            Text("nobody").tag(Workflow.Outside.nobody)
+                        }
+                        Button("Use what is detected") { model.config.repos[repo]?.workflow = nil; model.commit() }
+                            .buttonStyle(.link)
+                    } else {
+                        ForEach(workflow.summary, id: \.question) { row in
+                            LabeledContent(row.question, value: row.answer)
+                        }
+                        Button("Set by hand") { model.config.repos[repo, default: .init()].workflow = workflow; model.commit() }
+                            .buttonStyle(.link)
                     }
                 } header: {
-                    Text("Workflow" + (model.config.repos[repo]?.workflow == nil ? " · detected" : " · set by hand"))
+                    Text("Workflow" + (byHand ? " · set by hand" : " · detected"))
                 } footer: {
                     Text("Who may say each stage, first in line first. Any of them moves work on; only the first may take it back. Detected from the releases above and the board.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -213,6 +232,29 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Who is first in line for a stage: the picker names a source, and the rest follow as detected.
+    private func stagePicker(_ title: String, _ repo: String, _ workflow: Workflow, _ path: WritableKeyPath<Workflow, [Source]>) -> some View {
+        Picker(title, selection: Binding(
+            get: { workflow[keyPath: path].first ?? .pulls },
+            set: { s in var w = workflow; w[keyPath: path] = Workflow.first(s, in: w[keyPath: path]); model.config.repos[repo, default: .init()].workflow = w; model.commit() })) {
+            ForEach([Source.board, .pulls, .git, .deploy], id: \.self) { Text("\($0.title) first").tag($0) }
+        }
+    }
+
+    /// The same, for a stage a repository may do without.
+    private func optionalStagePicker(_ title: String, _ repo: String, _ workflow: Workflow, _ path: WritableKeyPath<Workflow, [Source]?>, off: String) -> some View {
+        Picker(title, selection: Binding(
+            get: { workflow[keyPath: path]?.first },
+            set: { s in
+                var w = workflow
+                w[keyPath: path] = s.map { Workflow.first($0, in: w[keyPath: path] ?? Workflow()[keyPath: path] ?? [$0]) }
+                model.config.repos[repo, default: .init()].workflow = w; model.commit()
+            })) {
+            Text(off).tag(Source?.none)
+            ForEach([Source.board, .pulls, .git, .deploy], id: \.self) { Text("\($0.title) first").tag(Source?.some($0)) }
+        }
     }
 
     private func branchField(_ repo: String, _ path: WritableKeyPath<AppConfig.Branches, String>) -> Binding<String> {
