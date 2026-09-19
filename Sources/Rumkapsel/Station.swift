@@ -330,6 +330,17 @@ final class Station {
     /// block. Anything from outside waits in it until someone clears it into storage. Its hatch is in
     /// the back wall, the row nearest it is where the objects stand, and the row by storage is the aisle.
     var deconCells: [Cell] { blocks.decon }
+    /// The yard cells crates stand on: every other row in storage and on the deck, the back row in
+    /// decon, the pallet's lane left out. Nobody stands on these; a carrier works from the aisle beside.
+    var crateRows: Set<Cell> {
+        var out = Set<Cell>()
+        for (cells, decon) in [(storageCells, false), (deckCells, false), (deconCells, true)] {
+            let rows = Set(cells.map(\.y)).sorted()
+            let crateRows = decon ? Set(rows.suffix(1)) : Set(rows.enumerated().filter { $0.offset % 2 == 0 }.map(\.element))
+            out.formUnion(cells.filter { crateRows.contains($0.y) && !palletLane.contains($0) })
+        }
+        return out
+    }
     private func makeDeconCells() -> [Cell] {
         guard hasPad else { return [] }
         let x0 = yardX0, r = yardRow(0)

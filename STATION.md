@@ -19,7 +19,9 @@ rectangular hatch, so hallway, chamber and bay read as one straight way out. Eve
 inside for the cycle before stepping out. Nobody goes to the bay for any other reason: it is outside. Space walks, visits to other stations and other ships docking are its future. The **yard** along the west side is three
 blocks: **storage** (merged work waiting for a release), the **deck** (work on staging, tested on the
 row nearest the pad, untested on the far row) and the **pad** (rockets). Blocks connect by doorways and
-have aisles down the middle; crates stack against the far walls, aisles stay clear.
+have aisles down the middle; crates stack against the far walls, aisles stay clear. Nobody stands on a
+crate row, however empty the spot: two repositories share a row cell as two columns half a tile apart,
+and a body between them is inside one of them. A carrier works from the aisle beside the row.
 
 **Offices** are where work happens. One office per branch. A hexagon crate delivered by shuttle
 becomes an office: it lands squarely on the bay's hexagon, aligned with it; a minion carries it to

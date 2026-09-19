@@ -325,6 +325,26 @@ enum Scenarios {
             return stored == 1 ? nil : "\(stored) ios crates left in storage; #280 alone should be"
         }),
 
+        // The same through the staging area, into the deck cell another repository's crate stands in.
+        Scenario("the stage panel with a staging area: to the deck beside another repository's crate, across it, and up", [
+            ("Target: ios#298", 4.8),
+            ("Open PR", 32),
+            ("Stage: stored", 128),
+            ("Stage: QA", 128),
+            ("Stage: cleared", 96),
+            ("Stage: shipped", 4.8),
+        ], tail: 224, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .carry(298, to: .deck),
+            .crateCleared("ios"),
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            let deck = Scenario.crates(sim, "deck", "ios")
+            return deck == 1 ? nil : "\(deck) ios crates left on the deck; #280 alone should be"
+        }),
+
         Scenario("production release: mark tested, merge, the rocket lifts", [
             ("Target: web#455", 4.8),
             ("Release: Production opens", 48),
