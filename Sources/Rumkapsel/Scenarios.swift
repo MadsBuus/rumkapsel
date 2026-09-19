@@ -304,6 +304,23 @@ enum Scenarios {
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
         }),
 
+        Scenario("the stage panel alone: said stored, QA, cleared and shipped, the crate goes all the way up", [
+            ("Target: ios#298", 4.8),
+            ("Open PR", 32),
+            ("Stage: stored", 128),      // no merge on GitHub: the record's word hauls the crate
+            ("Stage: QA", 128),          // to the staging area
+            ("Stage: cleared", 96),      // across it, and the rocket loads
+            ("Stage: shipped", 4.8),     // and goes
+        ], tail: 224, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .carry(298, to: .deck),
+            .crateCleared("ios"),
+            .rocket(.load(1), "ios"),
+            .carry(to: .pad),
+            .rocket(.launch, "ios"),
+        ]),
+
         Scenario("production release: mark tested, merge, the rocket lifts", [
             ("Target: web#455", 4.8),
             ("Release: Production opens", 48),
