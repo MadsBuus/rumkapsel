@@ -263,19 +263,14 @@ enum Props {
         }
         let nozzle = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14)))
         nozzle.geometry!.firstMaterial = dark
-        nozzle.position = v3(0, 0.05, 0)
+        nozzle.position = v3(0, 0.07, 0)
         n.addChildNode(nozzle)
-        // Landing legs so it stands on the pad.
-        for k in 0..<3 {
-            let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
-            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.22, length: 0.03, chamferRadius: 0))
-            leg.geometry!.firstMaterial = dark
-            leg.position = v3(0, 0.1, r * 1.1)
-            leg.eulerAngles.x = 0.5
-            pivot.addChildNode(leg)
-            n.addChildNode(pivot)
-        }
+        // The launch mount it stands on: a low dark table under the hull, the nozzle over it, the fins
+        // resting on its rim. No legs; a rocket on a pad does not land there.
+        let mount = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.9, height: 0.05)))
+        mount.geometry!.firstMaterial = lit(NSColor(rgb: (0.26, 0.27, 0.32)))
+        mount.position = v3(0, 0.025, 0)
+        n.addChildNode(mount)
         let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
         flame.position = v3(0, -0.2, 0)
