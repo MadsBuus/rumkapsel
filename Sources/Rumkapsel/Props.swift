@@ -331,71 +331,54 @@ enum Props {
 
     static func holdDecoration(around center: SIMD3<Double>, tall: Bool, armAt: Double? = nil, held: Bool = true) -> SCNNode {
         let n = SCNNode()
-        // The service tower: a steel lattice beside the rocket, as a real pad has, with cross-bracing
-        // between the legs, a work platform every so often, and a swing arm out to the rocket at the top.
-        // Grey steel, a red beacon on top; nothing wooden stands on a launch pad.
-        // As tall as the hatch it serves needs it, and a little over.
+        // The service tower: a plain steel column beside the rocket, a lift rail up its face on the
+        // rocket's side, a cap and a beacon on top. Grey steel; nothing wooden stands on a launch pad.
         let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
         let armY = armAt ?? h - 0.12
         let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
         let tower = SCNNode()
-        let w = 0.18, leg = 0.025
-        for (dx, dz) in [(-w / 2, -w / 2), (w / 2, -w / 2), (-w / 2, w / 2), (w / 2, w / 2)] {
-            let l = SCNNode(geometry: SCNBox(width: leg, height: h, length: leg, chamferRadius: 0))
-            l.geometry!.firstMaterial = steel
-            l.position = v3(dx, h / 2, dz)
-            tower.addChildNode(l)
-        }
-        let bay = 0.22
-        var y = bay
-        var level = 0
-        while y < h - 0.02 {
-            // Horizontal braces round the four sides, and a diagonal across each, alternating direction.
-            for side in 0..<4 {
-                let along = side % 2 == 0
-                let brace = SCNNode(geometry: SCNBox(width: along ? w : leg * 0.8, height: leg * 0.8, length: along ? leg * 0.8 : w, chamferRadius: 0))
-                brace.geometry!.firstMaterial = steel
-                let off = (side < 2 ? -1.0 : 1.0) * w / 2
-                brace.position = along ? v3(0, y, off) : v3(off, y, 0)
-                tower.addChildNode(brace)
-                let diagLen = (w * w + bay * bay).squareRoot()
-                let diag = SCNNode(geometry: SCNBox(width: diagLen, height: leg * 0.6, length: leg * 0.6, chamferRadius: 0))
-                diag.geometry!.firstMaterial = dark
-                diag.position = along ? v3(0, y - bay / 2, off) : v3(off, y - bay / 2, 0)
-                let tilt = atan2(bay, w) * ((level + side) % 2 == 0 ? 1 : -1)
-                diag.eulerAngles = along ? SCNVector3(0, 0, tilt) : SCNVector3(0, .pi / 2, tilt)
-                tower.addChildNode(diag)
-            }
-            y += bay; level += 1
-        }
-        // The one gangway, from the tower to the hatch: a walkway with a rail each side, hinged at the
-        // tower's face so it swings back along the tower once the rocket is loaded.
+        let w = 0.16
+        let column = SCNNode(geometry: SCNBox(width: w, height: h, length: w, chamferRadius: 0))
+        column.geometry!.firstMaterial = steel
+        column.position = v3(0, h / 2, 0)
+        tower.addChildNode(column)
+        let rail = SCNNode(geometry: SCNBox(width: 0.02, height: h - 0.1, length: 0.06, chamferRadius: 0))
+        rail.geometry!.firstMaterial = dark
+        rail.position = v3(-w / 2 - 0.005, (h - 0.1) / 2, 0)
+        tower.addChildNode(rail)
+        let cap = SCNNode(geometry: SCNBox(width: w + 0.04, height: 0.04, length: w + 0.04, chamferRadius: 0))
+        cap.geometry!.firstMaterial = dark
+        cap.position = v3(0, h + 0.02, 0)
+        tower.addChildNode(cap)
+        // The conveyor from the tower to the hatch: a belt with a rail each side and rollers across it,
+        // hinged at the tower's face so it swings back along the tower once the rocket is loaded. Crates
+        // come up the lift rail and ride the belt in.
         let armLen = 0.3
         let hinge = SCNNode()
         hinge.name = "arm"
         hinge.position = v3(-w / 2 + 0.02, armY - 0.1, 0)
-        let walk = SCNNode(geometry: SCNBox(width: armLen, height: 0.02, length: 0.1, chamferRadius: 0))
-        walk.geometry!.firstMaterial = dark
-        walk.position = v3(-armLen / 2, 0, 0)
-        hinge.addChildNode(walk)
-        for dz in [-0.05, 0.05] {
-            let rail = SCNNode(geometry: SCNBox(width: armLen, height: 0.012, length: 0.012, chamferRadius: 0))
-            rail.geometry!.firstMaterial = steel
-            rail.position = v3(-armLen / 2, 0.07, dz)
-            hinge.addChildNode(rail)
-            for k in 0..<3 {
-                let post = SCNNode(geometry: SCNBox(width: 0.01, height: 0.07, length: 0.01, chamferRadius: 0))
-                post.geometry!.firstMaterial = steel
-                post.position = v3(-armLen * (0.15 + 0.35 * Double(k)), 0.035, dz)
-                hinge.addChildNode(post)
-            }
+        let belt = SCNNode(geometry: SCNBox(width: armLen, height: 0.03, length: 0.1, chamferRadius: 0))
+        belt.geometry!.firstMaterial = lit(NSColor(rgb: (0.22, 0.23, 0.27)))
+        belt.position = v3(-armLen / 2, 0, 0)
+        hinge.addChildNode(belt)
+        for k in 0..<5 {
+            let roller = SCNNode(geometry: SCNBox(width: 0.012, height: 0.006, length: 0.09, chamferRadius: 0))
+            roller.geometry!.firstMaterial = steel
+            roller.position = v3(-armLen * (0.1 + 0.2 * Double(k)), 0.018, 0)
+            hinge.addChildNode(roller)
+        }
+        for dz in [-0.055, 0.055] {
+            let side = SCNNode(geometry: SCNBox(width: armLen, height: 0.04, length: 0.012, chamferRadius: 0))
+            side.geometry!.firstMaterial = steel
+            side.position = v3(-armLen / 2, 0.01, dz)
+            hinge.addChildNode(side)
         }
         tower.addChildNode(hinge)
         // A beacon on top: lit red while the rocket is held, dark once it is cleared.
         let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
         beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark
         beacon.name = "beacon"
-        beacon.position = v3(0, h + 0.025, 0)
+        beacon.position = v3(0, h + 0.065, 0)
         tower.addChildNode(beacon)
         tower.position = v3(center.x + 0.44, 0, center.z + 0.02)
         tower.name = "tower"
