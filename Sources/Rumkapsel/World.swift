@@ -55,6 +55,39 @@ final class World {
     private(set) var officeCrates: [String: CrateRef] = [:]
     /// Every piece of work by every name it goes by; see `WorkBook`.
     let works = WorkBook()
+    /// Stage changes heard since the last pass, waiting to become station events; see `stationEvents`.
+    private var transitions: [(record: WorkBook.Record, t: Transition)] = []
+
+    /// The office on the floor for a piece of work, under whichever key it stands.
+    func office(for record: WorkBook.Record) -> (station: Station, room: Room)? {
+        for station in fleet.stations.values {
+            for key in record.officeKeys { if let room = station.rooms[key] { return (station, room) } }
+        }
+        return nil
+    }
+
+    /// The stage changes heard this pass, as what the station does about them. A change whose office is
+    /// not on the floor yet waits for it. A change in a repository nobody has answered for yet is history,
+    /// not news, and is taken quietly, as every source's first answer is.
+    func stationEvents() -> [WorldEvent] {
+        var events: [WorldEvent] = []
+        var waiting: [(record: WorkBook.Record, t: Transition)] = []
+        for (record, t) in transitions {
+            switch t.to {
+            case .ready:
+                guard let (station, room) = office(for: record) else { waiting.append((record, t)); continue }
+                guard t.from != nil, isReady(record.repo) else { continue }
+                let key = roomKey(station, room)
+                let author = crewRoomInfo[key]?.author ?? github.myLogin() ?? ""
+                if let number = record.pulls.keys.min() {
+                    events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
+                }
+            default: break
+            }
+        }
+        transitions = waiting
+        return events
+    }
 
     /// A source's word about the work an office holds, for the record. The station does not act on the
     /// record yet: it shadows what the floor does, and the trace says where the two part ways.
@@ -326,9 +359,10 @@ final class World {
         if firstRun {
             didLoadLayout = true
             // The record shadows the floor for now; the trace is where the two are compared.
-            works.onTransition = { r, t in
+            works.onTransition = { [weak self] r, t in
                 let who = r.number.map { "#\($0)" } ?? r.work().label
                 StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
+                self?.transitions.append((r, t))
             }
             fleet.load()
             // Last run's answers come back with the floor, so the station stands whole from the first
@@ -491,16 +525,8 @@ final class World {
             let who = Work(repo: "", branch: change.branch).label
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
-            // Newly open on one of my checkouts: the office's worker packs the crate for it.
-            if change.pr.state == "OPEN", change.previous?.state != "OPEN" {
-                for station in fleet.stations.values {
-                    for room in station.rooms.values where room.branch == change.branch && room.worktree != nil {
-                        events.append(.pullRequestOpened(repo: room.repo ?? "", number: change.pr.number, author: github.myLogin() ?? "", roomKey: room.key))
-                        if let repo = room.repo, let r = works.find(repo: repo, pull: change.pr.number) { works.report(r, .ready, by: .pulls) }
-                    }
-                }
-            }
         }
+        events += stationEvents()   // a pull request newly open has its office's worker pack the crate
         if changed { events.append(.layoutChanged) }
         return events
     }
@@ -531,6 +557,7 @@ final class World {
         var events = run("gh.releases") { self.applyReleases() }
         events += run("gh.board") { self.applyBoardMoves() }
         events += run("gh.crew") { self.rebuildCrew(now: now) }
+        events += stationEvents()
         return events
     }
 
@@ -816,7 +843,6 @@ final class World {
                 changed = true
                 if isReady(repo) {
                     events.append(.officeOpened(station: station.name, key: key, source: .github(pr.author), arrival: .shuttle))
-                    events.append(.pullRequestOpened(repo: repo, number: pr.number, author: pr.author, roomKey: key))
                 }
             }
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)

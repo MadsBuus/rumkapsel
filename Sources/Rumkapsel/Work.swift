@@ -121,6 +121,14 @@ final class WorkBook {
         }
         /// The crate's number: the issue the work is for, else the branch's, else its pull request.
         var number: Int? { issue ?? branchIssue ?? pulls.keys.min() ?? crate }
+        /// Every key an office for this work might stand under today: by number, or by any of its
+        /// branches, since a teammate's office is keyed by branch while yours is re-keyed by its pull request.
+        var officeKeys: [String] {
+            var keys = [work().officeKey]
+            for b in branches.sorted() { keys.append(Work(repo: repo, branch: b).officeKey) }
+            if let n = number { keys.append(Work(repo: repo, issue: n).officeKey) }
+            return keys.reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+        }
     }
 
     private var records: [Int: Record] = [:]
