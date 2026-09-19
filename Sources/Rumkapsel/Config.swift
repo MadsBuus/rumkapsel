@@ -17,6 +17,7 @@ struct AppConfig: Codable, Equatable {
         var share: Bool = false        // visible to other rumkapsels on the local network
         var color: RGB?                // picked in Settings; nil is the colour the name hashes to
         var branches: Branches?        // the pipeline set by hand; nil is the one read from the repository
+        var workflow: Workflow?        // the way of working set by hand; nil is the one detected
         var path: String?              // a checkout added by hand in Settings, on the station with no session in it
     }
     /// A repository's way to production as set in Settings, over whatever was detected.

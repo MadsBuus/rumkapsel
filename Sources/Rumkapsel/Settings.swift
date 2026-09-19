@@ -9,6 +9,8 @@ struct RepoDetail {
     var remote: String?
     /// What the repository itself says, before anything set by hand; nil until it has been read.
     var detected: Pipeline?
+    /// The way of working that follows from it, set by hand or detected.
+    var workflow: Workflow?
 }
 
 /// The settings window: general options, repositories, GitHub and teammates.
@@ -196,6 +198,18 @@ struct SettingsView: View {
             } footer: {
                 Text("Merged pull requests go to storage, a release into staging moves them to the test deck, and a release into production loads the rocket. Read from the repository's release history, else its branch names. To set it for everyone, put .github/rumkapsel.json on the default branch.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if let workflow = detail?.workflow {
+                Section {
+                    ForEach(workflow.summary, id: \.question) { row in
+                        LabeledContent(row.question, value: row.answer)
+                    }
+                } header: {
+                    Text("Workflow" + (model.config.repos[repo]?.workflow == nil ? " · detected" : " · set by hand"))
+                } footer: {
+                    Text("Who may say each stage, first in line first. Any of them moves work on; only the first may take it back. Detected from the releases above and the board.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

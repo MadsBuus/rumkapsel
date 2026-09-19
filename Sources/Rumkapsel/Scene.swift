@@ -1052,8 +1052,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 logEvent("\(label): on staging, to the deck")   // the yard reconciliation carries it across
                 markersDirty = true
             case .cleared:
-                logEvent("\(label): passed QA, ready to ship")
-                handle(.crateCleared(station: station.name, repo: item.repo, number: item.number))
+                logEvent("\(label): passed QA, ready to ship")   // the record's word carries it across the deck
             case .shipped where from != nil:
                 logEvent("\(label): shipped")
             case .storage where from == st.development:
@@ -1267,7 +1266,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var out: [String: RepoDetail] = [:]
         for (root, info) in world.repoRoots.sorted(by: { $0.key < $1.key }) where out[info.repo] == nil {
             let p = github.detectedPipeline(repoRoot: root)
-            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root), detected: p.source == "settings" ? nil : p)
+            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root), detected: p.source == "settings" ? nil : p,
+                                        workflow: world.workflow(repo: info.repo))
         }
         return out
     }

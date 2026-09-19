@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains(where: { $0 == "--scenarios" || $0.hasSuffix("-tests") }) { Words.pinned = Vocabulary() }
         // The crate ledger on its own: facts in every order, no station.
         if args.contains("--ledger-tests") { LedgerTests.run() }
+        // How a piece of work is named, from whatever a source brought: one office key, one crate number.
+        if args.contains("--work-tests") { WorkTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }

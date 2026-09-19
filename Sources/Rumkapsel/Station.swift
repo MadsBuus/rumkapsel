@@ -108,37 +108,15 @@ enum Place: Hashable {
     }
 }
 
-/// A task (branch) or project a session works on; the minion's home room.
+/// A task (branch) or project a session works on; the minion's home room. Named by `Work`.
 struct Home {
     let key: String
     let name: String
     let repo: String
+    /// The number the work goes by, its issue else its pull request; nil for a branch with neither.
     let issue: Int?
 
-    static func from(repo: String, branch: String?, cwd: String) -> Home {
-        if let branch, let m = branch.firstMatch(of: #/^gh-(\d+)\/(.*)$/#), let n = Int(m.1) {
-            let words = m.2.split(separator: "-").joined(separator: " ")
-            return Home(key: "task:\(repo)#\(n)", name: "#\(n) " + shorten(words, to: 22), repo: repo, issue: n)
-        }
-        if let branch, !["main", "master", "develop", "HEAD", ""].contains(branch) {
-            let slug = branch.split(separator: "/").last.map(String.init) ?? branch
-            return Home(key: "task:\(repo)/\(branch)", name: shorten(slug.replacingOccurrences(of: "-", with: " "), to: 26), repo: repo, issue: nil)
-        }
-        return Home(key: "proj:\(repo)", name: repo, repo: repo, issue: nil)
-    }
-
-    /// Cuts at a word boundary near the limit, without a trailing ellipsis noise.
-    private static func shorten(_ text: String, to limit: Int) -> String {
-        guard text.count > limit else { return text }
-        let words = text.split(separator: " ")
-        var out = ""
-        for w in words {
-            if out.isEmpty { out = String(w); continue }
-            if out.count + 1 + w.count > limit { break }
-            out += " " + w
-        }
-        return String(out.prefix(limit))
-    }
+    static func from(repo: String, branch: String?, cwd: String) -> Home { Work(repo: repo, branch: branch).home }
 }
 
 final class Room {

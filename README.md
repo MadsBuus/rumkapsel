@@ -24,7 +24,7 @@ swift build --build-system native && .build/debug/Rumkapsel --scenarios
 ```
 
 runs the scripted scenarios headless in about twelve seconds; `--sim-tests`, `--idle-tests`, `--walk-tests`,
-`--ledger-tests`, `--pipeline-tests` and `--layout-tests` run the model on its own, no window. TESTING.md has the whole gate
+`--ledger-tests`, `--work-tests`, `--pipeline-tests` and `--layout-tests` run the model on its own, no window. TESTING.md has the whole gate
 and where it is going.
 
 ## Release

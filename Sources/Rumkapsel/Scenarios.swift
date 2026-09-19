@@ -293,9 +293,9 @@ enum Scenarios {
             ("Release: Mark tested", 128),       // cleared: the rocket loads, from storage
             ("Release: Production merges", 4.8),
         ], tail: 224, expects: [
+            .rocket(.standBy, "ios"),           // work is waiting on the board already: the rocket stands before any release
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
-            .rocket(.standBy, "ios"),
             .carry(to: .pad),
             .releaseMerged("ios", production: true),
             .rocket(.launch, "ios"),
@@ -310,8 +310,8 @@ enum Scenarios {
             ("Release: Mark tested", 96),
             ("Release: Production merges", 4.8),
         ], tail: 192, expects: [
+            .rocket(.standBy, "web"),           // a crate on the deck: the rocket stands before the release is opened
             .releaseOpened("web", untested: true),
-            .rocket(.standBy, "web"),
             .rocket(.load(1), "web"),
             .crateCleared("web"),
             .carry(to: .pad),
