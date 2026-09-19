@@ -345,10 +345,10 @@ extension StationController {
         if room.key.hasPrefix("proj:") { parts.append("no branch yet · checking one out builds the office") }
         let local = world.localState(room)
         if local.local { parts.append(local.commits == 0 ? "local branch, nothing committed · a research session" : "local branch, \(local.commits) commits not pushed") }
-        if let info = world.crewRoomInfo[roomKey(station, room)] {
-            var line = "by \(world.crewName(info.author)) · ⎇ \(info.branch)"
-            if let n = info.prNumber { line += " · PR #\(n) \(info.state.lowercased())" }
-            if let t = info.title { line += " · " + t }
+        if let info = world.crewRoomInfo[roomKey(station, room)], let rec = world.record(office: roomKey(station, room)) {
+            var line = "by \(world.crewName(rec.author ?? "?")) · ⎇ \(rec.work().branch ?? rec.branches.sorted().first ?? "?")"
+            if let n = rec.pulls.keys.min() { line += " · PR #\(n) \(info.state.lowercased())" }
+            if let t = rec.title { line += " · " + t }
             parts.append(line)
         }
         if let claims = world.peerOffices[roomKey(station, room)], !claims.isEmpty {
@@ -525,7 +525,7 @@ extension StationController {
         let name = raw.hasPrefix("box:") ? "room:" + raw.dropFirst(4) : raw
         let parts = name.dropFirst(5).split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return }
-        if let info = world.crewRoomInfo[roomKey(station, room)], let u = info.url.flatMap(URL.init(string:)) {
+        if world.crewRoomInfo[roomKey(station, room)] != nil, let u = world.record(office: roomKey(station, room))?.url.flatMap(URL.init(string:)) {
             DispatchQueue.main.async { NSWorkspace.shared.open(u) }
             return
         }

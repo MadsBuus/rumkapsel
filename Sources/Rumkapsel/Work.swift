@@ -101,6 +101,10 @@ final class WorkBook {
         var pulls: [Int: String] = [:]
         /// A crate number heard from the counts, issue or pull request unknown which, when nothing else names the work yet.
         var crate: Int?
+        /// Whose work it is, what it is called and where it is on GitHub, as the pull request or the board said.
+        var author: String?
+        var title: String?
+        var url: String?
 
         /// Where the work is, who last moved it there and when, and each source's last word.
         var stage: Stage?
@@ -181,7 +185,8 @@ final class WorkBook {
     /// that is already someone's finds that record; the rest are added to it. Names that belong to two
     /// records fold them into one, the older keeping its id.
     @discardableResult
-    func note(repo: String, branch: String? = nil, folder: String? = nil, issue: Int? = nil, pull: Int? = nil, pullState: String? = nil) -> Record {
+    func note(repo: String, branch: String? = nil, folder: String? = nil, issue: Int? = nil, pull: Int? = nil, pullState: String? = nil,
+              author: String? = nil, title: String? = nil, url: String? = nil) -> Record {
         var found: [Record] = []
         if let branch, !Work.notWork.contains(branch) {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
@@ -204,6 +209,9 @@ final class WorkBook {
         if let issue { record.issue = record.issue ?? issue; byIssue["\(repo)#\(issue)"] = record.id }
         if let n = record.branchIssue { byIssue["\(repo)#\(n)"] = record.id }
         if let pull { record.pulls[pull] = pullState ?? record.pulls[pull] ?? "OPEN"; byPull["\(repo)!\(pull)"] = record.id }
+        if let author, !author.isEmpty, author != "?" { record.author = author }
+        if let title, !title.isEmpty { record.title = title }
+        if let url, !url.isEmpty { record.url = url }
         return record
     }
 
@@ -214,6 +222,7 @@ final class WorkBook {
         if let n = other.branchIssue { byIssue["\(record.repo)#\(n)"] = record.id }
         for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }
         if let n = other.crate { record.crate = record.crate ?? n; byCrate["\(record.repo)|\(n)"] = record.id }
+        record.author = record.author ?? other.author; record.title = record.title ?? other.title; record.url = record.url ?? other.url
         // The stage goes with the record that is furthest along; each source's word is kept where newer.
         if let s = other.stage, record.stage.map({ s > $0 }) ?? true { record.stage = s; record.stagedAt = other.stagedAt; record.stagedBy = other.stagedBy }
         for (src, st) in other.words where record.words[src].map({ st > $0 }) ?? true { record.words[src] = st }
