@@ -261,16 +261,30 @@ enum Props {
             pivot.addChildNode(fin)
             n.addChildNode(pivot)
         }
-        let nozzle = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.55, bottomRadius: r * 0.8, height: 0.14)))
-        nozzle.geometry!.firstMaterial = dark
-        nozzle.position = v3(0, 0.07, 0)
-        n.addChildNode(nozzle)
-        // The launch mount it stands on: a low dark table under the hull, the nozzle over it, the fins
-        // resting on its rim. No legs; a rocket on a pad does not land there.
-        let mount = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.9, height: 0.05)))
-        mount.geometry!.firstMaterial = lit(NSColor(rgb: (0.26, 0.27, 0.32)))
-        mount.position = v3(0, 0.025, 0)
-        n.addChildNode(mount)
+        // The engine: a throat under the hull opening into a bell, its mouth just off the pad.
+        let throat = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.35, height: 0.04)))
+        throat.geometry!.firstMaterial = dark
+        throat.position = v3(0, 0.11, 0)
+        n.addChildNode(throat)
+        let bell = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.35, bottomRadius: r * 0.75, height: 0.09)))
+        bell.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.36)))
+        bell.position = v3(0, 0.055, 0)
+        n.addChildNode(bell)
+        // Landing legs, splayed out at the foot: the knee on the hull above the fin roots, the pad out on the ground.
+        for k in 0..<3 {
+            let pivot = SCNNode()
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
+            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
+            leg.geometry!.firstMaterial = dark
+            leg.position = v3(0, 0.11, r * 1.15)
+            leg.eulerAngles.x = -0.55
+            pivot.addChildNode(leg)
+            let foot = SCNNode(geometry: SCNBox(width: 0.06, height: 0.02, length: 0.06, chamferRadius: 0))
+            foot.geometry!.firstMaterial = dark
+            foot.position = v3(0, 0.01, r * 1.15 + 0.12 * sin(0.55))
+            pivot.addChildNode(foot)
+            n.addChildNode(pivot)
+        }
         let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
         flame.position = v3(0, -0.2, 0)
