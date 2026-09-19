@@ -174,6 +174,8 @@ station events (`World.stationEvents`). The rules are in `Stage`/`Record.hear`, 
 | Shipped | four places | the record: a rocket waits wherever work waits, loads when it is cleared, launches on the transition |
 
 Names (5, 6) go through `Work` and the register `WorkBook`, one record per piece of work with every
-alias. Still to fold in: the ledger's yards and flag into the record's stages, the merge blocks' state
-detection into a pull-request integration, GitHub's pull→issue table into the register, the crew-room
-bookkeeping, the two bot rules and four trunk lists into `Workflow`.
+alias. Folded in since: the ledger hears the record rather than the counts (its rows keep the station's
+side, where a crate stands); GitHub's pull→issue table serves the hover only; the crew-room table is down
+to an office's state; one bot rule; one trunk list; the workflow is a repository's, detected and
+editable. Still inline: the merge blocks' state detection, which reports to the record but has not moved
+into an integration of its own.
