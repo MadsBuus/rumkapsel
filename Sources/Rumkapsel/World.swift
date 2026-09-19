@@ -144,6 +144,19 @@ final class World {
         default: works.report(record, .working, by: .pulls, at: at)
         }
     }
+    /// Whether a piece of work is yours: your own checkout of it, or the record says you are its author.
+    func isMine(office key: String) -> Bool {
+        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]] else { return false }
+        if room.worktree != nil { return true }
+        guard let me = github.myLogin(), let repo = room.repo else { return false }
+        return works.find(officeKey: room.key, repo: repo)?.author == me
+    }
+    func isMine(repo: String, number: Int) -> Bool {
+        guard let me = github.myLogin() else { return false }
+        return works.find(repo: repo, crate: number)?.author == me || github.isMine(repo: repo, number: number)
+    }
+
     /// The record behind an office on this station, by "station|key".
     func record(office key: String) -> WorkBook.Record? {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -691,12 +704,13 @@ final class World {
     }
 
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
-    private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
-        let status = " · " + (pr.untested ? Words.current.holding : Words.current.cleared)
+    private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR, cleared: Bool? = nil) -> WorldEvent {
+        let cleared = cleared ?? !pr.untested
+        let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
         // A tag has no number and no branch it came from: it is a name and a moment.
         let label = pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)\(status)"
             : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
-        return .rocketCommand(station: station.name, repo: repo, label: label, untested: pr.untested,
+        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared,
                               tall: pr.isProduction, cargo: cargoWaiting(station: station, repo: repo),
                               command: .rocket(stage, station: station.name, repo: repo))
     }
@@ -752,11 +766,13 @@ final class World {
                                              untested: pr.untested, isProduction: pr.isProduction))
                 events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
-            // Untested, or not for production: the rocket only stands there. Cleared: it takes the cargo aboard.
-            let cleared = pr.isProduction && !pr.untested
-            if cleared { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
+            // Not for production: the rocket only stands there. Cleared, by the record's word or the release's
+            // (a label saying untested holds it): it takes the cargo aboard. A label that has not caught up
+            // with a board that cleared everything is the lower word, and takes nothing back.
+            if !pr.untested { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
+            let cleared = pr.isProduction && (!pr.untested || clearedToLoad(repo: info.repo, station: station.name))
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
-                               station: station, repo: info.repo, pr: pr))
+                               station: station, repo: info.repo, pr: pr, cleared: cleared))
         }
         return events + applyStaging()
     }
@@ -1233,7 +1249,7 @@ final class World {
             }
             let pos = SIMD3(station.offset.x + x, Double(level) * 0.34, station.offset.y + Double(cell.y) + jz)
             out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,
-                                mine: !e.crate.alien && github.isMine(repo: e.crate.repo, number: e.crate.number), group: s.group,
+                                mine: !e.crate.alien && isMine(repo: e.crate.repo, number: e.crate.number), group: s.group,
                                 column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried))
         }
         return out
