@@ -30,7 +30,9 @@ final class World {
     private(set) var repoRoots: [String: (repo: String, station: String)] = [:]
 
     /// A teammate's office, as GitHub describes it.
-    struct CrewRoomInfo { var repo: String; var branch: String; var prNumber: Int?; var title: String?; var author: String; var url: String?; var state: String; var last: Date }
+    /// An office that is GitHub's on this station, a teammate's pull request or a board issue, and what
+    /// state it was last heard in. Whose it is, what it is called and its numbers are the record's.
+    struct CrewRoomInfo { var state: String; var last: Date }
     private(set) var crewRoomInfo: [String: CrewRoomInfo] = [:]
     private(set) var crewBoxes: [String: (count: Int, state: String, color: RGB)] = [:]
     private(set) var peerBoxes: [String: (count: Int, state: String, color: RGB)] = [:]
@@ -79,7 +81,7 @@ final class World {
                 guard let (station, room) = office(for: record) else { waiting.append((record, t)); continue }
                 guard t.from != nil, isReady(record.repo) else { continue }
                 let key = roomKey(station, room)
-                let author = crewRoomInfo[key]?.author ?? github.myLogin() ?? ""
+                let author = (crewRoomInfo[key] != nil ? record.author : nil) ?? github.myLogin() ?? ""
                 if let number = record.pulls.keys.min() {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
@@ -142,6 +144,15 @@ final class World {
         default: works.report(record, .working, by: .pulls, at: at)
         }
     }
+    /// The record behind an office on this station, by "station|key".
+    func record(office key: String) -> WorkBook.Record? {
+        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]], let repo = room.repo else { return nil }
+        return works.find(officeKey: room.key, repo: repo)
+    }
+    /// A teammate's pull request on an office, if GitHub has said one.
+    func crewPull(_ key: String) -> Int? { crewRoomInfo[key] != nil ? record(office: key)?.pulls.keys.min() : nil }
+
     /// A repository's workflow: set by hand, else detected from its pipeline and whether a board follows it.
     func workflow(repo: String) -> Workflow {
         if let w = ConfigStore.shared.current.repos[repo]?.workflow { return w }
@@ -334,7 +345,7 @@ final class World {
 
     /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
     func occupant(of key: String) -> String? {
-        if let info = crewRoomInfo[key] { return crewName(info.author) }
+        if crewRoomInfo[key] != nil, let author = record(office: key)?.author { return crewName(author) }
         if let peer = peerOffices[key]?.keys.sorted().first { return peer }
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         if parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]], room.worktree != nil, room.key.hasPrefix("task:") {
@@ -864,19 +875,20 @@ final class World {
         liveKeys.formUnion(boardOffices.map { Work(repo: $0.repo, issue: $0.item.number).officeKey })
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
             let key = sk + room.key
-            let author = crewRoomInfo[key]?.author ?? ""
+            let known = room.repo.flatMap { works.find(officeKey: room.key, repo: $0) }
+            let author = known?.author ?? ""
             // A teammate's office that we also have checked out stays: the local scan decides its fate.
             guard room.worktree == nil else { crewRoomInfo[key] = nil; crewBoxes[key] = nil; continue }
             // Gone from the open list: merged, or closed without merging. The pull request itself is the
             // authority on which. The feed may already say; otherwise it is asked, and until it answers
             // nothing moves: a crate that was never merged work must not be carried to storage.
             var hauling = false
-            let branch = crewRoomInfo[key]?.branch ?? ""
+            let branch = known?.work().branch ?? known?.branches.sorted().first ?? ""
             let root = repoRoots.first { $0.value.repo == room.repo }?.key
             var state: String?
             if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_close" && $0.e.branch == branch }) { state = "CLOSED" }
             else if feed.contains(where: { $0.repo == room.repo && $0.e.kind == "pr_merge" && $0.e.branch == branch }) { state = "MERGED" }
-            else if let root, let number = crewRoomInfo[key]?.prNumber {
+            else if let root, let number = known?.pulls.keys.min() {
                 // By number: the office may have lived on as a board office, whose branch is only a guess.
                 github.refresh(pull: number, repoRoot: root)
                 if github.pullAnswered(number: number, repoRoot: root) { state = github.pull(number: number, repoRoot: root)?.state }
@@ -885,11 +897,12 @@ final class World {
                 if github.pullAnswered(branch: branch, repoRoot: root) { state = github.pull(branch: branch, repoRoot: root)?.state ?? "CLOSED" }
             } else { state = "MERGED" }   // no checkout of the repository here: nothing to ask, and nothing on the floor to carry
             guard let state else { continue }
-            if let repo = room.repo { report(pullState: state, record: crewRoomInfo[key]?.prNumber.map { works.note(repo: repo, pull: $0, pullState: state) } ?? works.find(officeKey: room.key, repo: repo)) }
+            if let repo = room.repo { report(pullState: state, record: known?.pulls.keys.min().map { works.note(repo: repo, pull: $0, pullState: state) } ?? known) }
+            crewRoomInfo[key]?.state = state
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
             if closedUnmerged {
                 // Closed without merging: red for ten minutes, then gone. Nothing to carry, and no crate.
-                if let n = crewRoomInfo[key]?.prNumber { station.ledger.forget(repo: room.repo ?? "", number: n) }
+                if let n = known?.number { station.ledger.forget(repo: room.repo ?? "", number: n) }
                 if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
             } else if !haulOrdered(office: key), station.hasPad {
@@ -905,7 +918,7 @@ final class World {
             changed = true
         }
         for (repo, pr) in open where !pr.isBot && !isKicked(sk + crewKey(repo: repo, branch: pr.branch)) {
-            let record = works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN")
+            let record = works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN", author: pr.author, title: pr.title, url: pr.url)
             works.report(record, .ready, by: .pulls, at: pr.createdAt)   // every pass: the office may have been the board's first
             let home = Work(repo: repo, branch: pr.branch).home
             let key = home.key
@@ -921,13 +934,14 @@ final class World {
                     events.append(.officeOpened(station: station.name, key: key, source: .github(pr.author), arrival: .shuttle))
                 }
             }
-            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
+            crewRoomInfo[sk + key] = CrewRoomInfo(state: "OPEN", last: pr.createdAt)
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
             crewBoxes[sk + key] = (1 + pushes, "OPEN", fleet.color(forRepo: repo))
         }
         for (repo, it, login) in boardOffices where !isKicked(sk + Work(repo: repo, issue: it.number).officeKey) {
             let key = Work(repo: repo, issue: it.number).officeKey
-            works.note(repo: repo, issue: it.number, pull: it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") })
+            works.note(repo: repo, issue: it.number, pull: it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") },
+                       author: login, title: it.title, url: it.url)
             let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.rooms[key] == nil {
@@ -942,11 +956,7 @@ final class World {
                     events.append(.issueStarted(repo: repo, number: it.number, author: login, roomKey: key))
                 }
             }
-            let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
-            // What the pull request told us earlier, its branch and number, outlives the board's guess.
-            let known = crewRoomInfo[sk + key]
-            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? Work.guessedBranch(issue: it.number), prNumber: prNumber ?? known?.prNumber,
-                                                  title: it.title, author: login, url: it.url, state: "OPEN", last: now)
+            crewRoomInfo[sk + key] = CrewRoomInfo(state: "OPEN", last: now)
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
 
@@ -1493,7 +1503,8 @@ final class World {
         // A crate is a task: the issue the pull request closes when it closes one, else the pull request
         // itself. With no pull request known there is nothing the yard could hold.
         let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
-        guard let prNumber = pull?.number ?? crewRoomInfo[key]?.prNumber, prNumber > 0 else { nothingToHaul.insert(key); return [] }
+        let known = works.find(officeKey: room.key, repo: repo)
+        guard let prNumber = pull?.number ?? known?.pulls.keys.min(), prNumber > 0 else { nothingToHaul.insert(key); return [] }
         // Git history names pull requests and the board names issues; the register knows which is which.
         let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull?.closes.first, pull: prNumber, pullState: pull?.state)
         guard let number = record.number else { return [] }

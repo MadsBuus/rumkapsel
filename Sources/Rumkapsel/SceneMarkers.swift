@@ -161,7 +161,7 @@ extension StationController {
                     // A teammate's pull request is a crate with its sticker; pushes before a PR are cubes.
                     // A peer's pull request, as they said it, when GitHub has not told us about it here.
                     let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
-                    let prNumber = world.crewRoomInfo[key]?.prNumber ?? peer?.pull
+                    let prNumber = world.crewPull(key) ?? peer?.pull
                     let state = world.isClosed(key) ? "CLOSED" : (peer?.pullState ?? (prNumber != nil ? "OPEN" : cb.state))
                     pr = PullRequest(number: prNumber ?? 0, title: "", state: state, reviewDecision: peer?.review ?? "", isDraft: false, url: "")
                     pr?.checks = peer?.checks ?? ""
