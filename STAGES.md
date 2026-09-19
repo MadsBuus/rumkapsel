@@ -63,11 +63,18 @@ has pull requests and nothing else gets a whole station.
 | **GitHub pull requests** (essential) | the crate, its light and straps; teammates' offices; the merge that sends a crate to storage; release pull requests as the pallet and the rocket; outside work | Inbound, Ready, Stored, QA, Shipped, outside | the activity feed once a minute as a doorbell, a pull request asked at once when rung, everything again every 5 min |
 | **GitHub issues** (optional) | one identity for a branch, its pull request and its issue: `gh-N/…` names the office after the issue, `closes #N` ties the crate to it; assignees as teammates | identity; Inbound | with the pull request |
 | **GitHub Projects** (optional) | Cleared per crate, the one signal nothing else gives; a doorbell that rings within seconds; a source for Stored and QA where a team moves cards faster than it merges | Cleared; doorbell; Stored, QA by choice | what moved, every 20 s; the whole board every 5 min |
-| **Neighbours** | everything, second hand, from a sister station on the network | all | every 3 s, as fast as the neighbour heard it |
+| **Neighbours** | everything, second hand: a sister station on the network sends its work in these same stages, never what it read them from | all | every 3 s, as fast as the neighbour heard it |
 
 **A project with no issues** is the common case: work is the branch, then the pull request. The office
 is named after the branch, the crate carries the pull request's number, the board has nothing to say.
 Issues add names and a second number, not a stage.
+
+**Neighbours talk in station terms.** Two stations need not share an integration, only this
+vocabulary: a neighbour sends each piece of work as repository, branch and whatever aliases it has (pull
+request, issue), the stage it is at, when, and from what kind of source it heard so, plus the station
+facts that are its to say, where it put the office and who is in it. A neighbour relays only what it
+heard first hand, never what another neighbour told it, so a stale stage cannot live on between two
+stations. A neighbour's word moves work forward like any other and never takes it back.
 
 **Later, not now:** GitHub Actions and deployments (QA when a staging deploy lands, Cleared when
 production is approved, Shipped when the production deploy succeeds); Sentry and the like (incoming
