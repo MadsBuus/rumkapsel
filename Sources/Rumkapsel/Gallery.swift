@@ -57,6 +57,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         if let i = args.firstIndex(of: "--tile"), args.count > i + 1, let t = tiles.first(where: { $0.title.contains(args[i + 1]) }) {
             pan = SIMD2(t.at.x - 6.4, t.at.y - 5.0)
             zoom = 3.5
+            if let z = args.firstIndex(of: "--zoom"), args.count > z + 1, let v = Double(args[z + 1]) { zoom = v }
         }
     }
 
@@ -287,7 +288,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             roomFloor(at: p, color: NSColor(rgb: (0.24, 0.26, 0.32)))
             let small = Props.rocket(color: amber, tall: false); small.position = v3(p.x - 0.7, 0, p.y); scene.rootNode.addChildNode(small)
             let tall = Props.rocket(color: teal, tall: true, cargo: 8); tall.position = v3(p.x + 0.5, 0, p.y)
-            tall.addChildNode(Looks.current.hold(tall: true) ?? Props.holdDecoration(around: SIMD3(0, 0, 0), tall: true)); scene.rootNode.addChildNode(tall)
+            if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) } else { Props.attachTower(to: tall, tall: true, held: true) }
+            scene.rootNode.addChildNode(tall)
         }
         // 10. monolith with lightning
         do {

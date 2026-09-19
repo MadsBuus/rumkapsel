@@ -215,11 +215,34 @@ enum Props {
         let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
-        // The loading hatch: a small dark plate at the foot on the deck side, where crates go in.
-        let hatch = SCNNode(geometry: SCNBox(width: r * 1.1, height: 0.2, length: 0.02, chamferRadius: 0))
-        hatch.geometry!.firstMaterial = dark
-        hatch.position = v3(0, 0.22, r + 0.005)
+        // The loading hatch on the deck side, where crates go in: a door set into the hull, a frame a
+        // shade darker than the panel, the panel a shade lighter than the frame, a latch bar across it,
+        // and two hinge knuckles down one side. The frame is sunk into the hull so it never floats.
+        let hatch = SCNNode()
         hatch.name = "hatch"
+        let frameW = r * 0.9, frameH = 0.2
+        let frame = SCNNode(geometry: SCNBox(width: frameW, height: frameH, length: 0.03, chamferRadius: 0))
+        frame.geometry!.firstMaterial = dark
+        frame.position = v3(0, 0, -0.012)
+        hatch.addChildNode(frame)
+        let panel = SCNNode(geometry: SCNBox(width: frameW - 0.03, height: frameH - 0.03, length: 0.02, chamferRadius: 0))
+        panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.32, 0.38)))
+        panel.position = v3(0, 0, 0.004)
+        hatch.addChildNode(panel)
+        let latch = SCNNode(geometry: SCNBox(width: frameW * 0.45, height: 0.016, length: 0.014, chamferRadius: 0))
+        latch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
+        latch.position = v3(frameW * 0.08, 0, 0.02)
+        hatch.addChildNode(latch)
+        for dy in [-0.055, 0.055] {
+            let hinge = SCNNode(geometry: SCNBox(width: 0.02, height: 0.03, length: 0.02, chamferRadius: 0))
+            hinge.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
+            hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
+            hatch.addChildNode(hinge)
+        }
+        // High on the payload section, under the portholes, on the side the service tower stands: cargo goes
+        // up the tower and in here. The hull has six flat sides and this is the middle of one, at the apothem.
+        hatch.position = v3(r * 0.866 + 0.003, 0.12 + h * 0.6, 0)
+        hatch.eulerAngles.y = .pi / 2
         n.addChildNode(hatch)
         // Body, a slightly wider lower stage, and a nose cone in the repo colour.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
@@ -273,7 +296,7 @@ enum Props {
         // Landing legs, splayed out at the foot: the knee on the hull above the fin roots, the pad out on the ground.
         for k in 0..<3 {
             let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3 + .pi / 3   // none in front of the hatch
             let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
             leg.geometry!.firstMaterial = dark
             leg.position = v3(0, 0.11, r * 1.15)
@@ -296,12 +319,23 @@ enum Props {
 
     /// The service tower beside a rocket that is up but not cleared to fly: it stays attached until the
     /// rocket is cleared, and a rocket ready to go stands alone, as on a real pad.
-    static func holdDecoration(around center: SIMD3<Double>, tall: Bool) -> SCNNode {
+    /// The service tower stood beside a rocket, its swing arm at the rocket's hatch: on the pad from the
+    /// moment the rocket stands to the moment it goes. Lit red while the rocket is held.
+    static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
+        let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.position.y) }
+        let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
+        deco.name = "hold"
+        rocket.addChildNode(deco)
+    }
+
+    static func holdDecoration(around center: SIMD3<Double>, tall: Bool, armAt: Double? = nil, held: Bool = true) -> SCNNode {
         let n = SCNNode()
         // The service tower: a steel lattice beside the rocket, as a real pad has, with cross-bracing
         // between the legs, a work platform every so often, and a swing arm out to the rocket at the top.
         // Grey steel, a red beacon on top; nothing wooden stands on a launch pad.
-        let h = tall ? 1.7 : 1.1
+        // As tall as the hatch it serves needs it, and a little over.
+        let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
+        let armY = armAt ?? h - 0.12
         let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
         let tower = SCNNode()
         let w = 0.18, leg = 0.025
@@ -348,18 +382,20 @@ enum Props {
         let armLen = 0.3
         let arm = SCNNode(geometry: SCNBox(width: armLen, height: 0.04, length: 0.06, chamferRadius: 0))
         arm.geometry!.firstMaterial = steel
-        arm.position = v3(-w / 2 - armLen / 2 + 0.02, h - 0.12, 0)
+        arm.position = v3(-w / 2 - armLen / 2 + 0.02, armY, 0)
         tower.addChildNode(arm)
         let umbilical = SCNNode(geometry: SCNBox(width: 0.06, height: 0.08, length: 0.08, chamferRadius: 0))
         umbilical.geometry!.firstMaterial = dark
-        umbilical.position = v3(-w / 2 - armLen + 0.04, h - 0.14, 0)
+        umbilical.position = v3(-w / 2 - armLen + 0.04, armY - 0.02, 0)
         tower.addChildNode(umbilical)
-        // A beacon on top.
+        // A beacon on top: lit red while the rocket is held, dark once it is cleared.
         let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
-        beacon.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.25, 0.2)))
+        beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark
+        beacon.name = "beacon"
         beacon.position = v3(0, h + 0.025, 0)
         tower.addChildNode(beacon)
         tower.position = v3(center.x + 0.44, 0, center.z + 0.02)
+        tower.name = "tower"
         n.addChildNode(tower)
         return n
     }
