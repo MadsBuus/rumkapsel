@@ -56,6 +56,16 @@ final class World {
     /// Every piece of work by every name it goes by; see `WorkBook`.
     let works = WorkBook()
 
+    /// A source's word about the work an office holds, for the record. The station does not act on the
+    /// record yet: it shadows what the floor does, and the trace says where the two part ways.
+    func report(office key: String, repo: String, _ stage: Stage, by source: Source, at: Date = Date()) {
+        guard let r = works.find(officeKey: key, repo: repo) else { return }
+        works.report(r, stage, by: source, at: at)
+    }
+    func report(crate n: Int, repo: String, _ stage: Stage, by source: Source, at: Date = Date()) {
+        works.report(works.note(repo: repo, crate: n), stage, by: source, at: at)
+    }
+
     // MARK: a crate's row, from the floor's side
 
     func crate(_ c: CrateRef) -> Ledger.Crate? { fleet.stations[c.station]?.ledger[c.repo, c.number] }
@@ -303,6 +313,11 @@ final class World {
         let firstRun = !didLoadLayout
         if firstRun {
             didLoadLayout = true
+            // The record shadows the floor for now; the trace is where the two are compared.
+            works.onTransition = { r, t in
+                let who = r.number.map { "#\($0)" } ?? r.work().label
+                StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
+            }
             fleet.load()
             // Last run's answers come back with the floor, so the station stands whole from the first
             // frame and the asks going out are corrections rather than the thing it is waiting for.
@@ -340,6 +355,7 @@ final class World {
                 // arrives on a station already at work.
                 events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id),
                                             arrival: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle))
+                report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
             }
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
@@ -349,6 +365,7 @@ final class World {
             if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
                 events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
                                       count: max(1, s.promptCount - seen.count)))
+                report(office: home.key, repo: home.repo, .working, by: .session, at: s.lastModified)
             }
             sessionPrompts[s.id] = (marker, s.promptCount)
             if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
@@ -457,6 +474,7 @@ final class World {
                 for station in fleet.stations.values {
                     for room in station.rooms.values where room.branch == change.branch && room.worktree != nil {
                         events.append(.pullRequestOpened(repo: room.repo ?? "", number: change.pr.number, author: github.myLogin() ?? "", roomKey: room.key))
+                        if let repo = room.repo, let r = works.find(repo: repo, pull: change.pr.number) { works.report(r, .ready, by: .pulls) }
                     }
                 }
             }
@@ -521,7 +539,10 @@ final class World {
     /// they shipped, so nothing else would take the rows away.
     func forgetShipped(station: String, repo: String) {
         guard let st = fleet.stations[station] else { return }
-        for c in st.ledger.crates(of: repo) where c.placed == .pad { st.ledger.forget(repo: repo, number: c.number) }
+        for c in st.ledger.crates(of: repo) where c.placed == .pad {
+            report(crate: c.number, repo: repo, .shipped, by: mergeLaunches.contains(station + "|" + repo) ? .git : .pulls)
+            st.ledger.forget(repo: repo, number: c.number)
+        }
     }
     /// Rockets going up for a merge rather than a release, as "station|repo": they stand on the pad too.
     var mergeLaunches: Set<String> = []
@@ -572,6 +593,9 @@ final class World {
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
+            for c in station.ledger.crates(of: info.repo) where c.placed == .pad || (c.placed == .deck && !stagingIsDeck(station: station.name, repo: info.repo)) {
+                report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date())
+            }
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
                                        : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
@@ -594,6 +618,7 @@ final class World {
             }
             // Untested, or not for production: the rocket only stands there. Cleared: it takes the cargo aboard.
             let cleared = pr.isProduction && !pr.untested
+            if cleared { for c in station.ledger.crates(of: info.repo) where c.placed == .deck { report(crate: c.number, repo: info.repo, .cleared, by: .pulls) } }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr))
         }
@@ -768,6 +793,7 @@ final class World {
                 if isReady(repo) {
                     events.append(.officeOpened(station: station.name, key: key, source: .github(pr.author), arrival: .shuttle))
                     events.append(.pullRequestOpened(repo: repo, number: pr.number, author: pr.author, roomKey: key))
+                    if let r = works.find(repo: repo, pull: pr.number) { works.report(r, .ready, by: .pulls, at: pr.createdAt) }
                 }
             }
             crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: pr.branch, prNumber: pr.number, title: pr.title, author: pr.author, url: pr.url, state: "OPEN", last: pr.createdAt)
@@ -786,6 +812,7 @@ final class World {
                 changed = true
                 if isReady(repo) {
                     events.append(.officeOpened(station: station.name, key: key, source: .board(login), arrival: .shuttle))
+                    report(office: key, repo: repo, .inbound, by: .board)
                     events.append(.issueStarted(repo: repo, number: it.number, author: login, roomKey: key))
                 }
             }
@@ -871,6 +898,7 @@ final class World {
                 if state == "MERGED", station.hasPad {
                     station.ledger.order(repo: info.repo, number: n, to: .storage)
                     events.append(.deconCleared(station: station.name, repo: info.repo, number: n))
+                    report(crate: n, repo: info.repo, .stored, by: .pulls)
                 } else {
                     station.ledger.forget(repo: info.repo, number: n)
                     events.append(.log("#\(n) \(Words.current.ejected)" + (state == "MERGED" ? "" : ", never cleared")))
@@ -929,6 +957,7 @@ final class World {
             changed = true
             if !bulk, now.timeIntervalSince(o.startedAt) < 3 * 60 {
                 events.append(.officeOpened(station: station.name, key: o.key, source: .peer(snap.name), arrival: .shuttle))
+                report(office: o.key, repo: o.repo, .inbound, by: .neighbour, at: o.startedAt)
                 events.append(.log("\(snap.name) started \(o.name)"))
             } else {
                 events.append(.officeOpened(station: station.name, key: o.key, source: .peer(snap.name), arrival: .fade))
@@ -1094,6 +1123,10 @@ final class World {
         // A repository whose merges ship has no release and no board word about its crates: the floor's
         // own moves are the only truth, and an empty answer must not take a crate off the pad before it goes.
         if github.pipeline(repoRoot: root).shipsOnMerge { return .snapped }
+        for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? Date()) }
+        // One word per crate: the deck's count carries the cleared ones too, and QA said after cleared would take them back.
+        for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
+        for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
         station.ledger.adopt(Ledger.Word(storage: c.storageNumbers, deck: c.deckNumbers, cleared: c.clearedNumbers, updated: c.updated), repo: repo)
         // The pallet is the hand carry for this repository from the moment one is ordered: nothing
         // else moves its crates until it has been emptied.
@@ -1321,6 +1354,7 @@ final class World {
         let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: issue, pull: prNumber, pullState: pull?.state)
         guard let number = record.number else { return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
+        works.report(record, .stored, by: .pulls)
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }
 

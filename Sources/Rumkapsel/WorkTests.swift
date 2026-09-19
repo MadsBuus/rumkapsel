@@ -104,6 +104,50 @@ enum WorkTests {
             expect(a.pulls[9] == "OPEN" && a.branches == ["feature/x"], "with both names")
         }
 
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
+
+        test("forward, the furthest word wins whoever said it first; a lower word changes nothing") {
+            let r = WorkBook.Record(id: 1, repo: "web")
+            expect(r.hear(Signal(stage: .ready, by: .pulls, at: at(0)))?.to == .ready, "a first word places it")
+            expect(r.hear(Signal(stage: .qa, by: .board, at: at(1)))?.to == .qa && r.stagedBy == .board, "the board says QA first: QA")
+            expect(r.hear(Signal(stage: .stored, by: .git, at: at(2))) == nil && r.stage == .qa, "git catching up with stored changes nothing")
+            expect(r.hear(Signal(stage: .qa, by: .git, at: at(3))) == nil && r.stagedBy == .board, "git agreeing changes nothing either")
+            expect(r.hear(Signal(stage: .shipped, by: .git, at: at(4)))?.to == .shipped, "git saying shipped first moves it on")
+        }
+
+        test("back, only the first in line takes work back, and only by changing its own word") {
+            let r = WorkBook.Record(id: 1, repo: "web")
+            _ = r.hear(Signal(stage: .stored, by: .pulls, at: at(0)))
+            _ = r.hear(Signal(stage: .qa, by: .board, at: at(1)))
+            expect(r.hear(Signal(stage: .stored, by: .pulls, at: at(2))) == nil && r.stage == .qa, "pull requests are not first in line for QA: no")
+            let r2 = WorkBook.Record(id: 2, repo: "web")
+            _ = r2.hear(Signal(stage: .qa, by: .pulls, at: at(0)))
+            expect(r2.hear(Signal(stage: .stored, by: .board, at: at(1))) == nil && r2.stage == .qa, "the board is first in line but never said QA: not a change of word, no")
+            let back = r.hear(Signal(stage: .stored, by: .board, at: at(3)))
+            expect(back?.to == .stored && back?.back == true && r.stage == .stored, "the board that said QA now says stored: back it goes")
+        }
+
+        test("records that fold keep the furthest stage and every source's newest word") {
+            let book = WorkBook()
+            let a = book.note(repo: "web", branch: "feature/x")
+            book.report(a, .working, by: .session, at: at(0))
+            let b = book.note(repo: "web", pull: 9)
+            book.report(b, .ready, by: .pulls, at: at(1))
+            let c = book.note(repo: "web", branch: "feature/x", pull: 9)
+            expect(c === a && c.stage == .ready && c.stagedBy == .pulls, "one record at ready, got \(String(describing: c.stage))")
+            expect(c.words[.session] == .working && c.words[.pulls] == .ready, "both words kept")
+        }
+
+        test("a crate number from the counts is work of its own until a name claims it") {
+            let book = WorkBook()
+            let counted = book.note(repo: "web", crate: 460)
+            book.report(counted, .stored, by: .git, at: at(0))
+            let named = book.note(repo: "web", branch: "feature/x", pull: 460, pullState: "MERGED")
+            expect(named === counted && named.stage == .stored && named.number == 460, "the pull request claims the counted crate")
+            expect(book.count == 1, "one record, got \(book.count)")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

@@ -97,6 +97,14 @@ final class WorkBook {
         var issue: Int?
         /// Pull requests by number, with the state each was last heard in.
         var pulls: [Int: String] = [:]
+        /// A crate number heard from the counts, issue or pull request unknown which, when nothing else names the work yet.
+        var crate: Int?
+
+        /// Where the work is, who last moved it there and when, and each source's last word.
+        var stage: Stage?
+        var stagedAt: Date?
+        var stagedBy: Source?
+        var words: [Source: Stage] = [:]
 
         init(id: Int, repo: String) { self.id = id; self.repo = repo }
 
@@ -112,7 +120,7 @@ final class WorkBook {
             return Work(repo: repo, branch: branch, issue: branchIssue, pull: open)
         }
         /// The crate's number: the issue the work is for, else the branch's, else its pull request.
-        var number: Int? { issue ?? branchIssue ?? pulls.keys.min() }
+        var number: Int? { issue ?? branchIssue ?? pulls.keys.min() ?? crate }
     }
 
     private var records: [Int: Record] = [:]
@@ -120,12 +128,35 @@ final class WorkBook {
     private var byFolder: [String: Int] = [:]
     private var byIssue: [String: Int] = [:]    // "repo#N"
     private var byPull: [String: Int] = [:]     // "repo!N"
+    private var byCrate: [String: Int] = [:]    // "repo|N", a number of unknown kind
     private var nextId = 1
+
+    /// What the trace hears of every stage change.
+    var onTransition: ((Record, Transition) -> Void)?
 
     func find(repo: String, branch: String) -> Record? { byBranch["\(repo)|\(branch)"].flatMap { records[$0] } }
     func find(folder: String) -> Record? { byFolder[folder].flatMap { records[$0] } }
     func find(repo: String, issue: Int) -> Record? { byIssue["\(repo)#\(issue)"].flatMap { records[$0] } }
     func find(repo: String, pull: Int) -> Record? { byPull["\(repo)!\(pull)"].flatMap { records[$0] } }
+    /// The record a crate number means: the issue, the pull request, or a number only the counts have said.
+    func find(repo: String, crate n: Int) -> Record? {
+        find(repo: repo, issue: n) ?? find(repo: repo, pull: n) ?? byCrate["\(repo)|\(n)"].flatMap { records[$0] }
+    }
+    /// A crate number from the counts, noted as work in its own right when nothing else has named it.
+    func note(repo: String, crate n: Int) -> Record {
+        if let r = find(repo: repo, crate: n) { return r }
+        let record = Record(id: nextId, repo: repo); nextId += 1
+        record.crate = n
+        records[record.id] = record
+        byCrate["\(repo)|\(n)"] = record.id
+        return record
+    }
+
+    /// A source's word about a piece of work, by the rules in `Stage`; the trace hears any change.
+    func report(_ record: Record, _ stage: Stage, by source: Source, at: Date = Date()) {
+        if let t = record.hear(Signal(stage: stage, by: source, at: at)) { onTransition?(record, t) }
+    }
+
     /// The record behind an office key as the floor writes it today, `task:repo#N` or `task:repo/branch`.
     func find(officeKey key: String, repo: String) -> Record? {
         if let n = Work.number(inOfficeKey: key) { return find(repo: repo, issue: n) ?? find(repo: repo, pull: n) }
@@ -146,6 +177,7 @@ final class WorkBook {
         if let folder, let r = find(folder: folder) { found.append(r) }
         if let issue, let r = find(repo: repo, issue: issue) { found.append(r) }
         if let pull, let r = find(repo: repo, pull: pull) { found.append(r) }
+        for n in [issue, pull].compactMap({ $0 }) { if let r = byCrate["\(repo)|\(n)"].flatMap({ records[$0] }) { found.append(r) } }
         let record: Record
         if let first = found.min(by: { $0.id < $1.id }) {
             record = first
@@ -168,6 +200,10 @@ final class WorkBook {
         if let i = other.issue { record.issue = record.issue ?? i; byIssue["\(record.repo)#\(i)"] = record.id }
         if let n = other.branchIssue { byIssue["\(record.repo)#\(n)"] = record.id }
         for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }
+        if let n = other.crate { record.crate = record.crate ?? n; byCrate["\(record.repo)|\(n)"] = record.id }
+        // The stage goes with the record that is furthest along; each source's word is kept where newer.
+        if let s = other.stage, record.stage.map({ s > $0 }) ?? true { record.stage = s; record.stagedAt = other.stagedAt; record.stagedBy = other.stagedBy }
+        for (src, st) in other.words where record.words[src].map({ st > $0 }) ?? true { record.words[src] = st }
         records[other.id] = nil
     }
 

@@ -271,6 +271,8 @@ final class GitHubResolver {
     struct Cargo: Equatable {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
+        /// Who counted: the board, or git history.
+        var source: Source = .git
     }
     private var cargo: [String: Cargo] = [:]
     /// Each repository's pipeline, as its branches said at the last release read.
@@ -303,7 +305,7 @@ final class GitHubResolver {
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
             let updated = Dictionary(mine.compactMap { it in it.updatedAt.map { (it.number, $0) } }, uniquingKeysWith: { a, _ in a })
-            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated)
+            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated, source: .board)
             }
         }
         guard var c = cargo[repoRoot] else { return nil }
