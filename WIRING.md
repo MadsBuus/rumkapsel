@@ -1,8 +1,8 @@
 # Wiring, as it is
 
-How the code decides each stage today: what triggers it, on what condition, and where. Nothing here is a
-setting yet; this is the configuration the code has baked in, written down so it can become one. The
-target is [STAGES.md](STAGES.md). File references are under `Sources/Rumkapsel/`, as of `7da3cfe`.
+How the code decided each stage before the record, and what changed. The tables below are the wiring as
+it was at `7da3cfe`, kept as the map of where each source speaks; the last section says what decides
+now. The target is [STAGES.md](STAGES.md). File references are under `Sources/Rumkapsel/`.
 
 ## Sources
 
@@ -147,12 +147,33 @@ and `webhook` (`GitHub.swift:809`). Nothing else counts as outside: a fork's pul
 | Closed office window | 10 min | `World.swift:1323` |
 | Conductor checkout | `~/dev/<repo>` | `World.swift:425` |
 
-## Decided more than once
+## Decided more than once, then
 
 1. **Merged**: own office, teammate, bot, and a crate snapped in by the counts.
 2. **To QA**: the count's carry, the pallet, a staging merge with no board, the git staging diff.
 3. **Cleared**: the ledger flag, the board move, the release label, the QA minion's own count (`Jobs.swift:437`). Never checked against each other.
 4. **Shipped**: the pad row deleted, `forgetShipped`, the board's snap, `clearPad`.
-5. **Which number a crate has**: the issue or the pull request, depending on the path that made it (`World.swift:1316`, `GitHub.swift:478`).
+5. **Which number a crate has**: the issue or the pull request, depending on the path that made it.
 6. **An office's key**: from the branch, re-keyed to the pull request, a teammate's, a board issue's.
 7. **Bots**: two rules. **Trunk names**: four lists.
+
+## Decided once, now
+
+Every source above still reads what it read; what it does with it is report to the record
+(`WorkBook.report`), and the station acts on the record's transitions, drained once per pass into
+station events (`World.stationEvents`). The rules are in `Stage`/`Record.hear`, under the repository's
+`Workflow`.
+
+| Stage | Was decided by | Decided now by |
+|---|---|---|
+| Inbound, Working | the office going up, a prompt | the same, reported |
+| Ready | two emissions of `.pullRequestOpened` | the record's transition, drained; the pack job follows |
+| Stored | four places | the record: an office hauls when it says stored, whoever said it |
+| QA | four places | the record's transition, drained into the carry to the deck; the pallet remains the hand carry for a staging release |
+| Cleared | four places, unchecked | the record: the ledger's flag reads it, the carry across the deck follows its transition |
+| Shipped | four places | the record: a rocket waits wherever work waits, loads when it is cleared, launches on the transition |
+
+Names (5, 6) go through `Work` and the register `WorkBook`, one record per piece of work with every
+alias. Still to fold in: the ledger's yards and flag into the record's stages, the merge blocks' state
+detection into a pull-request integration, GitHub's pull→issue table into the register, the crew-room
+bookkeeping, the two bot rules and four trunk lists into `Workflow`.
