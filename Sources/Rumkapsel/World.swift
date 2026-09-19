@@ -150,13 +150,10 @@ final class World {
 
     /// The issue an office is for, where its key says so: `task:repo#128`. A branch with no issue behind
     /// it has none.
-    func taskNumber(_ room: Room) -> Int? {
-        guard room.key.hasPrefix("task:"), let hash = room.key.lastIndex(of: "#") else { return nil }
-        return Int(room.key[room.key.index(after: hash)...])
-    }
+    func taskNumber(_ room: Room) -> Int? { Work.number(inOfficeKey: room.key) }
 
     /// The office key for a teammate's branch: the same key a local checkout of it would get.
-    func crewKey(repo: String, branch: String) -> String { Home.from(repo: repo, branch: branch, cwd: "").key }
+    func crewKey(repo: String, branch: String) -> String { Work(repo: repo, branch: branch).officeKey }
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
@@ -445,7 +442,7 @@ final class World {
         }
         events += applyBoardMoves()
         for change in github.takeStateChanges() {
-            let who = change.branch.firstMatch(of: #/^gh-(\d+)\//#).map { "#\($0.1)" } ?? change.branch
+            let who = Work(repo: "", branch: change.branch).label
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
             // Newly open on one of my checkouts: the office's worker packs the crate for it.
@@ -472,7 +469,7 @@ final class World {
         // `gh-N/…` already arrives as `#N`; this is for every branch that is not.
         if home.issue == nil, let branch = s.branch, let root = s.repoRoot,
            let pr = github.pull(branch: branch, repoRoot: root), pr.state == "OPEN" {
-            home = Home(key: "task:\(s.repo)#\(pr.number)", name: home.name, repo: home.repo, issue: pr.number)
+            home = Work(repo: s.repo, branch: branch, pull: pr.number).home
         }
         if let at = retired["\(station)|\(home.key)"], Date().timeIntervalSince(at) < World.holdWindow {
             return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
@@ -679,16 +676,16 @@ final class World {
             var branched: Set<String> = []
             let recent = now.addingTimeInterval(-14 * 24 * 3600)
             for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > recent {
-                guard let b = e.branch, let m = b.firstMatch(of: #/^gh-(\d+)\//#) else { continue }
+                guard let b = e.branch, let n = Work.issue(inBranch: b) else { continue }
                 switch e.kind {
-                case "push", "branch_create", "pr_open": branched.insert("\(repo)#\(m.1)")
-                case "branch_delete", "pr_close", "pr_merge": branched.remove("\(repo)#\(m.1)")
+                case "push", "branch_create", "pr_open": branched.insert("\(repo)#\(n)")
+                case "branch_delete", "pr_close", "pr_merge": branched.remove("\(repo)#\(n)")
                 default: break
                 }
             }
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
                 if it.isClosed { continue }   // finished work, whatever column the board left it in
-                let key = "task:\(it.repo)#\(it.number)"
+                let key = Work(repo: it.repo, issue: it.number).officeKey
                 guard let login = it.assignees.first, login != me else { continue }
                 if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
                 let working = !it.prURLs.isEmpty || branched.contains("\(it.repo)#\(it.number)") || peerOffices[sk + key] != nil || station.rooms[key]?.worktree != nil
@@ -709,7 +706,7 @@ final class World {
 
         // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
         var liveKeys = Set(open.filter { !$0.pr.isBot }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) })
-        liveKeys.formUnion(boardOffices.map { "task:\($0.repo)#\($0.item.number)" })
+        liveKeys.formUnion(boardOffices.map { Work(repo: $0.repo, issue: $0.item.number).officeKey })
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
             let key = sk + room.key
             let author = crewRoomInfo[key]?.author ?? ""
@@ -771,8 +768,8 @@ final class World {
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
             crewBoxes[sk + key] = (1 + pushes, "OPEN", fleet.color(forRepo: repo))
         }
-        for (repo, it, login) in boardOffices where !isKicked(sk + "task:\(repo)#\(it.number)") {
-            let key = "task:\(repo)#\(it.number)"
+        for (repo, it, login) in boardOffices where !isKicked(sk + Work(repo: repo, issue: it.number).officeKey) {
+            let key = Work(repo: repo, issue: it.number).officeKey
             let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.rooms[key] == nil {
@@ -789,7 +786,7 @@ final class World {
             let prNumber = it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") }
             // What the pull request told us earlier, its branch and number, outlives the board's guess.
             let known = crewRoomInfo[sk + key]
-            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? "gh-\(it.number)", prNumber: prNumber ?? known?.prNumber,
+            crewRoomInfo[sk + key] = CrewRoomInfo(repo: repo, branch: known?.branch ?? Work.guessedBranch(issue: it.number), prNumber: prNumber ?? known?.prNumber,
                                                   title: it.title, author: login, url: it.url, state: "OPEN", last: now)
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
@@ -1312,8 +1309,8 @@ final class World {
         // itself. With no pull request known there is nothing the yard could hold.
         let pull = room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
         guard let prNumber = pull?.number ?? crewRoomInfo[key]?.prNumber, prNumber > 0 else { nothingToHaul.insert(key); return [] }
-        let fromKey = room.key.firstMatch(of: #/#(\d+)$/#).flatMap { Int($0.1) }
-        let number = pull?.closes.first ?? github.task(repo: repo, pull: prNumber) ?? fromKey ?? prNumber
+        let issue = pull?.closes.first ?? github.task(repo: repo, pull: prNumber) ?? Work.number(inOfficeKey: room.key)
+        guard let number = Work(repo: repo, branch: room.branch, issue: issue, pull: prNumber).number else { return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }

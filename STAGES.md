@@ -12,7 +12,8 @@ them what it likes on screen (`Vocabulary`), but underneath they are these.
 | Thing | What it is |
 |---|---|
 | **minion** | a session at work |
-| **office** | a branch: one room per piece of work |
+| **work** | one piece of work, with one id and every name it goes by: its branch, its checkout folder, `repo#PR`, `repo#issue` |
+| **office** | the room where one piece of work takes place: one office per work |
 | **shuttle** | brings a new office to the bay |
 | **bay** | where shuttles land |
 | **cone** | the message a minion is working on |
