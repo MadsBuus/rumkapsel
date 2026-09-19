@@ -125,6 +125,12 @@ struct OpenPR: Equatable, Codable {
 
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    /// A login that is a bot's, by its name: the one rule for the open list and the feed alike.
+    static func isBot(_ login: String) -> Bool {
+        let l = login.lowercased()
+        return l.contains("dependabot") || login.contains("[bot]") || l.hasSuffix("-bot") || l.contains("webhook")
+    }
+
     /// A string as a GraphQL literal, quotes and all.
     static func quoted(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
@@ -238,7 +244,7 @@ final class GitHubResolver {
                     if let u = (o["updatedAt"] as? String).flatMap(iso.date(from:)), u < stale { continue }
                     let a = o["author"] as? [String: Any]
                     let login = a?["login"] as? String ?? "?"
-                    let isBot = (a?["is_bot"] as? Bool ?? false) || login.lowercased().contains("dependabot") || login.contains("[bot]")
+                    let isBot = (a?["is_bot"] as? Bool ?? false) || GitHubResolver.isBot(login)
                     found.append(OpenPR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", author: login, isBot: isBot,
                                         branch: o["headRefName"] as? String ?? "", url: o["url"] as? String ?? "",
                                         createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? Date()))
@@ -808,7 +814,7 @@ final class GitHubResolver {
                     guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
                     let actorObj = e["actor"] as? [String: Any]
                     let actor = actorObj?["login"] as? String ?? "?"
-                    let isBot = actor.lowercased().contains("dependabot") || actor.contains("[bot]") || actor.lowercased().hasSuffix("-bot") || actor.lowercased().contains("webhook")
+                    let isBot = GitHubResolver.isBot(actor)
                     let payload = e["payload"] as? [String: Any] ?? [:]
                     let pr = payload["pull_request"] as? [String: Any]
                     let prNumber = pr?["number"] as? Int

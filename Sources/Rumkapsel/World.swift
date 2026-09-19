@@ -23,7 +23,6 @@ final class World {
     /// How long a session outside Conductor keeps its office.
     static let roomsWindow: TimeInterval = 12 * 3600
 
-    private static let trunkBranches: Set<String> = ["develop", "staging", "main", "master", "production"]
 
     // MARK: model state
 
@@ -818,7 +817,7 @@ final class World {
         var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" && cfg.crewEnabled(repo: info.repo) {
-            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !World.trunkBranches.contains(pr.branch) { open.append((info.repo, pr)) }
+            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where pr.author != me && !Work.longLived.contains(pr.branch) { open.append((info.repo, pr)) }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
         // Issues the board says are in development, assigned to someone else: offices too, even before a pull request.

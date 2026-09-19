@@ -23,6 +23,8 @@ struct Work: Hashable {
 
     /// Branches that are not a piece of work but the trunk itself, or no branch at all.
     static let notWork: Set<String> = ["main", "master", "develop", "HEAD", ""]
+    /// The long-lived branches a pipeline is made of: a pull request from one of these is a release, not work.
+    static let longLived: Set<String> = ["develop", "staging", "main", "master", "production"]
 
     /// A branch named for its issue: `gh-128/anything` is issue 128.
     static func issue(inBranch branch: String) -> Int? {
