@@ -190,8 +190,9 @@ extension StationController {
             let base = SIMD3(Double(rocket.position.x), Double(rocket.position.y), Double(rocket.position.z))
             let towerX = rocket.childNode(withName: "tower", recursively: true).map { Double($0.position.x) } ?? 0.44
             let hatchAt = SIMD3(Double(hatch.position.x), Double(hatch.position.y), Double(hatch.position.z))
-            let foot = SIMD3(base.x + towerX + 0.12, at.y + 0.1, base.z + 0.02)
-            let top = SIMD3(foot.x, base.y + hatchAt.y, foot.z)
+            // Small on the lift rail, small along the belt, gone at the door.
+            let foot = SIMD3(base.x + towerX - 0.1, at.y + 0.1, base.z + 0.02)
+            let top = SIMD3(foot.x, base.y + hatchAt.y - 0.06, foot.z)
             let door = base + hatchAt
             // The door opens on the black of the hold as the crate reaches it, and closes white behind it.
             if let door = hatch.childNode(withName: "door", recursively: false) {
@@ -202,9 +203,9 @@ extension StationController {
             } else {
                 hatch.runAction(.sequence([.wait(duration: 1.3), .scale(to: 0.05, duration: 0.2), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
             }
-            moveCrate(b, legs: [MotionLeg(to: foot, seconds: 0.4, ease: .easeOut),
-                                MotionLeg(to: top, seconds: 0.9, ease: .easeInOut, scale: 0.5),
-                                MotionLeg(to: door, seconds: 0.5, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
+            moveCrate(b, legs: [MotionLeg(to: foot, seconds: 0.4, ease: .easeOut, scale: 0.3),
+                                MotionLeg(to: top, seconds: 0.9, ease: .easeInOut, scale: 0.3),
+                                MotionLeg(to: door, seconds: 0.6, ease: .linear, scale: 0.05)]) { b.removeFromParentNode() }
         default: break
         }
     }
