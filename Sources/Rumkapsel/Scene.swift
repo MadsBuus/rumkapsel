@@ -338,6 +338,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var userZoom = 1.0
     var userZoomChanged = false
     var userDriving = 0.0          // seconds left of snappy camera response after a gesture
+    /// Whether a hand has been on the camera since launch. The one-time framing when the floor has
+    /// finished arriving is for a view nobody has touched; a view already being driven is left alone.
+    var userTookView = false
     private var fpsFrames = 0, fpsMark = 0.0   // the frame counter behind RK_FPS
     private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up
     private var keyZoom = 0.0                    // E/Q held: +1 zooms in, -1 out
@@ -434,6 +437,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let before = self.userZoom
                 self.userZoom = min(6, max(0.4, self.userZoom * f))
                 self.userZoomChanged = true
+                self.userTookView = true
                 guard let g = ground, self.userZoom != before else { return }
                 self.userDriving = 0.5
                 let focus = self.targetFocus + self.userPan
@@ -448,6 +452,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let before = self.userYaw
                 self.userYaw -= r
                 self.userDriving = 0.5
+                self.userTookView = true
                 if let g = ground {
                     let focus = self.targetFocus + self.userPan
                     let d = focus - g
@@ -458,10 +463,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onTilt = { [weak self] dy in
-            self?.enqueue { guard let self else { return }; self.userPitch = min(-0.15, max(-Double.pi / 2 + 0.05, self.userPitch - dy * 0.004)) }
+            self?.enqueue { guard let self else { return }; self.userTookView = true; self.userPitch = min(-0.15, max(-Double.pi / 2 + 0.05, self.userPitch - dy * 0.004)) }
         }
         view.onPan = { [weak self] dx, dy in self?.enqueue { self?.pan(byPixels: dx, dy) } }
-        view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom } }
+        view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom; if dir != .zero || zoom != 0 { self?.userTookView = true } } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
         view.onHold = { [weak self] held in self?.liveTimeScale = held ? 4 : 1 }
         view.onKey = { [weak self] key in
@@ -909,7 +914,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // The floor has stopped arriving: frame it whole and settle everyone, once.
         if wasLooking, !floorSettling {
             wasLooking = false
-            focusNow(on: focused)
+            if !userTookView { focusNow(on: focused) }   // a view already being driven is not reframed under the hand
             timed("settle") { for st in fleet.stations.values { resettle(st) } }
         }
         if layoutDirty {
