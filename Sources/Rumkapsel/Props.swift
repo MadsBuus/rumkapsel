@@ -215,9 +215,9 @@ enum Props {
         let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
-        // The loading hatch on the deck side, where crates go in: a door set into the hull, a frame a
-        // shade darker than the panel, the panel a shade lighter than the frame, a latch bar across it,
-        // and two hinge knuckles down one side. The frame is sunk into the hull so it never floats.
+        // The loading hatch where crates go in: a door in the hull, white like the hull with a dark seam
+        // round it, a latch bar and two hinge knuckles; open, the door is the black of the hold inside.
+        // The seam is sunk into the hull so nothing floats.
         let hatch = SCNNode()
         hatch.name = "hatch"
         let frameW = r * 0.9, frameH = 0.2
@@ -225,8 +225,9 @@ enum Props {
         frame.geometry!.firstMaterial = dark
         frame.position = v3(0, 0, -0.012)
         hatch.addChildNode(frame)
-        let panel = SCNNode(geometry: SCNBox(width: frameW - 0.03, height: frameH - 0.03, length: 0.02, chamferRadius: 0))
-        panel.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.32, 0.38)))
+        let panel = SCNNode(geometry: SCNBox(width: frameW - 0.02, height: frameH - 0.02, length: 0.02, chamferRadius: 0))
+        panel.geometry!.firstMaterial = white
+        panel.name = "door"
         panel.position = v3(0, 0, 0.004)
         hatch.addChildNode(panel)
         let latch = SCNNode(geometry: SCNBox(width: frameW * 0.45, height: 0.016, length: 0.014, chamferRadius: 0))
