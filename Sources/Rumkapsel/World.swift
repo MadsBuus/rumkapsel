@@ -99,7 +99,10 @@ final class World {
     /// Repositories GitHub has answered for at least once. A repository's first answer is taken quietly:
     /// nothing in it is new, whatever it holds. Only changes after that are events.
     private(set) var readyRepos: Set<String> = []
-    private(set) var seenLogins: Set<String> = []
+    /// Everyone seen in a repository's feed, pull requests or board, with where and when last: the
+    /// Teammates list in Settings. Kept across launches, so the list is there before the feeds answer.
+    private(set) lazy var seenPeople: [String: SeenPerson] = waitsForGitHub ? SeenPerson.load() : [:]
+    private var savedPeople: [String: SeenPerson] = [:]
     private var crewSeen: Set<String> = []
     private var didLoadLayout = false
     /// Scans since this run began, for the moment the floor waits before putting offices up on its own.
@@ -157,7 +160,13 @@ final class World {
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
-    var knownRepos: [String] { fleet.repoColors.keys.sorted() }
+    /// The repositories Settings lists: every checkout the station knows, every repository with an office
+    /// on it, a neighbour's too, and every one with settings of its own, hidden or added by hand.
+    var knownRepos: [String] {
+        var names = Set(repoRoots.values.map(\.repo)).union(ConfigStore.shared.current.repos.keys)
+        for s in fleet.stations.values { for r in s.rooms.values { if let repo = r.repo { names.insert(repo) } } }
+        return names.sorted()
+    }
 
     /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
     func localState(_ room: Room) -> (local: Bool, commits: Int) {
@@ -419,6 +428,13 @@ final class World {
                         _ = fleet.color(forRepo: repo)
                     }
                 }
+            }
+            // A checkout added by hand in Settings is on the station the same way.
+            for (repo, o) in cfg.repos where cfg.shown(repo: repo) {
+                guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git"),
+                      !repoRoots.values.contains(where: { $0.repo == repo }) else { continue }
+                repoRoots[root] = (repo, "work")
+                _ = fleet.color(forRepo: repo)
             }
         }
         github.intervalMinutes = cfg.githubMinutes
@@ -782,7 +798,9 @@ final class World {
         var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
         logins.formUnion(boardOffices.map(\.login))
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
-        seenLogins.formUnion(feed.filter { !$0.e.isBot }.map(\.e.actor)); seenLogins.formUnion(logins)
+        for (repo, e) in feed where !e.isBot { seen(e.actor, in: repo, at: e.at) }
+        for (repo, pr) in open where !pr.isBot { seen(pr.author, in: repo, at: pr.createdAt) }
+        for o in boardOffices { seen(o.login, in: o.repo, at: o.item.updatedAt ?? now) }
         var roster: [String: CrewMember] = [:]
         for login in logins {
             let homeKey = open.first { $0.pr.author == login }.map { crewKey(repo: $0.repo, branch: $0.pr.branch) } ?? "kind:quarters"
@@ -813,6 +831,7 @@ final class World {
         if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
             savedKnowledgeAt = Date()
             github.saveKnowledge(repoRoots.mapValues(\.repo))
+            if seenPeople != savedPeople { savedPeople = seenPeople; SeenPerson.save(seenPeople) }
         }
         return events
     }
@@ -1319,4 +1338,26 @@ final class World {
         fleet.stations[crate.station]?.ledger.unorder(repo: crate.repo, number: crate.number)
     }
 
+}
+
+/// Where and when a GitHub login was last seen, for the Teammates list.
+struct SeenPerson: Codable, Equatable {
+    var repo: String
+    var at: Date
+
+    private static var url: URL { AppSupport.root.appendingPathComponent("Rumkapsel/people.json") }
+    static func load() -> [String: SeenPerson] {
+        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: SeenPerson].self, from: $0) } ?? [:]
+    }
+    static func save(_ people: [String: SeenPerson]) {
+        guard let data = try? JSONEncoder().encode(people) else { return }
+        Fleet.writing.async { try? data.write(to: url) }
+    }
+}
+
+extension World {
+    fileprivate func seen(_ login: String, in repo: String, at: Date) {
+        if let s = seenPeople[login], s.at >= at { return }
+        seenPeople[login] = SeenPerson(repo: repo, at: at)
+    }
 }

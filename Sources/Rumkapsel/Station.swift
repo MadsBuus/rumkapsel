@@ -900,45 +900,30 @@ final class Fleet {
         }
     }
 
-    /// A repository's colour comes from its name, not from the order it was first seen, so it is the
-    /// same on every launch and on every station: a hash picks the palette slot, and a name whose slot
-    /// another name already holds takes the next free one, names in alphabetical order.
+    /// A repository's colour comes from its name alone, so it is the same on every launch and on every
+    /// colleague's station: a hash picks one of the palette's slots, each hue in three shades. Two names can
+    /// land on the same slot; a colour picked in Settings sits on top for exactly that.
     func color(forRepo repo: String) -> RGB {
-        if repoColors[repo] == nil { repoColors[repo] = 0; assignColors() }
-        let i = repoColors[repo] ?? 0
+        let i = Fleet.slot(for: repo)
+        repoColors[repo] = i
+        return ConfigStore.shared.current.repos[repo]?.color ?? Fleet.color(slot: i)
+    }
+
+    static func slot(for name: String) -> Int {
+        var h: UInt64 = 14695981039346656037
+        for b in name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        return Int((h >> 32) % UInt64(Colors.repos.count * 3))   // FNV's low bits repeat for similar names; its high ones do not
+    }
+
+    static func color(slot i: Int) -> RGB {
         let base = Colors.repos[i % Colors.repos.count]
-        // More repositories than the palette has colours, so the second and third to land on a hue take
-        // it darker and lighter. The game shades one colour rather than reaching for a new one, and a
+        // More repositories than the palette has colours, so the second and third rounds of slots take a hue
+        // darker and lighter. The game shades one colour rather than reaching for a new one, and a
         // made-up seventh hue reads worse beside six real ones than a shade of one of them does.
-        switch i / Colors.repos.count {
+        switch i / Colors.repos.count % 3 {
         case 0: return base
         case 1: return base.shaded(0.60)     // darker first: a deep teal is further from mid teal than
         default: return base.shaded(1.42)    // a pale one is, and crate faces lighten what they are given
-
-        }
-    }
-
-    private func assignColors() {
-        let n = Colors.repos.count
-        // Three rounds of the palette: a hue on its own first, then the lighter shade of one, then the
-        // darker. A name keeps looking for the emptiest round rather than piling onto the first hue it
-        // hashes to, so eight repositories are eight colours and not six with two pairs of twins.
-        var taken: [Int: String] = [:]
-        for name in repoColors.keys.sorted() {
-            var h: UInt64 = 14695981039346656037
-            for b in name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
-            let want = Int(h % UInt64(n))
-            var slot: Int?
-            for round in 0..<3 {
-                for step in 0..<n {
-                    let i = round * n + (want + step) % n
-                    if taken[i] == nil { slot = i; break }
-                }
-                if slot != nil { break }
-            }
-            let i = slot ?? want
-            taken[i] = name
-            repoColors[name] = i
         }
     }
 
@@ -1000,7 +985,6 @@ final class Fleet {
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
         repoColors = saved.repoColors
-        assignColors()   // by name, whatever order an older save gave them
         // A private station saved before there was only one is left behind; its sessions come back on the
         // station with their next scan.
         for (name, s) in saved.stations where name != "crew" && name != "private" {

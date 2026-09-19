@@ -15,8 +15,17 @@ struct AppConfig: Codable, Equatable {
         var station: String = "auto"   // auto or hidden; "private" from before there was one station reads as hidden
         var crew: Bool = true          // unused since 0.18, kept so old config files still decode
         var share: Bool = false        // visible to other rumkapsels on the local network
+        var color: RGB?                // picked in Settings; nil is the colour the name hashes to
+        var branches: Branches?        // the pipeline set by hand; nil is the one read from the repository
+        var path: String?              // a checkout added by hand in Settings, on the station with no session in it
     }
-    var workOwners: [String] = ["Tattoodo"]
+    /// A repository's way to production as set in Settings, over whatever was detected.
+    struct Branches: Codable, Equatable {
+        var trunk: String
+        var staging: String            // "" for none
+        var production: String         // "" for no releases
+    }
+    var workOwners: [String] = []           // unused since there is one station, kept so old config files still decode
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
     /// Whose GitHub account this is. Remembered because it does not change, and because asking costs a
@@ -45,6 +54,11 @@ struct AppConfig: Codable, Equatable {
     var projectOwner: String?
     var projectNumber: Int?
     var projectStatuses: ProjectStatuses?
+    /// The single-select field on the board that says where an issue is; GitHub's own Status unless set.
+    var projectField: String?
+    /// Off keeps the board's settings but goes without it.
+    var useProject: Bool?
+    var statusField: String { projectField ?? "Status" }
 
     /// The project's Status names for each stage of the station.
     struct ProjectStatuses: Codable, Equatable {
@@ -55,7 +69,7 @@ struct AppConfig: Codable, Equatable {
         var shipped = "Shipped"                 // in production: launched
     }
     var project: (owner: String, number: Int)? {
-        guard let o = projectOwner, !o.isEmpty, let n = projectNumber, n > 0 else { return nil }
+        guard useProject != false, let o = projectOwner, !o.isEmpty, let n = projectNumber, n > 0 else { return nil }
         return (o, n)
     }
     var statuses: ProjectStatuses { projectStatuses ?? ProjectStatuses() }
@@ -67,17 +81,13 @@ struct AppConfig: Codable, Equatable {
     }
 
     static func load() -> AppConfig {
-        if let data = try? Data(contentsOf: url), var c = try? JSONDecoder().decode(AppConfig.self, from: data) {
-            // Configs from before the board existed: Tattoodo's own board, once.
-            if c.projectOwner == nil, c.projectNumber == nil, c.workOwners == ["Tattoodo"] { c.projectOwner = "Tattoodo"; c.projectNumber = 4; c.save() }
-            return c
-        }
+        if let data = try? Data(contentsOf: url), let c = try? JSONDecoder().decode(AppConfig.self, from: data) { return c }
         var c = AppConfig()
         // Carry over the old crew.json names if present.
         let crewURL = url.deletingLastPathComponent().appendingPathComponent("crew.json")
         if let data = try? Data(contentsOf: crewURL), let names = try? JSONDecoder().decode([String: String].self, from: data) { c.crewNames = names }
-        if c.crewNames.isEmpty { c.crewNames = ["donlion": "Leo", "johanplenge": "Johan", "skogge": "Chris", "MadsBuus": "Mads"] }
-        if c.workOwners == ["Tattoodo"] { c.projectOwner = "Tattoodo"; c.projectNumber = 4 }
+        // A scripted run starts from a fresh config and plays a board of its own making: it needs one set.
+        if Scripted.run { c.projectOwner = "example"; c.projectNumber = 1 }
         c.save()
         return c
     }

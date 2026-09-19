@@ -106,6 +106,14 @@ enum PipelineTests {
             expect(p.boardColumns == false && p.source == "file", "its board choice and its name as the source")
         }
 
+        test("branches set by hand in Settings go over what was detected, and only while they are set") {
+            let read = PipelineDetection.detect(branches: ["main"], merges: features("main", 5), file: nil, names: names, deploysOnPush: true)
+            let set = read.overridden(by: AppConfig.Branches(trunk: "main", staging: "", production: "live"))
+            expect(flow(set) == "main → - → live" && set.source == "override", "got \(flow(set)) from \(set.source)")
+            expect(!set.shipsOnMerge, "a production branch set by hand means releases, not every merge")
+            expect(read.overridden(by: nil) == read, "nothing set leaves the detection as it was")
+        }
+
         say(failures == 0 ? "pipelines: all passed" : "pipelines: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

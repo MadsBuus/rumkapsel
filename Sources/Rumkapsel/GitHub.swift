@@ -125,6 +125,11 @@ struct OpenPR: Equatable, Codable {
 
 /// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
+    /// A string as a GraphQL literal, quotes and all.
+    static func quoted(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
     /// Poll interval for pull requests, releases and open PRs; the feed stays at two minutes.
     var intervalMinutes = 5
     /// Frozen: every refresh is a no-op and nothing is written to disk. Only the simulator sets it,
@@ -284,7 +289,7 @@ final class GitHubResolver {
         if let items = project?.0, let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
-            let mine = items.filter { $0.repo == repo }
+            let mine = items.filter { $0.repo == repo && !$0.status.isEmpty }   // a stage left unset matches nothing
             // The board fills a repository's yard only once the repository moves work through the storage and
             // QA columns. One that goes from development straight to shipped is on the board but not in its
             // middle: its yard comes from git, like a repository not on the board at all.
@@ -504,6 +509,7 @@ final class GitHubResolver {
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("project"); lock.unlock() }
             // GraphQL rather than `gh project item-list`: it carries when each item last moved.
+            let fieldName = GitHubResolver.quoted(ConfigStore.shared.current.statusField)
             let iso = ISO8601DateFormatter()
             var items: [ProjectItem] = []
             var cursor = "null"
@@ -512,7 +518,7 @@ final class GitHubResolver {
                 { organization(login: "\(owner)") { projectV2(number: \(number)) { items(first: 100, after: \(cursor)) {
                   pageInfo { hasNextPage endCursor }
                   nodes { updatedAt
-                    fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+                    fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
                     content { ... on Issue { number title url state repository { name } assignees(first: 5) { nodes { login } }
                       closedByPullRequestsReferences(first: 5) { nodes { url state } } } } } } } } }
                 """
@@ -565,11 +571,12 @@ final class GitHubResolver {
         trace("ask project delta since \(iso.string(from: since))")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("projectDelta"); lock.unlock() }
+            let fieldName = GitHubResolver.quoted(ConfigStore.shared.current.statusField)
             let query = """
             { search(query: "project:\(owner)/\(number) updated:>=\(iso.string(from: since))", type: ISSUE, first: 50) { nodes { ... on Issue {
               number title url state repository { name } assignees(first: 5) { nodes { login } }
               closedByPullRequestsReferences(first: 5) { nodes { url state } }
-              projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
+              projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
             """
             var nodes: [[String: Any]] = []
             if let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
@@ -579,7 +586,7 @@ final class GitHubResolver {
             // sees one. The items that can still move, everything not shipped, are asked by number,
             // a hundred at a time, round and round: a move shows within a round.
             let shipped = ConfigStore.shared.current.statuses.shipped
-            let live = items.filter { $0.status != shipped }.sorted { ($0.repo, $0.number) < ($1.repo, $1.number) }
+            let live = items.filter { shipped.isEmpty || $0.status != shipped }.sorted { ($0.repo, $0.number) < ($1.repo, $1.number) }
             if !live.isEmpty {
                 let page = 100
                 let start = min(deltaPage * page, max(0, live.count - 1)) / page * page
@@ -588,7 +595,7 @@ final class GitHubResolver {
                 let fields = """
                 number title url repository { name } assignees(first: 5) { nodes { login } }
                 closedByPullRequestsReferences(first: 5) { nodes { url state } }
-                projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
+                projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
                 """
                 let parts = batch.enumerated().map { i, it in
                     "i\(i): repository(owner: \"\(owner)\", name: \"\(it.repo)\") { issue(number: \(it.number)) { \(fields) } }"
@@ -702,8 +709,12 @@ final class GitHubResolver {
         return false
     }
 
-    /// The repository's pipeline as its branches say, or the settings' names until they have been read.
-    func pipeline(repoRoot: String) -> Pipeline {
+    /// The repository's pipeline as its branches say, or the settings' names until they have been read,
+    /// under whatever was set for it by hand.
+    func pipeline(repoRoot: String) -> Pipeline { detectedPipeline(repoRoot: repoRoot).overridden(by: Pipeline.override(forRoot: repoRoot)) }
+
+    /// What the repository itself says, before anything set by hand. Nil until it has been read.
+    func detectedPipeline(repoRoot: String) -> Pipeline {
         lock.lock(); defer { lock.unlock() }
         return pipelines[repoRoot] ?? .configured
     }
@@ -926,9 +937,9 @@ final class GitHubResolver {
             // This repository's own pipeline: its file, else its release history, else its branch names.
             // History and file are asked at most once an hour; the branch list is read every time.
             lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; lock.unlock()
-            let pipe: Pipeline
+            let detected: Pipeline
             if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.source != "settings" {
-                pipe = cached
+                detected = cached
             } else {
                 var merges: [PipelineDetection.Merge] = []
                 var answered = false
@@ -944,16 +955,17 @@ final class GitHubResolver {
                 let file = run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
                     .flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
                 let names = (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch)
-                var detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names)
+                var read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names)
                 // No releases found: a workflow that deploys on every push to the trunk means every merge ships.
-                if detected.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: detected.trunk, repoRoot: repoRoot) {
-                    detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
-                } else if detected.production.isEmpty, file?.ship == nil, !GitHubResolver.tags(repoRoot: repoRoot, run: run).isEmpty {
-                    detected = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, tagged: true)
+                if read.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: read.trunk, repoRoot: repoRoot) {
+                    read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
+                } else if read.production.isEmpty, file?.ship == nil, !GitHubResolver.tags(repoRoot: repoRoot, run: run).isEmpty {
+                    read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, tagged: true)
                 }
-                pipe = detected
+                detected = read
                 if answered { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
             }
+            let pipe = detected.overridden(by: Pipeline.override(forRoot: repoRoot))
             let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
             let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
             func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
@@ -1063,9 +1075,9 @@ final class GitHubResolver {
             if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
                 pendingLaunches.append((repoRoot, tag))
             }
-            let pipelineChanged = pipelines[repoRoot] != pipe
+            let pipelineChanged = pipelines[repoRoot] != detected
             let changed = previous != found || cargo[repoRoot] != newCargo || pipelineChanged
-            pipelines[repoRoot] = pipe
+            pipelines[repoRoot] = detected
             cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)

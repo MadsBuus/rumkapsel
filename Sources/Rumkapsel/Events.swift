@@ -102,6 +102,7 @@ struct CrewActivity {
 
 extension AppConfig.ProjectStatuses {
     func stage(of status: String) -> WorldEvent.Stage {
+        guard !status.isEmpty else { return .other }
         switch status {
         case development: return .development
         case storage: return .storage
