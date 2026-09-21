@@ -82,17 +82,26 @@ With sharing on, rumkapsels on the same network merge their work stations into o
 
 ## Flags
 
-`--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits. `--gallery`
-opens the gallery of props and poses; `--gallery --tile rockets --snapshot out.png` puts the camera on the
-tile whose title has those words, close up, for a picture of one thing.
+`--demo` runs with fake sessions. `--snapshot out.png --delay 6` renders a frame and exits.
+
+`--gallery` opens the gallery: every routine a body plays and every piece the current theme draws,
+one to a tile. The motion comes from the same table the station's tick reads and the pieces from the
+current look, so a tile cannot show what the app does not. `--gallery --tiles` lists the sheet,
+`--gallery --tile rockets --snapshot out.png` frames the tile whose name has those words for a
+picture of one thing, and in the window `]` and `[` step between tiles with `0` for the whole sheet.
 
 `--simulator` opens the simulator window on its own: a real station with the scanner, GitHub and the
-network switched off, driven by a panel of buttons that write made-up facts through the same entry
-points production uses. The panel picks one target office and every button acts on it, or on its
-repository; a button that does not apply is greyed with the reason. `--simulate "Open PR,Merge PR"`
-presses those buttons in order, two seconds apart, `Target: web#455` picks the office to press on,
-and it pairs with `--snapshot` for a scripted check; the whole event and command log goes to stderr
-when the snapshot is written. The button names are listed at the top of `Simulator.swift`.
+network switched off, driven by a panel that writes made-up facts through the same entry points
+production uses. The panel is a board and the moves on it. The board is the position — the session
+in the target office, its commits, its pull request, its column, the repository's pipeline and
+releases, the peer, the night — one knob each. The moves are what happens, one press each, and a
+move whose ground is not laid lays it before it plays, so `Merge PR` on an office with no pull
+request opens one first rather than greying out.
+
+`--simulate "Target: web#455,Set: commits ahead = 8,Merge PR"` presses those in order, two seconds
+apart: `Target:` picks the office, `Set: <knob> = <value>` turns a knob, and anything else is a move.
+It pairs with `--snapshot` for a scripted check; the board's knobs and the whole event and command
+log go to stderr when the snapshot is written. Every name is listed at the top of `Simulator.swift`.
 
 ## A homage
 
