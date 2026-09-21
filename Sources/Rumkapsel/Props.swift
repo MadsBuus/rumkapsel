@@ -244,6 +244,15 @@ enum Props {
         return n
     }
 
+    /// The hull's deck plate where it meets the floor: the colour the wall starts from before it climbs and
+    /// cools, and the colour the bay's apron is laid in, so the two read as one piece of station.
+    static let hullPlate = (0.28, 0.33, 0.43)
+
+    /// The approach lights either side of the airlock's outer door, on and off. They burn the same amber as
+    /// the pallet's corner light, because they mean the same thing: something is on its way in.
+    static let hullLamp = NSColor(rgb: (1.0, 0.56, 0.12))
+    static let hullLampOff = NSColor(rgb: (0.26, 0.30, 0.40))
+
     /// The corner light's colour, on and off.
     static let palletAmber = NSColor(rgb: (1.0, 0.56, 0.12))
     static let palletAmberOff = NSColor(rgb: (0.42, 0.24, 0.08))

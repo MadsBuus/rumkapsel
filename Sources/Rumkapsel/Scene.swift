@@ -62,6 +62,14 @@ enum Palette {
 func v3(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(x, y, z) }
 
 /// Nothing in the station is round: every turned shape is cut with a few flat sides.
+/// Which nodes the pointer may find. A node carries `normal` unless it is scenery too big to click
+/// through — the hull wall leaning over the airlock — which carries `scenery` and is passed over. The
+/// camera reads the same mask, so scenery is a bit of its own rather than none at all.
+enum Pick {
+    static let normal = 1
+    static let scenery = 2
+}
+
 func faceted<G: SCNGeometry>(_ g: G, _ sides: Int = 6) -> G {
     (g as? SCNCylinder)?.radialSegmentCount = sides
     (g as? SCNCone)?.radialSegmentCount = sides
@@ -308,6 +316,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var bubbleIcons: [SKSpriteNode] = []
     /// Decon's hatch light per station, for the blink and the puff when something comes through.
     var hatchLights: [String: SCNNode] = [:]
+    /// When a manual GitHub refresh last went out. Focus, the menu item and `g` all land in the same place,
+    /// and macOS will hand us two activations in a row; the second one would find every cache age just
+    /// cleared by `invalidate()` and ask GitHub the whole round again, so a refresh close behind another is
+    /// dropped. The poller's own intervals are untouched — this guards only the manual door.
+    private var askedGitHubAt = Date.distantPast
     /// Objects just through decon's hatch, by marker name: drawn high and floated down onto their pile.
     var incoming: Set<String> = []
     /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
@@ -1141,6 +1154,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.stepPallets(dt: dt)
         drawShuttles(dt: dt)
         updateBerths()
+        tickHullLamps()
         drawRockets()
         drawPallets()
         tickCrateMotions()
@@ -1285,6 +1299,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Re-asks GitHub about every office, branch and release right now.
     func refreshGitHub() {
+        guard Date().timeIntervalSince(askedGitHubAt) > 3 else { return }
+        askedGitHubAt = Date()
         enqueue { [self] in
             github.invalidate()
             for station in fleet.stations.values {

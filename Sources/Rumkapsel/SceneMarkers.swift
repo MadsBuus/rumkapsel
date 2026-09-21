@@ -370,8 +370,8 @@ extension StationController {
         refreshObstacles()
     }
 
-    /// A hexagon on the floor of every berth in the bay, packed as the pad's are. They are grey while the
-    /// bay is empty; `updateBerths` lights the ones being flown into.
+    /// A hexagon on the floor of every berth in the bay, packed as the pad's are. They are near-black while
+    /// the bay is empty; `updateBerths` lights the ones being flown into.
     func rebuildBerths() {
         if berthRoot.parent == nil { propRoot.addChildNode(berthRoot) }
         berthRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -386,6 +386,16 @@ extension StationController {
                 hex.position = v3(station.offset.x + at.x, Looks.current.berthHexHeight, station.offset.y + at.y)
                 hex.name = "bay:" + station.name
                 berthRoot.addChildNode(hex)
+                // Where the bay is open, the rim has nothing under it: the berth carries its own plate, a
+                // shade of the floor the lanes are, so a ship and whoever walks out to it stand on something.
+                if Looks.current.bayOpenToSpace {
+                    let plate = SCNNode(geometry: faceted(SCNCylinder(radius: Station.bayRadius - 0.03, height: 0.05)))
+                    plate.geometry!.firstMaterial = flat(NSColor(Colors.hangar).darker(0.12))
+                    plate.opacity = 0.9
+                    plate.position = v3(station.offset.x + at.x, Looks.current.berthHexHeight - 0.026, station.offset.y + at.y)
+                    plate.name = "bay:" + station.name
+                    berthRoot.addChildNode(plate)
+                }
                 hexes.append(hex)
             }
             berthHexes[station.name] = hexes
@@ -423,8 +433,9 @@ extension StationController {
         }
     }
 
-    /// An unlit hexagon, the colour the bay and the pad are marked out in.
-    static let berthIdle = NSColor(rgb: (0.45, 0.47, 0.54))
+    /// An unlit hexagon, the colour the bay and the pad are marked out in: space black, so an empty
+    /// berth is an outline scored into the floor rather than a ring drawn on top of it.
+    static let berthIdle = NSColor(rgb: (0.05, 0.06, 0.09))
 
     /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it.
     func rebuildPadHexes() {

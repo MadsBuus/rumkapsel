@@ -15,6 +15,9 @@ struct KenneyLook: Look {
 
     /// On the ground there is nothing to drift.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { [] }
+    var bayOpenToSpace: Bool { false }
+    func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode? { nil }
+    func hullDoorReveal(depth: Double) -> Double { 0 }
 
     /// How far past the fleet the ground is known, and how far the fog then takes to close in.
     static let reach = 13.0, fade = 5.0

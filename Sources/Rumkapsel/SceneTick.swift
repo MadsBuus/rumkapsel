@@ -165,6 +165,21 @@ extension StationController {
         }
     }
 
+    /// The approach lights on the hull, either side of the outer door: amber while a ship is on its way in,
+    /// dark the moment it is down. Half a second on, half off, off the station's own clock, so they keep the
+    /// pallet's beat — the two lights mean the same thing, that something is coming.
+    func tickHullLamps() {
+        let inbound = Set(simulation.flights.filter { $0.phaseKind == .approach || $0.phaseKind == .descend }.map(\.station))
+        let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
+        for hull in staticRoot.childNodes where (hull.name ?? "").hasPrefix("hull:") {
+            let lit = on && inbound.contains(String(hull.name!.dropFirst("hull:".count)))
+            for lamp in hull.childNodes where lamp.name == "beacon" {
+                lamp.geometry?.firstMaterial?.diffuse.contents = lit ? Props.hullLamp : Props.hullLampOff
+                lamp.geometry?.firstMaterial?.emission.contents = lit ? Props.hullLamp : NSColor.black
+            }
+        }
+    }
+
     /// Every worker, once a frame. The simulation walks it and runs its commands; the scene runs the
     /// pallet errands, whose pallet is still a node, keeps the crate on the arms in step with the body's
     /// load, and draws the pose the body says it holds.
