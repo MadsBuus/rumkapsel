@@ -100,7 +100,7 @@ final class World {
             case .cleared where t.from != nil:
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
-            case .shipped where t.from != nil:
+            case .shipped where t.from != nil && !t.wasQuiet:
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let station = fleet.stations[info.station] else { continue }
                 launches.insert(info.station + "|" + info.repo)
                 _ = station
@@ -677,7 +677,11 @@ final class World {
     /// a staging area, and what is stored besides when it has not.
     func waiting(repo: String, station: String) -> [WorkBook.Record] {
         let from: Stage = stagingIsDeck(station: station, repo: repo) ? .qa : .stored
-        return works.records(repo: repo).filter { r in r.stage.map { $0 >= from && $0 < .shipped } ?? false }
+        return works.records(repo: repo).filter { r in
+            guard let stage = r.stage, stage >= from, stage < .shipped else { return false }
+            // Found merged at launch: waiting only once a count has listed it.
+            return !r.quiet || r.words[.git] != nil || r.words[.board] != nil
+        }
     }
     /// Whether the rocket may load a repository's waiting work: all of it cleared, or nothing to clear here.
     func clearedToLoad(repo: String, station: String) -> Bool {
@@ -747,6 +751,7 @@ final class World {
             releasesSeen.insert(root)
             let key = info.station + "|" + info.repo
             guard !launched.contains(key) else { continue }
+            guard padSlotOf[key] != nil || padRelease(root: root) == nil else { continue }   // no slot on the pad
             guard let pr = padRelease(root: root) else {
                 // No release opened yet: work waiting for one has a rocket standing all the same, loaded
                 // once every piece of it is cleared, or at once where nothing clears here.
@@ -1266,6 +1271,18 @@ final class World {
         // One word per crate: the deck's count carries the cleared ones too, and QA said after cleared would take them back.
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
+        // Shipped: absent from an exact git count begun after the merge was heard, or in the board's shipped column.
+        let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
+        let shippedColumn = ConfigStore.shared.current.statuses.shipped
+        for r in works.records(repo: repo) {
+            guard let n = r.number, let stage = r.stage, stage >= .stored, stage < .shipped else { continue }
+            if c.source == .git, c.exact, !listed.contains(n), !r.pulls.keys.contains(where: listed.contains),
+               let at = r.stagedAt, at < c.at {
+                works.report(r, .shipped, by: .git, at: c.at)
+            } else if !shippedColumn.isEmpty, github.projectItems()?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {
+                works.report(r, .shipped, by: .board)
+            }
+        }
         // The ledger hears the record, not the counts: where each piece of work is by the record's word,
         // whoever said it, and when it was last moved on. The counts above were only signals into it.
         station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)
@@ -1338,10 +1355,12 @@ final class World {
         let cells = station.padCells
         guard let x0 = cells.map(\.x).min(), let x1 = cells.map(\.x).max(), let y0 = cells.map(\.y).min(), let y1 = cells.map(\.y).max() else { return [.zero] }
         let c = station.padCenter
-        let fits = World.padSlotOffsets.map { c + $0 }.filter { p in
+        // The first four always; the rest only where the pad's cells have room.
+        let base = World.padSlotOffsets.prefix(4).map { c + $0 }
+        let more = World.padSlotOffsets.dropFirst(4).map { c + $0 }.filter { p in
             Int(p.x.rounded()) >= x0 && Int(p.x.rounded()) <= x1 && Int(p.y.rounded()) >= y0 && Int(p.y.rounded()) <= y1
         }
-        return fits.isEmpty ? [c] : fits
+        return base + more
     }
 
     /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one

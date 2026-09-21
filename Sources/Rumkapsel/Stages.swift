@@ -31,6 +31,8 @@ struct Transition {
     let to: Stage
     let by: Source
     let at: Date
+    /// The stage left was the record's first word.
+    var wasQuiet = false
     var back: Bool { from.map { to < $0 } ?? false }
 }
 
@@ -48,8 +50,9 @@ extension WorkBook.Record {
             return Transition(from: nil, to: s.stage, by: s.by, at: s.at)
         }
         if s.stage > current {
+            let wasQuiet = quiet
             stage = s.stage; stagedAt = s.at; stagedBy = s.by; quiet = false
-            return Transition(from: current, to: s.stage, by: s.by, at: s.at)
+            return Transition(from: current, to: s.stage, by: s.by, at: s.at, wasQuiet: wasQuiet)
         }
         if s.stage < current, workflow.inLine(current)?.first == s.by, let before, before >= current {
             stage = s.stage; stagedAt = s.at; stagedBy = s.by; quiet = false
