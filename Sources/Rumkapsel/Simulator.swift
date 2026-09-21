@@ -40,6 +40,7 @@ import SwiftUI
 ///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office
 ///     Sources:   Stage: ready, Stage: stored, Stage: QA, Stage: cleared, Stage: shipped
 ///     Board:     Board: Move <repo>#<n> to <column>, Board: Catch up
+///     Polls:     GitHub: Poll, Scan: again
 ///     Release:   Repo: No staging, Repo: Ships on merge, Release: Staging opens,
 ///                Release: Staging merges, Release: Staging merges (board lags),
 ///                Release: Staging closes, Release: Production opens, Release: Mark tested,
@@ -862,7 +863,13 @@ final class SimulatorModel: ObservableObject {
                 Stage.allCases.filter { $0 >= .ready }.map {
                     button("Stage: \($0)", "→ \($0)", o == nil ? .already("no office picked") : nil)
                 }),
-            Group(id: "Late polls", note: "a source answering after the fact, which is where the ordering bugs live", buttons: [
+            Group(id: "Late polls", note: "a source asked again, or answering after the fact: where the ordering bugs live", buttons: [
+                // The app asks its sources again every few seconds or minutes, and some rules only
+                // come round on a later answer: an office red for ten minutes clears on the poll
+                // after the tenth. A scripted run gets one of each at press time and never sees
+                // them, so both asks are moves of their own.
+                button("GitHub: Poll", "GitHub is asked again"),
+                button("Scan: again", "The scanner looks again"),
                 // The board's own poll arriving late: everything of the repository still in storage moves to the deck.
                 button("Board: Catch up", "The board catches up: \(repo) storage → deck",
                        board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil
@@ -1153,6 +1160,11 @@ final class SimulatorModel: ObservableObject {
         case "Peer: Kick office":
             guard let o = office else { return }
             station.simulateKick(roomKey: stationName(o) + "|" + o.home.key)
+
+        case "GitHub: Poll":
+            pushGitHub()
+        case "Scan: again":
+            pushScan()
 
         // Board
         case "Board: Move":
