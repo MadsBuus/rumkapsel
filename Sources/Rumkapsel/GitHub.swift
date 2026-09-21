@@ -279,6 +279,10 @@ final class GitHubResolver {
         var updated: [Int: Date] = [:]
         /// Who counted: the board, or git history.
         var source: Source = .git
+        /// Counted by an exact diff between branches or from a tag, not estimated from merge dates.
+        var exact = false
+        /// When the count began, before its fetch.
+        var at = Date.distantPast
     }
     private var cargo: [String: Cargo] = [:]
     /// Each repository's pipeline, as its branches said at the last release read.
@@ -926,6 +930,7 @@ final class GitHubResolver {
         lock.unlock()
         trace("ask releases \(repoRoot)")
         queue.async { [self] in
+            let countBegan = Date()
             var found: [ReleasePR] = []
             let cfg = ConfigStore.shared.current
             // Which of the configured branches this repository actually has.
@@ -1077,6 +1082,8 @@ final class GitHubResolver {
             let pipelineChanged = pipelines[repoRoot] != detected
             let changed = previous != found || cargo[repoRoot] != newCargo || pipelineChanged
             pipelines[repoRoot] = detected
+            newCargo.exact = exact
+            newCargo.at = countBegan
             cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)

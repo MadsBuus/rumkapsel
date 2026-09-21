@@ -182,6 +182,17 @@ enum WorkTests {
             expect(!r.quiet, "a change is news")
         }
 
+        test("history going out is not news either") {
+            let r = WorkBook.Record(id: 1, repo: "rumkapsel")
+            _ = r.hear(Signal(stage: .stored, by: .pulls, at: at(0)))
+            let t = r.hear(Signal(stage: .shipped, by: .git, at: at(1)))
+            expect(t?.to == .shipped && t?.wasQuiet == true, "found merged at launch, then found shipped: quiet all the way")
+            let live = WorkBook.Record(id: 2, repo: "rumkapsel")
+            _ = live.hear(Signal(stage: .ready, by: .pulls, at: at(0)))
+            _ = live.hear(Signal(stage: .stored, by: .pulls, at: at(1)))
+            expect(live.hear(Signal(stage: .shipped, by: .git, at: at(2)))?.wasQuiet == false, "work seen merging and then shipping is news")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
