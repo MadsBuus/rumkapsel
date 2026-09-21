@@ -517,8 +517,9 @@ extension StationController {
     }
 
     func open(named raw: String?) {
-        if let raw, raw.hasPrefix("rocket:"), let u = URL(string: String(raw.dropFirst(7).split(separator: "|", maxSplits: 1).first ?? "")) {
-            DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+        if let raw, raw.hasPrefix("rocket:") {
+            let link = String(raw.dropFirst(7).split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+            if let u = URL(string: link), u.scheme?.hasPrefix("http") == true { DispatchQueue.main.async { NSWorkspace.shared.open(u) } }
             return
         }
         guard let raw, raw.hasPrefix("room:") || raw.hasPrefix("box:") else { return }

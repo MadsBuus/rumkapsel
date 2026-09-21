@@ -701,9 +701,17 @@ final class World {
     /// A rocket for work waiting with no release opened for it yet: what is stored since the last one went.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
-        let label = "rocket:|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
+        let label = "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
         return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: true, cargo: n,
                               command: .rocket(stage, station: station.name, repo: repo))
+    }
+
+    /// GitHub's comparison of what has shipped with the trunk: from the newest tag, else the production branch.
+    func waitingURL(repo: String) -> String {
+        guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return "" }
+        let p = github.pipeline(repoRoot: root)
+        let shipped = github.releases(repoRoot: root)?.first(where: \.tag)?.head ?? p.production
+        return shipped.isEmpty ? "https://github.com/\(owner)" : "https://github.com/\(owner)/compare/\(shipped)...\(p.trunk)"
     }
 
     /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
