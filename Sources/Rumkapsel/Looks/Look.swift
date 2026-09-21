@@ -45,6 +45,19 @@ protocol Look {
     var drawsBerthHexes: Bool { get }
     /// How high off the floor those hexagons lie, above whatever the look has floored the bay with.
     var berthHexHeight: Double { get }
+    /// Whether the bay hangs open in space: the berths are floor to themselves, and the only floor around
+    /// them is the lane by the hatch and the lane behind, which a carrier stands in. A look whose station
+    /// is on the ground says no and floors the whole bay.
+    var bayOpenToSpace: Bool { get }
+    /// The hull standing at the airlock's outer door, `width` wide across it and leaning back over the
+    /// station as it rises. Placed at the door's own plane, facing the bay, and given `depth` as the room it
+    /// has to lean into — the run from that door to the inner one, which it must fade out within. A look
+    /// whose station stands on the ground is not a hull and returns nil. `doorway` is how wide the opening
+    /// for the outer door must be cut, so the frame is never buried by the solid foot of the wall.
+    func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode?
+    /// How deep the outer door's frame must be built to sit in that hull without a gap, given the same run.
+    /// Zero where the look draws no hull and the frame may stay as thin as it likes.
+    func hullDoorReveal(depth: Double) -> Double
 
     // MARK: the output: decon, storage, the deck and the pad
 
@@ -139,6 +152,11 @@ extension Look {
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
     var drawsBerthHexes: Bool { true }
     var berthHexHeight: Double { 0.009 }
+    var bayOpenToSpace: Bool { true }
+    func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode? {
+        Classic.hullWall(width: width, depth: depth, doorway: doorway)
+    }
+    func hullDoorReveal(depth: Double) -> Double { Classic.hullDoorReveal(depth: depth) }
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? { nil }
     func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }

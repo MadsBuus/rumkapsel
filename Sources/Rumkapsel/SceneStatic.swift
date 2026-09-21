@@ -222,7 +222,25 @@ extension StationController {
             // The input and the output: a look's set pieces, or tiles.
             let input = Looks.current.input(station)
             if let input { addSetPiece(input, station) } else {
-                for c in station.hangarCells {
+                // With the bay open to space its floor is one apron by the hatch, and everything past it is
+                // the hexes, which are their own floor, and the space between them. The apron is a strip
+                // rather than a row of tiles because it has to stop short of the nearest berth: it runs from
+                // the bay's own edge to a clear gap before the first hex's face, so the two never touch.
+                let open = Looks.current.bayOpenToSpace
+                if open, let near = station.hangarCells.map(\.y).min(), let front = station.hangarSlots.map(\.y).min() {
+                    let edge = Double(near) - 0.5
+                    let face = front - Station.hexRadius * cos(.pi / 6)   // flats face the hatch, so the apothem
+                    let deep = max(0.35, face - edge - 0.14)
+                    let xs = station.hangarCells.map(\.x)
+                    let apron = SCNNode(geometry: SCNPlane(width: Double(xs.max()! - xs.min()! + 1), height: deep))
+                    apron.geometry!.firstMaterial = flat(NSColor(rgb: Props.hullPlate))
+                    apron.opacity = 0.8
+                    apron.eulerAngles.x = -.pi / 2
+                    apron.position = v3(station.offset.x + Double(xs.min()! + xs.max()!) / 2, 0, station.offset.y + edge + deep / 2)
+                    apron.name = "hangar:" + station.name
+                    staticRoot.addChildNode(apron)
+                }
+                for c in station.hangarCells where !open {
                     addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(Colors.hangar), name: "hangar:" + station.name)
                 }
                 for c in station.airlockCells {
@@ -237,7 +255,12 @@ extension StationController {
                 let xs = station.airlockCells.map(\.x), ys = station.airlockCells.map(\.y)
                 let cx = station.offset.x + Double(xs.min()! + xs.max()!) / 2
                 let width = Double(xs.max()! - xs.min()! + 1) - 0.1   // posts in the walls
-                for (edge, tint) in [(Double(ys.min()!) - 0.46, NSColor(rgb: (0.55, 0.6, 0.72))), (Double(ys.max()!) + 0.46, NSColor(rgb: (0.75, 0.62, 0.25)))] {
+                // The outer frame is built deep enough to reach through the hull's thickness, because the
+                // wall's face slips back as it climbs and a frame in one plane would gape above the lintel
+                // and below the sill. The inner one opens onto the corridor and stays thin.
+                let reveal = Looks.current.hullDoorReveal(depth: Double(ys.max()! - ys.min()! + 1))
+                for (edge, tint, outer) in [(Double(ys.min()!) - 0.46, NSColor(rgb: (0.55, 0.6, 0.72)), false),
+                                            (Double(ys.max()!) + 0.46, NSColor(rgb: (0.75, 0.62, 0.25)), true)] {
                     let door = SCNNode()
                     let frame = lit(tint)
                     let spans = (xs.min()!...xs.max()!).map { station.offset.x + Double($0) - cx }
@@ -257,12 +280,43 @@ extension StationController {
                     pane.name = "pane"
                     door.addChildNode(pane)
                     door.position = v3(cx, 0, station.offset.y + edge)
+                    if outer, reveal > 0 { door.scale.z = CGFloat(reveal / 0.08) }   // the posts' own depth
                     door.name = "airlockdoor:" + station.name
                     staticRoot.addChildNode(door)
+                }
+                // As wide as the bay it faces, and leaning back into the chamber's own run.
+                let bay = station.hangarCells.map(\.x)
+                let across = Double((bay.max() ?? xs.max()!) - (bay.min() ?? xs.min()!) + 1)
+                if let hull = Looks.current.hullWall(width: across, depth: Double(ys.max()! - ys.min()! + 1), doorway: width) {
+                    hull.position = v3(cx, 0, station.offset.y + Double(ys.max()!) + 0.54)
+                    hull.name = "hull:" + station.name
+                    staticRoot.addChildNode(hull)
                 }
             }
             for c in station.padCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
+            }
+            // The pad's east edge, where the yard opens to space: the same wall the airlock's outer door
+            // stands in, given the airlock's own run so the two are one piece of hull, turned a quarter so
+            // it leans west over the pad and the station. Nothing comes through this stretch, so no door.
+            if station.hasPad, output == nil, let east = station.padCells.map(\.x).max(),
+               let y0 = station.padCells.map(\.y).min(), let y1 = station.padCells.map(\.y).max(),
+               let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Double(Station.airlockLength), doorway: 0) {
+                hull.eulerAngles.y = -.pi / 2
+                hull.position = v3(station.offset.x + Double(east) + 0.56, 0, station.offset.y + Double(y0 + y1) / 2)
+                hull.name = "hull:" + station.name
+                staticRoot.addChildNode(hull)
+            }
+            // The pad's east edge, where the yard opens to space: the same wall the airlock's outer door
+            // stands in, given the airlock's own run so the two are one piece of hull, turned a quarter so
+            // it leans west over the pad and the station rather than north. No door in this stretch.
+            if station.hasPad, output == nil, let east = station.padCells.map(\.x).max(),
+               let y0 = station.padCells.map(\.y).min(), let y1 = station.padCells.map(\.y).max(),
+               let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Double(Station.airlockLength), doorway: 0) {
+                hull.eulerAngles.y = -.pi / 2
+                hull.position = v3(station.offset.x + Double(east) + 0.56, 0, station.offset.y + Double(y0 + y1) / 2)
+                hull.name = "hull:" + station.name
+                staticRoot.addChildNode(hull)
             }
             for c in station.storageCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
