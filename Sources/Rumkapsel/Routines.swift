@@ -109,6 +109,50 @@ enum Routines {
         return m
     }
 
+    // MARK: what a body wears
+
+    /// Everything a body wears or holds, all of it together.
+    ///
+    /// An outfit is complete: every prop has a value in it, so putting one on replaces the lot.
+    /// That is the whole point of it. Props used to be switched on where an activity began and
+    /// switched off where that activity was thought to end — and an activity has more ways to end
+    /// than the one that was thought of, so the leftovers were worn into the next one: the bath's
+    /// pixels over an office desk, a towel long after the drying, the pallet's rod at a console.
+    /// Nothing is carried over now, because nothing persists: the kit is worked out again from what
+    /// the body is doing on every frame, and there is nothing left to forget to take off.
+    struct Outfit: Equatable {
+        /// What is in the hands, if anything.
+        var tool: Minion.Tool?
+        /// The bath's pixels, for a body under the water and nowhere else.
+        var pixels = false
+        /// The towel off the rail, for as long as the drying lasts.
+        var towel = false
+    }
+
+    /// The kit for what this body is doing now. `errand` is what the pallet errand puts in the
+    /// hands, which only the simulation can say, and `onErrand` whether there is one at all.
+    static func outfit(_ m: Minion, at clock: Double, errand: Minion.Tool?, onErrand: Bool) -> Outfit {
+        var kit = Outfit()
+        kit.pixels = m.bathing && m.phaseKind == .act && m.path.isEmpty
+        kit.towel = m.drying
+        kit.tool = hands(m, at: clock, errand: errand, onErrand: onErrand)
+        return kit
+    }
+
+    /// What the hands hold, in the order the floor settles it: an errand first, then the cone's
+    /// rota, then a fixture, then the day's work, then a book on the couch, and nothing otherwise.
+    private static func hands(_ m: Minion, at clock: Double, errand: Minion.Tool?, onErrand: Bool) -> Minion.Tool? {
+        if onErrand { return errand }
+        let resting = m.path.isEmpty && m.state == .settled
+        let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
+            && !m.exercising && !m.bathing && !m.onJob
+        if working, !m.pyramids.isEmpty, m.nearCone { return coneTools[m.toolSlot(at: clock)] }
+        if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil { return nil }   // nothing in the hands on a fixture
+        if working { return tool(for: m.activity) }
+        if m.place == .lounge, resting, m.couch != nil { return .tablet }   // reading on the couch
+        return nil
+    }
+
     // MARK: waiting on you
 
     /// The impatient little hop of a body waiting on you, in its first minute.

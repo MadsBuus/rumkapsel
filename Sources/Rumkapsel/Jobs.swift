@@ -454,8 +454,7 @@ extension StationController {
         } else if !wanted, let m = current {
             m.busy = false
             m.activity = .waiting
-            m.setTool(nil)
-            send(m, to: .lounge)
+            send(m, to: .lounge)   // the outfit drops the scanner: nothing here has to remember to
         }
     }
 }

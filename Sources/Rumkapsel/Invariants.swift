@@ -295,6 +295,22 @@ final class Invariants {
                     flag("two never share a bed", pair(m.id, other.id), "bed \(a)")
                 }
             }
+            // A prop belongs to the activity that put it there. The outfit is worked out afresh
+            // every frame, which is what makes that true; these say it is still true. The first
+            // catches anything that reaches past the outfit to a prop of its own accord, or a
+            // frame that skipped a body. The second catches the fault that started this: a visit's
+            // order carried out of the room it belongs to, which is how the bath's pixels came to
+            // be drawn over an office desk.
+            let kit = c.kit(m)
+            if m.showsBathPixels != kit.pixels || m.showsTowel != kit.towel || m.holding != kit.tool {
+                flag("a prop belongs to the activity that put it there", m.id,
+                     "wearing pixels \(m.showsBathPixels), towel \(m.showsTowel), \(m.holding.map { "\($0)" } ?? "empty-handed")"
+                     + " while \(m.words) wants pixels \(kit.pixels), towel \(kit.towel), \(kit.tool.map { "\($0)" } ?? "empty-handed")")
+            }
+            if m.bathing, m.path.isEmpty, let st = c.fleet.stations[m.station], !st.cells(of: .bath).contains(m.cell) {
+                flag("a visit's order never leaves its room", m.id,
+                     "washing at \(m.cell.x),\(m.cell.y), which is not the bath")
+            }
             // A visit lasts its whole time.
             if case .bath = m.current?.kind, let cur = m.current, m.phaseKind == .settle, m.phaseUntil > 0 {
                 bath[m.id] = (cur.id, m.phaseUntil)

@@ -168,6 +168,12 @@ extension StationController {
     /// Every worker, once a frame. The simulation walks it and runs its commands; the scene runs the
     /// pallet errands, whose pallet is still a node, keeps the crate on the arms in step with the body's
     /// load, and draws the pose the body says it holds.
+    /// What a body is wearing this frame. The pallet errand is the one prop the body cannot work
+    /// out for itself, so it is handed in; everything else follows from the body.
+    func kit(_ m: Minion) -> Routines.Outfit {
+        Routines.outfit(m, at: clock, errand: errandTool(m), onErrand: simulation.palletErrand(of: m) != nil)
+    }
+
     func tickMinions(dt: Double) {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
@@ -179,7 +185,7 @@ extension StationController {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
                 // draw it anywhere while it rises. The mirror below still runs.
-                m.mirror(station: station, clock: clock, dt: dt)
+                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))
                 continue
             case .walking, .wondering: break
             case .there:
@@ -190,12 +196,11 @@ extension StationController {
                 }
             }
             mirrorLoad(m)
-            if simulation.palletErrand(of: m) != nil {
-                m.setTool(errandTool(m))
-                if case .pushPallet = m.current?.kind, m.path.isEmpty { drawPusher(m, station: station) }
+            if simulation.palletErrand(of: m) != nil, case .pushPallet = m.current?.kind, m.path.isEmpty {
+                drawPusher(m, station: station)
             }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
-            m.mirror(station: station, clock: clock, dt: dt)   // the picture catches up whatever else this frame skipped
+            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
             pose(m, station: station, dt: dt)
         }
@@ -262,8 +267,8 @@ extension StationController {
         switch cue {
         case .flush(_, let bowl, let front): flush(at: bowl, front: front)
         case .fidget(let id): minions[id]?.fidget()
-        case .towel(let id, let station, let taken):
-            minions[id]?.setTowel(taken)
+        case .towel(_, let station, let taken):
+            // Only the rail's own towel: the one on the shoulders is drawn from the body's drying.
             staticRoot.childNode(withName: "towel:" + station, recursively: true)?.isHidden = taken
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
@@ -359,7 +364,6 @@ extension StationController {
             if atCone {
                 let slot = m.toolSlot(at: clock)
                 let cone = m.pyramids.last
-                m.setTool(Routines.coneTools[slot])
                 let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
                 if let pitch = r.hammerPitch { m.hammerPivot?.eulerAngles.x = CGFloat(pitch) }
@@ -383,7 +387,6 @@ extension StationController {
                 }
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working && !(m.place == .lounge && resting && m.couch != nil) && simulation.palletErrand(of: m) == nil { m.setTool(nil) }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
@@ -392,7 +395,7 @@ extension StationController {
                 m.smoothFacing = atan2(toTable.x, toTable.y)
                 tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05   // sat back on a couch, or standing at the table
                 roll = sin(t * 1.3) * 0.04
-                if m.couch != nil { m.setTool(.tablet); tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
+                if m.couch != nil { tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
                 // Two standing near each other talk: they turn to each other and nod in turn.
                 let other = minions.values.first { $0.id != m.id && $0.station == m.station && $0.place == .lounge && $0.couch == nil && $0.isResting && !$0.busy && $0.path.isEmpty && length($0.pos - m.pos) < 1.4 }
                 if m.couch == nil, let other {
@@ -417,7 +420,6 @@ extension StationController {
                 }
             }
             if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
-                m.setTool(nil)   // nothing in the hands on a fixture
                 let props = gymProps[station.name]
                 switch kind {
                 case .treadmill:   // running on the spot, leaning into the rail
@@ -434,7 +436,6 @@ extension StationController {
                 }
             }
             if working && !atCone {
-                m.setTool(Routines.tool(for: m.activity))
                 let r = Routines.working(m.activity, t: t, dt: dt, clock: clock)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
                 if let lit = r.scanner { m.blinkScanner(lit) }

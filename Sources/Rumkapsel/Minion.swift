@@ -369,10 +369,9 @@ final class Minion: Body {
     /// This is not work the body does — it is the picture catching up to the facts — so it runs for
     /// every body every frame, whatever else that frame skips. It lives here rather than in the scene,
     /// so the gallery and the station draw a minion the one way.
-    func mirror(station: Station, clock: Double, dt: Double) {
+    func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit) {
         setPose(currentPose(at: clock))
-        // What is drawn follows the order in hand, never a flag the last order left behind.
-        setStatic(bathing && phaseKind == .act && path.isEmpty, frame: Int(clock * 12))
+        wear(outfit, clock: clock)
         let resting = path.isEmpty && state == .settled
         let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0   // nobody hops in the shower
         // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
@@ -381,6 +380,19 @@ final class Minion: Body {
         shadow.position.y = CGFloat(0.003 - hop)   // the shadow stays on the floor while the body hops
         node.opacity = opacity
     }
+
+    /// Puts on the whole kit at once. The one place a prop is turned on or off, so no prop can
+    /// survive a change of activity: whatever is not in this outfit comes off.
+    private func wear(_ o: Routines.Outfit, clock: Double) {
+        setTool(o.tool)
+        setStatic(o.pixels, frame: Int(clock * 12))
+        setTowel(o.towel)
+    }
+
+    /// What the figure is showing, for the rule that a prop belongs to the activity that put it there.
+    var showsBathPixels: Bool { staticNode != nil }
+    var showsTowel: Bool { towelNode != nil }
+    var holding: Tool? { tool }
 
     /// Puts the figure into a pose. The only thing that moves the body node, so no two poses can fight
     /// over it, and the one place to look for what any of them does.
