@@ -210,6 +210,38 @@ enum SimulationTests {
             } else { expect(false, "the carry is still a carry") }
         }
 
+        test("every way in and out of the bay: a ship comes from outside, never touches the floor, and ends on its berth") {
+            for arrival in Arrival.allCases {
+                for side in [1.0, -1.0] {
+                    let at = SIMD3(3.0, 0, 9.0), rest = Station.restOverCrate
+                    let legs = arrivalLegs(arrival, at: at, rest: rest, side: side)
+                    let path = [legs.start] + legs.approach.points + legs.descend.points
+                    expect(legs.start.y > 3, "\(arrival) starts high: \(legs.start.y)")
+                    expect(legs.start.z > at.z, "\(arrival) comes in from outside the bay, not over the station: \(legs.start.z) against \(at.z)")
+                    let down = legs.descend.last
+                    expect(abs(down.x - at.x) < 0.01 && abs(down.z - at.z) < 0.01 && abs(down.y - rest) < 0.01,
+                           "\(arrival) ends over its berth: \(down.x),\(down.y),\(down.z)")
+                    for p in path { expect(p.y >= rest - 0.01, "\(arrival) keeps its skids off the floor: \(p.y)") }
+                    for (a, b) in zip(path, path.dropFirst()) {
+                        expect(b.y <= a.y + 0.01, "\(arrival) only ever comes down: \(a.y) then \(b.y)")
+                    }
+                    let out = departureLegs(.climb, at: at, rest: rest, side: side)
+                    let away = ([SIMD3(at.x, rest, at.z)] + out.rise.points + out.leave.points)
+                    for (a, b) in zip(away, away.dropFirst()) {
+                        expect(b.y >= a.y - 0.01, "a climb only ever goes up: \(a.y) then \(b.y)")
+                    }
+                }
+            }
+            for departure in Departure.allCases {
+                let at = SIMD3(3.0, 0, 9.0)
+                let out = departureLegs(departure, at: at, rest: Station.restOnSkids, side: 1)
+                expect(out.leave.last.y > 5, "\(departure) leaves high: \(out.leave.last.y)")
+                expect(out.leave.last.z > at.z, "\(departure) leaves outward, not over the station: \(out.leave.last.z)")
+                let away = [SIMD3(at.x, Station.restOnSkids, at.z)] + out.rise.points + out.leave.points
+                for p in away { expect(p.y >= Station.restOnSkids - 0.01, "\(departure) keeps its skids off the floor: \(p.y)") }
+            }
+        }
+
         test("a carrier left off the floor with a crate on its arms steps back onto it and delivers") {
             let (sim, station, m) = fixture()
             station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")

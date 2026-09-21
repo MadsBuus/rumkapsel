@@ -13,7 +13,8 @@ station's name and built outward as rooms need it, so it never re-plans and two 
 station draw the same one. The monolith is the ancient artefact the game's minions researched for new
 skills. Here it stands for the outside world: sessions that search the web or talk to other systems send
 their subagents to it, and it answers with cones of light, never lightning. The **bay** at the south
-arm's end is outside: shuttles land there and nowhere else. The **airlock** sits in the arm's own line
+arm's end is outside: shuttles land there and nowhere else, on a honeycomb of berths, and the berth a ship is
+flying into burns in its repository's colour until the crate on it has been carried in. The **airlock** sits in the arm's own line
 between its end and the bay, a chamber one wide and two deep with a rectangular inner door and a
 rectangular hatch, so hallway, chamber and bay read as one straight way out. Everyone who arrives or leaves goes through it, and a leaver waits
 inside for the cycle before stepping out. Nobody goes to the bay for any other reason: it is outside. Space walks, visits to other stations and other ships docking are its future. The **yard** along the west side is three
@@ -70,7 +71,9 @@ since real stations mandate both.
 - A carrier with carries queued behind it hurries: quicker on its feet, the same lift and the same
   set-down, and it says so.
 - A pallet is pushed, from behind, along one axis at a time, slowly, and only where a pallet fits.
-- A shuttle lands only in the bay and leaves before anyone walks under it. A rocket leaves only
+- A shuttle lands only in the bay and leaves before anyone walks under it. No two come in alike: each
+  draws its own way down — a high hover, a low sweep across the bay's mouth, a dive, a long shallow final —
+  and its own way out, and its nose follows the line it is flying the whole way. A rocket leaves only
   with its cargo aboard.
 - A rocket is loaded at its foot: the carrier walks up to the hull, an arm's length off, and sets
   the crate down on the loading hatch at its base; the hatch takes the crate up into the hold, the

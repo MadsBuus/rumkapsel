@@ -5,6 +5,7 @@
 // the same rooms in the same order lay them out identically, and a room's shape follows its key.
 
 import Foundation
+import simd
 
 enum LayoutTests {
     private static var failures = 0
@@ -176,6 +177,26 @@ enum LayoutTests {
                 let yard = Set(a.padCells + a.deckCells + a.storageCells + a.deconCells)
                 for (k, r) in a.rooms { expect(!r.cells.contains(where: yard.contains), "\(k) keeps off the yard") }
                 expect(yard.isDisjoint(with: a.corridorCells), "the hallway keeps off the yard")
+            }
+            test("\(theme.title): the bay's berths are a honeycomb on its floor, each with a lane cell to wait in") {
+                let a = fresh()
+                for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+                let berths = a.hangarSlots, bay = Set(a.hangarCells)
+                expect(berths.count >= 5, "the bay takes a row of ships and more: \(berths.count) berths")
+                for (i, at) in berths.enumerated() {
+                    let onFloor = bay.contains(Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded())))
+                    expect(onFloor, "berth \(i) stands on the bay's own floor: \(at.x),\(at.y)")
+                    for (j, other) in berths.enumerated() where j > i {
+                        expect(simd_distance(at, other) > Station.hive - 0.01, "berths \(i) and \(j) keep a ship's width apart: \(simd_distance(at, other))")
+                    }
+                    let stand = a.bayStand(slot: i)
+                    expect(bay.contains(stand), "berth \(i)'s carrier waits on the bay floor: \(stand.x),\(stand.y)")
+                    let p = SIMD2(Double(stand.x), Double(stand.y))
+                    expect(simd_distance(p, at) < 1.3, "berth \(i)'s carrier waits within reach of its crate: \(simd_distance(p, at))")
+                    for (j, other) in berths.enumerated() {
+                        expect(simd_distance(p, other) > Station.bayKeepOff, "berth \(i)'s carrier stands out from under berth \(j): \(simd_distance(p, other))")
+                    }
+                }
             }
             test("\(theme.title): the airlock runs through the hull and the bay hangs outside, touching the station only at the hatch") {
                 let a = fresh()

@@ -3,6 +3,12 @@
 import AppKit
 import SceneKit
 
+/// What one berth's hexagon shows: whose colour it burns in, and whether a ship is still on its way to it.
+struct BerthLight: Equatable {
+    let color: RGB
+    let beat: Bool
+}
+
 extension StationController {
     /// Tells each station what is standing on its floor, so walks thread between the props.
     func refreshObstacles() {
@@ -379,21 +385,77 @@ extension StationController {
         refreshObstacles()
     }
 
+    /// A hexagon on the floor of every berth in the bay, packed as the pad's are. They are grey while the
+    /// bay is empty; `updateBerths` lights the ones being flown into.
+    func rebuildBerths() {
+        if berthRoot.parent == nil { propRoot.addChildNode(berthRoot) }
+        berthRoot.childNodes.forEach { $0.removeFromParentNode() }
+        berthHexes = [:]
+        guard Looks.current.drawsBerthHexes else { return }
+        for station in fleet.stations.values where station.hasHangar {
+            var hexes: [SCNNode] = []
+            for at in station.hangarSlots {
+                let hex = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.bayRadius - 0.06, outerRadius: Station.bayRadius, height: 0.008)))
+                hex.geometry!.firstMaterial = flat(Self.berthIdle)
+                hex.opacity = 0.25
+                hex.position = v3(station.offset.x + at.x, Looks.current.berthHexHeight, station.offset.y + at.y)
+                hex.name = "bay:" + station.name
+                berthRoot.addChildNode(hex)
+                hexes.append(hex)
+            }
+            berthHexes[station.name] = hexes
+        }
+        berthLit = [:]
+    }
+
+    /// The berth a ship is flying into takes the colour of whoever is coming and pulses until it is down;
+    /// it holds that colour steady while the ship unloads and a crate of its waits to be fetched.
+    func updateBerths() {
+        var lit: [String: BerthLight] = [:]
+        for f in simulation.flights {
+            guard case .flight(_, _, let slot) = f.command.kind else { continue }
+            let coming = f.phaseKind == .approach || f.phaseKind == .descend
+            lit["\(f.station)|\(slot)"] = BerthLight(color: fleet.color(forRepo: f.repo), beat: coming)
+        }
+        // An order stands until its crate has been walked in, so its berth stays lit while the crate waits.
+        for order in world.truth.deliveries.values {
+            let key = "\(order.station)|\(order.slot)"
+            guard lit[key] == nil, let station = fleet.stations[order.station], let room = station.rooms[order.roomKey] else { continue }
+            lit[key] = BerthLight(color: room.color, beat: false)
+        }
+        guard lit != berthLit else { return }
+        berthLit = lit
+        for (name, hexes) in berthHexes {
+            for (i, hex) in hexes.enumerated() {
+                let light = lit["\(name)|\(i)"]
+                hex.removeAllActions()
+                hex.geometry?.firstMaterial?.diffuse.contents = light.map { NSColor($0.color) } ?? Self.berthIdle
+                hex.opacity = light == nil ? 0.25 : 0.75
+                if light?.beat == true {
+                    hex.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.95, duration: 0.5), .fadeOpacity(to: 0.35, duration: 0.6)])))
+                }
+            }
+        }
+    }
+
+    /// An unlit hexagon, the colour the bay and the pad are marked out in.
+    static let berthIdle = NSColor(rgb: (0.45, 0.47, 0.54))
+
     /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it.
-    func rebuildDueRings() {
-        if ringRoot.parent == nil { propRoot.addChildNode(ringRoot) }
-        ringRoot.childNodes.forEach { $0.removeFromParentNode() }
+    func rebuildPadHexes() {
+        if padHexRoot.parent == nil { propRoot.addChildNode(padHexRoot) }
+        padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values where station.hasPad {
             let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
                 world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
             })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.padRadius - 0.06, outerRadius: Station.padRadius, height: 0.008)))
-                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? NSColor(rgb: (0.45, 0.47, 0.54)))
+                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? Self.berthIdle)
                 pad.opacity = held[i] == nil ? 0.25 : 0.7
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
                 pad.name = "pad:" + station.name
-                ringRoot.addChildNode(pad)
+                padHexRoot.addChildNode(pad)
             }
         }
     }

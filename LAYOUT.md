@@ -59,8 +59,11 @@ replaces it and in what order.
 The compass: **south** to the airlock and bay, **west** to the yard, **north and east** free for rooms and
 alleys. Same roles as today, so the sources, the ledger and the scenarios keep their meaning.
 
-- **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: five wide
-  by three deep beyond it, three shuttle slots two tiles apart on the back row, a standing row for carriers, the front row the way in.
+- **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: seven wide
+  by four deep beyond it, nine berths on the honeycomb through its middle (`Station.baySlotOffsets`, five in the
+  row toward the hatch and four set between them behind), the row by the hatch and the row behind them the lanes
+  carriers walk and wait in. `bayStand` picks a berth's lane cell as the nearest bay cell clear of every berth's
+  own ground, so nobody ever waits under a ship.
 - **Yard**: pad, deck, storage and decon keep their order along the west arm and are **six wide** (`Station.yardWide`),
   four deep, decon 6x2 — four was too narrow once a pallet lived there, since two of its eight crate cells went
   to the pallet's lane and the way past the slab came down to a single stride. The yard's internal aisle stays

@@ -84,19 +84,19 @@ struct KingdomLook: Look {
         for n in [site.blob(lock, grow: 0.0, Self.stoneEdge, y: -0.02), site.blob(lock, grow: -0.1, Self.stone, y: 0.001)] { if let n { piece.add(n, as: .airlock) } }
         let xs = station.hangarCells.map(\.x), zs = station.hangarCells.map(\.y)
         let west = Double(xs.min()!), east = Double(xs.max()!), front = Double(zs.min()!), back = Double(zs.max()!)
-        // A jetty out from the quay beside every landing slot, where its ship moors.
+        // A jetty out from the quay beside every mooring, where its ship draws up.
         for slot in station.hangarSlots {
             let jetty = SCNNode()
-            let deck = SCNNode(geometry: SCNBox(width: 0.34, height: 0.05, length: 1.7, chamferRadius: 0))
+            let deck = SCNNode(geometry: SCNBox(width: 0.3, height: 0.05, length: 1.0, chamferRadius: 0))
             deck.geometry!.firstMaterial = lit(Self.planks)
             jetty.addChildNode(deck)
-            for (dx, dz) in [(-0.14, -0.7), (0.14, -0.7), (-0.14, 0.1), (0.14, 0.1), (-0.14, 0.8), (0.14, 0.8)] {
+            for (dx, dz) in [(-0.12, -0.4), (0.12, -0.4), (-0.12, 0.4), (0.12, 0.4)] {
                 let post = SCNNode(geometry: SCNBox(width: 0.06, height: 0.34, length: 0.06, chamferRadius: 0))
                 post.geometry!.firstMaterial = lit(Self.wood)
                 post.position = v3(dx, -0.14, dz)
                 jetty.addChildNode(post)
             }
-            jetty.position = v3(site.offset.x + slot.x + 0.3, 0.0, site.offset.y + back + 1.3)
+            jetty.position = v3(site.offset.x + slot.x + 0.55, 0.0, site.offset.y + slot.y)
             piece.add(jetty, as: .bay)
         }
         // Lanterns at the quay's landward corners, goods beside them, and a lighthouse on rocks off the cove's west side.
@@ -180,6 +180,9 @@ struct KingdomLook: Look {
         }
         return cart
     }
+
+    /// The moorings are jetties on the quay, not hexagons painted on a floor.
+    var drawsBerthHexes: Bool { false }
 
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? {
         let s = leg.slot, t = leg.progress

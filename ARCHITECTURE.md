@@ -160,7 +160,10 @@ drawn once, in the hands: the yard it left leaves it out, and the yard it is bou
 without drawing it.
 
 Shuttles, rockets and the crew run commands too (`Ships.swift`). A `Flight` flies one `.flight` command —
-`bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave, and the unload writes truth:
+`bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave. Each phase is one
+`FlightLeg`: the waypoints of that leg, its seconds and its easing, sampled as a rounded-off curve, so an
+`Arrival` and a `Departure` drawn per ship are the whole of how it flies. The ship's heading is the tangent
+of that curve, which is what the scene turns it onto. The unload writes truth:
 the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
 go from approach to lift. A `RocketJob`, one per station and repository, runs `.rocket` stages that only ever
 move forward: stand by, load, steam, launch. `World.applyReleases` reads the launch queue and the open

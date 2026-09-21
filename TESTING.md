@@ -21,7 +21,7 @@ cannot find the Sparkle framework beside it; the app bundle is fine either way. 
 the scenarios whose name contains a word; `--scenarios-verbose` prints each
 scenario's whole log, ledger and bodies. For a look at the picture, `--simulator --snapshot out.png
 --simulate "Target: web#455,Open PR,Merge PR" --delay 19` renders a frame after those presses, without
-taking the keyboard. `--focus work --look bath --zoom 5` frames one room, `--follow leo` keeps the camera on
+taking the keyboard. `--focus work --look bath --zoom 5` frames one room (or a fixed area: `bay`, `pad`, `deck`, `storage`, `decon`), `--follow leo` keeps the camera on
 one minion (by id, the word after its colon, or its home's name), and `--frames 80 --every 0.1` takes a strip of
 numbered pictures from the delay on, for a contact sheet or a gif.
 

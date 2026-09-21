@@ -241,28 +241,65 @@ final class Station {
     var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
     /// The hatch: where the chamber's outer cell opens onto the bay.
     var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
-    /// The bay: five wide and three deep across the far end of the airlock. The ships land on the back row,
-    /// two tiles apart, so nobody at one slot is ever within a tile of the next; the middle row is where
-    /// a carrier stands to wait for its crate; the front row is the way in from the hatch.
+    /// The bay: seven wide and four deep across the far end of the airlock. The berths are the two rows
+    /// through its middle, a honeycomb of them; the row by the hatch and the row behind are the lanes a
+    /// carrier walks and waits in, one to each row of berths.
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
         let y = end.y + Station.airlockLength + 1   // past the airlock's hatch
-        return (-2...2).flatMap { dx in (0..<3).map { d in Cell(x: end.x + dx, y: y + d) } }
+        return (-3...3).flatMap { dx in (0..<4).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
     var hangarCenter: SIMD2<Double> {
         guard let end = plan.south.last else { return .zero }
-        return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2)
+        return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2.5)
     }
-    /// Landing slots across the middle of the bay, two tiles apart.
+    /// The honeycomb both the bay and the pad are set out on: berths and rocket spots a `hive` apart along
+    /// a row, the next row `hiveRow` behind it and set between them, and a hexagon of `hexRadius` drawn on
+    /// each. The hexagon's corners point along the rows' own line, so at `hive` apart its flats come within
+    /// a finger's breadth of its neighbour's without ever meeting.
+    static let hive = 1.3
+    static let hiveRow = 1.3 * 0.866
+    static let hexRadius = 0.70
+
+    /// A honeycomb's spots about the middle of the floor it is set out on, the front row first, each given
+    /// as a multiple of the spacing. `toward` is which way that front row lies: the hatch in the bay, the
+    /// deck on the pad.
+    static func honeycomb(front: [Double], back: [Double], toward: Double) -> [SIMD2<Double>] {
+        front.map { SIMD2($0 * hive, toward * hiveRow / 2) } + back.map { SIMD2($0 * hive, -toward * hiveRow / 2) }
+    }
+    /// How high a ship holds over its berth: one carrying a passenger sets down on its skids, one
+    /// carrying a crate stays high enough to lower it out from under itself.
+    static let restOnSkids = 0.24, restOverCrate = 0.55
+    /// A ship's own ground over its berth: nobody may stand this near one coming down, and no walk
+    /// crosses it while a ship is on it.
+    static let bayKeepOff = 0.62
+
+    /// Where the ships set down, relative to the bay's centre: five berths in the row toward the hatch,
+    /// four behind set between them.
+    static let baySlotOffsets = Station.honeycomb(front: [0, 1, -1, 2, -2], back: [0.5, -0.5, 1.5, -1.5], toward: -1)
+    /// How much floor a berth takes: the hexagon drawn on it reaches to its corners, and the rows are
+    /// `Station.hive` apart, so the berths pack as a honeycomb with a hand's breadth between them.
+    static let bayRadius = Station.hexRadius
+    /// The berths that fit the bay's floor, the ones by the hatch and in the middle first.
     var hangarSlots: [SIMD2<Double>] {
-        guard let end = plan.south.last else { return [] }
-        return [-2, 0, 2].map { SIMD2(Double(end.x + $0), Double(end.y + Station.airlockLength) + 2) }
+        guard hasHangar, let x0 = hangarCells.map(\.x).min(), let x1 = hangarCells.map(\.x).max(),
+              let y0 = hangarCells.map(\.y).min(), let y1 = hangarCells.map(\.y).max() else { return [] }
+        let c = hangarCenter, r = Station.bayRadius
+        return Station.baySlotOffsets.map { c + $0 }.filter { p in
+            p.x - r >= Double(x0) - 0.5 && p.x + r <= Double(x1) + 0.5 && p.y - r >= Double(y0) - 0.5 && p.y + r <= Double(y1) + 0.5
+        }
     }
-    /// Where a carrier stands to wait for a slot's crate: the row by the hatch, a tile in front of the slot.
+    /// Where a carrier stands to wait for a berth's crate: the nearest bay cell that is clear of every
+    /// berth's own ground, which puts the front row's carriers in the lane by the hatch and the back
+    /// row's in the lane behind, and never anybody under a ship.
     func bayStand(slot: Int) -> Cell {
-        guard let end = plan.south.last else { return coreCenter }
-        return Cell(x: end.x + (min(2, max(0, slot)) - 1) * 2, y: end.y + Station.airlockLength + 1)
+        let slots = hangarSlots
+        guard slot >= 0, slot < slots.count else { return coreCenter }
+        let at = slots[slot]
+        func offBy(_ c: Cell, _ p: SIMD2<Double>) -> Double { pow(Double(c.x) - p.x, 2) + pow(Double(c.y) - p.y, 2) }
+        let lanes = hangarCells.filter { c in slots.allSatisfy { offBy(c, $0) > pow(Station.bayKeepOff + 0.15, 2) } }
+        return (lanes.isEmpty ? hangarCells : lanes).min { offBy($0, at) < offBy($1, at) } ?? coreCenter
     }
     /// The yard sits along the station's west side in three 4x4 blocks: storage to the south-west,
     /// the test deck at the end of the west arm, and the launch pad to the north-west. `yardX0` is the
@@ -298,9 +335,8 @@ final class Station {
     var padCells: [Cell] { blocks.pad }
     /// Where rockets stand, relative to the pad's centre: a front row by the deck and a back row set
     /// between its rockets, as a honeycomb, so the way to every rocket's foot is clear.
-    static let padSlotOffsets: [SIMD2<Double>] = [SIMD2(0, 0.45), SIMD2(1.3, 0.45), SIMD2(-1.3, 0.45),
-                                                   SIMD2(0.65, -0.75), SIMD2(-0.65, -0.75), SIMD2(1.95, -0.75), SIMD2(-1.95, -0.75)]
-    static let padRadius = 0.56
+    static let padSlotOffsets = Station.honeycomb(front: [0, 1, -1], back: [0.5, -0.5, 1.5, -1.5], toward: 1)
+    static let padRadius = Station.hexRadius
     /// The pad's rocket spots that fit on its floor, nearest the front and the middle first.
     var padSlots: [SIMD2<Double>] {
         guard let x0 = padCells.map(\.x).min(), let x1 = padCells.map(\.x).max(), let y0 = padCells.map(\.y).min(), let y1 = padCells.map(\.y).max() else { return [padCenter] }
@@ -881,7 +917,7 @@ final class Fleet {
         let dir = AppSupport.root
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v22.json")
+        return dir.appendingPathComponent("fleet-v23.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {
