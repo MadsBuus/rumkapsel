@@ -289,8 +289,14 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         m.node.position = v3(p.x, 0, p.y)
         m.node.opacity = 1
         scene.rootNode.addChildNode(m.node)
+        bodies.append(m)
         return m
     }
+
+    /// Every body on the sheet, so their props can be beaten each frame. A tile that hands a body a tool
+    /// and never beats it shows an empty pair of hands: the prop arrives at nothing and waits to be
+    /// brought up.
+    private var bodies: [Minion] = []
 
     /// Puts a routine's beat onto a body, the way the station's tick puts it: the spin on the body,
     /// the tilt and roll on its head, the lean a step along its own facing.
@@ -726,6 +732,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         lastTime = time
         clock += dt
         for u in updaters { u(clock, dt) }
+        for m in bodies { m.stepFades(dt) }
         for (id, motion) in motions where motion.apply(at: clock) { motions[id] = nil }
         settle(by: 1 - exp(-dt * 10))
     }

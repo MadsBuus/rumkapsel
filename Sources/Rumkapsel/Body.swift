@@ -90,6 +90,11 @@ class Body {
     /// Getting into bed, which is the same moves in the opposite order: sitting on the edge, then
     /// stretching out along it.
     var beddingUntil = 0.0
+    /// Whether this body has actually got into the bunk: it has sat on the edge and swung its legs up.
+    /// A body standing at the bedside is not lying yet, however still it is — without this the pose is
+    /// read off the absence of both timers, which cannot tell "not started" from "done", and the body
+    /// counts as lying the instant its walk ends and slides onto the mattress on its back.
+    var beddedDown = false
     /// How much of either move is spent sitting on the edge, before stretching out or standing up.
     static let riseSit = 0.55
     /// A change of orders is visible: standing a beat, head up, before going.
@@ -183,7 +188,7 @@ class Body {
     /// moment it is roused, not when it finally sets off.
     var lying: Bool {
         if onBench { return true }
-        return risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
+        return beddedDown && risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
             && (activity == .sleeping || napping) && place == .quarters
     }
 

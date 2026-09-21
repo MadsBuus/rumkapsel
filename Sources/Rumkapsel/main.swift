@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     var notesWindow: NSWindow?
     var galleryWindow: NSWindow?
     var gallery: GalleryController?
+    var playbookWindow: NSWindow?
+    var playbook: PlaybookController?
     var simulatorWindow: NSWindow?
     var simulator: SimulatorController?
     /// A scripted run's heartbeat: see below.
@@ -145,6 +147,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
+        let playbookMode = args.contains("--playbook")
+        if playbookMode {
+            if args.contains("--entries") {
+                for e in Playbook.entries { print(e.name) }
+                exit(0)
+            }
+            openPlaybook()
+            if let i = args.firstIndex(of: "--entry"), args.count > i + 1, let k = Playbook.find(args[i + 1]) {
+                playbook?.start(k)
+            }
+        }
         if simulatorOnly { openSimulator() }
         // The simulator runs its own station, so the view flags have to reach that one too.
         if let sim = simulator {
@@ -197,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 let url = URL(fileURLWithPath: path)
                 let name = frames == 1 ? path : url.deletingPathExtension().path + String(format: "-%03d.", k) + url.pathExtension
                 if galleryMode { gallery?.snapshot(to: name) }
+                else if playbookMode { playbook?.snapshot(to: name) }
                 else if let sim = simulator { sim.snapshot(to: name) }
                 else { controller.snapshot(to: name) }
                 guard k + 1 == frames else { return }
@@ -342,6 +356,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     /// A station driven by hand: synthetic facts in, every event and command in the log.
+    @objc func openPlaybook() {
+        if playbookWindow == nil {
+            let size = NSSize(width: 1100, height: 720)
+            let sc = PlaybookController(frame: NSRect(origin: .zero, size: size))
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            w.title = "rumkapsel playbook"
+            w.contentView = sc.view
+            w.isReleasedWhenClosed = false
+            w.center()
+            playbook = sc
+            playbookWindow = w
+        }
+        if Scripted.run {
+            playbookWindow?.orderBack(nil)
+        } else {
+            playbookWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     @objc func openSimulator() {
         if simulatorWindow == nil {
             let size = NSSize(width: 1060, height: 700)

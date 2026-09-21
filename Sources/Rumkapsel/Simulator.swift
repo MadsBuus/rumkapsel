@@ -44,7 +44,7 @@ import SwiftUI
 ///                Release: Staging merges, Release: Staging merges (board lags),
 ///                Release: Staging closes, Release: Production opens, Release: Mark tested,
 ///                Release: Production merges
-///     Everyone:  Night, Day, Everyone to lounge, Bath, Chore, Workout, Meet in the hall,
+///     Everyone:  Night, Day, Everyone to lounge, Breather, Bath, Chore, Workout, Meet in the hall,
 ///                Wedge carrier
 ///     Time:      Pause, Resume, Step, ¼x, ½x, 1x, 4x, 16x
 ///
@@ -893,7 +893,8 @@ final class SimulatorModel: ObservableObject {
                 button("Repo: Ships on merge", shown: false),
             ]),
             Group(id: "Everyone", note: nil, buttons: [
-                button("Everyone to lounge", "To the lounge"), button("Bath", "To the bath"),
+                button("Everyone to lounge", "To the lounge"), button("Breather", "One takes a break"),
+                button("Bath", "To the bath"),
                 button("Chore", "A chore"), button("Workout", "A turn in the gym"),
                 button("Meet in the hall", "A meeting in the hall"), button("Wedge carrier", "Wedge a carrier"),
                 button("Night", shown: false), button("Day", shown: false),
@@ -1230,6 +1231,7 @@ final class SimulatorModel: ObservableObject {
         case "Night": station.simulate(.night(true))
         case "Day": station.simulate(.night(false))
         case "Everyone to lounge": station.simulate(.lounge)
+        case "Breather": station.simulate(.breather(.lounge))
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
         case "Meet in the hall": station.simulate(.meet)
@@ -1581,7 +1583,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, meet, night(Bool?), wedge, workout }
+enum SimNudge { case bath, breather(Place), chore, lounge, meet, night(Bool?), wedge, workout }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1715,6 +1717,19 @@ extension StationController {
                     m.activity = .waiting
                     send(m, to: .lounge)
                 }
+            case .breather(let place):
+                // "Everyone to lounge" ends the work: it makes a body idle and parks it there. This does
+                // not. A body at work walks off, sits a moment and goes back to what it was doing, because
+                // the trip is a reaction — the activity and the office are untouched, and when the reaction
+                // runs out the body is sent back to its place. Nothing on the station ever chooses this;
+                // it is a press, so the floor never tells you a session is resting when it is working.
+                let atWork = minions.values.filter {
+                    $0.busy && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.bathing && !$0.exercising
+                }
+                guard let m = atWork.first(where: { !$0.isCrew }) ?? atWork.first else {
+                    handle(.log("nobody at work to send for a break")); return
+                }
+                react(m, m.activity, place: place, minutes: 12.0 / 60, words: "\(m.home.name) taking a break")
             case .night(let on):
                 sim?.night = on
                 for m in minions.values where !m.onJob { send(m, to: restPlace(m)) }

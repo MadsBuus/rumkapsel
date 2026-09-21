@@ -380,23 +380,11 @@ extension StationController {
         for station in fleet.stations.values where station.hasHangar {
             var hexes: [SCNNode] = []
             for at in station.hangarSlots {
-                let hex = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.bayRadius - 0.06, outerRadius: Station.bayRadius, height: 0.008)))
-                hex.geometry!.firstMaterial = flat(Self.berthIdle)
-                hex.opacity = 0.25
-                hex.position = v3(station.offset.x + at.x, Looks.current.berthHexHeight, station.offset.y + at.y)
-                hex.name = "bay:" + station.name
-                berthRoot.addChildNode(hex)
-                // Where the bay is open, the rim has nothing under it: the berth carries its own plate, a
-                // shade of the floor the lanes are, so a ship and whoever walks out to it stand on something.
-                if Looks.current.bayOpenToSpace {
-                    let plate = SCNNode(geometry: faceted(SCNCylinder(radius: Station.bayRadius - 0.03, height: 0.05)))
-                    plate.geometry!.firstMaterial = flat(NSColor(Colors.hangar).darker(0.12))
-                    plate.opacity = 0.9
-                    plate.position = v3(station.offset.x + at.x, Looks.current.berthHexHeight - 0.026, station.offset.y + at.y)
-                    plate.name = "bay:" + station.name
-                    berthRoot.addChildNode(plate)
-                }
-                hexes.append(hex)
+                let berth = Props.berth()
+                berth.node.position = v3(station.offset.x + at.x, 0, station.offset.y + at.y)
+                berth.node.name = "bay:" + station.name
+                berthRoot.addChildNode(berth.node)
+                hexes.append(berth.rim)
             }
             berthHexes[station.name] = hexes
         }
@@ -424,7 +412,7 @@ extension StationController {
             for (i, hex) in hexes.enumerated() {
                 let light = lit["\(name)|\(i)"]
                 hex.removeAllActions()
-                hex.geometry?.firstMaterial?.diffuse.contents = light.map { NSColor($0.color) } ?? Self.berthIdle
+                hex.geometry?.firstMaterial?.diffuse.contents = light.map { NSColor($0.color) } ?? Props.berthIdle
                 hex.opacity = light == nil ? 0.25 : 0.75
                 if light?.beat == true {
                     hex.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.95, duration: 0.5), .fadeOpacity(to: 0.35, duration: 0.6)])))
@@ -433,9 +421,6 @@ extension StationController {
         }
     }
 
-    /// An unlit hexagon, the colour the bay and the pad are marked out in: space black, so an empty
-    /// berth is an outline scored into the floor rather than a ring drawn on top of it.
-    static let berthIdle = NSColor(rgb: (0.05, 0.06, 0.09))
 
     /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it.
     func rebuildPadHexes() {
@@ -447,7 +432,7 @@ extension StationController {
             })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.padRadius - 0.06, outerRadius: Station.padRadius, height: 0.008)))
-                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? Self.berthIdle)
+                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? Props.berthIdle)
                 pad.opacity = held[i] == nil ? 0.25 : 0.7
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
                 pad.name = "pad:" + station.name
