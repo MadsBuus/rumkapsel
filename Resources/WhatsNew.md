@@ -1,3 +1,5 @@
-## What's new in 0.48
+## What's new in 0.49
 
-- Rockets for every slot the pad has, and shipped work found at launch calls none
+- Comments say what the code is, not what it used to be
+- Your own pull requests get offices, a standing rocket always goes up, stale offices go, a hex pad per rocket
+- A rocket with no release behind it links to what it waits to carry
