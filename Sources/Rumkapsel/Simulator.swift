@@ -31,9 +31,8 @@ import SwiftUI
 ///
 /// The names a move keeps, whatever the panel shows, since the scenarios press them:
 ///
-///     Mine:      Start session here, New branch in repo, Prompt, Busy, Quiet, Commit,
-///                Session ends, Switch branch, Open PR, Approve PR, Checks failing, Merge PR,
-///                Close PR
+///     Mine:      New branch in repo, Prompt, Commit, Session ends, Switch branch, Open PR,
+///                Approve PR, Checks failing, Merge PR, Close PR
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR, Teammate: Close PR (feed lags)
 ///     Bots:      Bot: Open PR, Bot: Merge PR, Bot: Close PR
@@ -49,8 +48,10 @@ import SwiftUI
 ///                Wedge carrier
 ///     Time:      Pause, Resume, Step, ¼x, ½x, 1x, 4x, 16x
 ///
-/// A few of those have no button of their own any more, because a knob works them: a script presses
-/// them all the same. Without a target the panel starts on the first office of mine, ios#298.
+/// Six of those have no button of their own, because a knob works them — the night, the peer and the
+/// pipeline — and they keep their names only because the scenarios press them. Starting a session and
+/// making one busy or quiet were dropped outright: the session knob is the whole of it.
+/// Without a target the panel starts on the first office of mine, ios#298.
 @MainActor
 final class SimulatorController {
     let station: StationController
@@ -830,10 +831,6 @@ final class SimulatorModel: ObservableObject {
                 button("Merge PR", "…is merged", needsOpenPull),
                 button("Close PR", "…is closed unmerged", needsOpenPull),
                 button("New branch in repo", "A new office of mine in \(repo)"),
-                // Worked by the board's session knob; kept so a script can still press it.
-                button("Start session here", shown: false),
-                button("Busy", shown: false),
-                button("Quiet", shown: false),
             ]),
             Group(id: "Teammate (\(teammate))", note: "on the target office when it is \(teammate)'s, else on his newest branch in \(repo)", buttons: [
                 button("Teammate: New branch", "A new branch in \(repo)"),
@@ -1016,14 +1013,6 @@ final class SimulatorModel: ObservableObject {
         switch name {
 
         // Me
-        case "Start session here":
-            guard let i = index(target) else { return }
-            if offices[i].cwd.isEmpty { offices[i].cwd = worktree(repo, "sim-\(offices[i].number)") }
-            makeDir(offices[i].cwd)
-            offices[i].pushed = true
-            offices[i].commits = max(1, offices[i].commits)
-            startSession(in: offices[i].uid, activity: .coding("src"))
-            pushScan()
         case "New branch in repo":
             // A new office of mine beside the target, in the target's repository. It becomes the target.
             let n = nextIssue(repo)
@@ -1044,16 +1033,6 @@ final class SimulatorModel: ObservableObject {
             s.prompts += 1
             s.markers[.prompt] = UUID().uuidString
             s.last = station.now
-            sessions[s.office] = s
-            pushScan()
-        case "Busy":
-            guard var s = targetSession else { return }
-            s.activity = .coding("src"); s.last = station.now
-            sessions[s.office] = s
-            pushScan()
-        case "Quiet":
-            guard var s = targetSession else { return }
-            s.activity = .waiting; s.last = station.now.addingTimeInterval(-600)
             sessions[s.office] = s
             pushScan()
         case "Session ends":
