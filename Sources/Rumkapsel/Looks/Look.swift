@@ -40,6 +40,11 @@ protocol Look {
     /// A ship's position and heading along its flight, in the station's own coordinates; nil keeps the
     /// simulation's path, down from the sky onto the slot. The simulation still says when, and which slot.
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)?
+    /// Whether the scene draws its hexagon on every berth, lit in the colour of the ship coming in. A look
+    /// that moors its ships rather than landing them says no and marks the berths itself.
+    var drawsBerthHexes: Bool { get }
+    /// How high off the floor those hexagons lie, above whatever the look has floored the bay with.
+    var berthHexHeight: Double { get }
 
     // MARK: the output: decon, storage, the deck and the pad
 
@@ -132,6 +137,8 @@ extension Look {
     }
     func shuttle(color: NSColor) -> SCNNode { Classic.shuttle(color: color) }
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
+    var drawsBerthHexes: Bool { true }
+    var berthHexHeight: Double { 0.009 }
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? { nil }
     func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }

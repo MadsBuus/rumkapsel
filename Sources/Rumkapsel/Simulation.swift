@@ -364,7 +364,7 @@ final class Simulation<B: Body> {
             let c = Station.sub(at)
             for dx in -2...2 { for dy in -2...2 {
                 let sub = Cell(x: c.x + dx, y: c.y + dy), p = Station.point(ofSub: sub)
-                if hypot(p.x - at.x, p.y - at.y) < 0.55 { out.insert(sub) }
+                if hypot(p.x - at.x, p.y - at.y) < Station.bayKeepOff { out.insert(sub) }
             } }
         }
         // The hover pallet where it stands this instant. It is read here rather than from the obstacle

@@ -51,6 +51,7 @@ final class Invariants {
         if !scanned, c.clock > 2 { scanned = true; scanShapes(c) }
         minions(c)
         shuttlesOverhead(c)
+        shuttleNoses(c)
         rockets(c)
         phases(c)
         if c.clock - slowAt >= Invariants.slowEvery {
@@ -335,6 +336,24 @@ final class Invariants {
                     flag("nobody walks under a shuttle", s.station + " / " + m.id,
                          String(format: "%.2f from the ship in phase %d: body at %.2f,%.2f doing %@, ship at %.2f,%.2f on %@", d, s.phase, m.pos.x, m.pos.y, m.words, local.x, local.y, s.command.words))
                 }
+            }
+        }
+    }
+
+    /// A ship flies the way it is pointing. It turns onto a new heading rather than snapping to it, so a
+    /// moment of catching up at the start of a leg is allowed; by the time it is well into one, its nose is
+    /// on the line it is flying and never sideways or backwards along it.
+    private func shuttleNoses(_ c: StationController) {
+        for s in c.simulation.flights {
+            guard let h = s.heading, let v = c.shuttleViews[ObjectIdentifier(s)], !v.posedByLook,
+                  s.progress(at: c.clock) > 0.4 else { continue }
+            let flat = (h.x * h.x + h.z * h.z).squareRoot()
+            guard flat > 0.05 else { continue }   // straight up or straight down: the nose says nothing
+            var off = (atan2(-h.z, h.x) - v.yaw).truncatingRemainder(dividingBy: 2 * .pi)
+            if off > .pi { off -= 2 * .pi } else if off < -.pi { off += 2 * .pi }
+            if abs(off) > .pi / 2 {
+                flag("a ship flies the way it is pointing", s.station + " / " + s.command.words,
+                     String(format: "%.0f degrees off its heading in phase %d", abs(off) * 180 / .pi, s.phase))
             }
         }
     }

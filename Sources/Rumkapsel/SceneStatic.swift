@@ -332,13 +332,6 @@ extension StationController {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
                 anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
-                for slot in station.hangarSlots where input == nil {
-                    let mark = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
-                    mark.geometry!.firstMaterial = flat(NSColor(Colors.hangar).lighter(0.18))
-                    mark.position = v3(station.offset.x + slot.x, 0.006, station.offset.y + slot.y)
-                    mark.name = "bay:" + station.name
-                    staticRoot.addChildNode(mark)
-                }
             }
             for c in station.corridorCells where Looks.current.dotsHallway && (c.x + c.y * 3) % 4 == 0 {
                 let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
@@ -445,6 +438,8 @@ extension StationController {
             Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
         rebuildLabels()
+        rebuildBerths()
+        rebuildPadHexes()
         timed("markers") { rebuildMarkers() }
         for key in fadeIn {
             for t in roomTiles[key] ?? [] { let o = t.opacity; t.opacity = 0; t.runAction(.fadeOpacity(to: o, duration: 2.5)) }

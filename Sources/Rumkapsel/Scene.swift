@@ -383,7 +383,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Floor cells under a room's writing, so boxes and cones keep off the words.
     var labelCells: [String: Set<Cell>] = [:]
 
-    let ringRoot = SCNNode()
+    let padHexRoot = SCNNode()
+    /// The hexagons on the bay's berths, by station, and which of them burn in whose colour.
+    let berthRoot = SCNNode()
+    var berthHexes: [String: [SCNNode]] = [:]
+    var berthLit: [String: BerthLight] = [:]
 
     var viewPinned = false   // set from the command line: never overridden by the remembered view
 
@@ -1135,7 +1139,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         simulation.stepShuttles()
         simulation.stepPallets(dt: dt)
-        drawShuttles()
+        drawShuttles(dt: dt)
+        updateBerths()
         drawRockets()
         drawPallets()
         tickCrateMotions()

@@ -285,13 +285,17 @@ extension StationController {
     }
 
     /// Pans onto one room of one station and holds a zoom there: for a picture of the bath, say.
-    /// The room is named by key (`kind:bath`) or by the word after `kind:`.
+    /// The room is named by key (`kind:bath`) or by the word after `kind:`; a fixed area is named by
+    /// itself (`bay`, `pad`, `deck`, `storage`, `decon`), since those are floor rather than rooms.
     func look(at roomName: String, in stationName: String, zoom: Double) {
         enqueue { [self] in
-            guard let station = fleet.stations[stationName],
-                  let room = station.rooms[roomName] ?? station.rooms["kind:" + roomName] else { return }
-            let cx = room.cells.map { Double($0.x) + 0.5 }.reduce(0, +) / Double(room.cells.count)
-            let cz = room.cells.map { Double($0.y) + 0.5 }.reduce(0, +) / Double(room.cells.count)
+            guard let station = fleet.stations[stationName] else { return }
+            let areas: [String: [Cell]] = ["bay": station.hangarCells, "pad": station.padCells, "deck": station.deckCells,
+                                           "storage": station.storageCells, "decon": station.deconCells]
+            guard let cells = areas[roomName] ?? (station.rooms[roomName] ?? station.rooms["kind:" + roomName])?.cells,
+                  !cells.isEmpty else { return }
+            let cx = cells.map { Double($0.x) + 0.5 }.reduce(0, +) / Double(cells.count)
+            let cz = cells.map { Double($0.y) + 0.5 }.reduce(0, +) / Double(cells.count)
             focused = nil
             userPan = SIMD2(cx + station.offset.x, cz + station.offset.y) - targetFocus
             userZoom = zoom

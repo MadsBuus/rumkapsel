@@ -268,8 +268,8 @@ struct KenneyLook: Look {
 
     func tint(tile: SCNNode, _ color: NSColor) { Kit.tint(tile: tile, color) }
 
-    /// The bay: an apron outside the hull with a landing circle painted for every slot, and the airlock a
-    /// marked passage running back in through it.
+    /// The bay: an apron outside the hull, the berths marked on it by the scene's own hexagons, and the
+    /// airlock a marked passage running back in through it.
     func input(_ station: Station) -> SetPiece? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
         var piece = SetPiece()
@@ -289,19 +289,6 @@ struct KenneyLook: Look {
             lane.position = v3(station.offset.x + Double(xs.min()! + xs.max()!) / 2, Kit.plateTop + 0.003,
                                station.offset.y + Double(zs.min()! + zs.max()!) / 2)
             piece.add(lane, as: .airlock)
-        }
-        // A circle painted where each ship sets down, with its own number bar beside it.
-        for slot in station.hangarSlots {
-            let ring = SCNNode(geometry: SCNPlane(width: 1.18, height: 1.18))
-            ring.geometry!.firstMaterial = flat(Self.paintLine)
-            ring.eulerAngles.x = -.pi / 2
-            ring.position = v3(station.offset.x + slot.x, Kit.plateTop + 0.004, station.offset.y + slot.y)
-            piece.add(ring, as: .bay)
-            let inner = SCNNode(geometry: SCNPlane(width: 1.0, height: 1.0))
-            inner.geometry!.firstMaterial = flat(Self.bayPaint)
-            inner.eulerAngles.x = -.pi / 2
-            inner.position = v3(station.offset.x + slot.x, Kit.plateTop + 0.005, station.offset.y + slot.y)
-            piece.add(inner, as: .bay)
         }
         return piece
     }
@@ -336,6 +323,8 @@ struct KenneyLook: Look {
     }
 
     func shuttle(color: NSColor) -> SCNNode { Kit.craft(color: color) ?? Classic.shuttle(color: color) }
+    /// The berths are painted on the apron's plate, so their hexagons lie just over it.
+    var berthHexHeight: Double { Kit.plateTop + 0.004 }
 
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         Kit.rocketProp(color: color, tall: tall, cargo: cargo) ?? Classic.rocket(color: color, tall: tall, cargo: cargo)

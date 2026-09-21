@@ -5,11 +5,16 @@
 import AppKit
 import SceneKit
 
-/// The node for one flight, and whether it has turned toward its way out.
+/// The node for one flight: the ship hung under a node that carries the heading, so the hull may pitch
+/// and bank inside it, and the nose it is turned to this instant.
 final class ShuttleView {
     let node: SCNNode
-    var leaving = false
-    init(node: SCNNode) { self.node = node }
+    let hull: SCNNode
+    var yaw: Double
+    var pitch = 0.0, bank = 0.0
+    /// Set while a look is drawing this ship's path itself, so nothing judges the nose the scene did not turn.
+    var posedByLook = false
+    init(node: SCNNode, hull: SCNNode, yaw: Double) { self.node = node; self.hull = hull; self.yaw = yaw }
 }
 
 /// The node for one rocket, and what it was drawn for, so it is only redrawn when that changes.
@@ -28,35 +33,52 @@ extension StationController {
 
     /// Every ship in the air, where the simulation has it. Everything is parented to the hangar
     /// anchor, so a station shifting underneath does not misalign it; a flight that is over loses its node.
-    func drawShuttles() {
+    /// The nose follows the line the ship is flying, turning onto it rather than snapping, and the hull
+    /// pitches with the climb and banks into the turn.
+    func drawShuttles(dt: Double) {
         var live = Set<ObjectIdentifier>()
         for f in simulation.flights {
             guard let station = fleet.stations[f.station], let anchor = hangarAnchors[f.station] else { continue }
             let id = ObjectIdentifier(f)
             live.insert(id)
+            let hc = station.hangarCenter
             let v = shuttleViews[id] ?? {
-                let ship = shuttle(color: NSColor(fleet.color(forRepo: f.repo)))
-                anchor.addChildNode(ship)
-                let v = ShuttleView(node: ship)
+                let holder = SCNNode()
+                let hull = shuttle(color: NSColor(fleet.color(forRepo: f.repo)))
+                holder.addChildNode(hull)
+                anchor.addChildNode(holder)
+                let v = ShuttleView(node: holder, hull: hull, yaw: f.heading.map { atan2(-$0.z, $0.x) } ?? 0)
                 shuttleViews[id] = v
                 return v
             }()
-            let hc = station.hangarCenter
             let leg = ShipLeg(phase: f.phaseKind, progress: f.progress(at: clock), slot: SIMD2(f.down.x, f.down.z), side: f.exit.x >= f.down.x ? 1 : -1)
             if let pose = Looks.current.shipPose(leg) {
+                // A look that draws its own path says where the ship is and which way it points, and nothing else moves it.
                 v.node.position = v3(pose.pos.x - hc.x, pose.pos.y, pose.pos.z - hc.y)
                 v.node.eulerAngles = SCNVector3(0, pose.yaw, 0)
+                v.hull.eulerAngles = SCNVector3(0, 0, 0)
+                v.posedByLook = true
                 continue
             }
+            v.posedByLook = false
             v.node.position = v3(f.pos.x - hc.x, f.pos.y, f.pos.z - hc.y)
-            if f.phaseKind == .leave, f.restYaw != nil, !v.leaving {
-                v.leaving = true
-                v.node.look(at: v3(f.exit.x - hc.x, f.exit.y, f.exit.z - hc.y), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
-            } else if f.phaseKind == .approach, f.restYaw != nil, f.phase == 0 {
-                v.node.look(at: v3(f.high.x - hc.x, f.high.y, f.high.z - hc.y), up: SCNVector3(0, 1, 0), localFront: SCNVector3(1, 0, 0))
-            } else if let yaw = f.yaw, !v.leaving {
-                v.node.eulerAngles = SCNVector3(0, yaw, 0)
+            var wantPitch = 0.0
+            if let h = f.heading {
+                let flat = (h.x * h.x + h.z * h.z).squareRoot()
+                let want = atan2(-h.z, h.x)
+                // The shortest way round to the new heading, at a rate a ship this size could turn at.
+                var turn = (want - v.yaw).truncatingRemainder(dividingBy: 2 * .pi)
+                if turn > .pi { turn -= 2 * .pi } else if turn < -.pi { turn += 2 * .pi }
+                let step = max(-2.6 * dt, min(2.6 * dt, turn))
+                v.yaw += step
+                v.bank += (max(-0.5, min(0.5, -step / max(dt, 1e-3) * 0.22)) - v.bank) * min(1, dt * 5)
+                wantPitch = max(-0.85, min(0.85, atan2(h.y, max(flat, 1e-4))))
+            } else {
+                v.bank += (0 - v.bank) * min(1, dt * 4)   // standing still: the wings come level
             }
+            v.pitch += (wantPitch - v.pitch) * min(1, dt * 4)
+            v.node.eulerAngles = SCNVector3(0, CGFloat(v.yaw), 0)
+            v.hull.eulerAngles = SCNVector3(CGFloat(v.bank), 0, CGFloat(v.pitch))
         }
         for (id, v) in shuttleViews where !live.contains(id) {
             v.node.removeFromParentNode()
@@ -216,9 +238,9 @@ extension StationController {
         node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
     }
 
-    /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the due rings redrawn.
+    /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the pad's hexagons redrawn.
     func refreshRockets() {
         simulation.refreshRockets()
-        rebuildDueRings()
+        rebuildPadHexes()
     }
 }
