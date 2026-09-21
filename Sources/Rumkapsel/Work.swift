@@ -195,7 +195,11 @@ final class WorkBook {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
             if let n = Work.issue(inBranch: branch), let r = find(repo: repo, issue: n) { found.append(r) }
         }
-        if let folder, let r = find(folder: folder) { found.append(r) }
+        // One checkout hosts one branch after another: a folder finds its record unless that record is another branch's.
+        if let folder, let r = find(folder: folder) {
+            let named = branch.flatMap { Work.notWork.contains($0) ? nil : $0 }
+            if named == nil || r.branches.isEmpty || r.branches.contains(named!) { found.append(r) }
+        }
         if let issue, let r = find(repo: repo, issue: issue) { found.append(r) }
         if let pull, let r = find(repo: repo, pull: pull) { found.append(r) }
         for n in [issue, pull].compactMap({ $0 }) { if let r = byCrate["\(repo)|\(n)"].flatMap({ records[$0] }) { found.append(r) } }

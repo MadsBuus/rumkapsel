@@ -296,6 +296,20 @@ final class Station {
     var storageCenter: SIMD2<Double> { yardCenter(0) }
     var deckCells: [Cell] { blocks.deck }
     var padCells: [Cell] { blocks.pad }
+    /// Where rockets stand, relative to the pad's centre: a front row by the deck and a back row set
+    /// between its rockets, as a honeycomb, so the way to every rocket's foot is clear.
+    static let padSlotOffsets: [SIMD2<Double>] = [SIMD2(0, 0.45), SIMD2(1.3, 0.45), SIMD2(-1.3, 0.45),
+                                                   SIMD2(0.65, -0.75), SIMD2(-0.65, -0.75), SIMD2(1.95, -0.75), SIMD2(-1.95, -0.75)]
+    static let padRadius = 0.56
+    /// The pad's rocket spots that fit on its floor, nearest the front and the middle first.
+    var padSlots: [SIMD2<Double>] {
+        guard let x0 = padCells.map(\.x).min(), let x1 = padCells.map(\.x).max(), let y0 = padCells.map(\.y).min(), let y1 = padCells.map(\.y).max() else { return [padCenter] }
+        let r = Station.padRadius
+        let fits = Station.padSlotOffsets.map { padCenter + $0 }.filter { p in
+            p.x - r >= Double(x0) - 0.5 && p.x + r <= Double(x1) + 0.5 && p.y - r >= Double(y0) - 0.5 && p.y + r <= Double(y1) + 0.5
+        }
+        return fits.isEmpty ? [padCenter] : fits
+    }
     var padCenter: SIMD2<Double> { yardCenter(2) }
     /// The storage row nearest the deck: the row the deck doorway opens onto.
     var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }

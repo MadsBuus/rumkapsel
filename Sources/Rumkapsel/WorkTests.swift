@@ -193,6 +193,14 @@ enum WorkTests {
             expect(live.hear(Signal(stage: .shipped, by: .git, at: at(2)))?.wasQuiet == false, "work seen merging and then shipping is news")
         }
 
+        test("two branches in one checkout are two pieces of work") {
+            let book = WorkBook()
+            let a = book.note(repo: "mk", branch: "canon/dossier", folder: "/w/one")
+            let b = book.note(repo: "mk", branch: "refactor/arrows", folder: "/w/one")
+            expect(a !== b && book.count == 2, "one record per branch, got \(book.count)")
+            expect(a.branches == ["canon/dossier"] && b.branches == ["refactor/arrows"], "each keeps its own branch")
+        }
+
         say(failures == 0 ? "work: all passed" : "work: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

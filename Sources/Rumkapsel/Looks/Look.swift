@@ -246,7 +246,7 @@ enum Dressing {
     static func padCorners(_ station: Station) -> [Cell] {
         guard station.hasPad else { return [] }
         let pc = station.padCenter
-        let slots = [SIMD2(0.0, 0.0), SIMD2(1.3, 0.0), SIMD2(-1.3, 0.0), SIMD2(0.0, 1.2)].map { pc + $0 }
+        let slots = station.padSlots
         func clearance(_ c: Cell) -> Double { slots.map { simd_distance(SIMD2(Double(c.x), Double(c.y)), $0) }.min() ?? 0 }
         let near: [Cell] = station.padCells.filter { c in clearance(c) > 1.1 && simd_distance(SIMD2(Double(c.x), Double(c.y)), pc) < 2.5 }
         let sorted: [Cell] = near.sorted { a, b in (clearance(a), a.y, a.x) > (clearance(b), b.y, b.x) }
