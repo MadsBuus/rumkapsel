@@ -1207,6 +1207,13 @@ final class GitHubResolver {
     }
 
     /// Whether the worktree's branch exists on origin, or nil if unknown yet.
+    /// The branch a checkout is on, as last asked.
+    func currentBranch(worktree: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return checkedOut[worktree]
+    }
+    private var checkedOut: [String: String] = [:]
+
     func branchPushed(worktree: String) -> Bool? {
         lock.lock(); defer { lock.unlock() }
         return pushed[worktree]
@@ -1227,9 +1234,11 @@ final class GitHubResolver {
                 base = candidate; break
             }
             var isPushed = false
+            var onBranch: String?
             if let out = run(["git", "branch", "--show-current"], cwd: worktree),
                let branch = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !branch.isEmpty {
                 isPushed = run(["git", "rev-parse", "--verify", "--quiet", "origin/" + branch], cwd: worktree) != nil
+                onBranch = branch
             }
             var changed = 0
             if let out = run(["git", "status", "--porcelain"], cwd: worktree), let text = String(data: out, encoding: .utf8) {
@@ -1245,6 +1254,7 @@ final class GitHubResolver {
             commits[worktree] = (n, Date())
             pushed[worktree] = isPushed
             dirty[worktree] = changed
+            checkedOut[worktree] = onBranch
             inFlight.remove("c:" + worktree)
             lock.unlock()
             if changedResult { DispatchQueue.main.async { self.onUpdate?() } }

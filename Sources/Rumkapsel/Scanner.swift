@@ -122,6 +122,13 @@ final class TranscriptScanner {
     private var checkoutCache: [String: String] = [:]
     func checkout(of cwd: String) -> String {
         if let c = checkoutCache[cwd] { return c }
+        // A deleted worktree is nobody's checkout: not the main checkout's, which the walk up would reach.
+        var standing = URL(fileURLWithPath: cwd)
+        while standing.path.count > 1, !FileManager.default.fileExists(atPath: standing.path) { standing.deleteLastPathComponent() }
+        if standing.path != cwd, standing.lastPathComponent == "worktrees" || standing.deletingLastPathComponent().lastPathComponent == "workspaces" {
+            checkoutCache[cwd] = cwd
+            return cwd
+        }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var dir = URL(fileURLWithPath: cwd)
         var found = cwd

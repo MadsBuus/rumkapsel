@@ -305,13 +305,6 @@ extension StationController {
                 staticRoot.addChildNode(console)
                 consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
             }
-            if station.hasPad, output == nil {
-                let pc = station.padCenter
-                let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 1.45, outerRadius: 1.55, height: 0.01)))
-                ring.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.48, 0.58)))
-                ring.position = v3(station.offset.x + pc.x, 0.006, station.offset.y + pc.y)
-                staticRoot.addChildNode(ring)
-            }
             for prop in Looks.current.dress(station: station) {
                 prop.position.x += station.offset.x; prop.position.z += station.offset.y
                 prop.name = "station:" + station.name

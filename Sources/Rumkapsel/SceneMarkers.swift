@@ -379,26 +379,21 @@ extension StationController {
         refreshObstacles()
     }
 
-    /// Cargo waiting with no rocket yet: a faint ring in the repo colour on the pad, a release is due.
+    /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it.
     func rebuildDueRings() {
         if ringRoot.parent == nil { propRoot.addChildNode(ringRoot) }
         ringRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values where station.hasPad {
-            let waiting = Set(station.stored.keys).union(station.staged.keys)
-                .filter { repo in ((world.stagingIsDeck(station: station.name, repo: repo) ? station.staged : station.stored)[repo] ?? 0) > 0 }.sorted()
-            let withRocket = Set(world.repoRoots.filter { $0.value.station == station.name }.compactMap { (root, info) -> String? in
-                (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) == true) ? info.repo : nil
+            let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
+                world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
             })
-            for (i, repo) in waiting.filter({ !withRocket.contains($0) }).enumerated() {
-                let radius = 1.62 + Double(i) * 0.12
-                let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: radius, outerRadius: radius + 0.05, height: 0.008)))
-                ring.geometry!.firstMaterial = flat(NSColor(fleet.color(forRepo: repo)))
-                ring.opacity = 0.3
-                ring.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.6, duration: 1.6), .fadeOpacity(to: 0.25, duration: 1.6)])))
-                let pc = station.padCenter
-                ring.position = v3(station.offset.x + pc.x, 0.009, station.offset.y + pc.y)
-                ring.name = "pad:" + station.name
-                ringRoot.addChildNode(ring)
+            for (i, at) in world.padSlots(station: station).enumerated() {
+                let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.padRadius - 0.06, outerRadius: Station.padRadius, height: 0.008)))
+                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? NSColor(rgb: (0.45, 0.47, 0.54)))
+                pad.opacity = held[i] == nil ? 0.25 : 0.7
+                pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
+                pad.name = "pad:" + station.name
+                ringRoot.addChildNode(pad)
             }
         }
     }
