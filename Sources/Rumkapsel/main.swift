@@ -201,6 +201,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 else { controller.snapshot(to: name) }
                 guard k + 1 == frames else { return }
                 if let sim = simulator {
+                    // The board's knobs as the panel has them, which a picture of the panel cannot
+                    // be read for: a snapshot loses a control's tint.
+                    FileHandle.standardError.write(("--- board ---\n" + sim.model.boardLines.joined(separator: "\n") + "\n").data(using: .utf8)!)
                     sim.station.dumpState()   // every body and order at this moment, to station.log beside the picture
                     // The scripted run's whole story, so a check can read it rather than the picture.
                     FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)

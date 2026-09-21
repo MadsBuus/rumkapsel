@@ -86,6 +86,83 @@ enum Props {
         return sticker
     }
 
+    /// The welding arc at a cone: a warm lamp with a billboard spark in it, put where the cone stands
+    /// and switched on and off by `Routines.Flash.weld`.
+    static func weldLamp() -> SCNNode {
+        let l = SCNNode()
+        l.light = SCNLight()
+        l.light!.type = .omni
+        l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55))
+        l.light!.attenuationEndDistance = 2.5
+        let spark = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))
+        spark.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.8)))
+        spark.constraints = [SCNBillboardConstraint()]
+        l.addChildNode(spark)
+        return l
+    }
+
+    /// QA passed one: a green tick that floats off the head and fades. It carries its own rise, so
+    /// whoever spawns it only has to place it and let it go.
+    static func qaTick() -> SCNNode {
+        let tick = SCNNode(geometry: SCNBox(width: 0.16, height: 0.02, length: 0.16, chamferRadius: 0))
+        tick.eulerAngles = SCNVector3(Double.pi / 2, 0, Double.pi / 4)
+        tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
+        tick.runAction(.sequence([.group([.moveBy(x: 0, y: 0.5, z: 0, duration: 0.9),
+                                          .sequence([.wait(duration: 0.5), .fadeOut(duration: 0.4)])]),
+                                  .removeFromParentNode()]))
+        return tick
+    }
+
+    /// One commit: a cube in the office's colour with its own shadow under it. Flat game-style
+    /// shading, light top, mid and dark sides, no lights involved. The three sizes the rows pick
+    /// from are `cubeSizes`; an uncommitted one is the same cube at `ghostOpacity`.
+    static let cubeSizes = [0.18, 0.26, 0.34]
+    static let ghostOpacity = 0.38
+
+    static func cube(color: NSColor, size: Double, shadow floorShadow: NSColor) -> SCNNode {
+        let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
+        let top = flat(color.lighter(0.14)), mid = flat(color), dark = flat(color.darker(0.13))
+        box.materials = [mid, dark, mid, dark, top, top]
+        let n = SCNNode(geometry: box)
+        let under = SCNNode(geometry: SCNPlane(width: size * 1.25, height: size * 1.25))
+        under.geometry!.firstMaterial = flat(floorShadow)
+        under.eulerAngles.x = -.pi / 2
+        under.position = v3(size * 0.08, -size / 2 + 0.004, size * 0.08)
+        n.addChildNode(under)
+        return n
+    }
+
+    /// The red cage round a cube or a crate whose checks are failing.
+    static func failingShell(size: Double) -> SCNNode {
+        let shell = SCNNode(geometry: SCNBox(width: size, height: size, length: size, chamferRadius: 0))
+        shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
+        shell.opacity = 0.2
+        shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
+        return shell
+    }
+
+    /// The monolith's answer: a cone of light down onto whoever is asking it, as the game's research
+    /// went. `aim` puts it between the two ends and breathes it.
+    static func beam() -> SCNNode {
+        let n = SCNNode(geometry: faceted(SCNCone(topRadius: 0.05, bottomRadius: 0.32, height: 1)))
+        n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
+        n.geometry!.firstMaterial?.transparency = 0.22
+        n.geometry!.firstMaterial?.writesToDepthBuffer = false
+        n.geometry!.firstMaterial?.isDoubleSided = true
+        return n
+    }
+
+    /// Stretches a beam from the monolith's head down onto a body's, and breathes it on the clock.
+    static func aim(_ beam: SCNNode, from: SIMD3<Double>, to: SIMD3<Double>, clock: Double, phase: Double) {
+        let d = to - from
+        let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
+        let mid = (from + to) / 2
+        beam.position = v3(mid.x, mid.y, mid.z)
+        beam.scale = SCNVector3(1, len, 1)
+        beam.look(at: v3(to.x, to.y, to.z), up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, -1, 0))
+        beam.opacity = 0.8 + 0.2 * sin(clock * 3 + phase)
+    }
+
     /// A hexagonal crate in the repo colour: the order for a new office.
     static func crate(color: NSColor) -> SCNNode {
         let geo = faceted(SCNCylinder(radius: 0.26, height: 0.18))

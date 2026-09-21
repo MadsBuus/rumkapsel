@@ -524,7 +524,12 @@ final class World {
                 // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED" && !merged
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
-                if !closed { closedAt[key] = nil }
+                // Only a room this pass can read the state of may clear that clock. A teammate's
+                // office has no checkout here to ask about, so `state` is nil however closed the
+                // pull request is, and the crew pass is the one that times it out from GitHub's
+                // answer. Clearing it here on every scan reset that ten minutes before it could ever
+                // run out, and such an office stood red on the floor for good.
+                if state != nil, !closed { closedAt[key] = nil }
                 if merged, station.hasPad, !haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
                 // A merged office clears once its crate is down in the yard, or when there was nothing to carry.
                 let cleared = (merged && (!station.hasPad || haulLanded(office: key) || nothingToHaul.contains(key)))

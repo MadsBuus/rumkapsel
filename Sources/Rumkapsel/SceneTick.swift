@@ -121,15 +121,7 @@ extension StationController {
         m.node.addChildNode(node)
         node.position = m.node.convertPosition(at, from: nil)
         node.eulerAngles.y = CGFloat(Double(node.eulerAngles.y) - m.smoothFacing)   // keeps its own turn, now on the arms
-        let y = Double(node.position.y)
-        let via: SIMD3<Double>
-        switch m.handsAt {
-        case 0: via = SIMD3(0, m.headHeight * 0.45, 0.3)
-        case 1: via = SIMD3(0, y, 0.2)
-        default: via = SIMD3(0, max(m.headHeight + 0.2, y), 0.15)
-        }
-        moveCrate(node, legs: [MotionLeg(to: via, seconds: Hands.liftFirst, ease: .easeOut),
-                               MotionLeg(to: SIMD3(0, m.headHeight + 0.14, 0), seconds: Hands.liftSecond)])
+        moveCrate(node, legs: Routines.liftLegs(from: Double(node.position.y), handsAt: m.handsAt, headHeight: m.headHeight))
         m.carried = node
     }
 
@@ -139,14 +131,7 @@ extension StationController {
     func setDown(_ m: Minion, _ node: SCNNode, to pos: SIMD3<Double>, yaw: Double, level: Int) {
         let t = m.node.convertPosition(v3(pos.x, pos.y, pos.z), from: nil)
         let target = SIMD3(Double(t.x), Double(t.y), Double(t.z))
-        let via: SIMD3<Double>
-        switch level {
-        case 0: via = SIMD3(0, m.headHeight * 0.45, 0.3)
-        case 1: via = SIMD3(0, target.y, 0.2)
-        default: via = SIMD3(0, max(m.headHeight + 0.2, target.y), 0.15)
-        }
-        moveCrate(node, legs: [MotionLeg(to: via, seconds: Hands.setDownFirst),
-                               MotionLeg(to: target, seconds: Hands.setDownSecond, ease: level == 0 ? .easeIn : .easeOut)],
+        moveCrate(node, legs: Routines.setDownLegs(to: target, level: level, headHeight: m.headHeight),
                   yawTo: yaw - m.smoothFacing)
     }
 
@@ -183,6 +168,13 @@ extension StationController {
     /// Every worker, once a frame. The simulation walks it and runs its commands; the scene runs the
     /// pallet errands, whose pallet is still a node, keeps the crate on the arms in step with the body's
     /// load, and draws the pose the body says it holds.
+    /// What a body is wearing this frame. The pallet errand is the one prop the body cannot work
+    /// out for itself, so it is handed in; everything else follows from the body.
+    func kit(_ m: Minion) -> Routines.Outfit {
+        let p = simulation.pallets[m.station]
+        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
+    }
+
     func tickMinions(dt: Double) {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
@@ -194,7 +186,7 @@ extension StationController {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
                 // draw it anywhere while it rises. The mirror below still runs.
-                m.mirror(station: station, clock: clock, dt: dt)
+                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))
                 continue
             case .walking, .wondering: break
             case .there:
@@ -205,12 +197,11 @@ extension StationController {
                 }
             }
             mirrorLoad(m)
-            if simulation.palletErrand(of: m) != nil {
-                m.setTool(errandTool(m))
-                if case .pushPallet = m.current?.kind, m.path.isEmpty { drawPusher(m, station: station) }
+            if simulation.palletErrand(of: m) != nil, case .pushPallet = m.current?.kind, m.path.isEmpty {
+                drawPusher(m, station: station)
             }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
-            m.mirror(station: station, clock: clock, dt: dt)   // the picture catches up whatever else this frame skipped
+            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
             pose(m, station: station, dt: dt)
         }
@@ -277,8 +268,8 @@ extension StationController {
         switch cue {
         case .flush(_, let bowl, let front): flush(at: bowl, front: front)
         case .fidget(let id): minions[id]?.fidget()
-        case .towel(let id, let station, let taken):
-            minions[id]?.setTowel(taken)
+        case .towel(_, let station, let taken):
+            // Only the rail's own towel: the one on the shoulders is drawn from the body's drying.
             staticRoot.childNode(withName: "towel:" + station, recursively: true)?.isHidden = taken
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
@@ -372,48 +363,31 @@ extension StationController {
                 m.smoothFacing = atan2(toCone.x, toCone.y)
             }
             if atCone {
-                // Working the cone: welding, hammering, pushing and pulling, or bent over it.
-                let tool = m.toolSlot(at: clock)
+                let slot = m.toolSlot(at: clock)
                 let cone = m.pyramids.last
-                m.setTool([Minion.Tool.goggles, .hammer, .scanner, .flashlight][tool])
-                switch tool {
-                case 0:
-                    tilt = 0.32
+                let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
+                tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
+                if let pitch = r.hammerPitch { m.hammerPivot?.eulerAngles.x = CGFloat(pitch) }
+                if let aim = r.aim { m.lightPivot?.eulerAngles = aim }
+                switch r.flash {
+                case .weld(let on, let intensity):
                     if Looks.current.workSparks, m.weldLight == nil {
-                        let l = SCNNode()
-                        l.light = SCNLight(); l.light!.type = .omni; l.light!.color = NSColor(rgb: (1.0, 0.85, 0.55)); l.light!.attenuationEndDistance = 2.5
-                        let spark = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))
-                        spark.geometry!.firstMaterial = flat(NSColor(rgb: (1.0, 0.95, 0.8)))
-                        spark.constraints = [SCNBillboardConstraint()]
-                        l.addChildNode(spark)
+                        let l = Props.weldLamp()
                         propRoot.addChildNode(l)
                         m.weldLight = l
                     }
                     if let l = m.weldLight, let cone {
                         l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
-                        let on = Double.random(in: 0...1) < 0.55
-                        l.light?.intensity = on ? Double.random(in: 300...1200) : 0
+                        l.light?.intensity = intensity
                         l.opacity = on ? 1 : 0
                     }
-                case 1:
-                    // Quick drop onto the peak, slower lift back: the grip pitches, the body only leans a little.
-                    let phase = (t * 1.1).truncatingRemainder(dividingBy: 1)
-                    let swing = phase < 0.25 ? pow(phase / 0.25, 2) : 1 - pow((phase - 0.25) / 0.75, 1.5)
-                    m.hammerPivot?.eulerAngles.x = Minion.hammerRest + (Minion.hammerStrike - Minion.hammerRest) * swing
-                    tilt = swing * 0.14
-                    if swing > 0.97 && !m.hammerUp { m.hammerUp = true; drone.thud(); cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)])) }
-                    if swing < 0.2 { m.hammerUp = false }
-                case 2:
-                    lean = sin(t * 2.5) * 0.05
-                    tilt = 0.12 + sin(t * 2.5) * 0.08
-                default:
-                    // Inspecting the cone by torchlight: the beam wanders over it.
-                    tilt = 0.18 + sin(t * 1.5) * 0.04
-                    m.lightPivot?.eulerAngles = SCNVector3(0.35 + sin(t * 1.3) * 0.25, sin(t * 0.9) * 0.45, 0)
+                case .strike:
+                    drone.thud()
+                    cone?.runAction(.sequence([.scale(to: 0.85, duration: 0.05), .scale(to: 1, duration: 0.25)]))
+                default: break
                 }
             }
             if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
-            if !working && !(m.place == .lounge && resting && m.couch != nil) && simulation.palletErrand(of: m) == nil { m.setTool(nil) }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
@@ -422,7 +396,7 @@ extension StationController {
                 m.smoothFacing = atan2(toTable.x, toTable.y)
                 tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05   // sat back on a couch, or standing at the table
                 roll = sin(t * 1.3) * 0.04
-                if m.couch != nil { m.setTool(.tablet); tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
+                if m.couch != nil { tilt = 0.12 + sin(t * 1.6) * 0.04 }   // reading on the couch
                 // Two standing near each other talk: they turn to each other and nod in turn.
                 let other = minions.values.first { $0.id != m.id && $0.station == m.station && $0.place == .lounge && $0.couch == nil && $0.isResting && !$0.busy && $0.path.isEmpty && length($0.pos - m.pos) < 1.4 }
                 if m.couch == nil, let other {
@@ -447,71 +421,38 @@ extension StationController {
                 }
             }
             if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
-                m.setTool(nil)   // nothing in the hands on a fixture
                 let props = gymProps[station.name]
                 switch kind {
                 case .treadmill:   // running on the spot, leaning into the rail
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
                 case .bench:       // on the back along the bench, and the bar goes up and down over the chest
-                    tilt = 0; roll = 0
                     props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
                 case .bag:         // jabs: a lean into each, and the bag swings off it
                     let jab = max(0, sin(t * 5.5))
                     lean = jab * 0.09; tilt = 0.1 + jab * 0.12; roll = sin(t * 5.5) * 0.05
-                    if let bag = props?.bag {
-                        let swing = max(0, sin(t * 5.5 - 0.7)) * 0.28
-                        bag.eulerAngles = SCNVector3(-swing * cos(m.smoothFacing + .pi), 0, swing * sin(m.smoothFacing + .pi))
-                    }
+                    let a = max(0, sin(t * 5.5 - 0.7)) * 0.28
+                    props?.bag.eulerAngles = SCNVector3(-a * cos(m.smoothFacing + .pi), 0, a * sin(m.smoothFacing + .pi))
                 case .mat:         // jumping jacks
                     lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
                 }
             }
             if working && !atCone {
-                switch m.activity {
-                case .testing, .running: m.setTool(.scanner); m.blinkScanner(Int(clock * 6) % 2 == 0)
-                case .exploring: m.setTool(.flashlight)
-                case .coding, .reading, .writing, .qa, .planning, .skill: m.setTool(.tablet)
-                default: m.setTool(nil)
-                }
-                switch m.activity {
-                case .coding: tilt = sin(t * 14) * 0.06                       // typing: quick nods
-                case .exploring:                                              // reading code: the torch plays over the boxes
-                    tilt = 0.12; spin = sin(t * 1.2) * 0.7
-                    m.lightPivot?.eulerAngles = SCNVector3(0.3 + sin(t * 1.7) * 0.2, sin(t * 0.8) * 0.3, 0)
-                case .writing: tilt = 0.2 + sin(t * 3) * 0.06                 // writing: head down over the clipboard, small nods
-                case .thinking: tilt = -0.18; roll = sin(t * 1.4) * 0.14      // thinking: head back, slow sway
-                case .planning: tilt = -0.12 + sin(t * 2) * 0.05              // planning: looking up
-                case .reading: tilt = -0.18                                   // reading your message: head back
-                case .testing: spin = sin(t * 1.6) * 0.6; tilt = 0.1         // testing: sweeping the scanner across
-                case .running: tilt = sin(t * 22) * 0.04; roll = cos(t * 19) * 0.04   // running things: jittery
-                case .shipping: roll = sin(t * 9) * 0.16                      // shipping: excited wiggle
-                case .skill: tilt = 0.15; roll = sin(t * 3) * 0.05           // using a skill: heads-down on the tablet
-                case .delegating: spin = sin(t * 4) * 0.3                     // delegating: glancing about
-                case .qa:
-                    // QA on the test deck: facing a stack, the scanner sweeping it from the floor to the top, a tick now and then.
-                    tilt = 0.08 + sin(t * 1.4) * 0.22; spin = 0
-                    if Int(t * 2) % 9 == 0 && Int((t - dt) * 2) % 9 != 0 {
-                        let tick = SCNNode(geometry: SCNBox(width: 0.16, height: 0.02, length: 0.16, chamferRadius: 0))
-                        tick.eulerAngles = SCNVector3(Double.pi / 2, 0, Double.pi / 4)
-                        tick.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.9, 0.45)))
-                        tick.position = v3(m.node.position.x, m.headHeight + 0.2, m.node.position.z)
-                        propRoot.addChildNode(tick)
-                        tick.runAction(.sequence([.group([.moveBy(x: 0, y: 0.5, z: 0, duration: 0.9), .sequence([.wait(duration: 0.5), .fadeOut(duration: 0.4)])]), .removeFromParentNode()]))
-                        drone.ping(seed: m.id.hashValue)
-                    }
-                default: roll = sin(t * 5) * 0.07
+                let r = Routines.working(m.activity, t: t, dt: dt, clock: clock)
+                tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
+                if let lit = r.scanner { m.blinkScanner(lit) }
+                if let aim = r.aim { m.lightPivot?.eulerAngles = aim }
+                if case .tick = r.flash {
+                    let tick = Props.qaTick()
+                    tick.position = v3(m.node.position.x, m.headHeight + 0.2, m.node.position.z)
+                    propRoot.addChildNode(tick)
+                    drone.ping(seed: m.id.hashValue)
                 }
             }
             if clock < m.wonderUntil { tilt = -0.15; roll = 0; spin = 0 }   // a beat of wondering
-            switch m.posture {
-            case .none: m.tilt.position.y = 0
-            case .crouch: tilt = max(tilt, 0.28); roll = 0; m.tilt.position.y = -0.12   // knees bent, not a bow
-            case .waist: tilt = max(tilt, 0.14); roll = 0; m.tilt.position.y = 0       // waist height: a lean, no crouch
-            case .reach: tilt = min(tilt, -0.18); roll = 0; m.tilt.position.y = 0.05   // up on the toes, head back
-            case .jump:                                                               // a little hop to reach the top of a tall stack
-                let hop = m.phaseUntil > 0 ? max(0, sin((m.phaseUntil - clock) / 1.1 * .pi)) * 0.28 : 0
-                tilt = min(tilt, -0.12); roll = 0; m.tilt.position.y = hop
-            }
+            // A little hop to reach the top of a tall stack, on its way up and down through the phase.
+            let hop = m.phaseUntil > 0 ? max(0, sin((m.phaseUntil - clock) / 1.1 * .pi)) : 0
+            let held = Routines.hold(m.posture, tilt: tilt, roll: roll, hop: hop)
+            tilt = held.tilt; roll = held.roll; m.tilt.position.y = CGFloat(held.rise)
             if let lift { m.tilt.position.y = lift }
             m.node.eulerAngles = SCNVector3(0, m.smoothFacing + spin, 0)
             m.tilt.eulerAngles = SCNVector3(tilt, 0, roll)

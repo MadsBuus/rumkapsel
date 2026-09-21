@@ -378,6 +378,24 @@ enum Scenarios {
             .carry(455, to: .storage),
         ]),
 
+        // A teammate's office has no checkout here, so the session scan cannot read its pull request
+        // and must not time it out: the crew pass owns that clock. Clearing it on every scan pinned
+        // such an office red on the floor for ever.
+        Scenario("a teammate's pull request closed unmerged: red, then the office clears", [
+            ("Target: api#5140", 4.8),
+            ("Teammate: Close PR", 200),
+            // The scanner looking again during the ten minutes must not reset them.
+            ("Scan: again", 200),
+            ("Scan: again", 200),
+            ("Scan: again", 120),
+            ("GitHub: Poll", 32),
+        ], tail: 32, expects: [
+            .log("pull request closed, not merged"),
+            .officeArchived("work|task:api#5140", reason: "pull request closed"),
+        ], forbids: [
+            .carry(5140, to: .storage),
+        ]),
+
         Scenario("a bot's pull request: an object in decon, merged, cleared into storage", [
             ("Target: ios#298", 4.8),
             ("Bot: Open PR", 32),

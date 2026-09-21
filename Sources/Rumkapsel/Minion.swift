@@ -60,7 +60,7 @@ final class Minion: Body {
         return img
     }
     func setStatic(_ on: Bool, frame: Int) {
-        if !on { staticNode?.removeFromParentNode(); staticNode = nil; return }
+        if !on { retire(staticNode); staticNode = nil; return }
         if staticNode == nil {
             // A small patch of pixels over the proper place, nothing more.
             let p = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.2))   // wider than the body: pixel pants
@@ -73,6 +73,7 @@ final class Minion: Body {
             p.geometry!.firstMaterial?.readsFromDepthBuffer = false
             p.geometry!.firstMaterial?.writesToDepthBuffer = false
             node.addChildNode(p)
+            arrive(p)
             staticNode = p
         }
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
@@ -186,7 +187,7 @@ final class Minion: Body {
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t
-        toolNode?.removeFromParentNode()
+        retire(toolNode)
         toolNode = nil
         hammerPivot = nil; lightPivot = nil; wandTip = nil; wandLight = nil
         guard let t else { return }
@@ -201,6 +202,7 @@ final class Minion: Body {
             wandLight = own.childNode(withName: "wandLight", recursively: true)
             n.name = node.name
             hold.addChildNode(n)
+            arrive(n)
             toolNode = n
             return
         }
@@ -342,6 +344,7 @@ final class Minion: Body {
         }
         n.name = node.name
         hold.addChildNode(n)
+        arrive(n)
         toolNode = n
     }
 
@@ -369,18 +372,66 @@ final class Minion: Body {
     /// This is not work the body does — it is the picture catching up to the facts — so it runs for
     /// every body every frame, whatever else that frame skips. It lives here rather than in the scene,
     /// so the gallery and the station draw a minion the one way.
-    func mirror(station: Station, clock: Double, dt: Double) {
+    func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit) {
         setPose(currentPose(at: clock))
-        // What is drawn follows the order in hand, never a flag the last order left behind.
-        setStatic(bathing && phaseKind == .act && path.isEmpty, frame: Int(clock * 12))
+        wear(outfit, clock: clock, dt: dt)
         let resting = path.isEmpty && state == .settled
-        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? abs(sin(clock * 7 + bobPhase)) * 0.14 : 0   // nobody hops in the shower
+        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0   // nobody hops in the shower
         // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
         node.position = v3(station.offset.x + pos.x + drawnLean.x, hop, station.offset.y + pos.y + drawnLean.y)
         shadow.position.y = CGFloat(0.003 - hop)   // the shadow stays on the floor while the body hops
         node.opacity = opacity
     }
+
+    /// Puts on the whole kit at once. The one place a prop is turned on or off, so no prop can
+    /// survive a change of activity: whatever is not in this outfit comes off.
+    private func wear(_ o: Routines.Outfit, clock: Double, dt: Double) {
+        setTool(o.tool)
+        setStatic(o.pixels, frame: Int(clock * 12))
+        setTowel(o.towel)
+        stepFades(dt)
+    }
+
+    /// A prop never pops. It fades up as it comes into the hands and down as it leaves them, and
+    /// only then is it taken away — so a wand put down at the end of a load is seen to be put down.
+    ///
+    /// The fade runs on the station's own clock rather than a scene action, for the reason a crate's
+    /// picture is tweened rather than given one: a headless step has no render loop, and a prop
+    /// handed to an action there would never finish leaving.
+    static let fadeSeconds = 0.22
+    private var fading: [(node: SCNNode, left: Double, out: Bool)] = []
+
+    /// Starts a prop on its way out. The node is let go of at once, so nothing can be handed it
+    /// again while it is still going.
+    private func retire(_ node: SCNNode?) {
+        guard let node else { return }
+        fading.removeAll { $0.node === node }
+        fading.append((node, Minion.fadeSeconds, true))
+    }
+
+    /// And on its way in, from nothing.
+    private func arrive(_ node: SCNNode) {
+        node.opacity = 0
+        fading.append((node, Minion.fadeSeconds, false))
+    }
+
+    private func stepFades(_ dt: Double) {
+        guard !fading.isEmpty else { return }
+        for i in fading.indices { fading[i].left -= dt }
+        for f in fading where f.left <= 0 && f.out { f.node.removeFromParentNode() }
+        for f in fading where f.left <= 0 && !f.out { f.node.opacity = 1 }
+        fading.removeAll { $0.left <= 0 }
+        for f in fading {
+            let through = max(0, min(1, f.left / Minion.fadeSeconds))
+            f.node.opacity = CGFloat(f.out ? through : 1 - through)
+        }
+    }
+
+    /// What the figure is showing, for the rule that a prop belongs to the activity that put it there.
+    var showsBathPixels: Bool { staticNode != nil }
+    var showsTowel: Bool { towelNode != nil }
+    var holding: Tool? { tool }
 
     /// Puts the figure into a pose. The only thing that moves the body node, so no two poses can fight
     /// over it, and the one place to look for what any of them does.
@@ -449,7 +500,7 @@ final class Minion: Body {
     /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
     /// A towel over the shoulders, draped across the top of the body, or none.
     func setTowel(_ on: Bool) {
-        if !on { towelNode?.removeFromParentNode(); towelNode = nil; return }
+        if !on { retire(towelNode); towelNode = nil; return }
         guard towelNode == nil else { return }
         let t = SCNNode(geometry: SCNBox(width: 0.3, height: 0.05, length: bodyDepth + 0.1, chamferRadius: 0.004))
         t.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
@@ -459,6 +510,7 @@ final class Minion: Body {
         stripe.position = v3(0, 0.02, 0)
         t.addChildNode(stripe)
         body.addChildNode(t)
+        arrive(t)
         towelNode = t
     }
 

@@ -103,11 +103,9 @@ extension StationController {
         }
         let shell = pkg.childNodes.first { $0.geometry?.name == Props.shellName }
         if failing, shell == nil {
-            let s = SCNNode(geometry: SCNBox(width: size * 1.2, height: size, length: size * 1.2, chamferRadius: 0))
+            let s = Props.failingShell(size: size)
+            (s.geometry as? SCNBox).map { $0.width = size * 1.2; $0.length = size * 1.2 }
             s.geometry!.name = Props.shellName
-            s.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
-            s.opacity = 0.2
-            s.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
             pkg.addChildNode(s)
         } else if !failing, let s = shell {
             s.removeFromParentNode()
@@ -254,20 +252,10 @@ extension StationController {
                 var newest: SCNNode?
                 for i in 0..<(count + ghosts) {
                     let ghost = i >= count
-                    let size = [0.18, 0.26, 0.34][min(2, Int(rnd() * 3))]
+                    let size = Props.cubeSizes[min(2, Int(rnd() * 3))]
                     let shade = CGFloat(rnd() * 0.1 - 0.04)
-                    let box = SCNBox(width: size, height: size, length: size, chamferRadius: 0)
-                    let tint = color.lighter(shade)
-                    // Flat game-style shading: light top, mid and dark sides, no lights involved.
-                    let top = flat(tint.lighter(0.14)), mid = flat(tint), dark = flat(tint.darker(0.13))
-                    box.materials = [mid, dark, mid, dark, top, top]
-                    let n = SCNNode(geometry: box)
-                    let shadow = SCNNode(geometry: SCNPlane(width: size * 1.25, height: size * 1.25))
-                    shadow.geometry!.firstMaterial = flat(floorShadow)
-                    shadow.eulerAngles.x = -.pi / 2
-                    shadow.position = v3(size * 0.08, -size / 2 + 0.004, size * 0.08)
-                    shadow.name = "box:" + key
-                    n.addChildNode(shadow)
+                    let n = Props.cube(color: color.lighter(shade), size: size, shadow: floorShadow)
+                    n.childNodes.forEach { $0.name = "box:" + key }
                     let pos: SIMD3<Double>
                     if i >= 8, let base = placedBoxes[i - 8] as (pos: SIMD3<Double>, size: Double)? {
                         pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
@@ -280,13 +268,10 @@ extension StationController {
                     n.position = v3(pos.x, pos.y, pos.z)
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
-                    n.opacity = undelivered.contains(key) ? 0 : (ghost ? 0.38 : boxOpacity)
+                    n.opacity = undelivered.contains(key) ? 0 : (ghost ? Props.ghostOpacity : boxOpacity)
                     if !ghost { newest = n }
                     if failing && !ghost {
-                        let shell = SCNNode(geometry: SCNBox(width: size * 1.25, height: size * 1.25, length: size * 1.25, chamferRadius: 0))
-                        shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
-                        shell.opacity = 0.2
-                        shell.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.55, duration: 0.7), .fadeOpacity(to: 0.15, duration: 0.9)])))
+                        let shell = Props.failingShell(size: size * 1.25)
                         shell.name = "box:" + key
                         n.addChildNode(shell)
                     }
@@ -519,24 +504,13 @@ extension StationController {
             let mp = station.monolithPosition
             let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
             let to = SIMD3(station.offset.x + m.pos.x, m.headHeight * 0.8, station.offset.y + m.pos.y)
-            // A cone of light from the monolith down onto whoever is asking it, as the game's research went.
             let cone = beams[m.id] ?? {
-                let n = SCNNode(geometry: faceted(SCNCone(topRadius: 0.05, bottomRadius: 0.32, height: 1)))
-                n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
-                n.geometry!.firstMaterial?.transparency = 0.22
-                n.geometry!.firstMaterial?.writesToDepthBuffer = false
-                n.geometry!.firstMaterial?.isDoubleSided = true
+                let n = Props.beam()
                 beamRoot.addChildNode(n)
                 beams[m.id] = n
                 return n
             }()
-            let d = to - from
-            let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
-            let mid = (from + to) / 2
-            cone.position = v3(mid.x, mid.y, mid.z)
-            cone.scale = SCNVector3(1, len, 1)
-            cone.look(at: v3(to.x, to.y, to.z), up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, -1, 0))
-            cone.opacity = 0.8 + 0.2 * sin(clock * 3 + Double(m.bobPhase))
+            Props.aim(cone, from: from, to: to, clock: clock, phase: m.bobPhase)
         }
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }
