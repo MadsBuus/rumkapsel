@@ -1,3 +1,3 @@
-## What's new in 0.47
+## What's new in 0.48
 
-- No two rockets on one spot: the pad hands out its slots, more of them where it has room, and a rocket keeps its slot
+- Rockets for every slot the pad has, and shipped work found at launch calls none
