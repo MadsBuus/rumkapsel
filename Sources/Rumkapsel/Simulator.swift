@@ -594,7 +594,7 @@ final class SimulatorModel: ObservableObject {
                 ?? works.note(repo: o.repo, branch: o.branch, issue: o.number)
             works.report(record, stage, by: stageSource, at: station.now)
             note("sim", "\(o.repo)#\(o.number) → \(stage) · \(stageSource.rawValue) · now \(record.stage.map { "\($0)" } ?? "-")")
-            pushScan()   // nothing else changed that the station watches: its own sessions again, so it looks
+            pushScan()   // nothing else the station watches has changed: its own sessions again, so it looks
             return
         }
         switch name {

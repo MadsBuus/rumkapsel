@@ -22,7 +22,7 @@ struct ReleaseFile: Codable, Equatable {
 }
 
 extension Pipeline {
-    /// The branches set by hand for this repository in Settings, over what was detected.
+    /// The branches set by hand for this repository in Settings.
     func overridden(by b: AppConfig.Branches?) -> Pipeline {
         guard let b else { return self }
         var p = self

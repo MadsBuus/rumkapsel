@@ -1,13 +1,8 @@
 import Foundation
 
-/// One piece of work: a branch, and the pull request and issue it comes to have. The one place that
-/// says what a piece of work is called: its office key, its crate number, its name on the floor. Every
-/// source that names work, a session's branch, a teammate's pull request, a board issue, the merge
-/// history, goes through here, so that the same work is one office and one crate wherever it was heard of.
-///
-/// Today the names are what they always were: the office is keyed by the issue where one is known,
-/// else the pull request, else the branch; the crate is numbered by the issue, else the pull request.
-/// STAGES.md says where that is going; this is the one place it will change.
+/// One piece of work: a branch, and the pull request and issue it comes to have. The one place that says
+/// what work is called, so the same work is one office and one crate whichever source named it. The office
+/// is keyed by the issue where there is one, else the pull request, else the branch.
 struct Work: Hashable {
     var repo: String
     var branch: String?
@@ -110,8 +105,7 @@ final class WorkBook {
         var stage: Stage?
         var stagedAt: Date?
         var stagedBy: Source?
-        /// Whether the stage it is at was the first word ever heard of it: history, not news. A merged
-        /// office found standing at launch is placed, not carried; the next change is news again.
+        /// The stage is the first word ever heard of this work: history, not news.
         var quiet = false
         var words: [Source: Stage] = [:]
 
@@ -119,10 +113,9 @@ final class WorkBook {
 
         /// The issue a branch is named for, `gh-N/…`: the one name that is on the office from the start.
         var branchIssue: Int? { branches.lazy.compactMap(Work.issue(inBranch:)).min() }
-        /// The work as the floor names it now: the branch's issue, else the open pull request, else the
-        /// branch. A pull request that closed or merged no longer names the office; the branch does again,
-        /// as it always has, so a session lingering on a merged branch is where it was. The branch asked
-        /// for is used when the record has several, so a session is named by the one it is on.
+        /// The work as the floor names it: the branch's issue, else the open pull request, else the branch.
+        /// Only an open pull request names an office, so a session on a merged branch stays where it is.
+        /// `preferred` picks among a record's branches, so a session is named by the one it is on.
         func work(branch preferred: String? = nil) -> Work {
             let branch = preferred.flatMap { branches.contains($0) ? $0 : nil } ?? branches.sorted().first
             let open = pulls.filter { $0.value == "OPEN" }.keys.min()
@@ -130,8 +123,7 @@ final class WorkBook {
         }
         /// The crate's number: the issue the work is for, else the branch's, else its pull request.
         var number: Int? { issue ?? branchIssue ?? pulls.keys.min() ?? crate }
-        /// Every key an office for this work might stand under today: by number, or by any of its
-        /// branches, since a teammate's office is keyed by branch while yours is re-keyed by its pull request.
+        /// Every key an office for this work might stand under: by number, or by any of its branches.
         var officeKeys: [String] {
             var keys = [work().officeKey]
             for b in branches.sorted() { keys.append(Work(repo: repo, branch: b).officeKey) }
@@ -177,7 +169,7 @@ final class WorkBook {
         if let t = record.hear(Signal(stage: stage, by: source, at: at), workflow: workflow(record.repo)) { onTransition?(record, t) }
     }
 
-    /// The record behind an office key as the floor writes it today, `task:repo#N` or `task:repo/branch`.
+    /// The record behind an office key, `task:repo#N` or `task:repo/branch`.
     func find(officeKey key: String, repo: String) -> Record? {
         if let n = Work.number(inOfficeKey: key) { return find(repo: repo, issue: n) ?? find(repo: repo, pull: n) }
         guard key.hasPrefix("task:\(repo)/") else { return nil }
@@ -195,7 +187,7 @@ final class WorkBook {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
             if let n = Work.issue(inBranch: branch), let r = find(repo: repo, issue: n) { found.append(r) }
         }
-        // One checkout hosts one branch after another: a folder finds its record unless that record is another branch's.
+        // One checkout hosts one branch after another: a folder is not enough to claim another branch's record.
         if let folder, let r = find(folder: folder) {
             let named = branch.flatMap { Work.notWork.contains($0) ? nil : $0 }
             if named == nil || r.branches.isEmpty || r.branches.contains(named!) { found.append(r) }
@@ -230,7 +222,7 @@ final class WorkBook {
         for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }
         if let n = other.crate { record.crate = record.crate ?? n; byCrate["\(record.repo)|\(n)"] = record.id }
         record.author = record.author ?? other.author; record.title = record.title ?? other.title; record.url = record.url ?? other.url
-        // The stage goes with the record that is furthest along; each source's word is kept where newer.
+        // The furthest stage wins; each source keeps its newest word.
         if let s = other.stage, record.stage.map({ s > $0 }) ?? true { record.stage = s; record.stagedAt = other.stagedAt; record.stagedBy = other.stagedBy }
         for (src, st) in other.words where record.words[src].map({ st > $0 }) ?? true { record.words[src] = st }
         records[other.id] = nil

@@ -1,8 +1,7 @@
 import Foundation
 
-/// The pull-request integration: what GitHub's pull requests say about a piece of work, as a word for
-/// the record. It reads and reports; the floor never asks it what to do. STAGES.md lists what it may
-/// say: open is ready, merged is stored, closed unmerged is back to working.
+/// What GitHub's pull requests say about a piece of work, as a word for the record. It reads and reports;
+/// the floor never asks it what to do. Open is ready, merged is stored, closed unmerged is back to working.
 struct PullRequests {
     let github: GitHubResolver
 
@@ -11,11 +10,10 @@ struct PullRequests {
         room.branch.flatMap { b in room.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
     }
 
-    /// A teammate's office whose pull request has left the open list: closed, or merged. The feed
-    /// may already say which; else the pull request is asked by number, since the office may have
-    /// lived on as a board office whose branch was only a guess; else by branch. Until it answers,
-    /// nothing: a crate that was never merged work must not be carried to storage. With no checkout
-    /// of the repository here there is nothing to ask and nothing on the floor to carry: merged.
+    /// A teammate's office whose pull request has left the open list: closed, or merged. The feed may say
+    /// which; else it is asked by number, since a board office's branch is only a guess, else by branch.
+    /// Nil until GitHub answers: a crate that was never merged work must not be carried to storage. With no
+    /// checkout of the repository here there is nothing to ask and nothing to carry: merged.
     func state(crewOffice room: Room, known: WorkBook.Record?, repoRoot root: String?,
                feed: [(repo: String, e: FeedEvent)]) -> String? {
         let branch = known?.work().branch ?? known?.branches.sorted().first ?? ""

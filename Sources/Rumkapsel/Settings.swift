@@ -383,8 +383,8 @@ struct SettingsView: View {
         .onAppear { if on { board.loadOrganisations(); if let o = model.config.projectOwner { board.loadProjects(owner: o) } } }
     }
 
-    /// A new project or field: each stage whose value the field does not have takes the likeliest one it
-    /// does, by the names boards usually give them, or none. A value that is there already is left alone.
+    /// A new project or field: each stage whose value the field does not have takes the likeliest one it does,
+    /// by the names boards usually give them, or none.
     private func guessStages() {
         guard let project = model.board.projects?.first(where: { $0.number == model.config.projectNumber }),
               let field = project.fields.first(where: { $0.name == model.config.statusField }) ?? project.fields.first(where: { $0.name == "Status" }) else { return }
@@ -419,7 +419,7 @@ struct SettingsView: View {
         }
     }
 
-    /// What GitHub offers, plus the saved value when GitHub has not said it or no longer has it.
+    /// What GitHub offers, plus the saved value when GitHub does not list it.
     private func options(_ offered: [String], keeping saved: String?) -> [String] {
         guard let saved, !saved.isEmpty, !offered.contains(saved) else { return offered }
         return offered + [saved]

@@ -712,11 +712,11 @@ final class GitHubResolver {
         return false
     }
 
-    /// The repository's pipeline as its branches say, or the settings' names until they have been read,
-    /// under whatever was set for it by hand.
+    /// The repository's pipeline as its branches say, or the settings' names until they are read, under
+    /// anything set for it by hand.
     func pipeline(repoRoot: String) -> Pipeline { detectedPipeline(repoRoot: repoRoot).overridden(by: Pipeline.override(forRoot: repoRoot)) }
 
-    /// What the repository itself says, before anything set by hand. Nil until it has been read.
+    /// What the repository itself says, before anything set by hand.
     func detectedPipeline(repoRoot: String) -> Pipeline {
         lock.lock(); defer { lock.unlock() }
         return pipelines[repoRoot] ?? .configured

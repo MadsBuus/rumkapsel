@@ -293,7 +293,7 @@ enum Scenarios {
             ("Release: Mark tested", 128),       // cleared: the rocket loads, from storage
             ("Release: Production merges", 4.8),
         ], tail: 224, expects: [
-            .rocket(.standBy, "ios"),           // work is waiting on the board already: the rocket stands before any release
+            .rocket(.standBy, "ios"),           // work is waiting on the board: a rocket stands before any release
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .carry(to: .pad),
@@ -304,9 +304,8 @@ enum Scenarios {
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
         }),
 
-        // The station half alone: no merge on GitHub, no board item moved. A repository without a
-        // staging area, so the crate goes from storage straight aboard; the deck's shared cell has a
-        // geometry bug of its own (two repositories' columns half a tile apart) that a QA carry walks into.
+        // The station half alone: no merge on GitHub, no board item moved. A repository without a staging
+        // area, so the crate goes from storage straight aboard.
         Scenario("the stage panel alone: said stored, cleared and shipped, the crate goes from storage up", [
             ("Target: ios#298", 4.8),
             ("Repo: No staging", 4.8),
@@ -351,7 +350,7 @@ enum Scenarios {
             ("Release: Mark tested", 96),
             ("Release: Production merges", 4.8),
         ], tail: 192, expects: [
-            .rocket(.standBy, "web"),           // a crate on the deck: the rocket stands before the release is opened
+            .rocket(.standBy, "web"),           // a crate on the deck: a rocket stands before the release opens
             .releaseOpened("web", untested: true),
             .rocket(.load(1), "web"),
             .crateCleared("web"),

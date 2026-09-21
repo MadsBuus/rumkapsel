@@ -338,8 +338,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var userZoom = 1.0
     var userZoomChanged = false
     var userDriving = 0.0          // seconds left of snappy camera response after a gesture
-    /// Whether a hand has been on the camera since launch. The one-time framing when the floor has
-    /// finished arriving is for a view nobody has touched; a view already being driven is left alone.
+    /// A hand has been on the camera since launch: the one-time framing when the floor has finished arriving
+    /// is for a view nobody has touched.
     var userTookView = false
     private var fpsFrames = 0, fpsMark = 0.0   // the frame counter behind RK_FPS
     private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up

@@ -121,8 +121,8 @@ extension StationController {
             }
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }
-        // Stage changes waiting on the floor, a crate not yet down in storage, a pallet still out, are
-        // tried again here, on the tick, as the reconciliation always was; a pass is not what they wait for.
+        // Every tick, for the stage changes waiting on the floor: a crate not down in storage yet, a pallet
+        // still out.
         for e in world.stationEvents() { handle(e) }
         for station in fleet.stations.values where station.hasPad {
             // A storage-to-deck carry whose crate the board has since put back in storage is off.
