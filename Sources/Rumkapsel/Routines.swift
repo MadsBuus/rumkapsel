@@ -163,28 +163,4 @@ enum Routines {
         case .jump: return (min(tilt, -0.12), 0, hop * 0.28)
         }
     }
-
-    // MARK: the fixtures
-
-    /// A turn on a gym fixture. `swing` comes back for the bag and `bar` for the bench, in the
-    /// fixture's own terms, since those move rather than the body.
-    static func workout(_ kind: Command.Workout, t: Double, facing: Double) -> (motion: Motion, bar: Double?, swing: SCNVector3?) {
-        var m = Motion()
-        var bar: Double?
-        var swing: SCNVector3?
-        switch kind {
-        case .treadmill:   // running on the spot, leaning into the rail
-            m.tilt = 0.2; m.lift = abs(sin(t * 9)) * 0.05; m.roll = sin(t * 9) * 0.04
-        case .bench:       // on the back along the bench, and the bar goes up and down over the chest
-            bar = 0.5 + max(0, sin(t * 2.4)) * 0.16
-        case .bag:         // jabs: a lean into each, and the bag swings off it
-            let jab = max(0, sin(t * 5.5))
-            m.lean = jab * 0.09; m.tilt = 0.1 + jab * 0.12; m.roll = sin(t * 5.5) * 0.05
-            let a = max(0, sin(t * 5.5 - 0.7)) * 0.28
-            swing = SCNVector3(-a * cos(facing + .pi), 0, a * sin(facing + .pi))
-        case .mat:         // jumping jacks
-            m.lift = abs(sin(t * 6)) * 0.14; m.roll = sin(t * 6) * 0.14; m.tilt = -0.05
-        }
-        return (m, bar, swing)
-    }
 }

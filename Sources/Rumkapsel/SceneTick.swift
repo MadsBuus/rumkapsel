@@ -419,11 +419,19 @@ extension StationController {
             if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
                 m.setTool(nil)   // nothing in the hands on a fixture
                 let props = gymProps[station.name]
-                let turn = Routines.workout(kind, t: t, facing: m.smoothFacing)
-                tilt = turn.motion.tilt; roll = turn.motion.roll; lean = turn.motion.lean
-                lift = turn.motion.lift
-                if let y = turn.bar { props?.bar.position.y = CGFloat(y) }
-                if let swing = turn.swing { props?.bag.eulerAngles = swing }
+                switch kind {
+                case .treadmill:   // running on the spot, leaning into the rail
+                    tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
+                case .bench:       // on the back along the bench, and the bar goes up and down over the chest
+                    props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
+                case .bag:         // jabs: a lean into each, and the bag swings off it
+                    let jab = max(0, sin(t * 5.5))
+                    lean = jab * 0.09; tilt = 0.1 + jab * 0.12; roll = sin(t * 5.5) * 0.05
+                    let a = max(0, sin(t * 5.5 - 0.7)) * 0.28
+                    props?.bag.eulerAngles = SCNVector3(-a * cos(m.smoothFacing + .pi), 0, a * sin(m.smoothFacing + .pi))
+                case .mat:         // jumping jacks
+                    lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
+                }
             }
             if working && !atCone {
                 m.setTool(Routines.tool(for: m.activity))

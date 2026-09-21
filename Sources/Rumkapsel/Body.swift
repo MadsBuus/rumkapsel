@@ -216,12 +216,7 @@ class Body {
         default: break
         }
         guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
-        switch handsAt {
-        case 0: return .crouch
-        case 1: return .waist
-        case 2: return .reach
-        default: return .jump
-        }
+        return Routines.posture(handsAt: handsAt)
     }
     /// What it would say if you asked.
     var words: String { current?.words ?? "nothing in particular" }
