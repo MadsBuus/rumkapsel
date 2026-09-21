@@ -313,7 +313,7 @@ extension Simulation {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }   // one going up already: the next goes when it has climbed
         world.mergeLaunches.insert(key)
-        rocket(station: station.name, repo: repo, label: "rocket:|\(repo) · deployed on merge", untested: false, tall: false, cargo: 1,
+        rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: false, cargo: 1,
                command: .rocket(.launch, station: station.name, repo: repo))
     }
 
