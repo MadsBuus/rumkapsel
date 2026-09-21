@@ -374,7 +374,7 @@ final class Minion: Body {
         // What is drawn follows the order in hand, never a flag the last order left behind.
         setStatic(bathing && phaseKind == .act && path.isEmpty, frame: Int(clock * 12))
         let resting = path.isEmpty && state == .settled
-        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? abs(sin(clock * 7 + bobPhase)) * 0.14 : 0   // nobody hops in the shower
+        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0   // nobody hops in the shower
         // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
         node.position = v3(station.offset.x + pos.x + drawnLean.x, hop, station.offset.y + pos.y + drawnLean.y)
