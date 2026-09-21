@@ -20,13 +20,13 @@ struct AppConfig: Codable, Equatable {
         var workflow: Workflow?        // the way of working set by hand; nil is the one detected
         var path: String?              // a checkout added by hand in Settings, on the station with no session in it
     }
-    /// A repository's way to production as set in Settings, over whatever was detected.
+    /// A repository's way to production as set in Settings, over what was detected.
     struct Branches: Codable, Equatable {
         var trunk: String
         var staging: String            // "" for none
         var production: String         // "" for no releases
     }
-    var workOwners: [String] = []           // unused since there is one station, kept so old config files still decode
+    var workOwners: [String] = []           // unused; kept so old config files decode
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
     /// Whose GitHub account this is. Remembered because it does not change, and because asking costs a

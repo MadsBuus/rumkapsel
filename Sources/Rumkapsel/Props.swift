@@ -215,9 +215,8 @@ enum Props {
         let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
-        // The loading hatch where crates go in: a door in the hull, white like the hull with a dark seam
-        // round it, a latch bar and two hinge knuckles; open, the door is the black of the hold inside.
-        // The seam is sunk into the hull so nothing floats.
+        // The loading hatch: a door in the hull, white with a dark seam round it, a latch bar and two hinge
+        // knuckles; open, the door is the black of the hold. The seam sits inside the hull so nothing floats.
         let hatch = SCNNode()
         hatch.name = "hatch"
         let frameW = r * 0.9, frameH = 0.2
@@ -240,8 +239,8 @@ enum Props {
             hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
             hatch.addChildNode(hinge)
         }
-        // High on the payload section, under the portholes, on the side the service tower stands: cargo goes
-        // up the tower and in here. The hull has six flat sides and this is the middle of one, at the apothem.
+        // High on the payload section, on the tower's side, where cargo comes in. The hull has six flat sides
+        // and this is the middle of one, at the apothem.
         hatch.position = v3(r * 0.866 + 0.003, 0.12 + h * 0.6, 0)
         hatch.eulerAngles.y = .pi / 2
         n.addChildNode(hatch)
@@ -271,15 +270,15 @@ enum Props {
             port.eulerAngles.y = a
             n.addChildNode(port)
         }
-        // Four tail fins and an engine nozzle. A fin hugs the hull at the top and flares out at the foot:
-        // a plate leaning in, its top edge buried in the lower stage, its bottom outer corner near the pad.
+        // Four tail fins: each a plate leaning in, its top edge buried in the lower stage, its bottom outer
+        // corner out by the pad.
         for k in 0..<4 {
             let pivot = SCNNode()
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
             let finH = r * 2.6, finL = r * 1.3, lean = 0.42
             let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
             fin.geometry!.firstMaterial = lit(color)
-            // The plate's centre, placed so that leaning by `lean` puts its top inner corner inside the hull.
+            // Placed so that leaning by `lean` puts the top inner corner inside the hull.
             fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
             fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)
@@ -318,10 +317,8 @@ enum Props {
         return n
     }
 
-    /// The service tower beside a rocket that is up but not cleared to fly: it stays attached until the
-    /// rocket is cleared, and a rocket ready to go stands alone, as on a real pad.
-    /// The service tower stood beside a rocket, its swing arm at the rocket's hatch: on the pad from the
-    /// moment the rocket stands to the moment it goes. Lit red while the rocket is held.
+    /// The service tower stood beside a rocket, its conveyor at the hatch: on the pad from the moment the
+    /// rocket stands to the moment it goes. The beacon is lit red while the rocket is held.
     static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
         let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.position.y) }
         let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
@@ -331,8 +328,8 @@ enum Props {
 
     static func holdDecoration(around center: SIMD3<Double>, tall: Bool, armAt: Double? = nil, held: Bool = true) -> SCNNode {
         let n = SCNNode()
-        // The service tower: a plain steel column beside the rocket, a lift rail up its face on the
-        // rocket's side, a cap and a beacon on top. Grey steel; nothing wooden stands on a launch pad.
+        // The service tower: a steel column beside the rocket, a lift rail up its face on the rocket's side,
+        // a cap and a beacon on top.
         let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
         let armY = armAt ?? h - 0.12
         let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
@@ -350,9 +347,8 @@ enum Props {
         cap.geometry!.firstMaterial = dark
         cap.position = v3(0, h + 0.02, 0)
         tower.addChildNode(cap)
-        // The conveyor from the tower to the hatch: a belt with a rail each side and rollers across it,
-        // hinged at the tower's face so it swings back along the tower once the rocket is loaded. Crates
-        // come up the lift rail and ride the belt in.
+        // The conveyor from the tower to the hatch: a belt with rollers and a rail each side, hinged at the
+        // tower's face so it swings back along the tower once the rocket is loaded.
         let armLen = 0.3
         let hinge = SCNNode()
         hinge.name = "arm"

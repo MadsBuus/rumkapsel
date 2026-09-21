@@ -37,10 +37,9 @@ struct Transition {
 }
 
 extension WorkBook.Record {
-    /// Hears a source's word by the two rules of STAGES.md, under the repository's workflow. Forward,
-    /// the furthest word wins whoever said it first. Back, only the source first in line for the stage
-    /// the work is at may take it, and only by changing its own word: a source that has not caught up
-    /// says nothing. A stage the repository does without is not heard at all.
+    /// Hears a source's word by the two rules of STAGES.md, under the repository's workflow. Forward, the
+    /// furthest word wins whoever said it first. Back, only the source first in line for the current stage
+    /// may take it, and only by changing its own word. A stage the repository does without is not heard.
     func hear(_ s: Signal, workflow: Workflow = Workflow()) -> Transition? {
         guard workflow.has(s.stage) else { return nil }
         let before = words[s.by]

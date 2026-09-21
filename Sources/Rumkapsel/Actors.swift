@@ -100,8 +100,8 @@ extension StationController {
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
-        // A look with a hold of its own shows it while the rocket is held; the classic pad has its
-        // service tower beside the rocket all the while it stands, lit red while held.
+        // A look with a hold of its own shows it while the rocket is held; the classic pad stands its service
+        // tower beside the rocket the whole time, the beacon lit while held.
         if let own = Looks.current.hold(tall: r.tall) {
             if r.untested { own.name = "hold"; n.addChildNode(own) }
         } else {
@@ -151,7 +151,7 @@ extension StationController {
     func play(rocket cue: Cue) {
         switch cue {
         case .rocketLoading(let key):
-            // Cleared: a look's own hold comes down; the tower stays for the loading, its beacon goes dark.
+            // Cleared: a look's own hold comes down; the tower stays to load, its beacon goes dark.
             if let hold = rocketViews[key]?.node.childNode(withName: "hold", recursively: false) {
                 if let beacon = hold.childNode(withName: "beacon", recursively: true) {
                     beacon.geometry?.firstMaterial = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
@@ -159,7 +159,7 @@ extension StationController {
             }
         case .liftOff(let key):
             if let node = rocketViews[key]?.node {
-                // The tower stays on the pad: it is let go of the rocket a moment before the climb.
+                // The tower is let go of the rocket a moment before the climb and stays on the pad.
                 if let hold = node.childNode(withName: "hold", recursively: false) {
                     hold.removeFromParentNode()
                     hold.position = node.position
@@ -186,16 +186,14 @@ extension StationController {
                                     MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z - 0.45), seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
                 return
             }
-            // Up the service tower and in through the hatch: to the tower's foot, up its face to the swing
-            // arm, across the arm and in, shrinking as it goes, since the rocket is far too small for it.
+            // Up the tower and in through the hatch, shrinking as it goes: the rocket is far too small for it.
             let base = SIMD3(Double(rocket.position.x), Double(rocket.position.y), Double(rocket.position.z))
             let towerX = rocket.childNode(withName: "tower", recursively: true).map { Double($0.position.x) } ?? 0.44
             let hatchAt = SIMD3(Double(hatch.position.x), Double(hatch.position.y), Double(hatch.position.z))
-            // Small on the lift rail, small along the belt, gone at the door.
             let foot = SIMD3(base.x + towerX - 0.1, at.y + 0.1, base.z + 0.02)
             let top = SIMD3(foot.x, base.y + hatchAt.y - 0.06, foot.z)
             let door = base + hatchAt
-            // The door opens on the black of the hold as the crate reaches it, and closes white behind it.
+            // The door opens on the hold's black as the crate reaches it, and closes white behind it.
             if let door = hatch.childNode(withName: "door", recursively: false) {
                 let shut = door.geometry?.firstMaterial
                 let open = flat(NSColor(rgb: (0.04, 0.04, 0.05)))

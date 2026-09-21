@@ -482,7 +482,7 @@ final class Simulation<B: Body> {
             return n
         }
         // A crate row is never stood on, however empty the spot: two repositories share a row cell as two
-        // columns half a tile apart, and a body between them is inside one of them. The aisle beside it is.
+        // columns half a tile apart, and a body between them would be inside one of them.
         let rows = st.crateRows
         if blocked(cell) == 0, st.walkable.contains(cell), !rows.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
