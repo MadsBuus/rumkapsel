@@ -171,7 +171,8 @@ extension StationController {
     /// What a body is wearing this frame. The pallet errand is the one prop the body cannot work
     /// out for itself, so it is handed in; everything else follows from the body.
     func kit(_ m: Minion) -> Routines.Outfit {
-        Routines.outfit(m, at: clock, errand: errandTool(m), onErrand: simulation.palletErrand(of: m) != nil)
+        let p = simulation.pallets[m.station]
+        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
     }
 
     func tickMinions(dt: Double) {

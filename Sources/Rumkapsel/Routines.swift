@@ -129,20 +129,31 @@ enum Routines {
         var towel = false
     }
 
-    /// The kit for what this body is doing now. `errand` is what the pallet errand puts in the
-    /// hands, which only the simulation can say, and `onErrand` whether there is one at all.
-    static func outfit(_ m: Minion, at clock: Double, errand: Minion.Tool?, onErrand: Bool) -> Outfit {
+    /// The kit for what this body is doing now. `pallet` is what the station's hover pallet is up
+    /// to, which only the simulation can say; everything else the body knows for itself.
+    static func outfit(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Outfit {
         var kit = Outfit()
         kit.pixels = m.bathing && m.phaseKind == .act && m.path.isEmpty
         kit.towel = m.drying
-        kit.tool = hands(m, at: clock, errand: errand, onErrand: onErrand)
+        kit.tool = hands(m, at: clock, pallet: pallet)
         return kit
     }
 
-    /// What the hands hold, in the order the floor settles it: an errand first, then the cone's
-    /// rota, then a fixture, then the day's work, then a book on the couch, and nothing otherwise.
-    private static func hands(_ m: Minion, at clock: Double, errand: Minion.Tool?, onErrand: Bool) -> Minion.Tool? {
-        if onErrand { return errand }
+    /// What the hands hold, in the order the floor settles it: the errand's own step first, then
+    /// the cone's rota, then a fixture, then the day's work, then a book on the couch, and nothing
+    /// otherwise.
+    ///
+    /// The errand is a chain of steps, and each step holds what that step needs rather than what
+    /// the errand as a whole is for: walking to the terminal and working it is a tablet, and the
+    /// wand only comes out once there is a pallet standing there to load.
+    private static func hands(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Minion.Tool? {
+        switch m.current?.kind {
+        case .dispatch: return .tablet
+        case .waitPallet(_, let repo): return pallet?.repo == repo ? .telekinesis : .tablet
+        case .loadPallet, .unloadPallet: return .telekinesis
+        case .pushPallet: return pallet?.pushing == true ? .hands : nil
+        default: break
+        }
         let resting = m.path.isEmpty && m.state == .settled
         let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             && !m.exercising && !m.bathing && !m.onJob
