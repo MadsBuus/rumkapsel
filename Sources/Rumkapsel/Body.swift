@@ -131,6 +131,11 @@ class Body {
     /// any other — it claims a bunk, it is walked round, it holds a seat — but the facts that drive it
     /// come off the wire, so nothing here may hand it work of its own.
     var isPeer = false
+    /// The peer whose word is driving this body, while one is. A colleague on the board and on the
+    /// network is one person: the board's body stays, because a teammate's reactions are addressed to
+    /// it, and the network drives it while it can be heard. Cleared when they go quiet, and the body
+    /// goes back to what the board alone says.
+    var peerFed: String?
     var busyUntil = 0.0        // replay seconds, for crew minions
     var bed: Int?
     var pos: SIMD2<Double>

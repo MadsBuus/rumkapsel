@@ -834,6 +834,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func placePeerMinions(_ snap: PeerSnapshot) {
         let station = fleet.station("work")
         for m in snap.minions {
+            // One person, one body. A colleague heard on the network is the same colleague the board
+            // named when they hold the same office, and the board's body is the one that stays: the
+            // reactions a teammate's pull request plays out are addressed to it by login. The network
+            // only drives it, and hands it back when it goes quiet.
+            if let crew = minions.values.first(where: { $0.isCrew && !$0.isPeer && $0.home.key == m.office }) {
+                crew.peerFed = snap.name
+                drive(crew, by: m, station: station)
+                // They may have stood here as a figure of their own before we knew they were the same
+                // person. One person, one body: the figure goes.
+                removePeerFigure("peer:\(snap.name)/\(m.id)")
+                continue
+            }
             let id = "peer:\(snap.name)/\(m.id)"
             let home = Home(key: m.office, name: snap.name, repo: "", issue: nil)
             let figure: Minion
@@ -849,25 +861,40 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 minionRoot.addChildNode(figure.node)
                 minions[id] = figure
             }
-            // What they told us, and nothing more.
-            figure.busy = m.busy && !m.asleep
-            figure.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
-            let want: Place = m.asleep ? restPlace(figure)
-                : (station.rooms[m.office] != nil ? .room(m.office) : .lounge)
-            if figure.place != want || figure.path.isEmpty && figure.state == .arriving { send(figure, to: want) }
-            let cones = m.asleep ? 0 : (m.cones ?? 0)
-            if figure.pyramids.count + figure.queuedCones.count != cones {
-                clearPyramids(figure)
-                figure.queuedCones.forEach { $0.removeFromParentNode() }
-                figure.queuedCones = []
-                if cones > 0 {
-                    addPyramid(for: figure)
-                    for _ in 1..<max(1, cones) { addPyramid(for: figure, queued: true) }
-                }
-            }
+            drive(figure, by: m, station: station)
         }
         let live = Set(snap.minions.map { "peer:\(snap.name)/\($0.id)" })
         for id in minions.keys where id.hasPrefix("peer:\(snap.name)/") && !live.contains(id) { removePeerFigure(id) }
+        // A colleague this peer was speaking for and no longer mentions goes back to the board's word.
+        let claimed = Set(snap.minions.map(\.office))
+        for b in minions.values where b.peerFed == snap.name && !b.isPeer && !claimed.contains(b.home.key) { handBack(b) }
+    }
+
+    /// What a peer told us about one of its minions, put onto a body. The facts and nothing else: where
+    /// the body goes and how it lies is the station's, by the same code that places our own.
+    private func drive(_ b: Minion, by m: PeerSnapshot.Minion, station: Station) {
+        b.busy = m.busy && !m.asleep
+        b.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
+        let want: Place = m.asleep ? restPlace(b) : (station.rooms[m.office] != nil ? .room(m.office) : .lounge)
+        if b.place != want || b.path.isEmpty && b.state == .arriving { send(b, to: want) }
+        let cones = m.asleep ? 0 : (m.cones ?? 0)
+        guard b.pyramids.count + b.queuedCones.count != cones else { return }
+        clearPyramids(b)
+        b.queuedCones.forEach { $0.removeFromParentNode() }
+        b.queuedCones = []
+        guard cones > 0 else { return }
+        addPyramid(for: b)
+        for _ in 1..<max(1, cones) { addPyramid(for: b, queued: true) }
+    }
+
+    /// The network has stopped speaking for this body: it is the board's again, which says only that a
+    /// teammate is about, and a teammate about with nothing to do is asleep in the quarters.
+    private func handBack(_ b: Minion) {
+        b.peerFed = nil
+        b.busy = false
+        b.activity = .sleeping
+        clearPyramids(b)
+        send(b, to: .quarters)
     }
 
     /// A peer's figure leaves, the way any body leaves.
@@ -879,6 +906,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
     func dropPeer(_ name: String) {
         for id in minions.keys where id.hasPrefix("peer:\(name)/") { removePeerFigure(id) }   // their figures leave with them
+        for b in minions.values where b.peerFed == name { handBack(b) }                          // and those they spoke for are the board's again
         handle(world.dropPeer(name))
         flushScene()
     }

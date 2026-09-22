@@ -36,7 +36,8 @@ import SwiftUI
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR, Teammate: Close PR (feed lags)
 ///     Bots:      Bot: Open PR, Bot: Merge PR, Bot: Close PR
-///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office
+///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office,
+///                Peer: Same branch as teammate
 ///     Sources:   Stage: ready, Stage: stored, Stage: QA, Stage: cleared, Stage: shipped
 ///     Board:     Board: Move <repo>#<n> to <column>, Board: Catch up
 ///     Polls:     GitHub: Poll, Scan: again
@@ -174,6 +175,8 @@ final class SimulatorModel: ObservableObject {
     let bot = "dependabot[bot]"
     private var peerHere = false
     private var peerBeat: Timer?
+    /// Whether the peer claims the teammate's office, so one person arrives from both sources at once.
+    private var peerSharesTeammate = false
     /// Issue numbers per repository, continuing each one's own range so a new office reads like its neighbours.
     private var nextIssues: [String: Int] = ["web": 460, "api": 5160, "ios": 300]
     private func nextIssue(_ repo: String) -> Int { nextIssues[repo, default: 700] += 1; return nextIssues[repo]! }
@@ -343,7 +346,10 @@ final class SimulatorModel: ObservableObject {
         // A peer is a person, and at night their session is as quiet as anyone's: without this the one
         // state a peer's body is hardest to place — asleep, wanting a bunk of its own — is unreachable.
         let asleep = station.sim?.night == true
-        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: $0.key, asleep: asleep, busy: !asleep) }
+        // The ghost case: the same colleague on the board and on the network, holding the same branch.
+        // Two sources, one person — and until this there was no way to stand them next to each other.
+        let office = peerSharesTeammate ? offices.first { $0.owner == .teammate }?.home.key : nil
+        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: office ?? $0.key, asleep: asleep, busy: !asleep) }
         let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: station.now.addingTimeInterval(-600),
                                 offices: mine, minions: Array(ms), github: nil, project: nil)
         station.simulate(peer: snap)
@@ -863,6 +869,7 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Push branch", "She pushes", peerOffice),
                 button("Peer: Kick office", "You kick this office off the station",
                        o == nil ? .already("no office picked") : nil),
+                button("Peer: Same branch as teammate", "She is on leo's branch too"),
                 button("Peer: Arrive", shown: false),
                 button("Peer: Leave", shown: false),
             ]),
@@ -1248,6 +1255,7 @@ final class SimulatorModel: ObservableObject {
         case "Everyone to lounge": station.simulate(.lounge)
         case "Breather": station.simulate(.breather(.lounge))
         case "Everyone asleep": station.simulate(.turnIn)
+        case "Peer: Same branch as teammate": peerSharesTeammate = true; pushPeer()
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
         case "Meet in the hall": station.simulate(.meet)
