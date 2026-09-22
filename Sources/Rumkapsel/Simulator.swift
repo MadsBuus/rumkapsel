@@ -517,6 +517,9 @@ final class SimulatorModel: ObservableObject {
         ("coding", .coding("src")), ("reading code", .exploring), ("testing", .testing),
         ("writing", .writing), ("thinking", .thinking), ("QA testing", .qa),
         ("web research", .researching), ("waiting for you", .waiting),
+        // A session gone quiet past `sleepMinutes` is asleep, and an asleep body is the only one the
+        // night sends to a bunk: without this the knob could not reach the one state bedtime needs.
+        ("sleeping", .sleeping),
     ]
     static let noSession = "no session"
 

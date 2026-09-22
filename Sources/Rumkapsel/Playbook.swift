@@ -22,41 +22,88 @@ enum PlaybookCamera {
     case follow(String, Double)
 }
 
-/// One thing the station can do: what it needs standing, what to press, where to look, how fast, and how
+/// One thing the station can do: what floor it needs standing, what to press, where to look, and how
 /// long before it starts over.
+///
+/// There is no speed on an entry. Speed belongs to a moment, not to a whole play — setup can run at
+/// sixteen times and drop to one before the thing you came to watch — and since the moves are presses,
+/// "16x" and "1x" are moves like any other. Put them in the list where they belong.
 struct PlaybookEntry {
     let name: String
     /// A press and the seconds to wait after it, on the station's clock.
     let moves: [(String, Double)]
     let camera: PlaybookCamera
-    /// A time press: nil leaves it at whatever the station runs at, "4x" watches a long errand in a
-    /// quarter of the time it takes.
-    let speed: String?
     /// Seconds after the last press before the station is torn down and the entry plays again.
     let tail: Double
-    /// The floor this entry needs. The plaza and its two arms are the plan's own and always stand; the
-    /// yard and the bay are the station's to drop when an entry has no use for them.
-    let pad: Bool
-    let hangar: Bool
+    /// Whether this entry needs the yard: the pad, the test deck, storage and decon are one block, and
+    /// `hasPad` is the gate on all four. An entry about one office in a hallway wants none of it.
+    let yard: Bool
+    /// Whether it needs the bay hanging outside the airlock.
+    let bay: Bool
 
-    init(_ name: String, _ moves: [(String, Double)], camera: PlaybookCamera, speed: String? = nil,
-         tail: Double = 6, pad: Bool = true, hangar: Bool = true) {
+    init(_ name: String, _ moves: [(String, Double)], camera: PlaybookCamera,
+         tail: Double = 8, yard: Bool = false, bay: Bool = false) {
         self.name = name; self.moves = moves; self.camera = camera
-        self.speed = speed; self.tail = tail; self.pad = pad; self.hangar = hangar
+        self.tail = tail; self.yard = yard; self.bay = bay
     }
 }
 
 enum Playbook {
-    /// Two ends of the scale to begin with: one body at one cone, and a crate crossing the whole station
-    /// into a rocket. Both are presses on a real station; neither knows what it looks like.
+    /// The office every entry acts on, and the smallest floor that can show one body at a desk.
+    private static let office = "task:web#455"
+    private static func at(_ moves: [(String, Double)]) -> [(String, Double)] { [("Target: web#455", 0.4)] + moves }
+
     static let entries: [PlaybookEntry] = [
-        PlaybookEntry("a cone worked", [("Target: web#455", 0.5), ("Set: session = coding", 1), ("Prompt", 1)],
-                   camera: .area("task:web#455", 5), tail: 12, pad: false, hangar: false),
+        // What a session is doing, one to an entry: the knob says it, the body wears it, the routine plays.
+        PlaybookEntry("coding", at([("Set: session = coding", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("reading code", at([("Set: session = reading code", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("testing", at([("Set: session = testing", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("writing", at([("Set: session = writing", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("thinking", at([("Set: session = thinking", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("waiting for you", at([("Set: session = waiting for you", 1)]), camera: .area(office, 5), tail: 14),
+        PlaybookEntry("web research", at([("Set: session = web research", 1)]), camera: .whole(2.2), tail: 16),
+        PlaybookEntry("QA testing", at([("Set: session = QA testing", 1)]), camera: .area("deck", 3), tail: 18, yard: true),
+
+        // A cone is a message being worked: a prompt lands and the body goes to it.
+        PlaybookEntry("a cone worked", at([("Set: session = coding", 1), ("Prompt", 1)]), camera: .area(office, 5), tail: 16),
+
+        // The life of one piece of work, a press at a time.
+        PlaybookEntry("a commit", at([("Set: session = coding", 1), ("Commit", 1)]), camera: .area(office, 5), tail: 12),
+        PlaybookEntry("a pull request opens", at([("Open PR", 2)]), camera: .area(office, 4), tail: 14),
+        PlaybookEntry("checks fail", at([("Open PR", 2), ("Checks failing", 2)]), camera: .area(office, 4), tail: 14),
+        PlaybookEntry("a pull request is approved", at([("Open PR", 2), ("Approve PR", 2)]), camera: .area(office, 4), tail: 14),
+        PlaybookEntry("a pull request merges", at([("Open PR", 2), ("Merge PR", 3)]), camera: .whole(1.6), tail: 24, yard: true),
+        PlaybookEntry("a pull request closes unmerged", at([("Open PR", 2), ("Close PR", 2)]), camera: .area(office, 4), tail: 16),
+        PlaybookEntry("the session ends", at([("Set: session = coding", 1), ("Session ends", 2)]), camera: .area(office, 4), tail: 16),
+
+        // Other people's work: a teammate's office, a bot's, a peer's.
+        PlaybookEntry("a teammate opens a pull request", [("Teammate: Open PR", 2)], camera: .whole(1.8), tail: 18),
+        PlaybookEntry("a teammate merges", [("Teammate: Open PR", 2), ("Teammate: Merge PR", 3)], camera: .whole(1.6), tail: 24, yard: true),
+        PlaybookEntry("a bot opens a pull request", [("Bot: Open PR", 2)], camera: .area("decon", 3), tail: 18, yard: true),
+        PlaybookEntry("a peer arrives", [("Peer: Leave", 2), ("Peer: Arrive", 2)], camera: .whole(1.8), tail: 16),
+        PlaybookEntry("a peer leaves", [("Peer: Leave", 2)], camera: .whole(1.8), tail: 16),
+
+        // The day, and what everyone does when nobody is working.
+        // A body at work does not go to bed because it is dark, and that is right: only a session that
+        // has gone quiet is asleep, and only an asleep body is sent to a bunk.
+        PlaybookEntry("going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
+                      camera: .area("kind:quarters", 4), tail: 26),
+        PlaybookEntry("getting up", at([("Set: session = sleeping", 1), ("Night", 14),
+                                        ("Day", 1), ("Set: session = coding", 2)]),
+                      camera: .area("kind:quarters", 4), tail: 22),
+        PlaybookEntry("everyone to the lounge", [("Everyone to lounge", 2)], camera: .area("kind:lounge", 4), tail: 18),
+        PlaybookEntry("a bath", [("Bath", 2)], camera: .area("kind:bath", 5), tail: 22),
+        PlaybookEntry("a workout", [("Workout", 2)], camera: .area("kind:gym", 4), tail: 22),
+        PlaybookEntry("a chore", [("Chore", 2)], camera: .whole(1.8), tail: 20),
+        PlaybookEntry("a meeting in the hall", [("Meet in the hall", 2)], camera: .whole(1.8), tail: 20),
+
+        // The long errand: a crate crossing the whole station into a rocket. Setup runs fast, then it
+        // drops to one so the loading and the launch are watched at the speed they happen.
         PlaybookEntry("crate into rocket",
-                   [("Target: web#455", 0.5), ("Open PR", 2), ("Merge PR", 6),
-                    ("Stage: stored", 6), ("Release: Production opens", 4),
-                    ("Release: Mark tested", 3), ("Release: Production merges", 4)],
-                   camera: .area("pad", 2.2), speed: "4x", tail: 40),
+                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", 4), ("Stage: stored", 4),
+                          ("1x", 0.5), ("Release: Production opens", 3),
+                          ("Release: Mark tested", 3), ("Release: Production merges", 3)]),
+                      camera: .area("pad", 2.2), tail: 40, yard: true),
     ]
 
     static func find(_ words: String) -> Int? {
@@ -98,8 +145,8 @@ final class PlaybookModel: ObservableObject {
     func play(_ k: Int) { restart?(k) }
     func subtitle(_ e: PlaybookEntry) -> String {
         var parts = ["\(e.moves.count) presses"]
-        if let s = e.speed { parts.append(s) }
-        if !e.pad { parts.append("no yard") }
+        if e.yard { parts.append("yard") }
+        if e.bay { parts.append("bay") }
         return parts.joined(separator: " · ")
     }
 }
@@ -159,7 +206,6 @@ final class PlaybookController {
         model.playing = k
         model.status = entry.name
         sim.seed()
-        if let s = entry.speed { sim.press(s) }
         var at = 1.0
         for (name, after) in entry.moves {
             script.append(Timer.scheduledTimer(withTimeInterval: at, repeats: false) { [weak self] _ in
@@ -182,10 +228,12 @@ final class PlaybookController {
     /// floor does not exist when an entry starts and there is no delay worth guessing; and every press
     /// that changes the floor puts the camera back where the station wants it.
     private func hold(_ entry: PlaybookEntry) {
-        if let work = station.fleet.stations["work"], work.hasPad != entry.pad || work.hasHangar != entry.hangar {
-            work.hasPad = entry.pad
-            work.hasHangar = entry.hangar
+        if let work = station.fleet.stations["work"], work.hasPad != entry.yard || work.hasHangar != entry.bay {
+            work.hasPad = entry.yard
+            work.hasHangar = entry.bay
             station.rebuildStatic()
+            // What floor the entry actually got, since "the smallest station that shows it" is the point.
+            FileHandle.standardError.write("playbook \(entry.name): yard \(entry.yard) (\(work.padCells.count + work.deckCells.count + work.storageCells.count) cells), bay \(entry.bay) (\(work.hangarCells.count) cells)\n".data(using: .utf8)!)
         }
         aim(entry.camera)
     }

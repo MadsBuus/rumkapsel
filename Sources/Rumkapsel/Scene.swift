@@ -70,6 +70,13 @@ enum Pick {
     static let scenery = 2
 }
 
+/// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
+/// nodes of weather around a station of a few hundred, which is noise when what you are looking at is
+/// the station: `--no-stars` leaves the void empty.
+enum Backdrop {
+    static let drawn = !CommandLine.arguments.contains("--no-stars")
+}
+
 func faceted<G: SCNGeometry>(_ g: G, _ sides: Int = 6) -> G {
     (g as? SCNCylinder)?.radialSegmentCount = sides
     (g as? SCNCone)?.radialSegmentCount = sides
@@ -556,6 +563,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func buildBackdrop() {
         debrisRoot.childNodes.forEach { $0.removeFromParentNode() }
         scene.background.contents = Looks.current.background
+        debris = []
+        guard Backdrop.drawn else { return }   // `--no-stars`: the station alone, for looking at the station
         debris = Looks.current.backdrop(into: debrisRoot)
     }
 
