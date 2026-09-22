@@ -7,7 +7,7 @@ import SwiftUI
 /// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
 /// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
 enum Scripted {
-    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0.hasSuffix("-tests") }
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-ledger" || $0.hasSuffix("-tests") }
 }
 
 @MainActor
@@ -195,6 +195,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             let names = args[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
             for (k, n) in names.enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4 + Double(k) * 2) { [weak self] in self?.simulator?.model.press(n) }
+            }
+        }
+        if let i = args.firstIndex(of: "--dump-ledger") {
+            let next = args.count > i + 1 ? args[i + 1] : nil
+            let seconds = next.flatMap(Double.init) ?? 25
+            let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                self?.controller.dumpLedger(only: only)
+                exit(0)
             }
         }
         if let path = snapshotPath {
