@@ -51,15 +51,19 @@ struct PlaybookEntry {
     /// The rest of the desk — two more offices of mine, the teammate, the peer. Off leaves one office and
     /// one body, which is all most plays are about.
     let crowd: Bool
+    /// How long to let the station settle before the camera looks. A body works where the work is, not
+    /// where it lives — QA happens on the test deck, a wash in the bath — so a play that aims the moment
+    /// it starts spends its first seconds watching a walk. Aim once the body is where the play is about.
+    let settle: Double
 
     static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym"]
 
     init(_ group: String, _ name: String, _ moves: [(String, Double)], camera: PlaybookCamera,
          tail: Double = 8, yard: Bool = false, bay: Bool = false,
-         rooms: Set<String> = PlaybookEntry.idleRooms, crowd: Bool = true) {
+         rooms: Set<String> = PlaybookEntry.idleRooms, crowd: Bool = true, settle: Double = 0) {
         self.group = group; self.name = name; self.moves = moves; self.camera = camera
         self.tail = tail; self.yard = yard; self.bay = bay
-        self.rooms = rooms; self.crowd = crowd
+        self.rooms = rooms; self.crowd = crowd; self.settle = settle
     }
 }
 
@@ -78,7 +82,7 @@ enum Playbook {
         PlaybookEntry("work", "web research", at([("Set: session = web research", 1)]),
                       camera: .whole(2.6), tail: 16, rooms: [], crowd: false),
         PlaybookEntry("work", "QA testing", at([("Set: session = QA testing", 1)]),
-                      camera: .follow(who, 4), tail: 18, yard: true, rooms: [], crowd: false),
+                      camera: .follow(who, 4), tail: 22, yard: true, rooms: [], crowd: false, settle: 8),
 
         // A cone is a message being worked: a prompt lands and the body goes to it.
         PlaybookEntry("work", "a cone worked", at([("Set: session = coding", 1), ("Prompt", 1)]),
@@ -116,16 +120,16 @@ enum Playbook {
         // A body at work does not go to bed because it is dark, and that is right: only a session gone
         // quiet is asleep, and only an asleep body is sent to a bunk.
         PlaybookEntry("idle", "going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
-                      camera: .follow(who, 4), tail: 26, rooms: ["kind:quarters"], crowd: false),
+                      camera: .follow(who, 4), tail: 30, rooms: ["kind:quarters"], crowd: false, settle: 8),
         PlaybookEntry("idle", "getting up", at([("Set: session = sleeping", 1), ("Night", 14),
                                         ("Day", 1), ("Set: session = coding", 2)]),
                       camera: .follow(who, 4), tail: 22, rooms: ["kind:quarters"], crowd: false),
 
         // What a body does when it is not working: each play keeps the one room it is about.
-        PlaybookEntry("idle", "a bath", [("Bath", 2)], camera: .follow(who, 4), tail: 24,
-                      rooms: ["kind:bath"], crowd: false),
-        PlaybookEntry("idle", "a workout", [("Workout", 2)], camera: .follow(who, 4), tail: 24,
-                      rooms: ["kind:gym"], crowd: false),
+        PlaybookEntry("idle", "a bath", [("Bath", 2)], camera: .follow(who, 4), tail: 28,
+                      rooms: ["kind:bath"], crowd: false, settle: 7),
+        PlaybookEntry("idle", "a workout", [("Workout", 2)], camera: .follow(who, 4), tail: 28,
+                      rooms: ["kind:gym"], crowd: false, settle: 7),
         PlaybookEntry("idle", "everyone to the lounge", [("Everyone to lounge", 2)],
                       camera: .follow(who, 4), tail: 20, rooms: ["kind:lounge"]),
         PlaybookEntry("idle", "a chore", [("Chore", 2)], camera: .whole(2.2), tail: 22,
@@ -213,6 +217,8 @@ final class PlaybookController {
     private var script: [Timer] = []
     private var camera: Timer?
     private var aimed = false
+    /// Seconds since this play started, for the settle.
+    private var clock = 0.0
     private var loop: Timer?
     private let listWidth = 240.0
     private var frame: NSRect
@@ -230,7 +236,6 @@ final class PlaybookController {
         view.addSubview(panel)
         mount(stationRect)
         model.restart = { [weak self] k in self?.start(k) }
-        start(0)
     }
 
     private func mount(_ rect: NSRect) {
@@ -250,6 +255,7 @@ final class PlaybookController {
         script.forEach { $0.invalidate() }; script = []
         camera?.invalidate(); camera = nil
         aimed = false
+        clock = 0
         loop?.invalidate(); loop = nil
         station.view.removeFromSuperview()
         let stationRect = NSRect(x: listWidth, y: 0, width: frame.width - listWidth, height: frame.height)
@@ -277,8 +283,9 @@ final class PlaybookController {
         // An office framed before it is opened is framed on nothing, and every press that changes the
         // floor puts the camera back where the station wants it. So the framing is not set once: it is
         // held, re-asked for every beat until the entry starts over.
-        camera = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hold(entry) }
+        clock = 0
+        camera = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.clock += 0.5; self?.hold(entry) }
         }
 
         loop = Timer.scheduledTimer(withTimeInterval: at + entry.tail, repeats: false) { [weak self] _ in
@@ -297,6 +304,7 @@ final class PlaybookController {
         // Bodies are spawned by the scan the seed pushes, so a play that follows one has to wait for it;
         // aiming at an empty station leaves the camera wherever it happened to be.
         guard !aimed else { return }
+        guard clock >= entry.settle else { return }
         if case .follow = entry.camera, station.minions.isEmpty { return }
         aimed = true
         aim(entry.camera)

@@ -154,9 +154,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 exit(0)
             }
             openPlaybook()
-            if let i = args.firstIndex(of: "--entry"), args.count > i + 1, let k = Playbook.find(args[i + 1]) {
-                playbook?.start(k)
-            }
+            // One play, whichever was asked for: starting one in the window and another from the flag
+            // runs two stations in the time it takes to look at one.
+            let wanted = args.firstIndex(of: "--entry").flatMap { args.count > $0 + 1 ? Playbook.find(args[$0 + 1]) : nil }
+            playbook?.start(wanted ?? 0)
         }
         if simulatorOnly { openSimulator() }
         // The simulator runs its own station, so the view flags have to reach that one too.
