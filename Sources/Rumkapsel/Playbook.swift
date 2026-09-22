@@ -169,19 +169,35 @@ struct PlaybookPanel: View {
     @ObservedObject var model: PlaybookModel
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            List(selection: Binding(get: { model.playing }, set: { if let k = $0 { model.play(k) } })) {
-                ForEach(Playbook.groups, id: \.self) { group in
-                    Section(group) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Playbook.groups, id: \.self) { group in
+                        Text(group)
+                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 12).padding(.top, 6)
                         ForEach(Playbook.onShelf(group), id: \.offset) { row in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.entry.name).font(.system(size: 12))
-                                Text(model.subtitle(row.entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+                            // A button rather than a row of a selected list: a list hands its selection
+                            // back, and a play that restarts to the same entry leaves the selection where
+                            // it was, so the next click is no change at all and nothing happens.
+                            Button { model.play(row.offset) } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(row.entry.name).font(.system(size: 12))
+                                    Text(model.subtitle(row.entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(model.playing == row.offset ? Color.accentColor.opacity(0.25) : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                .contentShape(Rectangle())
                             }
-                            .tag(row.offset)
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 6)
                         }
                     }
                 }
+                .padding(.vertical, 8)
             }
+            Divider()
             Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
                 .padding(.horizontal, 12).padding(.vertical, 8)
         }

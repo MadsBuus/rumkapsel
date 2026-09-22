@@ -157,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             // One play, whichever was asked for: starting one in the window and another from the flag
             // runs two stations in the time it takes to look at one.
             let wanted = args.firstIndex(of: "--entry").flatMap { args.count > $0 + 1 ? Playbook.find(args[$0 + 1]) : nil }
-            playbook?.start(wanted ?? 0)
+            playbook?.model.play(wanted ?? 0)   // the same door the list's buttons go through
         }
         if simulatorOnly { openSimulator() }
         // The simulator runs its own station, so the view flags have to reach that one too.
