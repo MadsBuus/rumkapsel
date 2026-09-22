@@ -11,8 +11,9 @@
 import AppKit
 
 extension StationController {
-    func dumpBodies(only station: String?) {
-        func say(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+    func bodiesReport(only station: String?) -> String {
+        var lines: [String] = []
+        func say(_ s: String) { lines.append(s) }
         func pad(_ s: String, _ n: Int) -> String { s.padding(toLength: max(n, s.count), withPad: " ", startingAt: 0) }
         func num(_ d: Double) -> String { d == 0 ? "-" : String(format: "%.1f", d - clock) }
 
@@ -63,5 +64,6 @@ extension StationController {
             }
             say("")
         }
+        return lines.joined(separator: "\n")
     }
 }

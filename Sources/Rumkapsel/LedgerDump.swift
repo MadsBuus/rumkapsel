@@ -13,8 +13,9 @@ import AppKit
 
 extension StationController {
     /// One line per crate, and the reasons a crate may be standing somewhere the source did not ask for.
-    func dumpLedger(only repo: String?) {
-        func say(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .utf8)!) }
+    func ledgerReport(only repo: String?) -> String {
+        var lines: [String] = []
+        func say(_ s: String) { lines.append(s) }
         let stamp = DateFormatter()
         stamp.dateFormat = "MM-dd HH:mm"
         func when(_ d: Date?) -> String { d.map(stamp.string(from:)) ?? "-" }
@@ -63,5 +64,6 @@ extension StationController {
                 say("    disagreeing: \(open.isEmpty ? "none" : open.map { "\($0.number) \($0.placed?.rawValue ?? "-")→\($0.wanted?.rawValue ?? "-")" }.joined(separator: ", "))")
             }
         }
+        return lines.joined(separator: "\n")
     }
 }

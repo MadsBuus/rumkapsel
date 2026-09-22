@@ -202,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             let seconds = next.flatMap(Double.init) ?? 20
             let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-                self?.controller.dumpBodies(only: only)
+                FileHandle.standardError.write((self!.controller.bodiesReport(only: only) + "\n").data(using: .utf8)!)
                 exit(0)
             }
         }
@@ -211,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             let seconds = next.flatMap(Double.init) ?? 25
             let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-                self?.controller.dumpLedger(only: only)
+                FileHandle.standardError.write((self!.controller.ledgerReport(only: only) + "\n").data(using: .utf8)!)
                 exit(0)
             }
         }
@@ -312,6 +312,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         g.keyEquivalentModifierMask = [.command, .shift]
         let sim = develop.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
         sim.keyEquivalentModifierMask = [.command, .shift]
+        let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook), keyEquivalent: "p")
+        play.keyEquivalentModifierMask = [.command, .shift]
+        develop.addItem(.separator())
+        // A reading of the station as it stands, onto the clipboard. A picture of a floor gone wrong says
+        // what it looks like; this says why, and it is the running station that has to answer, not a fresh
+        // one — the states worth asking about are the ones that took hours to arrive at.
+        let bodies = develop.addItem(withTitle: "Copy Body Report", action: #selector(copyBodies), keyEquivalent: "b")
+        bodies.keyEquivalentModifierMask = [.command, .shift]
+        let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
+        ledger.keyEquivalentModifierMask = [.command, .shift]
 
         let help = menu("Help")
         help.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
@@ -375,6 +385,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     /// A station driven by hand: synthetic facts in, every event and command in the log.
+    /// The report onto the clipboard and into the log, so it can be pasted wherever it is being read.
+    private func copy(_ text: String, what: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        FileHandle.standardError.write((text + "\n").data(using: .utf8)!)
+        controller.logEvent("\(what) copied")
+    }
+
+    @objc func copyBodies() { copy(controller.bodiesReport(only: nil), what: "body report") }
+    @objc func copyLedger() { copy(controller.ledgerReport(only: nil), what: "ledger report") }
+
     @objc func openPlaybook() {
         if playbookWindow == nil {
             let size = NSSize(width: 1100, height: 720)
