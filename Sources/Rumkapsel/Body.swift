@@ -90,6 +90,11 @@ class Body {
     /// Getting into bed, which is the same moves in the opposite order: sitting on the edge, then
     /// stretching out along it.
     var beddingUntil = 0.0
+    /// Whether this body has actually got into the bunk: it has sat on the edge and swung its legs up.
+    /// A body standing at the bedside is not lying yet, however still it is — without this the pose is
+    /// read off the absence of both timers, which cannot tell "not started" from "done", and the body
+    /// counts as lying the instant its walk ends and slides onto the mattress on its back.
+    var beddedDown = false
     /// How much of either move is spent sitting on the edge, before stretching out or standing up.
     static let riseSit = 0.55
     /// A change of orders is visible: standing a beat, head up, before going.
@@ -122,6 +127,15 @@ class Body {
     let isSubagent: Bool
     var facing = 0.0
     var isCrew = false
+    /// Someone else's body, heard over the network rather than read off this machine. It is a body like
+    /// any other — it claims a bunk, it is walked round, it holds a seat — but the facts that drive it
+    /// come off the wire, so nothing here may hand it work of its own.
+    var isPeer = false
+    /// The peer whose word is driving this body, while one is. A colleague on the board and on the
+    /// network is one person: the board's body stays, because a teammate's reactions are addressed to
+    /// it, and the network drives it while it can be heard. Cleared when they go quiet, and the body
+    /// goes back to what the board alone says.
+    var peerFed: String?
     var busyUntil = 0.0        // replay seconds, for crew minions
     var bed: Int?
     var pos: SIMD2<Double>
@@ -183,7 +197,7 @@ class Body {
     /// moment it is roused, not when it finally sets off.
     var lying: Bool {
         if onBench { return true }
-        return risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
+        return beddedDown && risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
             && (activity == .sleeping || napping) && place == .quarters
     }
 
@@ -195,7 +209,7 @@ class Body {
     /// Free for a chore: nothing in hand, arms empty, standing in for nobody, and whatever it is doing
     /// can be cut into. The one question every picker asks.
     var isFree: Bool {
-        !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
+        !onJob && !hasLoad && !isSubagent && !isCrew && !isPeer && !isQA
             && state != .leaving && wakeUntil == 0
             && (current == nil || phaseKind.interruptible)
     }

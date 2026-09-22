@@ -350,11 +350,23 @@ extension StationController {
             let resting = m.path.isEmpty && m.state == .settled
             // A visit outranks the day's work in the picture: someone on the treadmill is not also testing.
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
-            let inBed = m.bed != nil && m.place == .quarters && m.path.isEmpty
+            // A bunk is never turned, so a body on the mattress lies along the room. On the edge of one it
+            // keeps the facing it sat down with — its back to the bunk — or the turn onto the edge and the
+            // swing up into line, which is the whole of getting into bed, never shows.
+            var flatInBunk = false, onBunkEdge = false
+            if m.bed != nil, m.place == .quarters {
+                switch m.currentPose(at: clock) {
+                case .flat: flatInBunk = true
+                case .seated: onBunkEdge = m.beddingUntil > 0 || m.risingUntil > clock
+                default: break
+                }
+            }
             // A body on a seat keeps the way it was put down: a sitter is placed behind where its feet
             // are, along its own facing, so turning it to face the camera would swing it off the seat.
             let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
-            let wantFacing = inBed ? 0 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
+            let wantFacing = flatInBunk ? 0
+                : onBunkEdge ? m.facing
+                : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))

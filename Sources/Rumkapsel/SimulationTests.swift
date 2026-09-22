@@ -524,7 +524,10 @@ enum SimulationTests {
             _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
             m.activity = .sleeping
             m.napping = true
-            _ = step(sim, seconds: 2)
+            // Getting into a bunk takes the sit on the edge and the swing up into line, and that beat is
+            // a second or so plus a random moment so four of them do not turn in together. Long enough
+            // for the longest of those, or the body is still on its feet when the flat pose is asked for.
+            _ = step(sim, seconds: 6, until: { m.lying })
             expect(m.lying, "asleep in the quarters, flat on its back")
             let bedSpot = m.pos
 

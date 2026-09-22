@@ -244,6 +244,31 @@ enum Props {
         return n
     }
 
+    /// An unlit berth, the colour the bay and the pad are marked out in: space black, so an empty berth is
+    /// an outline scored into the floor rather than a ring drawn on top of it.
+    static let berthIdle = NSColor(rgb: (0.05, 0.06, 0.09))
+
+    /// One berth: the rim that takes the colour of whoever is coming, and, where the bay hangs open, the
+    /// plate under it that a ship and its carrier stand on. Centred on the origin — the bay places it over
+    /// its slot, and the gallery over its tile — so a tile cannot draw a berth the station does not.
+    static func berth() -> (node: SCNNode, rim: SCNNode) {
+        let node = SCNNode()
+        let height = Looks.current.berthHexHeight
+        if Looks.current.bayOpenToSpace {
+            let plate = SCNNode(geometry: faceted(SCNCylinder(radius: Station.bayRadius - 0.03, height: 0.05)))
+            plate.geometry!.firstMaterial = flat(NSColor(Colors.hangar).darker(0.12))
+            plate.opacity = 0.9
+            plate.position = v3(0, height - 0.026, 0)
+            node.addChildNode(plate)
+        }
+        let rim = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.bayRadius - 0.06, outerRadius: Station.bayRadius, height: 0.008)))
+        rim.geometry!.firstMaterial = flat(berthIdle)
+        rim.opacity = 0.25
+        rim.position = v3(0, height, 0)
+        node.addChildNode(rim)
+        return (node, rim)
+    }
+
     /// The hull's deck plate where it meets the floor: the colour the wall starts from before it climbs and
     /// cools, and the colour the bay's apron is laid in, so the two read as one piece of station.
     static let hullPlate = (0.28, 0.33, 0.43)

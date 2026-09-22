@@ -229,6 +229,7 @@ extension Classic {
             let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
             b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))   // lit shading pulls it toward the floor; the upper bunk lifts its colour the same way
             b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
+            dress(b, top: Minion.bedSeat / 2)
             return b
         }
         let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))
@@ -240,6 +241,24 @@ extension Classic {
             post.position = v3(dx, -0.17, dz)
             slab.addChildNode(post)
         } }
+        dress(slab, top: 0.015)
         return slab
+    }
+
+    /// What tells a bed from a box, seen from above: a pillow at the head and covers that stop short of
+    /// it. The edge where the covers end is the whole point — a bare slab reads as a lid.
+    private static func dress(_ mattress: SCNNode, top: Double) {
+        let head = -0.36, foot = 0.36
+        let pillow = SCNNode(geometry: SCNBox(width: 0.24, height: 0.035, length: 0.14, chamferRadius: 0.012))
+        pillow.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.4))
+        pillow.position = v3(0, top + 0.018, head + 0.11)
+        mattress.addChildNode(pillow)
+        // From a hand's breadth below the pillow to the foot, and a shade proud of the mattress either
+        // side, the way a blanket hangs over.
+        let from = head + 0.24
+        let covers = SCNNode(geometry: SCNBox(width: 0.355, height: 0.03, length: foot - from, chamferRadius: 0.008))
+        covers.geometry!.firstMaterial = lit(NSColor(Colors.bed).darker(0.22))
+        covers.position = v3(0, top + 0.014, (from + foot) / 2)
+        mattress.addChildNode(covers)
     }
 }

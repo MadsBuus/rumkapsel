@@ -36,7 +36,8 @@ import SwiftUI
 ///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
 ///                Teammate: Close PR, Teammate: Close PR (feed lags)
 ///     Bots:      Bot: Open PR, Bot: Merge PR, Bot: Close PR
-///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office
+///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office,
+///                Peer: Same branch as teammate
 ///     Sources:   Stage: ready, Stage: stored, Stage: QA, Stage: cleared, Stage: shipped
 ///     Board:     Board: Move <repo>#<n> to <column>, Board: Catch up
 ///     Polls:     GitHub: Poll, Scan: again
@@ -44,7 +45,8 @@ import SwiftUI
 ///                Release: Staging merges, Release: Staging merges (board lags),
 ///                Release: Staging closes, Release: Production opens, Release: Mark tested,
 ///                Release: Production merges
-///     Everyone:  Night, Day, Everyone to lounge, Bath, Chore, Workout, Meet in the hall,
+///     Everyone:  Night, Day, Everyone to lounge, Breather, Everyone asleep, Bath, Chore, Workout,
+///                Meet in the hall,
 ///                Wedge carrier
 ///     Time:      Pause, Resume, Step, ¼x, ½x, 1x, 4x, 16x
 ///
@@ -173,6 +175,8 @@ final class SimulatorModel: ObservableObject {
     let bot = "dependabot[bot]"
     private var peerHere = false
     private var peerBeat: Timer?
+    /// Whether the peer claims the teammate's office, so one person arrives from both sources at once.
+    private var peerSharesTeammate = false
     /// Issue numbers per repository, continuing each one's own range so a new office reads like its neighbours.
     private var nextIssues: [String: Int] = ["web": 460, "api": 5160, "ios": 300]
     private func nextIssue(_ repo: String) -> Int { nextIssues[repo, default: 700] += 1; return nextIssues[repo]! }
@@ -213,7 +217,9 @@ final class SimulatorModel: ObservableObject {
 
     /// A deterministic org: three repositories, five offices, three sessions of mine, one teammate
     /// with a pull request, one peer on the network, and crates on the board.
-    func seed() {
+    /// `crowd` is the rest of the desk: the other two offices of mine, the teammate and the peer. A play
+    /// about one body in a dorm wants none of them, and the org is the same org without them.
+    func seed(crowd: Bool = true) {
         for r in repos { makeDir(root(r)) }
         github.injectSilently = true
         github.simulationReset()
@@ -233,26 +239,28 @@ final class SimulatorModel: ObservableObject {
             item("web", 430, "checkout copy", statuses.deck, "me"),
             item("ios", 280, "push permissions", statuses.deck, "me"),
         ]
-        addMine(repo: "ios", number: 298, slug: "lima", branch: "gh-298/onboarding", title: "onboarding", activity: .waiting, commits: 1)
         addMine(repo: "web", number: 455, slug: "damascus", branch: "gh-455/booking-flow", title: "booking flow", activity: .coding("app"), commits: 4)
-        addMine(repo: "api", number: 5158, slug: "bismarck", branch: "gh-5158/offerings-gate", title: "offerings gate", activity: .testing, commits: 2)
-        var leo = makeOffice(repo: "api", number: 5140, branch: "gh-5140/settlement-redesign", title: "settlement redesign",
-                             owner: .teammate, who: teammate)
-        leo.prOpen = true
-        leo.pushed = true
-        leo.startedAt = station.now.addingTimeInterval(-7200)
-        offices.append(leo)
-        var kim = makeOffice(repo: "web", number: 460, branch: "gh-460/artist-tags", title: "artist tags", owner: .peer, who: peerName)
-        kim.pushed = true
-        kim.commits = 2
-        kim.startedAt = station.now.addingTimeInterval(-3600)
-        offices.append(kim)
+        if crowd {
+            addMine(repo: "ios", number: 298, slug: "lima", branch: "gh-298/onboarding", title: "onboarding", activity: .waiting, commits: 1)
+            addMine(repo: "api", number: 5158, slug: "bismarck", branch: "gh-5158/offerings-gate", title: "offerings gate", activity: .testing, commits: 2)
+            var leo = makeOffice(repo: "api", number: 5140, branch: "gh-5140/settlement-redesign", title: "settlement redesign",
+                                 owner: .teammate, who: teammate)
+            leo.prOpen = true
+            leo.pushed = true
+            leo.startedAt = station.now.addingTimeInterval(-7200)
+            offices.append(leo)
+            var kim = makeOffice(repo: "web", number: 460, branch: "gh-460/artist-tags", title: "artist tags", owner: .peer, who: peerName)
+            kim.pushed = true
+            kim.commits = 2
+            kim.startedAt = station.now.addingTimeInterval(-3600)
+            offices.append(kim)
+        }
 
         github.inject(project: board, quiet: true)
         github.injectSilently = false
         pushGitHub()          // taken quietly: the repositories answer for the first time here
         pushScan()
-        peerHere = true
+        peerHere = crowd
         pushPeer()
         pushGitHub()
         refresh()
@@ -335,7 +343,13 @@ final class SimulatorModel: ObservableObject {
                                 color: station.world.fleet.color(forRepo: o.repo), cells: [], pushed: o.pushed,
                                 startedAt: o.startedAt, lastActive: station.now, boxes: o.commits, dim: false)
         }
-        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: $0.key, asleep: false, busy: true) }
+        // A peer is a person, and at night their session is as quiet as anyone's: without this the one
+        // state a peer's body is hardest to place — asleep, wanting a bunk of its own — is unreachable.
+        let asleep = station.sim?.night == true
+        // The ghost case: the same colleague on the board and on the network, holding the same branch.
+        // Two sources, one person — and until this there was no way to stand them next to each other.
+        let office = peerSharesTeammate ? offices.first { $0.owner == .teammate }?.home.key : nil
+        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: office ?? $0.key, asleep: asleep, busy: !asleep) }
         let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: station.now.addingTimeInterval(-600),
                                 offices: mine, minions: Array(ms), github: nil, project: nil)
         station.simulate(peer: snap)
@@ -517,6 +531,9 @@ final class SimulatorModel: ObservableObject {
         ("coding", .coding("src")), ("reading code", .exploring), ("testing", .testing),
         ("writing", .writing), ("thinking", .thinking), ("QA testing", .qa),
         ("web research", .researching), ("waiting for you", .waiting),
+        // A session gone quiet past `sleepMinutes` is asleep, and an asleep body is the only one the
+        // night sends to a bunk: without this the knob could not reach the one state bedtime needs.
+        ("sleeping", .sleeping),
     ]
     static let noSession = "no session"
 
@@ -852,6 +869,7 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Push branch", "She pushes", peerOffice),
                 button("Peer: Kick office", "You kick this office off the station",
                        o == nil ? .already("no office picked") : nil),
+                button("Peer: Same branch as teammate", "She is on leo's branch too"),
                 button("Peer: Arrive", shown: false),
                 button("Peer: Leave", shown: false),
             ]),
@@ -893,7 +911,9 @@ final class SimulatorModel: ObservableObject {
                 button("Repo: Ships on merge", shown: false),
             ]),
             Group(id: "Everyone", note: nil, buttons: [
-                button("Everyone to lounge", "To the lounge"), button("Bath", "To the bath"),
+                button("Everyone to lounge", "To the lounge"), button("Breather", "One takes a break"),
+                button("Everyone asleep", "All sessions quiet"),
+                button("Bath", "To the bath"),
                 button("Chore", "A chore"), button("Workout", "A turn in the gym"),
                 button("Meet in the hall", "A meeting in the hall"), button("Wedge carrier", "Wedge a carrier"),
                 button("Night", shown: false), button("Day", shown: false),
@@ -905,6 +925,9 @@ final class SimulatorModel: ObservableObject {
     let timeNames = ["Pause", "Resume", "Step", "¼x", "½x", "1x", "4x", "16x"]
 
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
+
+    /// Stops the beats this model keeps, for a station that is being thrown away.
+    func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
 
     func press(_ name: String) {
         note("press", name, .press(name))
@@ -1230,6 +1253,9 @@ final class SimulatorModel: ObservableObject {
         case "Night": station.simulate(.night(true))
         case "Day": station.simulate(.night(false))
         case "Everyone to lounge": station.simulate(.lounge)
+        case "Breather": station.simulate(.breather(.lounge))
+        case "Everyone asleep": station.simulate(.turnIn)
+        case "Peer: Same branch as teammate": peerSharesTeammate = true; pushPeer()
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
         case "Meet in the hall": station.simulate(.meet)
@@ -1581,7 +1607,7 @@ final class SimHooks {
 }
 
 /// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
-enum SimNudge { case bath, chore, lounge, meet, night(Bool?), wedge, workout }
+enum SimNudge { case bath, breather(Place), chore, lounge, meet, night(Bool?), turnIn, wedge, workout }
 
 extension StationController {
     /// Small enough that a minion at sixteen times speed still walks rather than jumps.
@@ -1715,6 +1741,30 @@ extension StationController {
                     m.activity = .waiting
                     send(m, to: .lounge)
                 }
+            case .turnIn:
+                // Every session gone quiet at once, which is what a real night looks like and what a
+                // single body in a dorm never tests: the bunks are claimed together and the walks to
+                // them cross. Only a body whose session is asleep is ever sent to a bunk, so this says
+                // that of all of them and lets the night do the rest.
+                for m in minions.values where !m.isSubagent && !m.onJob && !m.hasLoad {
+                    m.busy = false
+                    m.activity = .sleeping
+                    if let c = m.current, !c.isRest { finish(m) }
+                    send(m, to: restPlace(m))
+                }
+            case .breather(let place):
+                // "Everyone to lounge" ends the work: it makes a body idle and parks it there. This does
+                // not. A body at work walks off, sits a moment and goes back to what it was doing, because
+                // the trip is a reaction — the activity and the office are untouched, and when the reaction
+                // runs out the body is sent back to its place. Nothing on the station ever chooses this;
+                // it is a press, so the floor never tells you a session is resting when it is working.
+                let atWork = minions.values.filter {
+                    $0.busy && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.bathing && !$0.exercising
+                }
+                guard let m = atWork.first(where: { !$0.isCrew }) ?? atWork.first else {
+                    handle(.log("nobody at work to send for a break")); return
+                }
+                react(m, m.activity, place: place, minutes: 12.0 / 60, words: "\(m.home.name) taking a break")
             case .night(let on):
                 sim?.night = on
                 for m in minions.values where !m.onJob { send(m, to: restPlace(m)) }

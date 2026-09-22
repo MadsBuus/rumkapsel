@@ -151,7 +151,7 @@ extension StationController {
                 rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), cargo: r.cargo, untested: r.untested)
                 continue
             }
-            guard r.stage.rank == 0, !v.node.hasActions else { continue }
+            guard r.stage.rank < 3, !v.node.hasActions else { continue }
             if r.cargo / 3 != v.cargoShown / 3 || r.untested != v.untestedShown {
                 let position = v.node.position
                 v.node.removeFromParentNode()
@@ -159,6 +159,7 @@ extension StationController {
                 v.node.position = position
                 v.cargoShown = r.cargo
                 v.untestedShown = r.untested
+                if r.stage.rank == 2 { addSteam(to: v.node) }   // redrawn mid-wait: it was venting, and still is
             } else if v.node.name != r.label {
                 v.node.name = r.label
                 v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }

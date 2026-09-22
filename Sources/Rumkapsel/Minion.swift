@@ -416,7 +416,9 @@ final class Minion: Body {
         fading.append((node, Minion.fadeSeconds, false))
     }
 
-    private func stepFades(_ dt: Double) {
+    /// A prop arrives at nothing and is brought up by this, so whoever draws a body has to beat it. The
+    /// station beats it through `wear`; the gallery puts routines on a body itself and beats it directly.
+    func stepFades(_ dt: Double) {
         guard !fading.isEmpty else { return }
         for i in fading.indices { fading[i].left -= dt }
         for f in fading where f.left <= 0 && f.out { f.node.removeFromParentNode() }

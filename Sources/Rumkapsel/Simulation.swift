@@ -340,6 +340,7 @@ final class Simulation<B: Body> {
     func rouse(_ m: B) {
         guard m.lying, m.risingUntil == 0 else { return }
         m.risingUntil = clock + 1.1
+        m.beddedDown = false
         m.napping = false
         m.bed = nil
     }
@@ -605,7 +606,7 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
-        if m.lying { m.napping = false; m.bed = nil }
+        if m.lying { m.napping = false; m.bed = nil; m.beddedDown = false }
         if m.place != place || m.path.isEmpty { send(m, to: place) }
         start(m, .react(activity, place: place, for: minutes * 60, words: words))
     }
@@ -904,7 +905,7 @@ final class Simulation<B: Body> {
             let stand = spot + outward * B.seatReach
             // At the edge with nothing else to do: it turns its back on the bunk, sits on it, and
             // stretches out along it. The same move the other way round is what getting up is.
-            if !m.lying, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
+            if !m.beddedDown, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
                 let gap = stand - m.pos
                 if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
                     // A moment apart from one another: four of them turning in together looks drilled.
@@ -912,7 +913,7 @@ final class Simulation<B: Body> {
                     m.facing = atan2(outward.x, outward.y)   // its back to the bunk, ready to sit down
                 }
             }
-            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0 }
+            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0; m.beddedDown = true }
             // It is on the mattress once it is lying on it, or once the sit is over and it is stretching.
             let stretching = m.beddingUntil > 0 && m.beddingUntil - clock <= B.riseSit
             m.pos += ((m.lying || stretching ? spot : stand) - m.pos) * min(1, dt * 4)

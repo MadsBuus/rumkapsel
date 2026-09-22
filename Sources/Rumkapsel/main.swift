@@ -7,7 +7,7 @@ import SwiftUI
 /// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
 /// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
 enum Scripted {
-    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0.hasSuffix("-tests") }
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-ledger" || $0 == "--dump-bodies" || $0.hasSuffix("-tests") }
 }
 
 @MainActor
@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     var notesWindow: NSWindow?
     var galleryWindow: NSWindow?
     var gallery: GalleryController?
+    var playbookWindow: NSWindow?
+    var playbook: PlaybookController?
     var simulatorWindow: NSWindow?
     var simulator: SimulatorController?
     /// A scripted run's heartbeat: see below.
@@ -145,6 +147,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
+        let playbookMode = args.contains("--playbook")
+        if playbookMode {
+            if args.contains("--entries") {
+                for e in Playbook.entries { print(e.name) }
+                exit(0)
+            }
+            openPlaybook()
+            // One play, whichever was asked for: starting one in the window and another from the flag
+            // runs two stations in the time it takes to look at one.
+            let wanted = args.firstIndex(of: "--entry").flatMap { args.count > $0 + 1 ? Playbook.find(args[$0 + 1]) : nil }
+            playbook?.model.play(wanted ?? 0)   // the same door the list's buttons go through
+        }
         if simulatorOnly { openSimulator() }
         // The simulator runs its own station, so the view flags have to reach that one too.
         if let sim = simulator {
@@ -183,6 +197,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4 + Double(k) * 2) { [weak self] in self?.simulator?.model.press(n) }
             }
         }
+        if let i = args.firstIndex(of: "--dump-bodies") {
+            let next = args.count > i + 1 ? args[i + 1] : nil
+            let seconds = next.flatMap(Double.init) ?? 20
+            let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                FileHandle.standardError.write((self!.controller.bodiesReport(only: only) + "\n").data(using: .utf8)!)
+                exit(0)
+            }
+        }
+        if let i = args.firstIndex(of: "--dump-ledger") {
+            let next = args.count > i + 1 ? args[i + 1] : nil
+            let seconds = next.flatMap(Double.init) ?? 25
+            let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+                FileHandle.standardError.write((self!.controller.ledgerReport(only: only) + "\n").data(using: .utf8)!)
+                exit(0)
+            }
+        }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
             // Off screen nothing asks SceneKit for a frame, so a scripted run would never tick.
@@ -197,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 let url = URL(fileURLWithPath: path)
                 let name = frames == 1 ? path : url.deletingPathExtension().path + String(format: "-%03d.", k) + url.pathExtension
                 if galleryMode { gallery?.snapshot(to: name) }
+                else if playbookMode { playbook?.snapshot(to: name) }
                 else if let sim = simulator { sim.snapshot(to: name) }
                 else { controller.snapshot(to: name) }
                 guard k + 1 == frames else { return }
@@ -279,6 +312,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         g.keyEquivalentModifierMask = [.command, .shift]
         let sim = develop.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
         sim.keyEquivalentModifierMask = [.command, .shift]
+        let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook), keyEquivalent: "p")
+        play.keyEquivalentModifierMask = [.command, .shift]
+        develop.addItem(.separator())
+        // A reading of the station as it stands, onto the clipboard. A picture of a floor gone wrong says
+        // what it looks like; this says why, and it is the running station that has to answer, not a fresh
+        // one — the states worth asking about are the ones that took hours to arrive at.
+        let bodies = develop.addItem(withTitle: "Copy Body Report", action: #selector(copyBodies), keyEquivalent: "b")
+        bodies.keyEquivalentModifierMask = [.command, .shift]
+        let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
+        ledger.keyEquivalentModifierMask = [.command, .shift]
 
         let help = menu("Help")
         help.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
@@ -342,6 +385,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     /// A station driven by hand: synthetic facts in, every event and command in the log.
+    /// The report onto the clipboard and into the log, so it can be pasted wherever it is being read.
+    private func copy(_ text: String, what: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        FileHandle.standardError.write((text + "\n").data(using: .utf8)!)
+        controller.logEvent("\(what) copied")
+    }
+
+    @objc func copyBodies() { copy(controller.bodiesReport(only: nil), what: "body report") }
+    @objc func copyLedger() { copy(controller.ledgerReport(only: nil), what: "ledger report") }
+
+    @objc func openPlaybook() {
+        if playbookWindow == nil {
+            let size = NSSize(width: 1100, height: 720)
+            let sc = PlaybookController(frame: NSRect(origin: .zero, size: size))
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            w.title = "rumkapsel playbook"
+            w.contentView = sc.view
+            w.isReleasedWhenClosed = false
+            w.center()
+            playbook = sc
+            playbookWindow = w
+        }
+        if Scripted.run {
+            playbookWindow?.orderBack(nil)
+        } else {
+            playbookWindow?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     @objc func openSimulator() {
         if simulatorWindow == nil {
             let size = NSSize(width: 1060, height: 700)
