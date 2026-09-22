@@ -757,7 +757,15 @@ final class World {
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
-            for r in waiting(repo: info.repo, station: station.name) { works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
+            // What the release carries is what shipped, wherever the floor had got it to. `waiting` is
+            // already that set — from QA up, where staging is the deck — and its records are marked
+            // shipped here. Their crates are marked with them, or a crate the release really took stays
+            // standing in a row for good, saying it is still waiting while its own record says it shipped.
+            for r in waiting(repo: info.repo, station: station.name) {
+                works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date())
+                if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
+            }
+            // And anything aboard that no record accounts for.
             for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
