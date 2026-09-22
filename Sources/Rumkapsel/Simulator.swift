@@ -213,7 +213,9 @@ final class SimulatorModel: ObservableObject {
 
     /// A deterministic org: three repositories, five offices, three sessions of mine, one teammate
     /// with a pull request, one peer on the network, and crates on the board.
-    func seed() {
+    /// `crowd` is the rest of the desk: the other two offices of mine, the teammate and the peer. A play
+    /// about one body in a dorm wants none of them, and the org is the same org without them.
+    func seed(crowd: Bool = true) {
         for r in repos { makeDir(root(r)) }
         github.injectSilently = true
         github.simulationReset()
@@ -233,26 +235,28 @@ final class SimulatorModel: ObservableObject {
             item("web", 430, "checkout copy", statuses.deck, "me"),
             item("ios", 280, "push permissions", statuses.deck, "me"),
         ]
-        addMine(repo: "ios", number: 298, slug: "lima", branch: "gh-298/onboarding", title: "onboarding", activity: .waiting, commits: 1)
         addMine(repo: "web", number: 455, slug: "damascus", branch: "gh-455/booking-flow", title: "booking flow", activity: .coding("app"), commits: 4)
-        addMine(repo: "api", number: 5158, slug: "bismarck", branch: "gh-5158/offerings-gate", title: "offerings gate", activity: .testing, commits: 2)
-        var leo = makeOffice(repo: "api", number: 5140, branch: "gh-5140/settlement-redesign", title: "settlement redesign",
-                             owner: .teammate, who: teammate)
-        leo.prOpen = true
-        leo.pushed = true
-        leo.startedAt = station.now.addingTimeInterval(-7200)
-        offices.append(leo)
-        var kim = makeOffice(repo: "web", number: 460, branch: "gh-460/artist-tags", title: "artist tags", owner: .peer, who: peerName)
-        kim.pushed = true
-        kim.commits = 2
-        kim.startedAt = station.now.addingTimeInterval(-3600)
-        offices.append(kim)
+        if crowd {
+            addMine(repo: "ios", number: 298, slug: "lima", branch: "gh-298/onboarding", title: "onboarding", activity: .waiting, commits: 1)
+            addMine(repo: "api", number: 5158, slug: "bismarck", branch: "gh-5158/offerings-gate", title: "offerings gate", activity: .testing, commits: 2)
+            var leo = makeOffice(repo: "api", number: 5140, branch: "gh-5140/settlement-redesign", title: "settlement redesign",
+                                 owner: .teammate, who: teammate)
+            leo.prOpen = true
+            leo.pushed = true
+            leo.startedAt = station.now.addingTimeInterval(-7200)
+            offices.append(leo)
+            var kim = makeOffice(repo: "web", number: 460, branch: "gh-460/artist-tags", title: "artist tags", owner: .peer, who: peerName)
+            kim.pushed = true
+            kim.commits = 2
+            kim.startedAt = station.now.addingTimeInterval(-3600)
+            offices.append(kim)
+        }
 
         github.inject(project: board, quiet: true)
         github.injectSilently = false
         pushGitHub()          // taken quietly: the repositories answer for the first time here
         pushScan()
-        peerHere = true
+        peerHere = crowd
         pushPeer()
         pushGitHub()
         refresh()

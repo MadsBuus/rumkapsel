@@ -17,8 +17,10 @@ import SwiftUI
 /// Where the camera sits for an entry: on one area of the floor, on one body, or back far enough for all
 /// of it. `zoom` is the station's own, so these are the same framings `--focus` and `--follow` give.
 enum PlaybookCamera {
+    /// Back far enough for the whole floor.
     case whole(Double)
-    case area(String, Double)
+    /// With one body, named loosely: its id, or any part of its office's name. The camera keeps up with
+    /// it and lets go the moment you pan, which is the point — the play aims once and the view is yours.
     case follow(String, Double)
 }
 
@@ -30,6 +32,8 @@ enum PlaybookCamera {
 /// "16x" and "1x" are moves like any other. Put them in the list where they belong.
 struct PlaybookEntry {
     let name: String
+    /// Which shelf of the list it sits on.
+    let group: String
     /// A press and the seconds to wait after it, on the station's clock.
     let moves: [(String, Double)]
     let camera: PlaybookCamera
@@ -40,75 +44,119 @@ struct PlaybookEntry {
     let yard: Bool
     /// Whether it needs the bay hanging outside the airlock.
     let bay: Bool
+    /// The rooms the crew idle in that this entry needs standing. A play about a bunk wants the dorm and
+    /// the hallway it stands on, and nothing else: the lounge, the bath and the gym are three more rooms
+    /// to read past.
+    let rooms: Set<String>
+    /// The rest of the desk — two more offices of mine, the teammate, the peer. Off leaves one office and
+    /// one body, which is all most plays are about.
+    let crowd: Bool
 
-    init(_ name: String, _ moves: [(String, Double)], camera: PlaybookCamera,
-         tail: Double = 8, yard: Bool = false, bay: Bool = false) {
-        self.name = name; self.moves = moves; self.camera = camera
+    static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym"]
+
+    init(_ group: String, _ name: String, _ moves: [(String, Double)], camera: PlaybookCamera,
+         tail: Double = 8, yard: Bool = false, bay: Bool = false,
+         rooms: Set<String> = PlaybookEntry.idleRooms, crowd: Bool = true) {
+        self.group = group; self.name = name; self.moves = moves; self.camera = camera
         self.tail = tail; self.yard = yard; self.bay = bay
+        self.rooms = rooms; self.crowd = crowd
     }
 }
 
 enum Playbook {
     /// The office every entry acts on, and the smallest floor that can show one body at a desk.
     private static let office = "task:web#455"
+    /// The body every play is about, matched loosely on its office's name.
+    private static let who = "booking"
     private static func at(_ moves: [(String, Double)]) -> [(String, Double)] { [("Target: web#455", 0.4)] + moves }
 
     static let entries: [PlaybookEntry] = [
         // What a session is doing, one to an entry: the knob says it, the body wears it, the routine plays.
-        PlaybookEntry("coding", at([("Set: session = coding", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("reading code", at([("Set: session = reading code", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("testing", at([("Set: session = testing", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("writing", at([("Set: session = writing", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("thinking", at([("Set: session = thinking", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("waiting for you", at([("Set: session = waiting for you", 1)]), camera: .area(office, 5), tail: 14),
-        PlaybookEntry("web research", at([("Set: session = web research", 1)]), camera: .whole(2.2), tail: 16),
-        PlaybookEntry("QA testing", at([("Set: session = QA testing", 1)]), camera: .area("deck", 3), tail: 18, yard: true),
+        // One office, one body, no yard and none of the rooms it idles in — none of that is the subject.
+        desk("coding", "coding"), desk("reading code", "reading code"), desk("testing", "testing"),
+        desk("writing", "writing"), desk("thinking", "thinking"), desk("waiting for you", "waiting for you"),
+        PlaybookEntry("work", "web research", at([("Set: session = web research", 1)]),
+                      camera: .whole(2.6), tail: 16, rooms: [], crowd: false),
+        PlaybookEntry("work", "QA testing", at([("Set: session = QA testing", 1)]),
+                      camera: .follow(who, 4), tail: 18, yard: true, rooms: [], crowd: false),
 
         // A cone is a message being worked: a prompt lands and the body goes to it.
-        PlaybookEntry("a cone worked", at([("Set: session = coding", 1), ("Prompt", 1)]), camera: .area(office, 5), tail: 16),
+        PlaybookEntry("work", "a cone worked", at([("Set: session = coding", 1), ("Prompt", 1)]),
+                      camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 
-        // The life of one piece of work, a press at a time.
-        PlaybookEntry("a commit", at([("Set: session = coding", 1), ("Commit", 1)]), camera: .area(office, 5), tail: 12),
-        PlaybookEntry("a pull request opens", at([("Open PR", 2)]), camera: .area(office, 4), tail: 14),
-        PlaybookEntry("checks fail", at([("Open PR", 2), ("Checks failing", 2)]), camera: .area(office, 4), tail: 14),
-        PlaybookEntry("a pull request is approved", at([("Open PR", 2), ("Approve PR", 2)]), camera: .area(office, 4), tail: 14),
-        PlaybookEntry("a pull request merges", at([("Open PR", 2), ("Merge PR", 3)]), camera: .whole(1.6), tail: 24, yard: true),
-        PlaybookEntry("a pull request closes unmerged", at([("Open PR", 2), ("Close PR", 2)]), camera: .area(office, 4), tail: 16),
-        PlaybookEntry("the session ends", at([("Set: session = coding", 1), ("Session ends", 2)]), camera: .area(office, 4), tail: 16),
+        // The life of one piece of work, a press at a time. A merge sends the crate off to storage, so
+        // that one alone needs the yard standing.
+        PlaybookEntry("work", "a commit", at([("Set: session = coding", 1), ("Commit", 1)]),
+                      camera: .follow(who, 4), tail: 12, rooms: [], crowd: false),
+        PlaybookEntry("work", "a pull request opens", at([("Open PR", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("work", "checks fail", at([("Open PR", 2), ("Checks failing", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("work", "a pull request is approved", at([("Open PR", 2), ("Approve PR", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("work", "a pull request merges", at([("Open PR", 2), ("Merge PR", 3)]),
+                      camera: .whole(1.8), tail: 26, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("work", "a pull request closes unmerged", at([("Open PR", 2), ("Close PR", 2)]),
+                      camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
+        PlaybookEntry("work", "the session ends", at([("Set: session = coding", 1), ("Session ends", 2)]),
+                      camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 
-        // Other people's work: a teammate's office, a bot's, a peer's.
-        PlaybookEntry("a teammate opens a pull request", [("Teammate: Open PR", 2)], camera: .whole(1.8), tail: 18),
-        PlaybookEntry("a teammate merges", [("Teammate: Open PR", 2), ("Teammate: Merge PR", 3)], camera: .whole(1.6), tail: 24, yard: true),
-        PlaybookEntry("a bot opens a pull request", [("Bot: Open PR", 2)], camera: .area("decon", 3), tail: 18, yard: true),
-        PlaybookEntry("a peer arrives", [("Peer: Leave", 2), ("Peer: Arrive", 2)], camera: .whole(1.8), tail: 16),
-        PlaybookEntry("a peer leaves", [("Peer: Leave", 2)], camera: .whole(1.8), tail: 16),
+        // Other people's work: a teammate's office, a bot's, a peer's. These are the crowd by definition.
+        PlaybookEntry("other", "a teammate opens a pull request", [("Teammate: Open PR", 2)],
+                      camera: .whole(2.0), tail: 18, rooms: []),
+        PlaybookEntry("other", "a teammate merges", [("Teammate: Open PR", 2), ("Teammate: Merge PR", 3)],
+                      camera: .whole(1.8), tail: 26, yard: true, rooms: []),
+        PlaybookEntry("other", "a bot opens a pull request", [("Bot: Open PR", 2)],
+                      camera: .whole(2.0), tail: 18, yard: true, rooms: []),
+        PlaybookEntry("other", "a peer arrives", [("Peer: Leave", 2), ("Peer: Arrive", 2)],
+                      camera: .whole(2.0), tail: 16, rooms: []),
+        PlaybookEntry("other", "a peer leaves", [("Peer: Leave", 2)],
+                      camera: .whole(2.0), tail: 16, rooms: []),
 
-        // The day, and what everyone does when nobody is working.
-        // A body at work does not go to bed because it is dark, and that is right: only a session that
-        // has gone quiet is asleep, and only an asleep body is sent to a bunk.
-        PlaybookEntry("going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
-                      camera: .area("kind:quarters", 4), tail: 26),
-        PlaybookEntry("getting up", at([("Set: session = sleeping", 1), ("Night", 14),
+        // A body at work does not go to bed because it is dark, and that is right: only a session gone
+        // quiet is asleep, and only an asleep body is sent to a bunk.
+        PlaybookEntry("idle", "going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
+                      camera: .follow(who, 4), tail: 26, rooms: ["kind:quarters"], crowd: false),
+        PlaybookEntry("idle", "getting up", at([("Set: session = sleeping", 1), ("Night", 14),
                                         ("Day", 1), ("Set: session = coding", 2)]),
-                      camera: .area("kind:quarters", 4), tail: 22),
-        PlaybookEntry("everyone to the lounge", [("Everyone to lounge", 2)], camera: .area("kind:lounge", 4), tail: 18),
-        PlaybookEntry("a bath", [("Bath", 2)], camera: .area("kind:bath", 5), tail: 22),
-        PlaybookEntry("a workout", [("Workout", 2)], camera: .area("kind:gym", 4), tail: 22),
-        PlaybookEntry("a chore", [("Chore", 2)], camera: .whole(1.8), tail: 20),
-        PlaybookEntry("a meeting in the hall", [("Meet in the hall", 2)], camera: .whole(1.8), tail: 20),
+                      camera: .follow(who, 4), tail: 22, rooms: ["kind:quarters"], crowd: false),
+
+        // What a body does when it is not working: each play keeps the one room it is about.
+        PlaybookEntry("idle", "a bath", [("Bath", 2)], camera: .follow(who, 4), tail: 24,
+                      rooms: ["kind:bath"], crowd: false),
+        PlaybookEntry("idle", "a workout", [("Workout", 2)], camera: .follow(who, 4), tail: 24,
+                      rooms: ["kind:gym"], crowd: false),
+        PlaybookEntry("idle", "everyone to the lounge", [("Everyone to lounge", 2)],
+                      camera: .follow(who, 4), tail: 20, rooms: ["kind:lounge"]),
+        PlaybookEntry("idle", "a chore", [("Chore", 2)], camera: .whole(2.2), tail: 22,
+                      rooms: ["kind:lounge"], crowd: false),
+        PlaybookEntry("idle", "a meeting in the hall", [("Meet in the hall", 2)], camera: .whole(2.0), tail: 20, rooms: []),
 
         // The long errand: a crate crossing the whole station into a rocket. Setup runs fast, then it
         // drops to one so the loading and the launch are watched at the speed they happen.
-        PlaybookEntry("crate into rocket",
+        PlaybookEntry("release", "crate into rocket",
                       at([("16x", 0.5), ("Open PR", 2), ("Merge PR", 4), ("Stage: stored", 4),
                           ("1x", 0.5), ("Release: Production opens", 3),
                           ("Release: Mark tested", 3), ("Release: Production merges", 3)]),
-                      camera: .area("pad", 2.2), tail: 40, yard: true),
+                      camera: .whole(1.8), tail: 40, yard: true, rooms: [], crowd: false),
     ]
+
+    /// A session at its desk: the smallest play there is, and the shape most of them take.
+    private static func desk(_ name: String, _ session: String) -> PlaybookEntry {
+        PlaybookEntry("work", name, at([("Set: session = \(session)", 1)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false)
+    }
 
     static func find(_ words: String) -> Int? {
         let want = words.lowercased()
         return entries.firstIndex { $0.name.lowercased().contains(want) }
+    }
+
+    /// The shelves, in the order the list shows them: what a session does, what comes of it, what a body
+    /// does when it is not working, and everyone else.
+    static let groups = ["work", "release", "idle", "other"]
+    static func onShelf(_ group: String) -> [(offset: Int, entry: PlaybookEntry)] {
+        entries.enumerated().filter { $0.element.group == group }.map { ($0.offset, $0.element) }
     }
 }
 
@@ -117,17 +165,19 @@ struct PlaybookPanel: View {
     @ObservedObject var model: PlaybookModel
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("what the station does")
-                .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 6)
-            List(Array(Playbook.entries.enumerated()), id: \.offset, selection: Binding(
-                get: { model.playing }, set: { if let k = $0 { model.play(k) } })) { k, entry in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.name).font(.system(size: 12))
-                        Text(model.subtitle(entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+            List(selection: Binding(get: { model.playing }, set: { if let k = $0 { model.play(k) } })) {
+                ForEach(Playbook.groups, id: \.self) { group in
+                    Section(group) {
+                        ForEach(Playbook.onShelf(group), id: \.offset) { row in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.entry.name).font(.system(size: 12))
+                                Text(model.subtitle(row.entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                            .tag(row.offset)
+                        }
                     }
-                    .tag(k)
                 }
+            }
             Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
                 .padding(.horizontal, 12).padding(.vertical, 8)
         }
@@ -162,6 +212,7 @@ final class PlaybookController {
     private var panel: NSHostingView<PlaybookPanel>
     private var script: [Timer] = []
     private var camera: Timer?
+    private var aimed = false
     private var loop: Timer?
     private let listWidth = 240.0
     private var frame: NSRect
@@ -187,6 +238,7 @@ final class PlaybookController {
         station.view.autoresizingMask = [.width, .height]
         station.viewSize = rect.size
         station.drone.isEnabled = false
+        station.settlesView = false
         view.addSubview(station.view)
     }
 
@@ -197,6 +249,7 @@ final class PlaybookController {
         let entry = Playbook.entries[k]
         script.forEach { $0.invalidate() }; script = []
         camera?.invalidate(); camera = nil
+        aimed = false
         loop?.invalidate(); loop = nil
         station.view.removeFromSuperview()
         let stationRect = NSRect(x: listWidth, y: 0, width: frame.width - listWidth, height: frame.height)
@@ -205,7 +258,15 @@ final class PlaybookController {
         mount(stationRect)
         model.playing = k
         model.status = entry.name
-        sim.seed()
+        // The floor is settled before anything is seeded onto it: a room taken away later leaves whoever
+        // was sent to it sitting in mid-air, and a rebuild mid-play throws the camera out to a
+        // forty-tile fit. Built once, right, and never rebuilt.
+        let work = station.fleet.station("work", fixed: entry.rooms.sorted().map { Place.room($0) })
+        work.hasPad = entry.yard
+        work.hasHangar = entry.bay
+        // What floor the play actually got, since the smallest station that shows a thing is the point.
+        FileHandle.standardError.write("playbook \(entry.name): rooms \(work.rooms.keys.sorted().joined(separator: " ")), yard \(entry.yard), bay \(entry.bay), crowd \(entry.crowd)\n".data(using: .utf8)!)
+        sim.seed(crowd: entry.crowd)
         var at = 1.0
         for (name, after) in entry.moves {
             script.append(Timer.scheduledTimer(withTimeInterval: at, repeats: false) { [weak self] _ in
@@ -219,29 +280,31 @@ final class PlaybookController {
         camera = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.hold(entry) }
         }
+
         loop = Timer.scheduledTimer(withTimeInterval: at + entry.tail, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.start(k) }
         }
     }
 
-    /// Held every beat rather than set once. Seeding is enqueued onto the station's own queue, so the
-    /// floor does not exist when an entry starts and there is no delay worth guessing; and every press
-    /// that changes the floor puts the camera back where the station wants it.
+    /// The floor is checked every beat, because seeding is enqueued onto the station's own queue and there
+    /// is no delay worth guessing. The camera is not: `look` sets `userZoomChanged`, which is the camera's
+    /// own word for "snap there", so asking for it every beat snaps the view over and over and reads as
+    /// zooming at random. It is aimed when the floor changes under it and at the two moments the entry
+    /// knows about, and otherwise left alone.
     private func hold(_ entry: PlaybookEntry) {
-        if let work = station.fleet.stations["work"], work.hasPad != entry.yard || work.hasHangar != entry.bay {
-            work.hasPad = entry.yard
-            work.hasHangar = entry.bay
-            station.rebuildStatic()
-            // What floor the entry actually got, since "the smallest station that shows it" is the point.
-            FileHandle.standardError.write("playbook \(entry.name): yard \(entry.yard) (\(work.padCells.count + work.deckCells.count + work.storageCells.count) cells), bay \(entry.bay) (\(work.hangarCells.count) cells)\n".data(using: .utf8)!)
-        }
+        // Once, as soon as there is something to look at, and never again: the view is yours after that.
+        // A play that keeps asking for its framing takes the camera back out of your hands mid-gesture.
+        // Bodies are spawned by the scan the seed pushes, so a play that follows one has to wait for it;
+        // aiming at an empty station leaves the camera wherever it happened to be.
+        guard !aimed else { return }
+        if case .follow = entry.camera, station.minions.isEmpty { return }
+        aimed = true
         aim(entry.camera)
     }
 
     private func aim(_ camera: PlaybookCamera) {
         switch camera {
         case .whole(let zoom): station.setView(yawDegrees: 0, pitchDegrees: -30, zoom: zoom)
-        case .area(let name, let zoom): station.look(at: name, in: "work", zoom: zoom)
         case .follow(let who, let zoom): station.follow(named: who, zoom: zoom)
         }
     }

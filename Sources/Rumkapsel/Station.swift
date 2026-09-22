@@ -967,12 +967,16 @@ final class Fleet {
     }
 
     func station(_ name: String) -> Station {
+        station(name, fixed: [.quarters, .lounge, .bath, .gym])
+    }
+
+    /// A station with only the rooms named. Taking a room away afterwards leaves the bodies that were
+    /// already sent to it sitting on nothing, so a station that should not have one never gets one.
+    @discardableResult
+    func station(_ name: String, fixed: [Place]) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
-        s.ensureFixedRoom(.quarters)
-        s.ensureFixedRoom(.lounge)
-        s.ensureFixedRoom(.bath)
-        s.ensureFixedRoom(.gym)
+        for place in fixed { s.ensureFixedRoom(place) }
         stations[name] = s
         return s
     }

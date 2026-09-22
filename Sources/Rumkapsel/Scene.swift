@@ -901,7 +901,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The floor is still arriving, or has only just stopped. Answers from GitHub are not the end of it:
     /// offices land after them, and minions after those, each a rebuild of its own. Holding until the
     /// rebuilds go quiet is what "settled" has to mean, or the view is let go one step too early.
-    var floorSettling: Bool { world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5 }
+    /// Whether the view pulls back to take in the whole floor while the floor is arriving. True for the
+    /// station you keep, where a redraw is a thing to watch settle. False for the playbook, where the
+    /// floor is torn down and laid again every play and the point is one body: there, a settle throws the
+    /// camera out to a forty-tile fit and back for every rebuild, which reads as zooming at random.
+    var settlesView = true
+    var floorSettling: Bool { settlesView && (world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5) }
 
     /// How dim an office is while it waits to be looked at.
     static let unlitOffice = 0.75   // dim enough to read as unconfirmed, not so dim the colour goes
