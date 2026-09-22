@@ -677,6 +677,14 @@ final class World {
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
+    /// Whether a production release stands open for this repository. While it does, staging keeps
+    /// moving: anything merged there afterwards is carried by that same release, so a rocket already
+    /// loaded for it is not finished loading.
+    func productionOpen(station: String, repo: String) -> Bool {
+        repoRoots.contains { $0.value.station == station && $0.value.repo == repo
+            && (github.openReleases(repoRoot: $0.key)?.contains(where: \.isProduction) ?? false) }
+    }
+
     /// The release pull request whose rocket a repository's pad should hold, if any.
     private func padRelease(root: String) -> ReleasePR? {
         guard let open = github.openReleases(repoRoot: root) else { return nil }

@@ -370,8 +370,11 @@ extension Simulation {
         let key = station + "|" + repo
         if let r = rockets[key] {
             r.label = label
-            if r.stage.rank == 0 { r.cargo = cargo; r.untested = untested }   // only one standing by is resized
-            if !untested { r.untested = false }   // cleared is never taken back off a rocket that has loaded
+            // Whatever it is carrying, it says so, right up to the moment it lights: a rocket that takes
+            // on untested work while it waits is a rocket carrying untested work, and the tape saying
+            // otherwise would be the floor telling you something the release will not honour. Once it is
+            // climbing nothing changes what went up.
+            if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested }
             guard stage.rank > r.stage.rank else { return }
             take(r, command)
             return
@@ -423,6 +426,10 @@ extension Simulation {
     /// One pass over every rocket: loading watches station truth, the climb watches the clock.
     func stepRockets() {
         for r in Array(rockets.values) {
+            // Loaded and waiting is not finished loading. A production release stays open while staging
+            // keeps moving, and work merged there after the rocket filled up rides the same release, so
+            // the doors stay open until it lights.
+            if r.stage.rank == 2, world.productionOpen(station: r.station, repo: r.repo) { loadCrates(r) }
             switch r.phaseKind {
             case .load:
                 loadCrates(r)
