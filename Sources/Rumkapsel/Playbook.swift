@@ -121,6 +121,17 @@ enum Playbook {
         // quiet is asleep, and only an asleep body is sent to a bunk.
         PlaybookEntry("idle", "going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
                       camera: .follow(who, 4), tail: 30, rooms: ["kind:quarters"], crowd: false, settle: 8),
+        // The dorm under load: every session quiet at once, so the bunks are claimed together and the
+        // walks to them cross. One body finds its bunk every time; the question this asks is how many of
+        // five do.
+        PlaybookEntry("idle", "everyone turns in", [("Everyone asleep", 3), ("Night", 3)],
+                      camera: .follow(who, 3.2), tail: 34, rooms: ["kind:quarters"], settle: 12),
+        // The floor moving under a sleeper. `bedCache` is dropped by any change to the plan, so the bunks
+        // are worked out again — and a body already bedded down keeps saying so while the bunk it was
+        // given may now be somewhere else.
+        PlaybookEntry("idle", "a floor change while they sleep",
+                      [("Everyone asleep", 3), ("Night", 8), ("New branch in repo", 4), ("New branch in repo", 4)],
+                      camera: .follow(who, 3.2), tail: 30, rooms: ["kind:quarters"], settle: 14),
         PlaybookEntry("idle", "getting up", at([("Set: session = sleeping", 1), ("Night", 14),
                                         ("Day", 1), ("Set: session = coding", 2)]),
                       camera: .follow(who, 4), tail: 22, rooms: ["kind:quarters"], crowd: false),

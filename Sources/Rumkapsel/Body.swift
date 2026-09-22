@@ -127,6 +127,10 @@ class Body {
     let isSubagent: Bool
     var facing = 0.0
     var isCrew = false
+    /// Someone else's body, heard over the network rather than read off this machine. It is a body like
+    /// any other — it claims a bunk, it is walked round, it holds a seat — but the facts that drive it
+    /// come off the wire, so nothing here may hand it work of its own.
+    var isPeer = false
     var busyUntil = 0.0        // replay seconds, for crew minions
     var bed: Int?
     var pos: SIMD2<Double>
@@ -200,7 +204,7 @@ class Body {
     /// Free for a chore: nothing in hand, arms empty, standing in for nobody, and whatever it is doing
     /// can be cut into. The one question every picker asks.
     var isFree: Bool {
-        !onJob && !hasLoad && !isSubagent && !isCrew && !isQA
+        !onJob && !hasLoad && !isSubagent && !isCrew && !isPeer && !isQA
             && state != .leaving && wakeUntil == 0
             && (current == nil || phaseKind.interruptible)
     }

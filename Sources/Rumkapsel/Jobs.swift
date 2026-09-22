@@ -388,7 +388,7 @@ extension StationController {
             minions[m.id] = m
             send(m, to: .quarters)
         }
-        for m in minions.values where m.isCrew && members[String(m.id.dropFirst(5))] == nil { despawn(m) }
+        for m in minions.values where m.isCrew && !m.isPeer && members[String(m.id.dropFirst(5))] == nil { despawn(m) }
     }
 
     /// What a teammate just did, played out on the floor as a command of its own: they walk there,

@@ -294,9 +294,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let peers = PeerHub()
     var fadeIn: Set<String> = []
     private let peerRoot = SCNNode()
-    private var peerMinions: [String: (minion: Minion, target: SIMD3<Double>)] = [:]
     /// How many of the peers' figures stand on the station, for the checks.
-    var peerFigures: Int { peerMinions.count }
+    var peerFigures: Int { minions.values.filter(\.isPeer).count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
     /// Crates under way are the simulation's (`Cargo`); the node each one is drawn as is kept here, by command id.
@@ -827,33 +826,35 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         placePeerMinions(snap)
     }
 
-    /// Their minions stand in the office they claim here, wherever we happened to put it.
+    /// Their minions are bodies here like any other. The wire carries facts and no places — the two
+    /// machines lay their floors differently, so their coordinates would mean nothing here — and the
+    /// facts are all this sets. Where the body goes and how it lies is the station's to decide, by the
+    /// same code that puts our own to bed: anything else is a second way of standing a body in a room,
+    /// and the second way is the one that puts two of them under one bunk.
     private func placePeerMinions(_ snap: PeerSnapshot) {
         let station = fleet.station("work")
         for m in snap.minions {
-            let id = "\(snap.name)/\(m.id)"
-            let cells: [Cell]
-            if m.asleep { cells = station.cells(of: .quarters) } else { cells = station.rooms[m.office]?.cells ?? [] }
-            guard !cells.isEmpty else { continue }
-            var seed = UInt64(truncatingIfNeeded: id.hashValue) | 1
-            func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-            let cell = cells[Int(rnd() * Double(cells.count)) % cells.count]
-            let target = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * 0.5, 0, station.offset.y + Double(cell.y) + (rnd() - 0.5) * 0.5)
-            // A real minion in a teammate's grey, in the office they claim, posed the way their session is:
-            // asleep in the dorm, at work with the tablet out, waiting with empty hands and its cones standing.
+            let id = "peer:\(snap.name)/\(m.id)"
+            let home = Home(key: m.office, name: snap.name, repo: "", issue: nil)
             let figure: Minion
-            if let existing = peerMinions[id] {
-                figure = existing.minion
+            if let existing = minions[id] {
+                figure = existing
             } else {
-                figure = Minion(id: "peer:" + id, station: station.name, home: Home(key: m.office, name: snap.name, repo: "", issue: nil),
-                                cwd: "", toolCount: 0, isSubagent: false, start: cell, crew: true)
-                figure.node.position = v3(target.x, 0, target.z)
+                let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
+                figure = Minion(id: id, station: station.name, home: home, cwd: "", toolCount: 0,
+                                isSubagent: false, start: start, crew: true)
+                figure.isPeer = true
+                figure.title = snap.name
                 figure.node.opacity = 1
-                peerRoot.addChildNode(figure.node)
+                minionRoot.addChildNode(figure.node)
+                minions[id] = figure
             }
-            peerMinions[id] = (figure, target)
-            figure.setPose(m.asleep ? .flat(height: 0) : .standing)
-            figure.setTool(m.asleep || m.waiting == true || !m.busy ? nil : .tablet)
+            // What they told us, and nothing more.
+            figure.busy = m.busy && !m.asleep
+            figure.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
+            let want: Place = m.asleep ? restPlace(figure)
+                : (station.rooms[m.office] != nil ? .room(m.office) : .lounge)
+            if figure.place != want || figure.path.isEmpty && figure.state == .arriving { send(figure, to: want) }
             let cones = m.asleep ? 0 : (m.cones ?? 0)
             if figure.pyramids.count + figure.queuedCones.count != cones {
                 clearPyramids(figure)
@@ -865,22 +866,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
-        let liveMinions = Set(snap.minions.map { "\(snap.name)/\($0.id)" })
-        for id in peerMinions.keys where id.hasPrefix(snap.name + "/") && !liveMinions.contains(id) { removePeerFigure(id) }
+        let live = Set(snap.minions.map { "peer:\(snap.name)/\($0.id)" })
+        for id in minions.keys where id.hasPrefix("peer:\(snap.name)/") && !live.contains(id) { removePeerFigure(id) }
     }
 
-    /// A peer's figure leaves: its body and its cones.
+    /// A peer's figure leaves, the way any body leaves.
     private func removePeerFigure(_ id: String) {
-        guard let pm = peerMinions[id] else { return }
-        clearPyramids(pm.minion)
-        pm.minion.queuedCones.forEach { $0.removeFromParentNode() }
-        pm.minion.node.removeFromParentNode()
-        peerMinions[id] = nil
+        guard let m = minions[id] else { return }
+        despawn(m)
     }
 
     /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
     func dropPeer(_ name: String) {
-        for id in peerMinions.keys where id.hasPrefix(name + "/") { removePeerFigure(id) }   // their figures leave with them
+        for id in minions.keys where id.hasPrefix("peer:\(name)/") { removePeerFigure(id) }   // their figures leave with them
         handle(world.dropPeer(name))
         flushScene()
     }
@@ -1078,7 +1076,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .prompt(let stationName, let key, let minionId, let count):
             promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:
-            for m in minions.values where m.isCrew { despawn(m) }
+            for m in minions.values where m.isCrew && !m.isPeer { despawn(m) }
         case .boardMoved(let item, let from, let to):
             guard let info = world.repoRoots.values.first(where: { $0.repo == item.repo }), let station = fleet.stations[info.station] else { return }
             let st = ConfigStore.shared.current.statuses
@@ -1172,13 +1170,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         drawRockets()
         drawPallets()
         tickCrateMotions()
-        for (id, pm) in peerMinions {
-            let p = SIMD3(Double(pm.minion.node.position.x), 0, Double(pm.minion.node.position.z))
-            let d = pm.target - p
-            let step = min(1, dt * 2)
-            pm.minion.node.position.x += CGFloat(d.x * step); pm.minion.node.position.z += CGFloat(d.z * step)
-            _ = id
-        }
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }
         }
