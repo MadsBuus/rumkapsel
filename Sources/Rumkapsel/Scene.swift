@@ -1332,6 +1332,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
+    /// Everything this station is doing, stopped. The playbook throws a station away for each play, and
+    /// one still drawing and still ticking after its view is gone competes for the frame with the live
+    /// one — several of them, after several plays.
+    func quiesce() {
+        timer?.invalidate(); timer = nil
+        watcher = nil
+        drone.isEnabled = false
+        view.isPlaying = false
+        view.delegate = nil
+        view.scene = nil
+    }
+
     /// Renders the current frame to a PNG, used for self-checks.
     func snapshot(to path: String) {
         let image = view.snapshot()

@@ -273,6 +273,8 @@ final class PlaybookController {
         aimed = false
         clock = 0
         loop?.invalidate(); loop = nil
+        sim.quiesce()
+        station.quiesce()
         station.view.removeFromSuperview()
         let stationRect = NSRect(x: listWidth, y: 0, width: frame.width - listWidth, height: frame.height)
         station = StationController(frame: stationRect, demo: false, simulated: true)

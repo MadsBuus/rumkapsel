@@ -914,6 +914,9 @@ final class SimulatorModel: ObservableObject {
 
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
 
+    /// Stops the beats this model keeps, for a station that is being thrown away.
+    func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
+
     func press(_ name: String) {
         note("press", name, .press(name))
         if name.hasPrefix("Target: ") {
