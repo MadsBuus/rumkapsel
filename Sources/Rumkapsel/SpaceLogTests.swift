@@ -132,6 +132,15 @@ enum SpaceLogTests {
             expect(story.entries.map(\.key) == ["merged:api:10"], "only the real merge: \(story.entries.map(\.key))")
         }
 
+        test("a staging release once read as a launch is put right by the next read") {
+            var story = SpaceLog.Story()
+            let wrong = facts(releases: [release(7, 1, production: true)])
+            _ = story.add(SpaceLog.read(wrong, since: at(0)), feeds: wrong.repos, now: at(2))
+            let right = facts(releases: [release(7, 1, production: false)])
+            _ = story.add(SpaceLog.read(right, since: at(0)), feeds: right.repos, now: at(3))
+            expect(story.entries.map(\.kind) == [.staging], "only the staging line: \(story.entries.map(\.key))")
+        }
+
         test("the story keeps a fact once read: a feed that scrolls on takes nothing out") {
             var story = SpaceLog.Story()
             let first = facts(feed: [feed("pr_merge", 1, 1), feed("pr_merge", 2, 2)])

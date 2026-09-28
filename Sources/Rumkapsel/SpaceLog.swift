@@ -1,9 +1,5 @@
-// The station log: the few things worth hearing about when you come back to the station after hours
-// away — launches, deploys, QA, merges, work started. It is read out of what GitHub already told the
-// station (each repository's feed, its release pull requests, the board), so it covers the hours the
-// app was not running as well as the ones it was. What happened stays happened: every fact read is
-// kept in the story on disk and later reads only add to it, so a feed that has scrolled on or a board
-// item that has moved again takes nothing out of the log.
+// The station log: launches, deploys, QA, merges and new work, read from what GitHub told the station
+// and kept on disk.
 
 import Foundation
 
@@ -15,28 +11,32 @@ enum SpaceLog {
         case launch, staging, deck, cleared, merged, opened, started
     }
 
-    /// One thing that happened. `what` says it without numbers, so a burst of the same thing folds into
-    /// one line; `items` are the numbers and titles it happened to.
+    /// One thing that happened: `what` without numbers, `items` the numbers and titles it happened to.
     struct Entry: Codable, Equatable {
-        /// What makes it the same fact when it is read again: kind, repository, number, and for the board the column.
+        /// The same fact read again has the same key.
         var key: String
         var at: Date
         var kind: Kind
         var repo: String?
         var what: String
         var items: [String]
-        /// Who did it, where the line is someone's doing: "you", or a teammate's name.
+        /// "you", or a teammate's name.
         var who: String? = nil
 
-        /// A release's own line — its title, or "release #5365" — once the issues it carried have become its items.
+        /// A release's own title, once its items are the issues it carried.
         var note: String? = nil
 
         /// An issue the board calls shipped, as against the release that shipped it.
         var isShipped: Bool { kind == .launch && what == "shipped" }
         var isRelease: Bool { kind == .staging || (kind == .launch && !isShipped) }
+        /// A release line's repository and pull request number, read off its key: "launch:api:5466:…", "staging:api:5352".
+        var releaseID: String? {
+            guard isRelease else { return nil }
+            let p = key.split(separator: ":", maxSplits: 3)
+            return p.count >= 3 ? "\(p[1]):\(p[2])" : nil
+        }
 
-        /// The station's own shape for what happened: a rocket for a launch, a crate for anything that
-        /// moves one, a ticked crate for one that passed, a hex for an office, a cone for a new job.
+        /// The station's shape for the line.
         enum Shape { case rocket, crate, checked, office, order }
         var shape: Shape {
             switch kind {
@@ -47,9 +47,7 @@ enum SpaceLog {
             }
         }
 
-        /// The line as the station says it: who, and what they did in the station's own words — crates
-        /// packed, put in storage, sent to the deck, lifted off. The name comes apart so it can be set in
-        /// its own weight; a line with nobody to name starts with its first word capitalised.
+        /// The line in the station's words, the name apart from the rest.
         var sentence: (who: String?, rest: String) {
             let v = Words.current
             let n = items.count
@@ -102,12 +100,12 @@ enum SpaceLog {
         var repos: [Repo]
         var board: [ProjectItem]
         var statuses: AppConfig.ProjectStatuses
-        /// Your own login, so your work reads as yours.
+        /// Your login, read as "you".
         var me: String?
         var name: (String) -> String = { $0 }
-        /// A title for a number, where the feed brought none: GitHub's feed carries numbers only.
+        /// A title for a number the feed gave without one.
         var title: (_ repo: String, _ number: Int) -> String? = { _, _ in nil }
-        /// Whether a pull request from this branch is a release: the same test the rockets use.
+        /// Whether a pull request from this branch is a release.
         var isReleaseBranch: (_ repo: String, _ branch: String) -> Bool = { _, _ in false }
     }
 
@@ -122,9 +120,7 @@ enum SpaceLog {
         return out
     }
 
-    /// Everything since `since`, oldest first. Release pull requests are launches and deploys, never
-    /// merges; the board says what reached QA, passed it and shipped; the feed says who merged, opened
-    /// and filed what.
+    /// Everything since `since`, oldest first.
     static func read(_ f: Facts, since: Date) -> [Entry] {
         var out: [Entry] = []
         func who(_ login: String) -> String { login == f.me ? "you" : f.name(login) }
@@ -133,7 +129,6 @@ enum SpaceLog {
             let releaseNumbers = releases[r.name] ?? []
             for pr in r.releases where pr.state == "MERGED" {
                 guard let at = pr.mergedAt, at > since else { continue }
-                // Who pressed merge on the release: the feed has it, the release pull request does not.
                 let by = r.feed.first { $0.kind == "pr_merge" && $0.prNumber == pr.number && pr.number > 0 }.map { who($0.actor) }
                 if pr.isProduction {
                     out.append(Entry(key: "launch:\(r.name):\(pr.number):\(pr.title)", at: at, kind: .launch, repo: r.name, what: "\(Words.current.launchedTo) production", items: [pr.title], who: by))
@@ -152,8 +147,6 @@ enum SpaceLog {
                 }
             }
         }
-        // A board item says where it is and when it last changed, not every column it passed through:
-        // enough to say where each one got to while you were away.
         let repos = Set(f.repos.map(\.name))
         for item in f.board where repos.contains(item.repo) {
             guard let at = item.updatedAt, at > since else { continue }
@@ -175,9 +168,8 @@ enum SpaceLog {
     /// How close a board move must be to a release to have gone out with it.
     static let carried: TimeInterval = 30 * 60
 
-    /// A release's cargo: the board's shipped issues go into the launch they left with, and the issues
-    /// that reached QA into the staging deploy that took them there, as the release's own items. A
-    /// board move no release accounts for stays a line of its own.
+    /// Board moves folded into the release they went with: shipped issues into a launch, issues in QA
+    /// into a staging deploy.
     static func rollUp(_ entries: [Entry]) -> [Entry] {
         var out = entries.sorted { $0.at < $1.at }
         var claimed = Set<String>()
@@ -195,8 +187,7 @@ enum SpaceLog {
         return out.filter { !claimed.contains($0.key) }
     }
 
-    /// Issues filed and started are gathered into one line per person, repository and day: "Leo filed 3
-    /// issues · started 2". Everything else passes as it came.
+    /// Issues filed and started, one line per person, repository and day.
     static func gather(_ entries: [Entry], calendar: Calendar = .current) -> [Entry] {
         var out: [Entry] = []
         var at: [String: Int] = [:]
@@ -204,7 +195,6 @@ enum SpaceLog {
             guard e.kind == .started else { out.append(e); continue }
             let key = "\(calendar.startOfDay(for: e.at).timeIntervalSince1970)|\(e.repo ?? "")|\(e.who ?? "")"
             let filed = e.what.hasSuffix("filed an issue")
-            // Folded before it gets here, a line may already stand for several of the same.
             if let i = at[key] {
                 out[i].at = e.at
                 for item in e.items where !out[i].items.contains(item) { out[i].items.append(item) }
@@ -244,8 +234,7 @@ enum SpaceLog {
         return out
     }
 
-    /// A stretch where a repository's feed had scrolled on before the station read it: GitHub keeps a
-    /// busy repository's last few hundred events, so a weekend away can outrun it.
+    /// A stretch of a repository's feed the station never read.
     struct Gap: Codable, Equatable {
         var repo: String
         var from: Date
@@ -256,21 +245,21 @@ enum SpaceLog {
     struct Story: Codable, Equatable {
         var entries: [Entry] = []
         var readAt: Date?
-        /// Per repository, the newest feed event already taken in: where the next read must reach back to.
+        /// Per repository, the newest feed event taken in.
         var seen: [String: Date] = [:]
         var gaps: [Gap] = []
 
-        /// Takes in a fresh read. A fact already in the story stands as it was; all a later read may add to
-        /// one is the title a bare number lacked, or who did it. The one fact taken back is a release pull
-        /// request that was read as work before it was known for a release. True when anything changed.
+        /// Takes in a fresh read; true when anything changed. A kept fact stands, except a release pull
+        /// request kept as work, or as the wrong kind of release.
         mutating func add(_ fresh: [Entry], feeds: [Repo], now: Date, releases: [String: Set<Int>] = [:]) -> Bool {
             var changed = false
-            // A release pull request read as ordinary work before it was known for one: it never was.
             let before = entries.count
             entries.removeAll { e in
                 guard e.kind == .merged || e.kind == .opened, let repo = e.repo, let known = releases[repo] else { return false }
                 return e.items.contains { Target(kind: e.kind, repo: repo, item: $0).number.map(known.contains) == true }
             }
+            let releaseKind = Dictionary(fresh.filter(\.isRelease).compactMap { e in e.releaseID.map { ($0, e.kind) } }, uniquingKeysWith: { a, _ in a })
+            entries.removeAll { e in e.isRelease && e.releaseID.flatMap { releaseKind[$0] }.map { $0 != e.kind } == true }
             if entries.count != before { changed = true }
             var index = Dictionary(entries.enumerated().map { ($1.key, $0) }, uniquingKeysWith: { a, _ in a })
             for e in fresh {
@@ -287,7 +276,6 @@ enum SpaceLog {
             }
             for r in feeds where !r.feed.isEmpty {
                 let oldest = r.feed.map(\.at).min()!, newest = r.feed.map(\.at).max()!
-                // A full feed that starts after what was last seen skipped something in between.
                 if let last = seen[r.name], r.feed.count >= 100, oldest > last {
                     gaps.append(Gap(repo: r.name, from: last, to: oldest)); changed = true
                 }
@@ -306,8 +294,7 @@ enum SpaceLog {
     static let keep: TimeInterval = 30 * 24 * 3600
 }
 
-/// The story on disk, `spacelog.json` beside the station's settings. Added to on the scene's thread,
-/// read on the main one, so every touch is under the lock.
+/// The story on disk, `spacelog.json`, shared by the scene's thread and the main one.
 final class StoryBook {
     static let shared = StoryBook()
     private let lock = NSLock()
