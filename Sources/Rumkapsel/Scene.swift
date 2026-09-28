@@ -298,6 +298,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var peerFigures: Int { minions.values.filter(\.isPeer).count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
+    /// How lit each office is drawn: full with someone in it, toned down while empty, faded once dark.
+    var roomLight: [String: OfficeLight] = [:]
     /// Crates under way are the simulation's (`Cargo`); the node each one is drawn as is kept here, by command id.
     var cargo: [Int: Cargo] {
         get { simulation.cargo }
@@ -1179,7 +1181,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             due.forEach { $0.run() }
         }
         if demo { tickDemo(dt: dt) }
-        if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 { updatePower() }
+        if Int(clock) != Int(clock - dt) { updatePower() }   // once a second: a worker walking in lights the room at once
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
             simulation.scheduleCarries()
