@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
-        // The station log read out of GitHub's facts: no station, no network.
+        // The station log on its own: no station, no network.
         if args.contains("--spacelog-tests") { SpaceLogTests.run() }
         // What each look promises to draw, since a look conforms by shape and can be unhooked in silence.
         if args.contains("--look-tests") { LookTests.run() }
@@ -147,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let i = args.firstIndex(of: "--share-as"), args.count > i + 1 {
             controller.peers.start(name: args[i + 1])
         }
-        // `--log`: the station log open, a while before the picture, once GitHub has had time to answer.
+        // `--log`: the station log open for the picture.
         if args.contains("--log") {
             DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 3)) { [self] in controller.toggleSpaceLog() }
         }

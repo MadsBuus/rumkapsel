@@ -1,5 +1,4 @@
-// The station log on screen: a button in the top right corner that says how much is unread, and the
-// log it opens, newest first, a day at a time, each line leading to what it names on the floor.
+// The station log on screen: its button, the log, and where a line leads on the floor.
 
 import AppKit
 import SceneKit
@@ -7,7 +6,7 @@ import SceneKit
 extension StationController {
     // MARK: station log
 
-    /// What GitHub has told the station, gathered for the log. On the scene's thread, where the station lives.
+    /// What GitHub has told the station, for the log. On the scene's thread.
     func spaceLogFacts() -> SpaceLog.Facts {
         let repos = world.repoRoots.sorted { $0.value.repo < $1.value.repo }.map { root, info in
             SpaceLog.Repo(name: info.repo, feed: github.feed(repoRoot: root) ?? [], releases: github.releases(repoRoot: root) ?? [])
@@ -18,7 +17,6 @@ extension StationController {
         return SpaceLog.Facts(repos: repos, board: config.project == nil ? [] : github.projectItems() ?? [], statuses: config.statuses,
                               me: github.myLogin(), name: { [world] in world.crewName($0) },
                               title: { [github] repo, n in
-            // The pull request's own note, else the issue it was done for, else an open pull request's title.
             if let t = github.work(repo: repo, number: n)?.title, !t.isEmpty { return t }
             if let issue = github.task(repo: repo, pull: n), let t = github.work(repo: repo, number: issue)?.title, !t.isEmpty { return t }
             return titles[repo]?[n]
@@ -28,7 +26,7 @@ extension StationController {
         })
     }
 
-    /// Reads GitHub's facts into the story and returns it. On the scene's thread, where the station lives.
+    /// Reads GitHub's facts into the story. On the scene's thread.
     @discardableResult
     func advanceSpaceLog() -> (story: SpaceLog.Story, changed: Bool) {
         let facts = spaceLogFacts()
@@ -39,14 +37,14 @@ extension StationController {
         return (StoryBook.shared.current, changed)
     }
 
-    /// The panel drawn from the story, on the main thread. Called from the scene's thread.
+    /// Draws the panel on the main thread. Called from the scene's thread.
     private func drawSpaceLog(_ story: SpaceLog.Story, fresh: Bool) {
         var colors: [String: NSColor] = [:]
         for e in story.entries { if let r = e.repo, colors[r] == nil { colors[r] = NSColor(fleet.color(forRepo: r)) } }
         DispatchQueue.main.async { [self] in spaceLogPanel?.show(story: story, colors: colors, fromTop: fresh) }
     }
 
-    /// The panel's contents as it opens, read on the scene's thread, then shown on the main one.
+    /// Fills the panel as it opens.
     func refreshSpaceLog() {
         enqueue { [self] in
             spaceLogDrawnAt = clock
@@ -54,8 +52,7 @@ extension StationController {
         }
     }
 
-    /// Takes in what is new. Closed, it counts the unread lines for the button; open, it draws what came
-    /// in, and once a minute regardless, so a new day and the times read true. On the scene's thread.
+    /// Takes in what is new: counts it for the button, or redraws an open log. On the scene's thread.
     func countUnreadSpaceLog() {
         let (story, changed) = advanceSpaceLog()
         let since = max(story.readAt ?? .distantPast, Date().addingTimeInterval(-SpaceLog.reach))
@@ -67,7 +64,7 @@ extension StationController {
         DispatchQueue.main.async { [self] in if spaceLogPanel?.isHidden != false { spaceLogButton?.unread = n } }
     }
 
-    /// The button and the panel, over the station view, in the top right corner.
+    /// The button and the panel, over the station view.
     func installSpaceLog() {
         let w = view.bounds.width
         let button = SpaceLogButton(frame: NSRect(x: w - 72, y: view.bounds.height - 28, width: 60, height: 20))
@@ -78,7 +75,6 @@ extension StationController {
             button.setFrameOrigin(NSPoint(x: host.bounds.width - 12 - button.frame.width, y: button.frame.minY))
             self.spaceLogCorner = button.frame.width + 12
         }
-        // Below the repositories' names and counts, above the line along the bottom.
         let panel = SpaceLogPanel(frame: NSRect(x: w - 472, y: 40, width: 460, height: max(200, view.bounds.height - 110)))
         panel.autoresizingMask = [.minXMargin, .height]
         panel.isHidden = true
@@ -93,7 +89,6 @@ extension StationController {
     /// Opens or closes the log.
     func toggleSpaceLog() {
         guard let panel = spaceLogPanel else { return }
-        // Read is when you close it: what arrives while you are looking stays new until then.
         if panel.isHidden {
             panel.isHidden = false
             spaceLogButton?.unread = 0
@@ -107,9 +102,7 @@ extension StationController {
         enqueue { [self] in spaceLogOpen = open }
     }
 
-    /// A line of the log was clicked: the camera goes to what it names, where that stands on the floor
-    /// now — the crate wherever it has got to, the office working on it, the repository's rocket — and
-    /// what is no longer on the floor opens on GitHub instead.
+    /// Takes the camera to what a line names, or opens it on GitHub when it is no longer on the floor.
     func goTo(_ t: SpaceLog.Target) {
         enqueue { [self] in
             let numbers = Set([t.number, t.number.flatMap { github.task(repo: t.repo, pull: $0) }].compactMap { $0 })
@@ -158,7 +151,6 @@ extension StationController {
                 hovered = "room:\(st.name)|\(room.key)"
                 return true
             }
-            // Where to look first: a crate for what is in the yard, an office for work being done, the pad for a launch.
             let went: Bool
             switch t.kind {
             case .deck, .cleared, .merged: went = toCrate() || toOffice() || toRocket()
@@ -167,13 +159,13 @@ extension StationController {
             }
             if went { return }
             guard let root = world.repoRoots.first(where: { $0.value.repo == t.repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return }
-            // GitHub sends an issue link on to the pull request when the number is one.
+            // GitHub redirects /issues/N to the pull request when N is one.
             let url = URL(string: "https://github.com/\(owner)" + (t.number.map { "/issues/\($0)" } ?? "/pulls"))
             if let url { DispatchQueue.main.async { NSWorkspace.shared.open(url) } }
         }
     }
 
-    /// Whether the log takes the pointer here, so the station under it does not hover.
+    /// Whether the log takes the pointer here.
     func spaceLogTakes(point p: NSPoint) -> Bool {
         if let b = spaceLogButton, b.frame.contains(p) { return true }
         if let panel = spaceLogPanel, !panel.isHidden, panel.frame.contains(p) { return true }
@@ -185,7 +177,7 @@ enum SpaceLogStyle {
     static let amber = NSColor(rgb: (0.98, 0.72, 0.3))
     static let plate = Palette.void.withAlphaComponent(0.94)
 
-    /// The rocket's orange, for the line a launch gets.
+    /// A launch's line.
     static let launch = NSColor(rgb: (1.0, 0.62, 0.3))
 
     static func mono(_ size: CGFloat, bold: Bool = false) -> NSFont {
@@ -195,14 +187,13 @@ enum SpaceLogStyle {
         NSFont(name: "HelveticaNeue-Italic", size: size) ?? .systemFont(ofSize: size)
     }
 
-    /// A line's mark: the station's shape for what happened, flat, in its repository's colour.
+    /// A line's mark: its shape, flat, in the repository's colour.
     static func glyph(_ shape: SpaceLog.Entry.Shape, color: NSColor, size: CGFloat) -> NSImage {
         NSImage(size: NSSize(width: size, height: size), flipped: false) { r in
             let w = r.width, h = r.height
             let dark = color.darker(0.45)
             switch shape {
             case .rocket:
-                // A body with a nose, and two fins at the foot.
                 let body = NSBezierPath()
                 body.move(to: NSPoint(x: w * 0.5, y: h))
                 body.line(to: NSPoint(x: w * 0.72, y: h * 0.62)); body.line(to: NSPoint(x: w * 0.72, y: h * 0.18))
@@ -213,13 +204,11 @@ enum SpaceLogStyle {
                 fins.move(to: NSPoint(x: w * 0.72, y: h * 0.42)); fins.line(to: NSPoint(x: w * 0.9, y: 0)); fins.line(to: NSPoint(x: w * 0.72, y: h * 0.18)); fins.close()
                 dark.setFill(); fins.fill()
             case .crate, .checked:
-                // A crate from the yard: a block with a strap round it; a passed one wears a green light.
                 let box = NSRect(x: w * 0.1, y: h * 0.12, width: w * 0.8, height: h * 0.76)
                 color.setFill(); box.fill()
                 (shape == .checked ? NSColor(rgb: (0.45, 0.95, 0.5)) : dark).setFill()
                 NSRect(x: box.minX, y: box.midY - h * 0.08, width: box.width, height: h * 0.16).fill()
             case .office:
-                // A room on the floor plan: flat hexagon.
                 let hex = NSBezierPath()
                 for i in 0..<6 {
                     let a = CGFloat(i) * .pi / 3
@@ -228,7 +217,6 @@ enum SpaceLogStyle {
                 }
                 hex.close(); color.setFill(); hex.fill()
             case .order:
-                // Something asked of the station: the cone a message leaves on an office floor.
                 let cone = NSBezierPath()
                 cone.move(to: NSPoint(x: w * 0.5, y: h * 0.92)); cone.line(to: NSPoint(x: w * 0.88, y: h * 0.12)); cone.line(to: NSPoint(x: w * 0.12, y: h * 0.12)); cone.close()
                 color.setFill(); cone.fill()
@@ -238,10 +226,10 @@ enum SpaceLogStyle {
     }
 }
 
-/// "Log" on a small plate, with how many lines are unread beside it and a light that breathes while any are.
+/// "Log" on a small plate, with the unread count and a light that breathes while there is any.
 final class SpaceLogButton: NSView {
     var onClick: (() -> Void)?
-    /// Told when the width changes, so whoever placed it can keep its right edge where it was.
+    /// Told when the width changes.
     var onResize: (() -> Void)?
     var unread = 0 { didSet { if unread != oldValue { resize(); needsDisplay = true; breathe() } } }
     var open = false { didSet { needsDisplay = true } }
@@ -290,13 +278,10 @@ final class SpaceLogButton: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The log itself: no pane, only the dark of space deepening towards the edge, so the lines stand
-/// over the station the way the rest of the HUD does. Each event is one big line in the station's words,
-/// with what it was about in small print under it.
+/// The log: one line per event with small print under it, over space darkening towards the edge.
 final class SpaceLogPanel: NSView {
     private let text = LinkedText()
     private let scroll = NSScrollView()
-    /// A line with somewhere to go was clicked.
     var onGo: ((SpaceLog.Target) -> Void)? { get { text.onGo } set { text.onGo = newValue } }
 
     override init(frame: NSRect) {
@@ -324,9 +309,7 @@ final class SpaceLogPanel: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Space darkening towards the window's edge, and softening away at the top and the foot.
         let deep = Palette.void
-        // Dark enough by where the text begins that a lit floor underneath never shows through the words.
         NSGradient(colors: [deep.withAlphaComponent(0), deep.withAlphaComponent(0.7), deep.withAlphaComponent(0.88), deep.withAlphaComponent(0.92)],
                    atLocations: [0, 0.07, 0.2, 1], colorSpace: .deviceRGB)!.draw(in: bounds, angle: 0)
     }
@@ -336,7 +319,7 @@ final class SpaceLogPanel: NSView {
     override func mouseDragged(with event: NSEvent) {}
     override func rightMouseDown(with event: NSEvent) {}
 
-    /// `fromTop` for a panel just opened; a redraw while it is open keeps where it was scrolled to.
+    /// `fromTop` for a panel just opened; otherwise the scroll position is kept.
     func show(story: SpaceLog.Story, colors: [String: NSColor], fromTop: Bool = true) {
         let scrolled = scroll.contentView.bounds.origin
         let now = Date()
@@ -344,7 +327,7 @@ final class SpaceLogPanel: NSView {
         let hhmm = DateFormatter(); hhmm.dateFormat = "HH:mm"
         let readAt = story.readAt
         let entries = story.entries.filter { $0.at > now.addingTimeInterval(-SpaceLog.reach) }
-        // New since you last opened it; a first look takes the last twelve hours as new.
+        // With no last look, the last twelve hours count as new.
         let since = max(readAt ?? now.addingTimeInterval(-12 * 3600), now.addingTimeInterval(-SpaceLog.reach))
 
         let out = NSMutableAttributedString()
@@ -371,7 +354,6 @@ final class SpaceLogPanel: NSView {
         var gaps = story.gaps.filter { $0.to > now.addingTimeInterval(-SpaceLog.reach) }.sorted { $0.to > $1.to }
         var marked = readAt == nil
         var lastDay: Date?
-        // The log opens on today, even before anything has happened in it.
         if let newest = lines.first, !cal.isDateInToday(newest.at) {
             day(now, first: true)
             quiet("Quiet so far today.", Palette.dim)
@@ -380,7 +362,6 @@ final class SpaceLogPanel: NSView {
         for e in lines {
             let d = cal.startOfDay(for: e.at)
             if d != lastDay { day(d, first: lastDay == nil); lastDay = d }
-            // Where your last look was, between what is new and what you had already seen.
             if !marked, e.at <= since {
                 marked = true
                 if e.key != lines.first?.key { quiet("· you were here, \(StationController.span(now.timeIntervalSince(since))) ago ·", SpaceLogStyle.amber.withAlphaComponent(0.75)) }
@@ -416,16 +397,13 @@ final class SpaceLogPanel: NSView {
             if let who { put(who.prefix(1).uppercased() + who.dropFirst() + " ", [.font: NSFont.systemFont(ofSize: size, weight: .semibold), .foregroundColor: ink]) }
             put(rest + "\n", [.font: NSFont.systemFont(ofSize: size, weight: launch ? .semibold : .regular), .foregroundColor: ink.withAlphaComponent(alpha * (launch ? 1 : 0.88))])
 
-            // The small print: what it was about, a few at most, each one leading to itself.
             let small = NSMutableParagraphStyle()
             small.firstLineHeadIndent = indent; small.headIndent = indent; small.paragraphSpacing = 1
             small.lineBreakMode = .byTruncatingTail
-            // Further items line up under the first, past the time.
             let more = (small.mutableCopy() as! NSMutableParagraphStyle)
             more.firstLineHeadIndent = indent + 44; more.headIndent = indent + 44
             let detail = e.items.filter { $0 != e.note && $0.hasPrefix("#") }
             let shown = detail.prefix(detail.count > 3 ? 2 : 3)
-            // The time opens the small print, so the big line is the sentence and nothing else.
             add(hhmm.string(from: e.at) + (shown.isEmpty ? "\n" : "  "), [.font: SpaceLogStyle.mono(10.5), .foregroundColor: Palette.dim.withAlphaComponent(alpha * 0.8), .paragraphStyle: small])
             for (i, item) in shown.enumerated() {
                 var attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: Palette.dim.withAlphaComponent(alpha * 0.95), .paragraphStyle: i == 0 ? small : more]
@@ -435,7 +413,6 @@ final class SpaceLogPanel: NSView {
             if detail.count > shown.count {
                 add("and \(detail.count - shown.count) more\n", [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: Palette.dim.withAlphaComponent(alpha * 0.6), .paragraphStyle: more])
             }
-            // Room between events, so each reads as its own.
             add("\n", [.font: NSFont.systemFont(ofSize: launch ? 12 : 9)])
         }
         text.textStorage?.setAttributedString(out)
@@ -444,8 +421,7 @@ final class SpaceLogPanel: NSView {
     }
 }
 
-/// The log's text, where a line naming something can be clicked to go to it. Not selectable, so it never
-/// takes the keyboard from the station.
+/// The log's text, where a line can be clicked. Not selectable, so it never takes the keyboard.
 final class LinkedText: NSTextView {
     static let target = NSAttributedString.Key("rumkapsel.spacelog.target")
     var onGo: ((SpaceLog.Target) -> Void)?
