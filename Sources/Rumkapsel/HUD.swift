@@ -393,6 +393,7 @@ extension StationController {
         if clock - hudClock > 0.5 {
             hudClock = clock
             layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
+            if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
             // Sharing indicator: green dot when broadcasting, with how many stations are in range.
             let sharing = peers.isRunning
             shareDot.isHidden = !sharing
@@ -404,7 +405,7 @@ extension StationController {
                 let status = !up ? "no network" : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range" : "nobody in range"
                 shareLabel.text = "sharing as \(peers.name) · " + status
                 shareDot.color = !up ? NSColor(rgb: (0.45, 0.46, 0.5)) : n > 0 ? NSColor(rgb: (0.35, 0.85, 0.5)) : NSColor(rgb: (0.9, 0.7, 0.3))
-                shareLabel.position = CGPoint(x: hud.size.width - 14, y: hud.size.height - 14)
+                shareLabel.position = CGPoint(x: hud.size.width - 14 - spaceLogCorner, y: hud.size.height - 14)
                 shareDot.position = CGPoint(x: hud.size.width - 14 - shareLabel.frame.width - 10, y: hud.size.height - 19)
                 shareDot.alpha = n > 0 && up ? 0.7 + 0.3 * sin(clock * 2) : 0.8
             }

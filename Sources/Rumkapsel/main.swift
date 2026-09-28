@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
+        // The station log read out of GitHub's facts: no station, no network.
+        if args.contains("--spacelog-tests") { SpaceLogTests.run() }
         // What each look promises to draw, since a look conforms by shape and can be unhooked in silence.
         if args.contains("--look-tests") { LookTests.run() }
         if args.contains("--dump-colors") { ColorDump.run() }
@@ -144,6 +146,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         if let i = args.firstIndex(of: "--share-as"), args.count > i + 1 {
             controller.peers.start(name: args[i + 1])
+        }
+        // `--log`: the station log open, a while before the picture, once GitHub has had time to answer.
+        if args.contains("--log") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 3)) { [self] in controller.toggleSpaceLog() }
         }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
@@ -305,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let station = menu("Station")
         let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
         refresh.keyEquivalentModifierMask = [.command, .shift]
+        station.addItem(withTitle: "Station Log", action: #selector(toggleSpaceLog), keyEquivalent: "l")
 
         // The tools for working on rumkapsel itself, out of the way of the ordinary path.
         let develop = menu("Develop")
@@ -366,6 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func resetView() { controller.resetView() }
+    @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
 
     @objc func openGallery() {
         if galleryWindow == nil {

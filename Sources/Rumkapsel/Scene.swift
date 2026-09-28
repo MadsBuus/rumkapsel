@@ -342,6 +342,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hudClock = 0.0
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
+    var spaceLogButton: SpaceLogButton?
+    var spaceLogPanel: SpaceLogPanel?
+    var spaceLogClock = -100.0
+    /// Whether the log is open and when it was last drawn, as the scene's thread knows it.
+    var spaceLogOpen = false
+    var spaceLogDrawnAt = 0.0
+    /// How much of the top right corner the log's button takes, set on the main thread: the sharing line stands left of it.
+    var spaceLogCorner: CGFloat = 0
     var hovered: String?
     /// The minion the camera goes with, until a pan, Esc or a click on the floor.
     var following: String?
@@ -435,7 +443,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.bubbleTakes(point: p) ?? false }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node in
             let n = node?.name
@@ -500,7 +508,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "0": following = nil; focus(on: nil)
             case "1", "2", "3", "4": following = nil; focus(onIndex: Int(key)! - 1)
             case "r": following = nil; resetView()
-            case "\u{1b}": following = nil
+            case "\u{1b}":
+                following = nil
+                if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
+            case "l": toggleSpaceLog()
             case "g": refreshGitHub()
             default: return false
             }
@@ -516,6 +527,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
+        if !simulated && !demo { installSpaceLog() }
         if demo {
             seedDemo()
         } else if !simulated {
@@ -1368,6 +1380,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Renders the current frame to a PNG, used for self-checks.
     func snapshot(to path: String) {
         let image = view.snapshot()
+        // The AppKit overlays, the station log's button and panel, drawn over the rendered frame.
+        let overlays = view.subviews.filter { !$0.isHidden }
+        if !overlays.isEmpty {
+            image.lockFocus()
+            let scale = image.size.width / max(1, view.bounds.width)
+            for v in overlays {
+                guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                // Blended over the frame: a plain draw copies, and would black out whatever the overlay leaves see-through.
+                rep.draw(in: NSRect(x: v.frame.minX * scale, y: v.frame.minY * scale, width: v.frame.width * scale, height: v.frame.height * scale),
+                         from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
+            image.unlockFocus()
+        }
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
