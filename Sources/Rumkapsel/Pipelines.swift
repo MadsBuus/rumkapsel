@@ -79,10 +79,23 @@ enum PipelineDetection {
         // A merge back into the trunk after a release is not one.
         let candidates = merges.filter { longLived.contains($0.base) && $0.base != trunk && $0.base != $0.head && (longLived.contains($0.head) || releaseLike($0.head)) }
         // Between two branches the flow runs the way most merges go. The rarer way back, production merged
-        // into staging after a hotfix say, keeps them in step and is not a release.
+        // into staging after a hotfix say, keeps them in step and is not a release. On a tie, the flow
+        // runs away from the trunk.
         var edges: [String: Int] = [:]
         for c in candidates { edges["\(c.head)>\(c.base)", default: 0] += 1 }
-        let releases = candidates.filter { c in edges["\(c.head)>\(c.base)", default: 0] > edges["\(c.base)>\(c.head)", default: 0] }
+        var fromTrunk: [String: Int] = [trunk: 0]
+        var frontier = [trunk]
+        while !frontier.isEmpty {
+            var next: [String] = []
+            for b in frontier { for c in candidates where c.head == b && fromTrunk[c.base] == nil { fromTrunk[c.base] = fromTrunk[b]! + 1; next.append(c.base) } }
+            frontier = next
+        }
+        let releases = candidates.filter { c in
+            let forward = edges["\(c.head)>\(c.base)", default: 0], back = edges["\(c.base)>\(c.head)", default: 0]
+            if forward != back { return forward > back }
+            guard let h = fromTrunk[c.head], let b = fromTrunk[c.base] else { return false }
+            return h < b
+        }
         if !releases.isEmpty {
             var perBase: [String: Int] = [:]
             for r in releases { perBase[r.base, default: 0] += 1 }
