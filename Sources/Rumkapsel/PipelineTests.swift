@@ -51,6 +51,14 @@ enum PipelineTests {
             expect(flow(p) == "develop → - → production", "got \(flow(p))")
         }
 
+        test("as many merges back as releases forward: the flow runs away from the trunk, as api's history had it") {
+            let merges = features("develop", 49) + times(M(base: "staging", head: "develop"), 30) + times(M(base: "production", head: "staging"), 3)
+                + times(M(base: "staging", head: "production"), 3) + times(M(base: "develop", head: "staging"), 3) + features("production", 4)
+            let p = PipelineDetection.detect(branches: ["develop", "staging", "production"], merges: merges, file: nil, names: names)
+            expect(flow(p) == "develop → staging → production", "got \(flow(p)): \(p.why)")
+            expect(p.isReleaseHead("staging"), "staging into production is a release")
+        }
+
         test("merges back against the flow, as api, web and backend keep staging in step, do not hide production") {
             let merges = features("develop", 50) + times(M(base: "staging", head: "develop"), 28) + times(M(base: "production", head: "staging"), 5)
                 + times(M(base: "staging", head: "production"), 3) + times(M(base: "develop", head: "staging"), 3) + times(M(base: "production", head: "gh-9/hotfix-work"), 8)

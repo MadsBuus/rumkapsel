@@ -469,16 +469,13 @@ extension StationController {
         light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
     }
 
-    /// An office's own colour before its light is taken into account: a touch down while nothing is done
-    /// in it yet, or while it is only on someone else's machine.
+    /// An office's colour before its light.
     func officeBase(_ station: Station, _ room: Room) -> NSColor {
         let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
         return room.key.hasPrefix("proj:") ? full.dimmed(0.86) : full
     }
 
-    /// How lit an office is: occupied while anyone is in it, one of yours or the crew; empty while nobody
-    /// is but it was busy within the power window; dark after that, or when the peer it belongs to says so.
-    /// The station's own rooms are always lit.
+    /// Occupied with anyone in it, empty while busy within the power window, dark after that.
     func officeLight(_ station: Station, _ room: Room) -> OfficeLight {
         if room.key.hasPrefix("kind:") { return .occupied }
         if minions.values.contains(where: { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }) { return .occupied }
@@ -486,7 +483,7 @@ extension StationController {
         return now.timeIntervalSince(room.lastActive) < StationController.powerWindow ? .empty : .dark
     }
 
-    /// The floor's colour at a light: an empty office drawn towards the bare grey floor, a dark one most of the way.
+    /// The floor's colour at a light.
     func officeTone(_ base: NSColor, _ light: OfficeLight) -> NSColor {
         let floor = NSColor(rgb: (0.27, 0.28, 0.33))
         switch light {
@@ -496,8 +493,7 @@ extension StationController {
         }
     }
 
-    /// Offices brighten when someone goes in and tone down when they leave, and a dark office that comes
-    /// back to life flickers its lights on.
+    /// Eases each office to its light; one coming back from dark flickers on.
     func updatePower() {
         for station in fleet.stations.values {
             for room in station.rooms.values where !room.key.hasPrefix("kind:") {
@@ -509,7 +505,6 @@ extension StationController {
                 let base = officeBase(station, room)
                 let from = officeTone(base, was), to = officeTone(base, light)
                 for t in roomTiles[key] ?? [] {
-                    // The colour eases across rather than jumping, so a change of light reads as the room's own.
                     t.removeAction(forKey: "light")
                     t.runAction(.customAction(duration: 0.6) { node, elapsed in
                         Looks.current.tint(tile: node, from.mixed(with: to, min(1, elapsed / 0.6)))

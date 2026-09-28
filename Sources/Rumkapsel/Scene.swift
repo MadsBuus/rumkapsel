@@ -298,7 +298,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var peerFigures: Int { minions.values.filter(\.isPeer).count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
-    /// How lit each office is drawn: full with someone in it, toned down while empty, faded once dark.
+    /// How lit each office is drawn.
     var roomLight: [String: OfficeLight] = [:]
     /// Crates under way are the simulation's (`Cargo`); the node each one is drawn as is kept here, by command id.
     var cargo: [Int: Cargo] {
@@ -348,7 +348,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Whether the log is open and when it was last drawn, as the scene's thread knows it.
     var spaceLogOpen = false
     var spaceLogDrawnAt = 0.0
-    /// How much of the top right corner the log's button takes, set on the main thread: the sharing line stands left of it.
+    /// The width the log's button takes in the top right corner, set on the main thread.
     var spaceLogCorner: CGFloat = 0
     var hovered: String?
     /// The minion the camera goes with, until a pan, Esc or a click on the floor.
@@ -1193,7 +1193,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             due.forEach { $0.run() }
         }
         if demo { tickDemo(dt: dt) }
-        if Int(clock) != Int(clock - dt) { updatePower() }   // once a second: a worker walking in lights the room at once
+        if Int(clock) != Int(clock - dt) { updatePower() }
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
             simulation.scheduleCarries()
@@ -1380,7 +1380,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Renders the current frame to a PNG, used for self-checks.
     func snapshot(to path: String) {
         let image = view.snapshot()
-        // The AppKit overlays, the station log's button and panel, drawn over the rendered frame.
         let overlays = view.subviews.filter { !$0.isHidden }
         if !overlays.isEmpty {
             image.lockFocus()
@@ -1388,7 +1387,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for v in overlays {
                 guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
                 v.cacheDisplay(in: v.bounds, to: rep)
-                // Blended over the frame: a plain draw copies, and would black out whatever the overlay leaves see-through.
+                // A plain draw copies rather than blends.
                 rep.draw(in: NSRect(x: v.frame.minX * scale, y: v.frame.minY * scale, width: v.frame.width * scale, height: v.frame.height * scale),
                          from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }
