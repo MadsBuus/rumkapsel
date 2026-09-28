@@ -62,6 +62,8 @@ enum Theme: String, CaseIterable, Identifiable {
         v.crate = "barrel"; v.crates = "barrels"; v.loadInto = "aboard the ship"; v.standingBy = "moored at the quay"
         v.steaming = "loaded and made fast"; v.liftingOff = "casting off"; v.launchedTo = "sailed for"; v.onThePad = "at the harbour"
         v.holding = "untested, held at the quay"; v.cleared = "cleared to sail"
+        v.liftedOff = "set sail"; v.aboard = "in the hold"; v.passedInspection = "were stamped at the market"
+        v.office = "workshop"; v.offices = "workshops"; v.job = "order"; v.jobs = "orders"
         v.kicked = "sent"; v.kickedOff = "away from the castle"; v.unidentified = "unmarked goods"; v.ejected = "turned away at customs"
         v.clearedDecon = "cleared customs, into the granary"; v.toStorage = "goods to the granary"; v.toDeck = "off to market"
         v.atMonolith = "in the keep"; v.foldsAway = "its crate folds away on the quay"; v.shipLeaving = "the caravan to pull away"
@@ -96,6 +98,9 @@ struct Vocabulary {
     var crate = "crate", crates = "crates", loadInto = "into the rocket", standingBy = "standing by on the pad"
     var steaming = "loaded and steaming", liftingOff = "lifting off", launchedTo = "launched to", onThePad = "on the pad"
     var holding = "untested, holding on the pad", cleared = "cleared for launch"
+    // The station log.
+    var liftedOff = "lifted off", aboard = "aboard", passedInspection = "passed inspection"
+    var office = "office", offices = "offices", job = "job", jobs = "jobs"
     // The log.
     var kicked = "kicked", kickedOff = "off the station", unidentified = "unidentified object", ejected = "ejected from decon"
     var clearedDecon = "cleared decon, into storage", toStorage = "package to storage", toDeck = "moving to the test deck"

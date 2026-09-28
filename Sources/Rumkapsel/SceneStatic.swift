@@ -414,12 +414,11 @@ extension StationController {
                 // commits add more, and pushing finishes it.
                 // Dark while it's just a conversation; lit as soon as a branch exists; power cut when left alone.
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
-                let powered = (room.key.hasPrefix("kind:") || world.crewRoomInfo[key] != nil || Date().timeIntervalSince(room.lastActive) < StationController.powerWindow)
-                    && !world.peerDim(key)   // a peer who says the office is idle: dimmed like our own idle ones
-                roomPower[key] = powered
+                let light = officeLight(station, room)
+                roomLight[key] = light
+                roomPower[key] = light != .dark
                 let failing = world.checksFailing(room)
                 let dusty = world.isDusty(room)
-                let grey = NSColor(rgb: (0.27, 0.28, 0.33))          // an empty room's floor
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
                 let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
@@ -436,8 +435,7 @@ extension StationController {
                     // Nothing on the plot before the office unfolds from its crate: no grey placeholder.
                     // An office with nothing done yet is its own colour, a touch down. It used to lose a
                     // third off every channel, which took the palette with it.
-                    var color = progress == 0 ? full.dimmed(0.86) : (i < tiled ? full : subfloor)
-                    if !powered { color = color.dimmed(0.78) }
+                    let color = i < tiled || progress == 0 ? officeTone(officeBase(station, room), light) : subfloor
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }

@@ -469,24 +469,57 @@ extension StationController {
         light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
     }
 
-    /// Lights flicker on when a dark office gets activity, and dim when it is left alone.
+    /// An office's own colour before its light is taken into account: a touch down while nothing is done
+    /// in it yet, or while it is only on someone else's machine.
+    func officeBase(_ station: Station, _ room: Room) -> NSColor {
+        let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
+        return room.key.hasPrefix("proj:") ? full.dimmed(0.86) : full
+    }
+
+    /// How lit an office is: occupied while anyone is in it, one of yours or the crew; empty while nobody
+    /// is but it was busy within the power window; dark after that, or when the peer it belongs to says so.
+    /// The station's own rooms are always lit.
+    func officeLight(_ station: Station, _ room: Room) -> OfficeLight {
+        if room.key.hasPrefix("kind:") { return .occupied }
+        if minions.values.contains(where: { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }) { return .occupied }
+        if world.peerDim(roomKey(station, room)) { return .dark }
+        return now.timeIntervalSince(room.lastActive) < StationController.powerWindow ? .empty : .dark
+    }
+
+    /// The floor's colour at a light: an empty office drawn towards the bare grey floor, a dark one most of the way.
+    func officeTone(_ base: NSColor, _ light: OfficeLight) -> NSColor {
+        let floor = NSColor(rgb: (0.27, 0.28, 0.33))
+        switch light {
+        case .occupied: return base
+        case .empty: return base.mixed(with: floor, 0.35).darker(0.1)
+        case .dark: return base.mixed(with: floor, 0.6).darker(0.3)
+        }
+    }
+
+    /// Offices brighten when someone goes in and tone down when they leave, and a dark office that comes
+    /// back to life flickers its lights on.
     func updatePower() {
         for station in fleet.stations.values {
-            for room in station.rooms.values where !room.key.hasPrefix("kind:") && world.crewRoomInfo[roomKey(station, room)] == nil {
+            for room in station.rooms.values where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
-                let powered = Date().timeIntervalSince(room.lastActive) < StationController.powerWindow
-                    || minions.values.contains { $0.station == station.name && $0.place == .room(room.key) && $0.busy }
-                guard powered != (roomPower[key] ?? powered) else { continue }
-                roomPower[key] = powered
-                let full = NSColor(room.color)
-                let base = room.key.hasPrefix("proj:") ? full.darker(0.32) : full
-                let color = powered ? base : base.darker(0.2)
+                let light = officeLight(station, room)
+                guard let was = roomLight[key], was != light else { if roomLight[key] == nil { roomLight[key] = light }; continue }
+                roomLight[key] = light
+                roomPower[key] = light != .dark
+                let base = officeBase(station, room)
+                let from = officeTone(base, was), to = officeTone(base, light)
                 for t in roomTiles[key] ?? [] {
-                    Looks.current.tint(tile: t, color)
-                    let flicker = SCNAction.sequence([.fadeOpacity(to: 0.35, duration: 0.05), .fadeOpacity(to: 1, duration: 0.08), .fadeOpacity(to: 0.5, duration: 0.05), .fadeOpacity(to: 1, duration: 0.12), .fadeOpacity(to: 0.7, duration: 0.05), .fadeOpacity(to: 1, duration: 0.1)])
-                    t.runAction(flicker)
+                    // The colour eases across rather than jumping, so a change of light reads as the room's own.
+                    t.removeAction(forKey: "light")
+                    t.runAction(.customAction(duration: 0.6) { node, elapsed in
+                        Looks.current.tint(tile: node, from.mixed(with: to, min(1, elapsed / 0.6)))
+                    }, forKey: "light")
+                    if was == .dark {
+                        t.runAction(.sequence([.fadeOpacity(to: 0.35, duration: 0.05), .fadeOpacity(to: 1, duration: 0.08), .fadeOpacity(to: 0.5, duration: 0.05),
+                                               .fadeOpacity(to: 1, duration: 0.12), .fadeOpacity(to: 0.7, duration: 0.05), .fadeOpacity(to: 1, duration: 0.1)]))
+                    }
                 }
-                if powered { logEvent("\(room.name): \(Words.current.lightsOn)") }
+                if was == .dark { logEvent("\(room.name): \(Words.current.lightsOn)") }
             }
         }
     }
@@ -511,3 +544,6 @@ extension StationController {
         for (id, n) in beams where !live.contains(id) { n.removeFromParentNode(); beams[id] = nil }
     }
 }
+
+/// How lit an office is drawn.
+enum OfficeLight { case occupied, empty, dark }

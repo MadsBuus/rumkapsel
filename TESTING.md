@@ -14,6 +14,7 @@ swift build --build-system native
 .build/debug/Rumkapsel --work-tests
 .build/debug/Rumkapsel --pipeline-tests
 .build/debug/Rumkapsel --layout-tests
+.build/debug/Rumkapsel --spacelog-tests
 ```
 
 The native build system is named because Xcode 26.1's default lays the products out where the debug binary
