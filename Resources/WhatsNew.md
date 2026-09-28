@@ -1,4 +1,4 @@
-## What's new in 0.52
+## What's new in 0.53
 
-- A station log: what happened while you were away, in the station's own words
-- Empty offices fade back, so the rooms with someone in them stand out
+- Production releases are seen again when hotfixes are merged back as often as releases go out
+- The log puts right a release it had read as the wrong kind
