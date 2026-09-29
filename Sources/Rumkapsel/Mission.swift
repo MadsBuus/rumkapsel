@@ -39,8 +39,10 @@ struct Mission {
             case .failed, .lost: return end.progress
             }
         }
+        // Quick off the pad and up past the station in the first minute or so, then a long coast and approach
+        // that still moves at a third of the pace at the end; past the usual length it creeps.
         let f = max(0, clock - started) / max(1, expected)
-        return f < 1 ? 0.92 * f : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
+        return f < 1 ? 0.92 * (0.35 * f + 0.65 * (1 - pow(1 - f, 4))) : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
     }
 
     /// The words under the clock.
@@ -106,14 +108,15 @@ extension StationController {
     func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
         let m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
         // Already flying since the merge: the run has turned up, and the clock is set to when it began.
+        // The clock only moves earlier: a flight never sinks back toward the pad because its run began after the merge.
         if var current = mission, current.repo == repo, current.ended == nil {
-            current.started = m.started; current.expected = expected
+            current.started = min(current.started, m.started); current.expected = expected
             if !release.isEmpty { current.release = release }
             mission = current
             return
         }
         if let i = queuedMissions.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
-            queuedMissions[i].started = m.started; queuedMissions[i].expected = expected
+            queuedMissions[i].started = min(queuedMissions[i].started, m.started); queuedMissions[i].expected = expected
             return
         }
         if let current = mission {
