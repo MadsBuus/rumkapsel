@@ -22,6 +22,30 @@ enum PlaybookCamera {
     /// With one body, named loosely: its id, or any part of its office's name. The camera keeps up with
     /// it and lets go the moment you pan, which is the point — the play aims once and the view is yours.
     case follow(String, Double)
+    /// On one area of the floor: "pad", "deck", "storage", "bay", or a room's name, as `--look` takes them.
+    case area(String, Double)
+}
+
+/// What a move waits for before the next is pressed: a short beat, or a fact about the station coming
+/// true. A carry takes as long as it takes, so anything that waits for one waits for its fact, never a
+/// guess at its length.
+enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
+    /// Seconds, for a beat between presses that need nothing to have happened.
+    case beat(Double)
+    /// Until the fact holds, named for the log.
+    case until(String, (StationController) -> Bool)
+
+    init(floatLiteral value: Double) { self = .beat(value) }
+    init(integerLiteral value: Int) { self = .beat(Double(value)) }
+
+    /// The target crate, web#455, in a place.
+    static func crate(_ words: String, _ holds: @escaping (Ledger.Crate) -> Bool) -> PlaybookWait {
+        .until("#455 \(words)") { c in c.fleet.stations.values.contains { $0.ledger["web", 455].map(holds) ?? false } }
+    }
+    static let inStorage = crate("in storage") { $0.stands(in: .storage) }
+    static let onDeck = crate("on the deck") { $0.stands(in: .deck) && !$0.cleared }
+    static let onStack = crate("on its stack by the rocket") { $0.stands(in: .deck) && $0.cleared }
+    static let byTheGate = crate("by the gate") { $0.area == .gate }
 }
 
 /// One thing the station can do: what floor it needs standing, what to press, where to look, and how
@@ -34,8 +58,8 @@ struct PlaybookEntry {
     let name: String
     /// Which shelf of the list it sits on.
     let group: String
-    /// A press and the seconds to wait after it, on the station's clock.
-    let moves: [(String, Double)]
+    /// A press and what to wait for after it.
+    let moves: [(String, PlaybookWait)]
     let camera: PlaybookCamera
     /// Seconds after the last press before the station is torn down and the entry plays again.
     let tail: Double
@@ -58,7 +82,7 @@ struct PlaybookEntry {
 
     static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym"]
 
-    init(_ group: String, _ name: String, _ moves: [(String, Double)], camera: PlaybookCamera,
+    init(_ group: String, _ name: String, _ moves: [(String, PlaybookWait)], camera: PlaybookCamera,
          tail: Double = 8, yard: Bool = false, bay: Bool = false,
          rooms: Set<String> = PlaybookEntry.idleRooms, crowd: Bool = true, settle: Double = 0) {
         self.group = group; self.name = name; self.moves = moves; self.camera = camera
@@ -72,7 +96,7 @@ enum Playbook {
     private static let office = "task:web#455"
     /// The body every play is about, matched loosely on its office's name.
     private static let who = "booking"
-    private static func at(_ moves: [(String, Double)]) -> [(String, Double)] { [("Target: web#455", 0.4)] + moves }
+    private static func at(_ moves: [(String, PlaybookWait)]) -> [(String, PlaybookWait)] { [("Target: web#455", 0.4)] + moves }
 
     static let entries: [PlaybookEntry] = [
         // What a session is doing, one to an entry: the knob says it, the body wears it, the routine plays.
@@ -154,6 +178,17 @@ enum Playbook {
                           ("1x", 0.5), ("Release: Production opens", 3),
                           ("Release: Mark tested", 3), ("Release: Production merges", 3)]),
                       camera: .whole(1.8), tail: 40, yard: true, rooms: [], crowd: false),
+
+        // QA passes one crate: carried to the gate, looked over by the security unit, floated onto its stack.
+        PlaybookEntry("release", "a crate passes QA: the gate",
+                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", .inStorage), ("Stage: QA", .onDeck),
+                          ("1x", 0.5), ("Stage: cleared", .onStack)]),
+                      camera: .area("pad", 3), tail: 45, yard: true, rooms: [], crowd: false),
+        // And taken back: the unit fetches it from its stack, scans it red, floats it out to the untested row.
+        PlaybookEntry("release", "clearance taken back: the gate",
+                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", .inStorage), ("Stage: QA", .onDeck),
+                          ("Stage: cleared", .onStack), ("1x", 0.5), ("Stage: QA", .onDeck)]),
+                      camera: .area("pad", 3), tail: 35, yard: true, rooms: [], crowd: false),
     ]
 
     /// A session at its desk: the smallest play there is, and the shape most of them take.
@@ -302,13 +337,34 @@ final class PlaybookController {
         // What floor the play actually got, since the smallest station that shows a thing is the point.
         FileHandle.standardError.write("playbook \(entry.name): rooms \(work.rooms.keys.sorted().joined(separator: " ")), yard \(entry.yard), bay \(entry.bay), crowd \(entry.crowd)\n".data(using: .utf8)!)
         sim.seed(crowd: entry.crowd)
-        var at = 1.0
-        for (name, after) in entry.moves {
-            script.append(Timer.scheduledTimer(withTimeInterval: at, repeats: false) { [weak self] _ in
-                MainActor.assumeIsolated { self?.sim.press(name) }
-            })
-            at += after
-        }
+        // One move at a time: pressed, then its wait, looked at every quarter second. A fact that never
+        // comes is said in the log after two minutes and the play goes on, so a broken entry shows itself.
+        var next = 0, pressedAt = 0.0, waited = 0.0
+        script.append(Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] t in
+            MainActor.assumeIsolated {
+                guard let self else { t.invalidate(); return }
+                waited += 0.25
+                if next > 0 {
+                    switch entry.moves[next - 1].1 {
+                    case .beat(let s): if waited - pressedAt < s { return }
+                    case .until(let words, let holds):
+                        if !holds(self.station) {
+                            guard waited - pressedAt > 120 else { return }
+                            FileHandle.standardError.write("playbook \(entry.name): waited two minutes for \(words), it never came\n".data(using: .utf8)!)
+                        }
+                    }
+                }
+                guard next < entry.moves.count else {
+                    t.invalidate()
+                    self.loop = Timer.scheduledTimer(withTimeInterval: entry.tail, repeats: false) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.start(k) }
+                    }
+                    return
+                }
+                self.sim.press(entry.moves[next].0)
+                next += 1; pressedAt = waited
+            }
+        })
         // An office framed before it is opened is framed on nothing, and every press that changes the
         // floor puts the camera back where the station wants it. So the framing is not set once: it is
         // held, re-asked for every beat until the entry starts over.
@@ -317,9 +373,6 @@ final class PlaybookController {
             MainActor.assumeIsolated { self?.clock += 0.5; self?.hold(entry) }
         }
 
-        loop = Timer.scheduledTimer(withTimeInterval: at + entry.tail, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.start(k) }
-        }
     }
 
     /// The floor is checked every beat, because seeding is enqueued onto the station's own queue and there
@@ -343,6 +396,7 @@ final class PlaybookController {
         switch camera {
         case .whole(let zoom): station.setView(yawDegrees: 0, pitchDegrees: -30, zoom: zoom)
         case .follow(let who, let zoom): station.follow(named: who, zoom: zoom)
+        case .area(let name, let zoom): station.look(at: name, in: station.fleet.ordered.first?.name ?? "work", zoom: zoom)
         }
     }
 

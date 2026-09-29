@@ -1027,7 +1027,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             layoutDirty = false; markersDirty = false
             timed("floor") { rebuildStatic() }
-            if firstRun, !viewPinned { restoreView() }
+            if firstRun, !viewPinned, !world.simulated { restoreView() }   // a playbook's station is framed by its entry, never by your view
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
             // is about to grow again is the jitter.
             if !floorSettling { timed("settle") { for st in fleet.stations.values { resettle(st) } } }
