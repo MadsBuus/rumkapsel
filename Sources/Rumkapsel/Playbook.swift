@@ -38,14 +38,19 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     init(floatLiteral value: Double) { self = .beat(value) }
     init(integerLiteral value: Int) { self = .beat(Double(value)) }
 
-    /// The target crate, web#455, in a place.
-    static func crate(_ words: String, _ holds: @escaping (Ledger.Crate) -> Bool) -> PlaybookWait {
-        .until("#455 \(words)") { c in c.fleet.stations.values.contains { $0.ledger["web", 455].map(holds) ?? false } }
+    /// A crate of web's, by number, in a place.
+    static func crate(_ n: Int, _ words: String, _ holds: @escaping (Ledger.Crate) -> Bool) -> PlaybookWait {
+        .until("#\(n) \(words)") { c in c.fleet.stations.values.contains { $0.ledger["web", n].map(holds) ?? false } }
     }
-    static let inStorage = crate("in storage") { $0.stands(in: .storage) }
-    static let onDeck = crate("on the deck") { $0.stands(in: .deck) && !$0.cleared }
-    static let onStack = crate("on its stack by the rocket") { $0.stands(in: .deck) && $0.cleared }
-    static let byTheGate = crate("by the gate") { $0.area == .gate }
+    static func inStorage(_ n: Int) -> PlaybookWait { crate(n, "in storage") { $0.stands(in: .storage) } }
+    /// Set down on the deck's untested row, or on its stack by the rocket, by where it was put down last.
+    static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
+    static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on its stack by the rocket") { $0.area == .tested && !$0.inTransit } }
+    /// The pallet out and loaded, and gone again once emptied.
+    static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
+    static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
+    /// The flight most of the way to its planet.
+    static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
 }
 
 /// One thing the station can do: what floor it needs standing, what to press, where to look, and how
@@ -56,6 +61,8 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
 /// "16x" and "1x" are moves like any other. Put them in the list where they belong.
 struct PlaybookEntry {
     let name: String
+    /// What you will see, under the name.
+    let seeing: String
     /// Which shelf of the list it sits on.
     let group: String
     /// A press and what to wait for after it.
@@ -82,10 +89,10 @@ struct PlaybookEntry {
 
     static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym"]
 
-    init(_ group: String, _ name: String, _ moves: [(String, PlaybookWait)], camera: PlaybookCamera,
+    init(_ group: String, _ name: String, _ seeing: String, _ moves: [(String, PlaybookWait)], camera: PlaybookCamera,
          tail: Double = 8, yard: Bool = false, bay: Bool = false,
          rooms: Set<String> = PlaybookEntry.idleRooms, crowd: Bool = true, settle: Double = 0) {
-        self.group = group; self.name = name; self.moves = moves; self.camera = camera
+        self.group = group; self.name = name; self.seeing = seeing; self.moves = moves; self.camera = camera
         self.tail = tail; self.yard = yard; self.bay = bay
         self.rooms = rooms; self.crowd = crowd; self.settle = settle
     }
@@ -98,102 +105,96 @@ enum Playbook {
     private static let who = "booking"
     private static func at(_ moves: [(String, PlaybookWait)]) -> [(String, PlaybookWait)] { [("Target: web#455", 0.4)] + moves }
 
+    /// The crate on the deck in every seeded station, and the columns QA moves it between.
+    private static let tested = 430
+    private static var passQA: String { "Board: Move web#\(tested) to \(ConfigStore.shared.current.statuses.cleared)" }
+    private static var backToQA: String { "Board: Move web#\(tested) to \(ConfigStore.shared.current.statuses.deck)" }
+
     static let entries: [PlaybookEntry] = [
-        // What a session is doing, one to an entry: the knob says it, the body wears it, the routine plays.
-        // One office, one body, no yard and none of the rooms it idles in — none of that is the subject.
-        desk("coding", "coding"), desk("reading code", "reading code"), desk("testing", "testing"),
-        desk("writing", "writing"), desk("thinking", "thinking"), desk("waiting for you", "waiting for you"),
-        PlaybookEntry("work", "web research", at([("Set: session = web research", 1)]),
+        // In an office: one session, one body, no yard.
+        desk("Session: coding", "minion hammers at the desk", "coding"),
+        desk("Session: reading code", "minion reads at the desk", "reading code"),
+        desk("Session: running tests", "minion runs tests at the desk", "testing"),
+        desk("Session: writing", "minion writes at the desk", "writing"),
+        desk("Session: thinking", "minion thinks at the desk", "thinking"),
+        desk("Session: waiting for you", "minion stops and waits, no cone", "waiting for you"),
+        PlaybookEntry("office", "Session: web research", "subagent walks to the monolith", at([("Set: session = web research", 1)]),
                       camera: .whole(2.6), tail: 16, rooms: [], crowd: false),
-        PlaybookEntry("work", "QA testing", at([("Set: session = QA testing", 1)]),
+        PlaybookEntry("office", "Session: QA testing", "minion walks the deck rows", at([("Set: session = QA testing", 1)]),
                       camera: .follow(who, 4), tail: 22, yard: true, rooms: [], crowd: false, settle: 8),
-
-        // A cone is a message being worked: a prompt lands and the body goes to it.
-        PlaybookEntry("work", "a cone worked", at([("Set: session = coding", 1), ("Prompt", 1)]),
+        PlaybookEntry("office", "Message sent", "new cone appears, minion works it", at([("Set: session = coding", 1), ("Prompt", 1)]),
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
-
-        // The life of one piece of work, a press at a time. A merge sends the crate off to storage, so
-        // that one alone needs the yard standing.
-        PlaybookEntry("work", "a commit", at([("Set: session = coding", 1), ("Commit", 1)]),
+        PlaybookEntry("office", "Commit", "cube stowed on the office floor", at([("Set: session = coding", 1), ("Commit", 1)]),
                       camera: .follow(who, 4), tail: 12, rooms: [], crowd: false),
-        PlaybookEntry("work", "a pull request opens", at([("Open PR", 2)]),
-                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
-        PlaybookEntry("work", "checks fail", at([("Open PR", 2), ("Checks failing", 2)]),
-                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
-        PlaybookEntry("work", "a pull request is approved", at([("Open PR", 2), ("Approve PR", 2)]),
-                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
-        PlaybookEntry("work", "a pull request merges", at([("Open PR", 2), ("Merge PR", 3)]),
-                      camera: .whole(1.8), tail: 26, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("work", "a pull request closes unmerged", at([("Open PR", 2), ("Close PR", 2)]),
-                      camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
-        PlaybookEntry("work", "the session ends", at([("Set: session = coding", 1), ("Session ends", 2)]),
+        PlaybookEntry("office", "Session ends", "minion leaves, office stays", at([("Set: session = coding", 1), ("Session ends", 2)]),
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 
-        // Other people's work: a teammate's office, a bot's, a peer's. These are the crowd by definition.
-        PlaybookEntry("other", "a teammate opens a pull request", [("Teammate: Open PR", 2)],
+        // A pull request, from packed to merged or closed.
+        PlaybookEntry("pull request", "PR opened", "crate packed in the office", at([("Open PR", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "PR checks fail", "crate light turns red", at([("Open PR", 2), ("Checks failing", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "PR approved", "crate light turns green", at([("Open PR", 2), ("Approve PR", 2)]),
+                      camera: .follow(who, 4), tail: 14, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "PR merged", "crate carried to storage", at([("Open PR", 2), ("Merge PR", .inStorage(455))]),
+                      camera: .whole(1.8), tail: 8, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "PR closed unmerged", "crate turns red", at([("Open PR", 2), ("Close PR", 2)]),
+                      camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
+
+        // The release, through the yard: web's crates already stand in storage and on the deck.
+        PlaybookEntry("release", "Staging PR opened", "pallet loads crates from storage", [("Release: Staging opens", .palletLoaded)],
+                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, unloaded", [("Release: Staging opens", .palletLoaded), ("Release: Staging merges", .palletGone)],
+                      camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("Release: Staging opens", .palletLoaded), ("Release: Staging closes", .palletGone)],
+                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "QA approves a crate", "crate carried to the gate, scanned green, floats to the rocket", [(passQA, .onStack(tested))],
+                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "QA rejects a crate", "crate scanned red, floats back to the deck", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), (backToQA, .onDeck(tested))],
+                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), ("Release: Production opens", 20)],
+                      camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("Release: Production opens", 2), ("Release: Production merges", 2),
+                                                                           ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
+                      camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Production deploy fails", "flight loses signal", [("Release: Production opens", 2), ("Release: Production merges", 2),
+                                                                         ("Deploy: Production starts", .flightFarOut), ("Deploy: Fails", 10)],
+                      camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
+
+        // Other people's work: a teammate's office, a bot's, a neighbour station's.
+        PlaybookEntry("others", "Teammate PR opened", "crate packed in the teammate's office", [("Teammate: Open PR", 2)],
                       camera: .whole(2.0), tail: 18, rooms: []),
-        PlaybookEntry("other", "a teammate merges", [("Teammate: Open PR", 2), ("Teammate: Merge PR", 3)],
+        PlaybookEntry("others", "Teammate PR merged", "teammate's crate carried to storage", [("Teammate: Open PR", 2), ("Teammate: Merge PR", 3)],
                       camera: .whole(1.8), tail: 26, yard: true, rooms: []),
-        PlaybookEntry("other", "a bot opens a pull request", [("Bot: Open PR", 2)],
+        PlaybookEntry("others", "Bot PR opened", "object arrives in decon", [("Bot: Open PR", 2)],
                       camera: .whole(2.0), tail: 18, yard: true, rooms: []),
-        PlaybookEntry("other", "a peer arrives", [("Peer: Leave", 2), ("Peer: Arrive", 2)],
+        PlaybookEntry("others", "Peer station connects", "peer's offices fade in", [("Peer: Leave", 2), ("Peer: Arrive", 2)],
                       camera: .whole(2.0), tail: 16, rooms: []),
-        PlaybookEntry("other", "a peer leaves", [("Peer: Leave", 2)],
+        PlaybookEntry("others", "Peer station disconnects", "peer's offices fade out", [("Peer: Leave", 2)],
                       camera: .whole(2.0), tail: 16, rooms: []),
 
-        // A body at work does not go to bed because it is dark, and that is right: only a session gone
-        // quiet is asleep, and only an asleep body is sent to a bunk.
-        PlaybookEntry("idle", "going to bed", at([("Set: session = sleeping", 1), ("Night", 3)]),
+        // Life on the station, each in the one room it is about.
+        PlaybookEntry("life", "Session asleep", "minion goes to its bunk", at([("Set: session = sleeping", 1), ("Night", 3)]),
                       camera: .follow(who, 4), tail: 30, rooms: ["kind:quarters"], crowd: false, settle: 8),
-        // The dorm under load: every session quiet at once, so the bunks are claimed together and the
-        // walks to them cross. One body finds its bunk every time; the question this asks is how many of
-        // five do.
-        PlaybookEntry("idle", "everyone turns in", [("Everyone asleep", 3), ("Night", 3)],
+        PlaybookEntry("life", "All sessions asleep", "all minions go to their bunks", [("Everyone asleep", 3), ("Night", 3)],
                       camera: .follow(who, 3.2), tail: 34, rooms: ["kind:quarters"], settle: 12),
-        // The floor moving under a sleeper. `bedCache` is dropped by any change to the plan, so the bunks
-        // are worked out again — and a body already bedded down keeps saying so while the bunk it was
-        // given may now be somewhere else.
-        PlaybookEntry("idle", "a floor change while they sleep",
-                      [("Everyone asleep", 3), ("Night", 8), ("New branch in repo", 4), ("New branch in repo", 4)],
-                      camera: .follow(who, 3.2), tail: 30, rooms: ["kind:quarters"], settle: 14),
-        PlaybookEntry("idle", "getting up", at([("Set: session = sleeping", 1), ("Night", 14),
+        PlaybookEntry("life", "Session wakes", "minion gets up, back to the desk", at([("Set: session = sleeping", 1), ("Night", 14),
                                         ("Day", 1), ("Set: session = coding", 2)]),
                       camera: .follow(who, 4), tail: 22, rooms: ["kind:quarters"], crowd: false),
-
-        // What a body does when it is not working: each play keeps the one room it is about.
-        PlaybookEntry("idle", "a bath", [("Bath", 2)], camera: .follow(who, 4), tail: 28,
+        PlaybookEntry("life", "Bath", "minion showers and dries off", [("Bath", 2)], camera: .follow(who, 4), tail: 28,
                       rooms: ["kind:bath"], crowd: false, settle: 7),
-        PlaybookEntry("idle", "a workout", [("Workout", 2)], camera: .follow(who, 4), tail: 28,
+        PlaybookEntry("life", "Workout", "minion uses the gym", [("Workout", 2)], camera: .follow(who, 4), tail: 28,
                       rooms: ["kind:gym"], crowd: false, settle: 7),
-        PlaybookEntry("idle", "everyone to the lounge", [("Everyone to lounge", 2)],
+        PlaybookEntry("life", "Everyone to the lounge", "minions sit on the couches", [("Everyone to lounge", 2)],
                       camera: .follow(who, 4), tail: 20, rooms: ["kind:lounge"]),
-        PlaybookEntry("idle", "a chore", [("Chore", 2)], camera: .whole(2.2), tail: 22,
+        PlaybookEntry("life", "Chore", "minion does a chore", [("Chore", 2)], camera: .whole(2.2), tail: 22,
                       rooms: ["kind:lounge"], crowd: false),
-        PlaybookEntry("idle", "a meeting in the hall", [("Meet in the hall", 2)], camera: .whole(2.0), tail: 20, rooms: []),
-
-        // The long errand: a crate crossing the whole station into a rocket. Setup runs fast, then it
-        // drops to one so the loading and the launch are watched at the speed they happen.
-        PlaybookEntry("release", "crate into rocket",
-                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", 4), ("Stage: stored", 4),
-                          ("1x", 0.5), ("Release: Production opens", 3),
-                          ("Release: Mark tested", 3), ("Release: Production merges", 3)]),
-                      camera: .whole(1.8), tail: 40, yard: true, rooms: [], crowd: false),
-
-        // QA passes one crate: carried to the gate, looked over by the security unit, floated onto its stack.
-        PlaybookEntry("release", "a crate passes QA: the gate",
-                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", .inStorage), ("Stage: QA", .onDeck),
-                          ("1x", 0.5), ("Stage: cleared", .onStack)]),
-                      camera: .area("pad", 3), tail: 45, yard: true, rooms: [], crowd: false),
-        // And taken back: the unit fetches it from its stack, scans it red, floats it out to the untested row.
-        PlaybookEntry("release", "clearance taken back: the gate",
-                      at([("16x", 0.5), ("Open PR", 2), ("Merge PR", .inStorage), ("Stage: QA", .onDeck),
-                          ("Stage: cleared", .onStack), ("1x", 0.5), ("Stage: QA", .onDeck)]),
-                      camera: .area("pad", 3), tail: 35, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("life", "Meeting in the hall", "two minions meet in the hallway", [("Meet in the hall", 2)], camera: .whole(2.0), tail: 20, rooms: []),
     ]
 
     /// A session at its desk: the smallest play there is, and the shape most of them take.
-    private static func desk(_ name: String, _ session: String) -> PlaybookEntry {
-        PlaybookEntry("work", name, at([("Set: session = \(session)", 1)]),
+    private static func desk(_ name: String, _ seeing: String, _ session: String) -> PlaybookEntry {
+        PlaybookEntry("office", name, seeing, at([("Set: session = \(session)", 1)]),
                       camera: .follow(who, 4), tail: 14, rooms: [], crowd: false)
     }
 
@@ -204,7 +205,12 @@ enum Playbook {
 
     /// The shelves, in the order the list shows them: what a session does, what comes of it, what a body
     /// does when it is not working, and everyone else.
-    static let groups = ["work", "release", "idle", "other"]
+    static let groups = ["office", "pull request", "release", "others", "life"]
+    /// What a shelf is called in the list.
+    static func shelfTitle(_ group: String) -> String {
+        ["office": "Session", "pull request": "Pull request", "release": "Release",
+         "others": "Other people", "life": "Idle"][group] ?? group
+    }
     static func onShelf(_ group: String) -> [(offset: Int, entry: PlaybookEntry)] {
         entries.enumerated().filter { $0.element.group == group }.map { ($0.offset, $0.element) }
     }
@@ -218,8 +224,8 @@ struct PlaybookPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(Playbook.groups, id: \.self) { group in
-                        Text(group)
-                            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        Text(Playbook.shelfTitle(group))
+                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                             .padding(.horizontal, 12).padding(.top, 6)
                         ForEach(Playbook.onShelf(group), id: \.offset) { row in
                             // A button rather than a row of a selected list: a list hands its selection
@@ -259,12 +265,7 @@ final class PlaybookModel: ObservableObject {
     var restart: ((Int) -> Void)?
 
     func play(_ k: Int) { restart?(k) }
-    func subtitle(_ e: PlaybookEntry) -> String {
-        var parts = ["\(e.moves.count) presses"]
-        if e.yard { parts.append("yard") }
-        if e.bay { parts.append("bay") }
-        return parts.joined(separator: " · ")
-    }
+    func subtitle(_ e: PlaybookEntry) -> String { e.seeing }
 }
 
 /// The window: a live station on the right, the list on the left. The station is a real one with the
