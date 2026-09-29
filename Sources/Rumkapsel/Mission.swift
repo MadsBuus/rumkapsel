@@ -618,7 +618,10 @@ extension StationController {
             pip.isPlaying = true
             pip.rendersContinuously = true
             let screen = MissionScreen(frame: frame)
-            screen.onClick = { [weak self] in self?.cycleMissionSize() }
+            screen.onClick = { [weak self] p in
+                guard let self else { return }
+                if !openLandedFlag(near: p) { cycleMissionSize() }
+            }
             screen.onOrbit = { [weak self] dx, dy in
                 guard let self, missionSize == 2 else { return }
                 missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
@@ -669,6 +672,20 @@ extension StationController {
         pip.isHidden = small; screen.isHidden = small
     }
 
+    /// Landed, a click on the colony's flag opens the release it flies: the pull request, or the tag.
+    /// True when the click was the flag's.
+    private func openLandedFlag(near p: NSPoint) -> Bool {
+        guard let m = mission, m.ended?.outcome == .live, let pip = missionView,
+              let flag = planets[m.repo]?.childNode(withName: "colony", recursively: false)?.childNode(withName: "cloth", recursively: true) else { return false }
+        let at = pip.projectPoint(flag.presentation.worldPosition)
+        guard at.z < 1, hypot(Double(at.x - p.x), Double(at.y - p.y)) < 40,
+              let root = world.repoRoots.first(where: { $0.value.repo == m.repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return false }
+        let path = m.release.hasPrefix("#") ? "pull/\(m.release.dropFirst())" : "releases/tag/\(m.release)"
+        guard !m.release.isEmpty, let url = URL(string: "https://github.com/\(owner)/\(path)") else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
     /// The window a size up: from its corner to medium, to filling the station, and back to its corner.
     func cycleMissionSize() {
         guard let pip = missionView, let screen = missionScreen else { return }
@@ -691,7 +708,8 @@ extension StationController {
 /// What lies over the camera's picture: the edge of a lens, faint scan lines, where the camera is, and
 /// the mission clock. Static when the signal is lost.
 final class MissionScreen: NSView {
-    var onClick: (() -> Void)?
+    /// A click that is not the ×, where it landed in the window.
+    var onClick: ((NSPoint) -> Void)?
     /// The × in the top right corner: the window shrinks to its chip.
     var onClose: (() -> Void)?
     /// A drag, a two-finger scroll or a twist over the window: how far, across and up.
@@ -811,7 +829,8 @@ final class MissionScreen: NSView {
     override func magnify(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
         if dragged { dragged = false; return }
-        if closeRect.contains(convert(event.locationInWindow, from: nil)) { onClose?() } else { onClick?() }
+        let p = convert(event.locationInWindow, from: nil)
+        if closeRect.contains(p) { onClose?() } else { onClick?(p) }
     }
     private var closeRect: NSRect { NSRect(x: bounds.width - 30, y: bounds.height - 30, width: 26, height: 26) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
