@@ -64,6 +64,7 @@ has pull requests and nothing else gets a whole station.
 | **GitHub pull requests** (essential) | the crate, its light and straps; teammates' offices; the merge that sends a crate to storage; release pull requests as the pallet and the rocket; outside work | Inbound, Ready, Stored, QA, Shipped, outside | the activity feed once a minute as a doorbell, a pull request asked at once when rung, everything again every 5 min |
 | **GitHub issues** (optional) | one identity for a branch, its pull request and its issue: `gh-N/…` names the office after the issue, `closes #N` ties the crate to it; assignees as teammates | identity; Inbound | with the pull request |
 | **GitHub Projects** (optional) | Cleared per crate, the one signal nothing else gives; a doorbell that rings within seconds; a source for Stored and QA where a team moves cards faster than it merges | Cleared; doorbell; Stored, QA by choice | what moved, every 20 s; the whole board every 5 min |
+| **GitHub Actions deploys** (optional) | flights: a deploy started, and how it ended (live, failed, cancelled), with how long the repository's deploys usually take. A deploy is a run of a workflow that runs on a push to the staging or production branch (the trunk where every merge deploys) and is named for deploying or deploys in its file: a GitHub environment or a deploy tool | none yet: the flight is shown, not tracked | with the releases every 5 min; every 10 s after a release merges and while a deploy runs |
 | **Neighbours** | everything, second hand: a sister station on the network sends its work in these same stages, never what it read them from | all | every 3 s, as fast as the neighbour heard it |
 
 **A project with no issues** is the common case: work is the branch, then the pull request. The office
@@ -77,8 +78,8 @@ facts that are its to say, where it put the office and who is in it. A neighbour
 heard first hand, never what another neighbour told it, so a stale stage cannot live on between two
 stations. A neighbour's word moves work forward like any other and never takes it back.
 
-**Later, not now:** GitHub Actions and deployments (QA when a staging deploy lands, Cleared when
-production is approved, Shipped when the production deploy succeeds); Sentry and the like (incoming
+**Later, not now:** deploys as stages (QA when a staging deploy lands, Shipped when the production
+deploy succeeds) and deployments outside GitHub Actions; environment approvals as Cleared; Sentry and the like (incoming
 bugs: something new arriving at the station, not a stage); AWS and the like (the state of the
 infrastructure); ticket systems (Jira, Linear, in the board's place).
 

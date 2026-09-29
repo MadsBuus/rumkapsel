@@ -1178,8 +1178,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
-        case .deployStarted(let stationName, let repo, true, let expected, let release):
-            beginMission(station: stationName, repo: repo, expected: expected, release: release)
+        case .deployStarted(let stationName, let repo, true, let expected, let release, let elapsed):
+            beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
         case .deployStarted, .deployEnded:

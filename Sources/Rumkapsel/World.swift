@@ -583,7 +583,18 @@ final class World {
         if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
+            github.refreshDeploys(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
+        }
+        for d in github.takeDeploys() {
+            guard let info = repoRoots[d.repoRoot] else { continue }
+            switch d.change {
+            case .started(let run, let elapsed):
+                events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
+                                             release: run.release, elapsed: elapsed))
+            case .ended(_, let outcome):
+                events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
+            }
         }
         events += applyBoardMoves()
         for change in github.takeStateChanges() {

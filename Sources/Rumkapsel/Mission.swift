@@ -96,8 +96,8 @@ extension StationController {
 
     /// A production deploy starts. One flight is shown at a time: another repository's waits its turn and
     /// joins its own flight where it has got to, the clock having run for it all along.
-    func beginMission(station: String, repo: String, expected: TimeInterval, release: String) {
-        let m = Mission(repo: repo, station: station, started: clock, expected: expected, release: release)
+    func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
+        let m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
         if let current = mission {
             if current.repo != repo, !queuedMissions.contains(where: { $0.repo == repo }) { queuedMissions.append(m) }
             logEvent("\(repo): liftoff, deploying to production")
