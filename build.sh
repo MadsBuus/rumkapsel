@@ -55,6 +55,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 echo "built $APP"
-# Asked for by hand, so it comes to the front: a build you waited for is one you want to look at.
-for a in "$@"; do [ "$a" = run ] && open "$APP"; done
+# Asked for by hand, so it comes to the front: a build you waited for is one you want to look at. Any
+# rumkapsel already running goes first, whichever checkout it came from: `open` would only bring that one
+# forward.
+for a in "$@"; do
+  [ "$a" = run ] || continue
+  if pgrep -xq rumkapsel; then
+    osascript -e 'quit app "rumkapsel"' >/dev/null 2>&1
+    for _ in {1..20}; do pgrep -xq rumkapsel || break; sleep 0.25; done
+    pkill -x rumkapsel 2>/dev/null || true   # already gone is fine: `set -e` would stop here
+    for _ in {1..20}; do pgrep -xq rumkapsel || break; sleep 0.25; done
+    sleep 0.5   # Launch Services forgets the old one a beat after it is gone
+  fi
+  # A fresh instance of this bundle, not whichever copy Launch Services last knew as rumkapsel.
+  open -n "$APP"
+done
 exit 0
