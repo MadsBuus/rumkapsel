@@ -80,6 +80,17 @@ enum DeployTests {
             expect(c.isEmpty, "yesterday's deploy flies nothing, got \(c)")
         }
 
+        test("a deploy over before the station was watching is history, even after a stale first look") {
+            let stale = run(1, began: -30 * 86400)
+            let fresh = run(2, began: 0, took: 400)
+            let watching = t0.addingTimeInterval(20 * 60)   // the app started twenty minutes after that deploy began
+            let c = Deployments.changes(was: stale, runs: [fresh, stale], firstLook: false, at: t0.addingTimeInterval(23 * 60), watchingSince: watching)
+            expect(c.isEmpty, "the replay of an earlier deploy flies nothing, got \(c)")
+            let live = run(3, status: "in_progress", began: 25 * 60)
+            let d = Deployments.changes(was: fresh, runs: [live, fresh], firstLook: false, at: t0.addingTimeInterval(26 * 60), watchingSince: watching)
+            expect(d == [.started(live, elapsed: 60)], "one begun since still flies, got \(d)")
+        }
+
         test("the release is the pull request the merge names") {
             expect(run(1).release == "#5466", "from the merge's title")
             expect(run(1, title: "chore: bump").release == "", "nothing named: nothing")

@@ -122,7 +122,7 @@ enum Deployments {
     /// repository is quiet about deploys already over; one still running is joined where it has got to.
     /// A newer deploy takes over from an older one still running: the older is ended the way the list says,
     /// cancelled when the list no longer has it.
-    static func changes(was: DeployRun?, runs: [DeployRun], firstLook: Bool, at now: Date) -> [Change] {
+    static func changes(was: DeployRun?, runs: [DeployRun], firstLook: Bool, at now: Date, watchingSince: Date? = nil) -> [Change] {
         guard let newest = runs.first else { return [] }
         func elapsed(_ r: DeployRun) -> TimeInterval { r.startedAt.map { max(0, now.timeIntervalSince($0)) } ?? 0 }
         if firstLook { return newest.running ? [.started(newest, elapsed: elapsed(newest))] : [] }
@@ -139,6 +139,9 @@ enum Deployments {
         }
         // Over already and begun long ago: history, not a flight.
         if !newest.running, elapsed(newest) > recent { return out }
+        // Over before the station was watching: history, however fresh. GitHub's first answer can be a
+        // snapshot weeks old, so the first look is no guard on its own.
+        if !newest.running, let since = watchingSince, let over = newest.updatedAt, over < since { return out }
         out.append(.started(newest, elapsed: elapsed(newest)))
         if let o = newest.outcome { out.append(.ended(newest, o)) }
         return out

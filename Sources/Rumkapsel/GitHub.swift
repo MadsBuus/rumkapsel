@@ -669,6 +669,8 @@ final class GitHubResolver {
     private var deployNewest: [String: DeployRun] = [:]
     private var deployUsual: [String: TimeInterval] = [:]
     private var deploysRead: [String: Date] = [:]
+    /// Per "root|branch": when the station first read it. A deploy over before then never flies.
+    private var deployWatchedSince: [String: Date] = [:]
     /// Per "root|branch": the workflows whose file deploys on a push to that branch, read at most hourly.
     private var deployWorkflows: [String: (names: Set<String>, at: Date)] = [:]
     private var pendingDeploys: [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] = []
@@ -795,7 +797,8 @@ final class GitHubResolver {
                 lock.lock()
                 if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
                 let first = deployNewest[key] == nil
-                let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date())
+                if deployWatchedSince[key] == nil { deployWatchedSince[key] = Date() }
+                let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date(), watchingSince: deployWatchedSince[key])
                 let usual = Deployments.usual(runs)
                 deployUsual[key] = usual
                 if let newest = runs.first {
