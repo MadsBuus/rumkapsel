@@ -322,6 +322,7 @@ extension Simulation {
                 putDown(m, on: to)
                 cargo[id] = nil
                 world.setDown(crate, at: to)
+                if to.area == .gate { gateReceived(crate, at: to) }
                 cue(.landed(job))
                 finish(m)
                 return .spent

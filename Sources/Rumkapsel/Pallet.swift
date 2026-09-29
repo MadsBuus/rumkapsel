@@ -636,7 +636,10 @@ extension Simulation {
 
     /// A crate landed: on the pallet, or down in a yard by hand, the station's word on where it stands.
     private func land(_ f: PalletJob.Flight, _ p: PalletJob, station: Station) {
-        if let slot = f.slot, let yard = f.yard {
+        if let slot = f.slot, slot.area == .gate {
+            world.setDown(f.crate, at: slot)
+            gateReceived(f.crate, at: slot)   // cleared already: it waits by the gate for the unit
+        } else if let slot = f.slot, let yard = f.yard {
             world.setDown(f.crate, at: slot)
             world.landed(station: station, repo: f.crate.repo, number: f.crate.number, in: yard, at: now)
         } else {

@@ -18,7 +18,7 @@ enum Yard: String, Codable {
     init?(area: Spot.Area) {
         switch area {
         case .storage: self = .storage
-        case .deck, .tested: self = .deck
+        case .deck, .tested, .gate: self = .deck
         case .pad: self = .pad
         case .decon: self = .decon
         default: return nil
@@ -118,6 +118,7 @@ struct Ledger: Codable {
         var inTransit: Bool {
             switch at {
             case .carried, .pallet: return true
+            case .slot(.gate, _, _): return true   // by the gate, waiting for the unit: not on any row
             default: return false
             }
         }

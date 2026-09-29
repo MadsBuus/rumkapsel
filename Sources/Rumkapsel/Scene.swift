@@ -1245,6 +1245,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         simulation.stepShuttles()
         simulation.stepPallets(dt: dt)
+        simulation.stepGates(dt: dt)
         drawShuttles(dt: dt)
         updateBerths()
         tickHullLamps()

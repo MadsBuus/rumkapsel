@@ -315,6 +315,9 @@ extension StationController {
         case .redraw: markersDirty = true
         case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
         case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
+        case .gateScan(let station, let passed): gateScanned(station: station, passed: passed)
+        case .gateLift(let station, let crate): gateLift(station: station, crate: crate)
+        case .gateLanded(let station, let crate): gateLanded(station: station, crate: crate)
         case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)

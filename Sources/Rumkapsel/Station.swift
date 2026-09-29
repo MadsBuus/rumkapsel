@@ -373,6 +373,12 @@ final class Station {
         let mid = (spans.min()! + spans.max()!) / 2 - simd_dot(centre, along)
         return (centre + along * mid, inward, spans.max()! - spans.min()! + 1)
     }
+    /// Where a cleared crate is set down for the unit: the deck cell across the gate line from its post.
+    var gateInbox: Cell? {
+        guard let post = securityPost, let first = gateDoorway.first else { return nil }
+        let c = Cell(x: post.x - (first.pad.x - first.deck.x), y: post.y - (first.pad.y - first.deck.y))
+        return deckCells.contains(c) ? c : nil
+    }
     /// Where the security unit keeps its post: on the pad, beside the gate's end, off the way through.
     var securityPost: Cell? {
         let pairs = gateDoorway

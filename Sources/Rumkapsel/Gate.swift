@@ -21,6 +21,9 @@ final class GateView {
     var yaw: Double
     /// The scan showing now, and until when; an alarm blinks.
     var scan: (color: NSColor, until: Double, alarm: Bool)?
+    /// Crates waiting for the unit, by the gate or on their stack, by crate key; and the one in the air.
+    var waiting: [String: SCNNode] = [:]
+    var flying: SCNNode?
 
     init(arch: SCNNode, unit: SCNNode, post: SIMD3<Double>, restYaw: Double) {
         self.arch = arch; self.unit = unit; self.post = post; self.restYaw = restYaw; yaw = restYaw
@@ -146,8 +149,89 @@ extension StationController {
                 let d = simd_distance(m.pos, g.center)
                 if d < StationController.unitWatch, d < (nearest?.d ?? .infinity) { nearest = (d, m.pos) }
             }
-            drawUnit(gv, station: station, watching: nearest?.at, dt: dt)
+            if let job = simulation.gates[name] { drawJob(job, gv: gv, station: station, idle: nearest?.at, dt: dt) }
+            else { drawUnit(gv, station: station, watching: nearest?.at, dt: dt) }
         }
+    }
+
+    /// The unit at work, where the simulation has it; the crates waiting for it; the one in the air.
+    private func drawJob(_ job: GateJob, gv: GateView, station: Station, idle watching: SIMD2<Double>?, dt: Double) {
+        if case .rest = job.phase, job.waiting.isEmpty, job.ejecting.isEmpty,
+           simd_distance(job.unit, gv.post) < 0.05 {
+            drawUnit(gv, station: station, watching: watching, dt: dt)
+        } else {
+            let bob = sin(clock * 7.3 + gv.bobPhase) * 0.015
+            gv.unit.position = v3(job.unit.x, job.unit.y + bob, job.unit.z)
+            let turn = atan2(sin(job.yaw - gv.yaw), cos(job.yaw - gv.yaw))
+            gv.yaw += turn * min(1, dt * 10)
+            gv.unit.eulerAngles.y = CGFloat(gv.yaw)
+            var light = Props.scanIdle
+            if case .inspecting = job.phase { light = clock.truncatingRemainder(dividingBy: 0.25) < 0.125 ? .white : Props.scanIdle }
+            if let s = gv.scan, clock <= s.until { light = s.color }
+            gv.eye?.geometry?.firstMaterial?.diffuse.contents = light
+            gv.beam?.geometry?.firstMaterial?.diffuse.contents = light == Props.scanIdle ? Props.scanIdle.darker(0.4) : light
+        }
+        // What waits: by the gate crate-sized, on its stack small.
+        var want: [String: (SIMD3<Double>, Double, CrateRef)] = [:]
+        for w in job.waiting where w.crate != job.busyWith || { if case .inspecting = job.phase { return true }; return false }() {
+            want[w.crate.key] = (w.at, 1, w.crate)
+        }
+        for w in job.ejecting { want[w.crate.key] = (w.at, Station.testedScale, w.crate) }
+        for (key, node) in gv.waiting where want[key] == nil { node.removeFromParentNode(); gv.waiting[key] = nil }
+        for (key, w) in want where gv.waiting[key] == nil {
+            let node = gateCrate(w.2, small: w.1 < 1)
+            node.position = v3(w.0.x, w.0.y, w.0.z)
+            propRoot.addChildNode(node)
+            gv.waiting[key] = node
+        }
+        if case .carrying(let f) = job.phase, let node = gv.flying {
+            let p = f.position(at: clock)
+            node.position = v3(p.pos.x, p.pos.y, p.pos.z)
+            let k = CGFloat(p.scale)
+            node.scale = SCNVector3(k, k, k)
+        }
+    }
+
+    /// A crate as the rows draw it, for the gate to hold: its repository's colour, your straps, the light off.
+    private func gateCrate(_ crate: CrateRef, small: Bool) -> SCNNode {
+        let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
+        let alien = row?.alien == true
+        let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))
+        let band = small ? Props.passedLight : NSColor(rgb: (0.3, 0.32, 0.38))
+        let node = Props.package(color: color, band: band, size: 0.38, mine: !alien && world.isMine(repo: crate.repo, number: crate.number))
+        if small { let k = CGFloat(Station.testedScale); node.scale = SCNVector3(k, k, k) }
+        return node
+    }
+
+    /// The unit's verdict, shown on its eye and the arch.
+    func gateScanned(station: String, passed: Bool) {
+        guard let gv = gates[station] else { return }
+        gv.scan = (passed ? Props.passedLight : Props.scanRed, clock + 1.2, false)
+        drone.ping(seed: passed ? 7 : 3)
+    }
+
+    /// A crate leaves the ground by the gate, or its stack, for the unit's float through.
+    func gateLift(station: String, crate: CrateRef) {
+        guard let gv = gates[station] else { return }
+        let node = gv.waiting.removeValue(forKey: crate.key) ?? crateNode(crate) ?? gateCrate(crate, small: false)
+        let at = node.worldPosition
+        node.removeFromParentNode()
+        node.position = at
+        propRoot.addChildNode(node)
+        if let plate = node.childNodes.first(where: { $0.geometry?.name == Props.plateName }),
+           let s = gv.scan { plate.geometry?.firstMaterial?.diffuse.contents = s.color }
+        gv.flying = node
+        rebuildMarkers()
+    }
+
+    /// Down on its stack, or out on the untested row: the rows draw it from here.
+    func gateLanded(station: String, crate: CrateRef) {
+        guard let gv = gates[station] else { return }
+        gv.flying?.removeFromParentNode()
+        gv.flying = nil
+        drone.thud()
+        rebuildMarkers()
+        refreshRockets()
     }
 
     /// A crate crossed the gate. Onto the pad it passes green, or sets off the alarm when it is going up

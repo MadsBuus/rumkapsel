@@ -48,6 +48,11 @@ enum Cue {
     /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
     case palletLift(station: String, crate: CrateRef)
     case palletLanded(station: String, crate: CrateRef, aboard: Bool)
+    /// The security unit's scan: passed or not.
+    case gateScan(station: String, passed: Bool)
+    /// A crate leaves the ground by the gate or its stack, and comes down through the gate.
+    case gateLift(station: String, crate: CrateRef)
+    case gateLanded(station: String, crate: CrateRef)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
@@ -102,6 +107,8 @@ final class Simulation<B: Body> {
     /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
     /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
     var pallets: [String: PalletJob] = [:]
+    /// Each station's gate and the security unit's errands there.
+    var gates: [String: GateJob] = [:]
     var palletWishes: [String: Bool] = [:]
     /// Every shuttle in the air, and one rocket per repository with a release on the pad, by "station|repo".
     var flights: [Flight] = []
