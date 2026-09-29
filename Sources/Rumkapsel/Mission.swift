@@ -335,6 +335,16 @@ extension StationController {
             look = look + (droneLook - look) * k
         }
         up /= max(0.001, simd_length(up))
+        // Filling the station, the view can be turned a little about the craft, or the colony once it lands.
+        if missionSize == 2, missionOrbit != .zero {
+            let pivot = (landing ?? 0) >= 7 ? ground : craft
+            var side = simd_cross(at - pivot, up)
+            side /= max(0.001, simd_length(side))
+            let turn = simd_quatd(angle: missionOrbit.x, axis: up) * simd_quatd(angle: missionOrbit.y, axis: side)
+            at = pivot + turn.act(at - pivot)
+            look = pivot + turn.act(look - pivot)
+            up = turn.act(up)
+        }
         let heat = landing.map { $0 >= 4 && $0 < 7.5 ? sin(.pi * ($0 - 4) / 3.5) : 0 } ?? 0
         // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
         var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
@@ -608,7 +618,11 @@ extension StationController {
             pip.isPlaying = true
             pip.rendersContinuously = true
             let screen = MissionScreen(frame: frame)
-            screen.onClick = { [weak self] in self?.toggleMissionFull() }
+            screen.onClick = { [weak self] in self?.cycleMissionSize() }
+            screen.onOrbit = { [weak self] dx, dy in
+                guard let self, missionSize == 2 else { return }
+                missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
+            }
             screen.onClose = { [weak self] in
                 self?.missionUserSmall = true; self?.missionUserOpened = false
                 self?.sizeMission(auto: false, ended: false, chip: self?.missionChip?.text ?? "")
@@ -629,6 +643,7 @@ extension StationController {
         missionScreen?.removeFromSuperview(); missionScreen = nil
         missionChip?.removeFromSuperview(); missionChip = nil
         missionUserSmall = false; missionUserOpened = false
+        missionSize = 0; missionOrbit = .zero
     }
 
     /// The window's place: the bottom right corner, over the log.
@@ -654,11 +669,14 @@ extension StationController {
         pip.isHidden = small; screen.isHidden = small
     }
 
-    /// The window fills the station, or goes back to its corner.
-    func toggleMissionFull() {
+    /// The window a size up: from its corner to medium, to filling the station, and back to its corner.
+    func cycleMissionSize() {
         guard let pip = missionView, let screen = missionScreen else { return }
-        let full = pip.frame.width < view.bounds.width - 1
-        let frame = full ? view.bounds : missionFrame
+        missionSize = (missionSize + 1) % 3
+        if missionSize != 2 { missionOrbit = .zero }
+        let full = missionSize == 2
+        let w = min(view.bounds.width * 0.55, 820), medium = NSRect(x: view.bounds.width - 12 - w, y: 44, width: w, height: w * 232 / 384)
+        let frame = full ? view.bounds : missionSize == 1 ? medium : missionFrame
         pip.frame = frame; screen.frame = frame
         pip.autoresizingMask = full ? [.width, .height] : [.minXMargin]
         screen.autoresizingMask = full ? [.width, .height] : [.minXMargin]
@@ -676,6 +694,9 @@ final class MissionScreen: NSView {
     var onClick: (() -> Void)?
     /// The × in the top right corner: the window shrinks to its chip.
     var onClose: (() -> Void)?
+    /// A drag, a two-finger scroll or a twist over the window: how far, across and up.
+    var onOrbit: ((Double, Double) -> Void)?
+    private var dragged = false
     private var repo = "", clock = "", phase = "", usual = ""
     private var outcome: DeployOutcome?
     private var climbing = false
@@ -783,8 +804,13 @@ final class MissionScreen: NSView {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) { dragged = false }
+    override func mouseDragged(with event: NSEvent) { dragged = true; onOrbit?(Double(event.deltaX), Double(event.deltaY)) }
+    override func scrollWheel(with event: NSEvent) { onOrbit?(Double(event.scrollingDeltaX), Double(event.scrollingDeltaY)) }
+    override func rotate(with event: NSEvent) { onOrbit?(Double(event.rotation) * 4, 0) }
+    override func magnify(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
+        if dragged { dragged = false; return }
         if closeRect.contains(convert(event.locationInWindow, from: nil)) { onClose?() } else { onClick?() }
     }
     private var closeRect: NSRect { NSRect(x: bounds.width - 30, y: bounds.height - 30, width: 26, height: 26) }
