@@ -329,6 +329,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         bodies.keyEquivalentModifierMask = [.command, .shift]
         let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
         ledger.keyEquivalentModifierMask = [.command, .shift]
+        develop.addItem(.separator())
+        // A pretend production deploy on this station, for looking at the flight: nothing is recorded.
+        develop.addItem(withTitle: "Rehearse Launch", action: #selector(rehearseLaunch), keyEquivalent: "")
+        develop.addItem(withTitle: "Rehearse Failed Launch", action: #selector(rehearseFailedLaunch), keyEquivalent: "")
 
         let help = menu("Help")
         help.addItem(withTitle: "Request a Feature…", action: #selector(requestFeature), keyEquivalent: "")
@@ -403,6 +407,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
     @objc func copyBodies() { copy(controller.bodiesReport(only: nil), what: "body report") }
     @objc func copyLedger() { copy(controller.ledgerReport(only: nil), what: "ledger report") }
+    @objc func rehearseLaunch() { controller.rehearseLaunch(.live) }
+    @objc func rehearseFailedLaunch() { controller.rehearseLaunch(.failed) }
 
     @objc func openPlaybook() {
         if playbookWindow == nil {

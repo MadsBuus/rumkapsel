@@ -70,6 +70,11 @@ enum WorldEvent {
     case markersChanged
     /// The saved layout came back from disk: this is the first scan of the run.
     case worldLoaded
+    /// A deploy began, to production or staging; `expected` is how long this repository's deploys usually take,
+    /// `release` what is going out: a tag, or the release pull request's number.
+    case deployStarted(station: String, repo: String, production: Bool, expected: TimeInterval, release: String)
+    /// A deploy ended: live, failed or cancelled.
+    case deployEnded(station: String, repo: String, production: Bool, outcome: DeployOutcome)
     /// A line for the station log.
     case log(String)
     /// Worth a chime, with a seed for its pitch.

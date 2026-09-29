@@ -44,6 +44,11 @@ tiles for every floor, arches on the airlock and the decon hatch, a comms tower 
 rockets and speeders, a desk in every office, fuel by the pad and a rover in the bay. The view starts turned
 about so the pad faces right. The models used live in `Resources/Kenney`.
 
+A production deploy flies: an onboard camera rides the repository's rocket from the pad to its planet on the
+horizon and lands it at the repository's colony (Develop › Rehearse Launch flies a pretend one). The planet
+surfaces are [Solar System Scope](https://www.solarsystemscope.com/textures/)'s textures (CC BY 4.0), tinted in
+each repository's colour; they live in `Resources/Planets`.
+
 THEMES.md is the guide to designing one: the layers of a place, designing for change, and how theme work is judged.
 
 ## Controls
