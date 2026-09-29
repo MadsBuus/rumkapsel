@@ -22,6 +22,8 @@ struct Mission {
     var ended: (outcome: DeployOutcome, at: Double, progress: Double)?
     /// How long the deploy took, from its start to its end.
     var took: Double?
+    /// When its window opened: a flight joined late still gets its minute in full before it shrinks.
+    var shownAt = 0.0
     var dustRaised = false
     /// The lifter has let go of the tip.
     var separated = false
@@ -137,6 +139,7 @@ extension StationController {
 
     private func launch(_ m: Mission) {
         mission = m
+        mission?.shownAt = clock
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
@@ -348,15 +351,22 @@ extension StationController {
         let heat = landing.map { $0 >= 4 && $0 < 7.5 ? sin(.pi * ($0 - 4) / 3.5) : 0 } ?? 0
         // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
         var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
-        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
-        if shake > 0 { at += SIMD3(Double.random(in: -shake...shake), Double.random(in: -shake...shake), Double.random(in: -shake...shake)) }
+        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.002 + 0.01 * heat : l < 10 ? 0.004 : 0 }
+        // A rumble, not a twitch: a few slow sines out of step with each other, never a fresh jolt a frame.
+        if shake > 0 {
+            let t = clock, k = shake / 1.5
+            let x: Double = sin(t * 23.1) + 0.5 * sin(t * 37.7)
+            let y: Double = sin(t * 29.3 + 1.3) + 0.5 * sin(t * 41.9)
+            let z: Double = sin(t * 19.7 + 2.1) + 0.5 * sin(t * 33.1)
+            at += SIMD3(x, y, z) * k
+        }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
         if let end = m.ended, end.outcome.signalLost { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
 
         let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.started) / 60, Int(clock - m.started) % 60)
         let landed = (landing ?? 0) >= 10.5
-        let auto = m.ended == nil && clock - m.started > 60, ended = m.ended != nil
+        let auto = m.ended == nil && clock - m.shownAt > 60, ended = m.ended != nil
         let shown = clockText + "|" + m.phase(at: clock) + "|\(Int(heat * 12))|\(landed)|\(auto)|\(ended)"
         guard shown != missionShown else { return }
         missionShown = shown
@@ -626,9 +636,10 @@ extension StationController {
                 guard let self, missionSize == 2 else { return }
                 missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
             }
+            // The ×: from medium or full back to the small picture; on the small picture, closed for this flight.
             screen.onClose = { [weak self] in
-                self?.missionUserSmall = true; self?.missionUserOpened = false
-                self?.sizeMission(auto: false, ended: false, chip: self?.missionChip?.text ?? "")
+                guard let self else { return }
+                if missionSize != 0 { missionSize = 2; cycleMissionSize() } else { missionUserSmall = true; sizeMission(auto: false, ended: false, chip: "") }
             }
             pip.autoresizingMask = [.minXMargin]
             screen.autoresizingMask = [.minXMargin]
@@ -644,7 +655,6 @@ extension StationController {
     func closeMissionScreen() {
         missionView?.removeFromSuperview(); missionView = nil
         missionScreen?.removeFromSuperview(); missionScreen = nil
-        missionChip?.removeFromSuperview(); missionChip = nil
         missionUserSmall = false; missionUserOpened = false
         missionSize = 0; missionOrbit = .zero
     }
@@ -652,24 +662,10 @@ extension StationController {
     /// The window's place: the bottom right corner, over the log.
     var missionFrame: NSRect { NSRect(x: view.bounds.width - 12 - 384, y: 44, width: 384, height: 232) }
 
-    /// A long flight shrinks to a chip after its first minute, and the × does the same; the chip opens it
-    /// again, and the ending opens it by itself. Main thread.
+    /// The window shows unless it was closed with the ×. Main thread.
     func sizeMission(auto: Bool, ended: Bool, chip text: String) {
         guard let pip = missionView, let screen = missionScreen else { return }
-        let small = !ended && (missionUserSmall || (auto && !missionUserOpened))
-        if small, missionChip == nil {
-            let chip = MissionChip(frame: NSRect(x: view.bounds.width - 12 - 240, y: 44, width: 240, height: 26))
-            chip.autoresizingMask = [.minXMargin]
-            chip.onClick = { [weak self] in
-                self?.missionUserOpened = true; self?.missionUserSmall = false
-                self?.sizeMission(auto: false, ended: false, chip: "")
-            }
-            view.addSubview(chip)
-            missionChip = chip
-        }
-        missionChip?.isHidden = !small
-        missionChip?.text = text
-        pip.isHidden = small; screen.isHidden = small
+        pip.isHidden = missionUserSmall; screen.isHidden = missionUserSmall
     }
 
     /// Landed, a click on the colony's flag opens the release it flies: the pull request, or the tag.
@@ -701,7 +697,7 @@ extension StationController {
     }
 
     func missionTakes(point p: NSPoint) -> Bool {
-        (missionScreen.map { !$0.isHidden && $0.frame.contains(p) } ?? false) || (missionChip.map { !$0.isHidden && $0.frame.contains(p) } ?? false)
+        missionScreen.map { !$0.isHidden && $0.frame.contains(p) } ?? false
     }
 }
 
@@ -836,22 +832,3 @@ final class MissionScreen: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// A flight shrunk to one line: its repository, the clock and what it is doing. Clicking it opens the window.
-final class MissionChip: NSView {
-    var onClick: (() -> Void)?
-    var text = "" { didSet { if text != oldValue { needsDisplay = true } } }
-
-    override func draw(_ dirtyRect: NSRect) {
-        Palette.void.withAlphaComponent(0.9).setFill()
-        bounds.fill()
-        NSColor(rgb: (0.98, 0.72, 0.3)).withAlphaComponent(0.6).setStroke()
-        let edge = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)); edge.lineWidth = 1; edge.stroke()
-        let t = NSAttributedString(string: text, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                                                              .foregroundColor: NSColor.white.withAlphaComponent(0.9)])
-        t.draw(at: NSPoint(x: 10, y: (bounds.height - t.size().height) / 2))
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-    override func mouseUp(with event: NSEvent) { onClick?() }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}

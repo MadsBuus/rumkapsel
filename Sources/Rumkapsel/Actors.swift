@@ -189,7 +189,7 @@ extension StationController {
                     rocketRoot.addChildNode(hold)
                     hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
                 }
-                liftOff(node)
+                liftOff(node, repo: String(key.split(separator: "|", maxSplits: 1).last ?? ""))
             }
         case .steam(let key):
             if let node = rocketViews[key]?.node {
@@ -232,8 +232,14 @@ extension StationController {
         }
     }
 
-    /// Flame on, a slow climb that carries the rocket out of the frame, then gone.
-    func liftOff(_ node: SCNNode) {
+    /// Flame on, a slow climb that carries the rocket out of the frame, then gone. A rocket whose flight is
+    /// already on screen is that flight: it leaves the pad quietly rather than lifting off a second time.
+    func liftOff(_ node: SCNNode, repo: String) {
+        let flying = (mission.map { $0.repo == repo && $0.ended == nil } ?? false) || queuedMissions.contains { $0.repo == repo && $0.ended == nil }
+        if flying {
+            node.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
+            return
+        }
         drone.sweep(up: true)
         node.childNode(withName: "flame", recursively: false)?.opacity = 1
         node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
