@@ -353,8 +353,12 @@ extension StationController {
         let heat = landing.map { $0 >= 4 && $0 < 7.5 ? sin(.pi * ($0 - 4) / 3.5) : 0 } ?? 0
         // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
         var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
-        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
-        if shake > 0 { at += SIMD3(Double.random(in: -shake...shake), Double.random(in: -shake...shake), Double.random(in: -shake...shake)) }
+        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.002 + 0.01 * heat : l < 10 ? 0.004 : 0 }
+        // A rumble, not a twitch: a few slow sines out of step with each other, never a fresh jolt a frame.
+        if shake > 0 {
+            let t = clock
+            at += SIMD3(sin(t * 23.1) + 0.5 * sin(t * 37.7), sin(t * 29.3 + 1.3) + 0.5 * sin(t * 41.9), sin(t * 19.7 + 2.1) + 0.5 * sin(t * 33.1)) * (shake / 1.5)
+        }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
         if let end = m.ended, end.outcome.signalLost { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
