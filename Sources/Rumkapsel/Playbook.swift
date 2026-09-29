@@ -46,6 +46,10 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// Set down on the deck's untested row, or on its stack by the rocket, by where it was put down last.
     static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
     static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on its stack by the rocket") { $0.area == .tested && !$0.inTransit } }
+    /// Somebody standing on the deck.
+    static let bodyOnDeck = PlaybookWait.until("somebody on the deck") { c in
+        c.minions.values.contains { m in c.fleet.stations[m.station]?.deckCells.contains(m.cell) ?? false }
+    }
     /// The pallet out and loaded, and gone again once emptied.
     static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
@@ -149,9 +153,9 @@ enum Playbook {
         PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("Release: Staging opens", .palletLoaded), ("Release: Staging closes", .palletGone)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "QA approves a crate", "crate carried to the gate, scanned green, floats to the rocket", [(passQA, .onStack(tested))],
-                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+                      camera: .area("gate", 3.4), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "QA rejects a crate", "crate scanned red, floats back to the deck", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), (backToQA, .onDeck(tested))],
-                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+                      camera: .area("gate", 3.4), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), ("Release: Production opens", 20)],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("Release: Production opens", 2), ("Release: Production merges", 2),
@@ -340,13 +344,15 @@ final class PlaybookController {
         sim.seed(crowd: entry.crowd)
         // One move at a time: pressed, then its wait, looked at every quarter second. A fact that never
         // comes is said in the log after two minutes and the play goes on, so a broken entry shows itself.
+        // Anything in the yard needs someone free to carry: laid with the floor, before the first move.
+        let moves: [(String, PlaybookWait)] = (entry.yard ? [("Hands: one free on the deck", PlaybookWait.bodyOnDeck)] : []) + entry.moves
         var next = 0, pressedAt = 0.0, waited = 0.0
         script.append(Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
                 guard let self else { t.invalidate(); return }
                 waited += 0.25
                 if next > 0 {
-                    switch entry.moves[next - 1].1 {
+                    switch moves[next - 1].1 {
                     case .beat(let s): if waited - pressedAt < s { return }
                     case .until(let words, let holds):
                         if !holds(self.station) {
@@ -355,14 +361,14 @@ final class PlaybookController {
                         }
                     }
                 }
-                guard next < entry.moves.count else {
+                guard next < moves.count else {
                     t.invalidate()
                     self.loop = Timer.scheduledTimer(withTimeInterval: entry.tail, repeats: false) { [weak self] _ in
                         MainActor.assumeIsolated { self?.start(k) }
                     }
                     return
                 }
-                self.sim.press(entry.moves[next].0)
+                self.sim.press(moves[next].0)
                 next += 1; pressedAt = waited
             }
         })

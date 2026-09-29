@@ -5,6 +5,7 @@
 // SceneKit: the scene draws the unit, the waiting crates and the one in the air from these facts.
 
 import Foundation
+import simd
 
 /// One station's gate: what waits there, and what the unit is doing about it.
 final class GateJob {
@@ -22,7 +23,8 @@ final class GateJob {
 
     enum Phase {
         case rest
-        case going(to: SIMD3<Double>)
+        /// Flying a route: through the arch when the other side is where it is going.
+        case going([SIMD3<Double>])
         case inspecting(crate: CrateRef, at: SIMD3<Double>, began: Double, outbound: Bool)
         case carrying(GateFlight)
     }
@@ -39,10 +41,12 @@ final class GateJob {
     }
 }
 
-/// A crate floating through the gate on the station clock: an eased arc, its size changing on the way.
+/// A crate floating through the gate on the station clock: along its points, low through the arch, its
+/// size changing as it crosses the gate's line.
 struct GateFlight {
     let crate: CrateRef
-    let from: SIMD3<Double>, to: SIMD3<Double>
+    /// Where it starts, the arch's deck side, its middle and its pad side (or the other way round), where it lands.
+    let points: [SIMD3<Double>]
     let fromScale: Double, toScale: Double
     let at: Double, seconds: Double
     /// Where it lands, and whether it is going out to the untested row.
@@ -51,9 +55,21 @@ struct GateFlight {
 
     func position(at clock: Double) -> (pos: SIMD3<Double>, scale: Double, done: Bool) {
         let t = min(1, max(0, (clock - at) / seconds))
-        let e = t * t * (3 - 2 * t)
-        let p = from + (to - from) * e
-        return (SIMD3(p.x, p.y + sin(t * .pi) * 0.6, p.z), fromScale + (toScale - fromScale) * e, t >= 1)
+        let p = along(t * t * (3 - 2 * t))
+        return (p.pos, p.scale, t >= 1)
+    }
+
+    /// The point a fraction of the way along, and the size there.
+    func along(_ e: Double) -> (pos: SIMD3<Double>, scale: Double) {
+        let legs = zip(points, points.dropFirst()).map { simd_distance($0, $1) }
+        let total = max(0.001, legs.reduce(0, +))
+        var left = e * total, k = 0
+        while k < legs.count - 1, left > legs[k] { left -= legs[k]; k += 1 }
+        let p = points[k] + (points[k + 1] - points[k]) * min(1, left / max(0.001, legs[k]))
+        // The size changes crossing the arch: from its deck side to its pad side.
+        let before = legs.prefix(1).reduce(0, +), through = legs.dropFirst().prefix(2).reduce(0, +)
+        let c = min(1, max(0, (e * total - before) / max(0.001, through)))
+        return (p, fromScale + (toScale - fromScale) * c)
     }
 }
 
@@ -94,26 +110,33 @@ extension Simulation {
     /// One frame of every gate: the unit goes to what waits, looks it over, and sends it through.
     func stepGates(dt: Double) {
         for (name, job) in gates {
-            guard let station = fleet.stations[name], let post = station.securityPost else { continue }
+            guard let station = fleet.stations[name], let post = station.securityPost,
+                  let arch = station.throughGate(height: Simulation.hover + 0.25) else { continue }
             let home = SIMD3(station.offset.x + Double(post.x), Simulation.hover, station.offset.y + Double(post.y))
+            let onDeck = simd_dot(SIMD2(job.unit.x - arch.middle.x, job.unit.z - arch.middle.z),
+                                  SIMD2(arch.pad.x - arch.deck.x, arch.pad.z - arch.deck.z)) < 0
             switch job.phase {
             case .rest:
                 if let next = job.waiting.first {
-                    job.phase = .going(to: next.at + SIMD3(0, 0.62, 0))
+                    // Waiting on the deck side: out through the arch to it.
+                    let over = next.at + SIMD3(0, 0.55, 0)
+                    job.phase = .going(onDeck ? [over] : [arch.pad, arch.middle, arch.deck, over])
                 } else if let next = job.ejecting.first {
-                    job.phase = .going(to: next.at + SIMD3(0, 0.5, 0))
-                } else {
-                    fly(job, toward: home, dt: dt, speed: 1.2)
+                    let over = next.at + SIMD3(0, 0.45, 0)
+                    job.phase = .going(onDeck ? [arch.deck, arch.middle, arch.pad, over] : [over])
+                } else if simd_distance(job.unit, home) > 0.03 {
+                    job.phase = .going(onDeck ? [arch.deck, arch.middle, arch.pad, home] : [home])
                 }
-            case .going(let target):
-                if fly(job, toward: target, dt: dt, speed: Simulation.unitSpeed) {
-                    if let next = job.waiting.first {
-                        job.phase = .inspecting(crate: next.crate, at: next.at, began: clock, outbound: false)
-                    } else if let next = job.ejecting.first {
-                        job.phase = .inspecting(crate: next.crate, at: next.at, began: clock, outbound: true)
-                    } else {
-                        job.phase = .rest
-                    }
+            case .going(let route):
+                guard let target = route.first else { job.phase = .rest; continue }
+                guard fly(job, toward: target, dt: dt, speed: Simulation.unitSpeed) else { continue }
+                if route.count > 1 { job.phase = .going(Array(route.dropFirst())); continue }
+                if let next = job.waiting.first, simd_distance(target, next.at + SIMD3(0, 0.55, 0)) < 0.05 {
+                    job.phase = .inspecting(crate: next.crate, at: next.at, began: clock, outbound: false)
+                } else if let next = job.ejecting.first, simd_distance(target, next.at + SIMD3(0, 0.45, 0)) < 0.05 {
+                    job.phase = .inspecting(crate: next.crate, at: next.at, began: clock, outbound: true)
+                } else {
+                    job.phase = .rest
                 }
             case .inspecting(let crate, let at, let began, let outbound):
                 // Round it, low and quick, the eye on it the whole time.
@@ -123,9 +146,8 @@ extension Simulation {
                 guard t >= Simulation.inspectSeconds else { continue }
                 sendThrough(job, crate: crate, from: at, outbound: outbound, station: station)
             case .carrying(let f):
-                let p = f.position(at: clock)
-                job.unit = p.pos + SIMD3(0, 0.45, 0)
-                guard p.done else { continue }
+                // The unit holds where it scanned while the crate goes through; the scene draws the stream.
+                guard f.position(at: clock).done else { continue }
                 world.setDown(f.crate, at: f.spot)
                 world.landed(station: station, repo: f.crate.repo, number: f.crate.number, in: .deck, at: now)
                 cue(.gateLanded(station: name, crate: f.crate))
@@ -134,20 +156,26 @@ extension Simulation {
         }
     }
 
-    /// The scan's verdict and the crate in the air. Inbound, a crate still cleared passes and goes onto its
-    /// stack; one whose clearance went while it waited is scanned red and goes to the untested row instead.
+    /// The scan's verdict and the crate in the air. Inbound, a crate still cleared passes and goes through
+    /// the arch onto its stack; one whose clearance went while it waited is scanned red and goes to the
+    /// untested row instead, without crossing.
     private func sendThrough(_ job: GateJob, crate: CrateRef, from: SIMD3<Double>, outbound: Bool, station: Station) {
         if outbound { job.ejecting.removeAll { $0.crate == crate } } else { job.waiting.removeAll { $0.crate == crate } }
         world.freeGateSlot(crate)
         let row = station.ledger[crate.repo, crate.number]
         let passes = !outbound && (row?.cleared == true || row?.alien == true || !world.workflow(repo: crate.repo).has(.cleared))
-        job.scan = (passes, clock + 1.2)
+        job.scan = (passes, clock + 1.4)
         cue(.gateScan(station: station.name, passed: passes))
         station.ledger.order(repo: crate.repo, number: crate.number, to: .deck)
-        guard let to = world.slotNow(for: crate, toward: .deck, pastGate: true) else { job.phase = .rest; return }
+        guard let to = world.slotNow(for: crate, toward: .deck, pastGate: true), let arch = station.throughGate(height: 0.3) else { job.phase = .rest; return }
         let small = to.area == .tested
-        job.phase = .carrying(GateFlight(crate: crate, from: from, to: to.pos, fromScale: outbound ? Station.testedScale : 1,
-                                         toScale: small ? Station.testedScale : 1, at: clock, seconds: 2.2, spot: to, outbound: !small))
+        let lifted = from + SIMD3(0, 0.3, 0), down = to.pos + SIMD3(0, 0.25, 0)
+        let points: [SIMD3<Double>]
+        if outbound { points = [from, lifted, arch.pad, arch.middle, arch.deck, down, to.pos] }
+        else if small { points = [from, lifted, arch.deck, arch.middle, arch.pad, down, to.pos] }
+        else { points = [from, lifted, down, to.pos] }
+        job.phase = .carrying(GateFlight(crate: crate, points: points, fromScale: outbound ? Station.testedScale : 1,
+                                         toScale: small ? Station.testedScale : 1, at: clock, seconds: 3.0, spot: to, outbound: !small))
         cue(.gateLift(station: station.name, crate: crate))
     }
 

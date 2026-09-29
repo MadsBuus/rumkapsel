@@ -373,18 +373,30 @@ final class Station {
         let mid = (spans.min()! + spans.max()!) / 2 - simd_dot(centre, along)
         return (centre + along * mid, inward, spans.max()! - spans.min()! + 1)
     }
-    /// Where a cleared crate is set down for the unit: the deck cell across the gate line from its post.
-    var gateInbox: Cell? {
-        guard let post = securityPost, let first = gateDoorway.first else { return nil }
-        let c = Cell(x: post.x - (first.pad.x - first.deck.x), y: post.y - (first.pad.y - first.deck.y))
-        return deckCells.contains(c) ? c : nil
+    /// Where cleared crates wait for the unit: in front of the arch on the deck side, in the half of the
+    /// opening nearer its post. The other half stays the way through for everyone else.
+    var gateInbox: [Cell] {
+        guard let post = securityPost else { return [] }
+        let pairs = gateDoorway.sorted { abs($0.pad.x - post.x) + abs($0.pad.y - post.y) < abs($1.pad.x - post.x) + abs($1.pad.y - post.y) }
+        return pairs.prefix(max(1, pairs.count / 2)).map(\.deck).filter { deckCells.contains($0) }
     }
-    /// Where a carrier stands to set a crate down by the gate: the deck aisle behind that cell, never a doorway.
+    /// Where a carrier stands to set a crate down in front of the gate: the deck aisle behind the waiting
+    /// crates, never a doorway.
     var gateStand: Cell? {
-        guard let inbox = gateInbox, let first = gateDoorway.first else { return nil }
+        guard let inbox = gateInbox.first, let first = gateDoorway.first else { return nil }
         let c = Cell(x: inbox.x - (first.pad.x - first.deck.x), y: inbox.y - (first.pad.y - first.deck.y))
         let doors = Set(yardDoorways.flatMap { [$0.0, $0.1] })
         return deckCells.contains(c) && !doors.contains(c) ? c : nil
+    }
+    /// Through the arch, in world coordinates at a height: the deck side, the middle of the opening, the pad side.
+    func throughGate(height: Double) -> (deck: SIMD3<Double>, middle: SIMD3<Double>, pad: SIMD3<Double>)? {
+        guard let g = gate else { return nil }
+        let inbox = gateInbox.map { SIMD2(Double($0.x), Double($0.y)) }
+        let along = SIMD2(-g.inward.y, g.inward.x)
+        // Straight through the half of the opening the waiting crates stand in, so nothing crosses a post.
+        let mid = inbox.isEmpty ? g.center : g.center + along * simd_dot(inbox.reduce(.zero, +) / Double(inbox.count) - g.center, along)
+        func w(_ p: SIMD2<Double>) -> SIMD3<Double> { SIMD3(offset.x + p.x, height, offset.y + p.y) }
+        return (w(mid - g.inward * 0.6), w(mid), w(mid + g.inward * 0.6))
     }
     /// Where the security unit keeps its post: on the pad, beside the gate's end, off the way through.
     var securityPost: Cell? {

@@ -1650,7 +1650,8 @@ final class World {
 
     /// Where a crate waits by the gate for the security unit, when the station has a gate with a post.
     func gateSpot(station: Station, crate: CrateRef) -> Spot? {
-        guard deckInUse(station: station.name), let cell = station.gateInbox else { return nil }
+        let cells = station.gateInbox
+        guard deckInUse(station: station.name), let first = cells.first else { return nil }
         let prefix = station.name + "|"
         let index = gateSlots[crate.key] ?? {
             let taken = Set(gateSlots.filter { $0.key.hasPrefix(prefix) }.values)
@@ -1658,9 +1659,10 @@ final class World {
             gateSlots[crate.key] = free
             return free
         }()
-        let c = index % 4, level = index / 4
-        let x = Double(cell.x) + (Double(c % 2) - 0.5) * 0.42, z = Double(cell.y) + (Double(c / 2) - 0.5) * 0.42
-        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: station.gateStand ?? cell,
+        // A crate on each cell of the waiting half, in a row along the arch; more stack on top.
+        let cell = cells[index % cells.count], level = index / cells.count
+        let x = Double(cell.x), z = Double(cell.y)
+        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: station.gateStand ?? first,
                     pos: SIMD3(station.offset.x + x, Double(level) * 0.34, station.offset.y + z), level: level, yaw: 0)
     }
 

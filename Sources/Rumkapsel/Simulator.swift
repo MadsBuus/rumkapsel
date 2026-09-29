@@ -922,6 +922,7 @@ final class SimulatorModel: ObservableObject {
                 button("Chore", "A chore"), button("Workout", "A turn in the gym"),
                 button("Meet in the hall", "A meeting in the hall"), button("Wedge carrier", "Wedge a carrier"),
                 button("Night", shown: false), button("Day", shown: false),
+                button("Hands: one free on the deck", shown: false),
             ]),
         ]
     }
@@ -1276,6 +1277,15 @@ final class SimulatorModel: ObservableObject {
         case "Meet in the hall": station.simulate(.meet)
         case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
+        case "Hands: one free on the deck":
+            // The floor laid, not walked to: a body that can carry is put standing on the deck by the gate,
+            // so a carry there starts at once.
+            guard let st = station.fleet.stations.values.first(where: { !$0.deckCells.isEmpty }),
+                  let cell = st.gateStand ?? st.deckCells.first,
+                  let m = station.minions.values.filter({ $0.isFree }).sorted(by: { $0.id < $1.id }).first
+                      ?? station.minions.values.filter({ !$0.isCrew && !$0.isPeer && !$0.isSubagent }).sorted(by: { $0.id < $1.id }).first else { return }
+            m.path = []
+            m.pos = SIMD2(Double(cell.x), Double(cell.y))
 
         default:
             note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
