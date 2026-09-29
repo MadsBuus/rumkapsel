@@ -355,7 +355,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hiddenRockets: [SCNNode] = []
     var missionView: SCNView?
     var missionScreen: MissionScreen?
-    var missionChip: MissionChip?
     /// Main thread: the × pressed, or the chip clicked to keep the window open.
     var missionUserSmall = false, missionUserOpened = false
     /// The window's size: 0 in its corner, 1 medium, 2 filling the station. Filled, it can be turned a little.
