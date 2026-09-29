@@ -794,7 +794,7 @@ final class GitHubResolver {
                 let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deployingWorkflows(branch: branch, repoRoot: repoRoot))
                 lock.lock()
                 if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
-                let first = deployNewest[key] == nil && deploysRead[repoRoot] == nil
+                let first = deployNewest[key] == nil
                 let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date())
                 let usual = Deployments.usual(runs)
                 deployUsual[key] = usual
