@@ -6,6 +6,47 @@ import SwiftUI
 /// Whether this run was started by a script rather than by somebody at the keyboard: the scenario
 /// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
 /// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
+/// The main window's place and the screen it was on, kept in the defaults. AppKit's own autosave puts a
+/// window back on the main screen whenever the saved screen's frame does not match exactly, which with
+/// several displays is most of the time.
+enum WindowPlace {
+    private static let key = "windowPlace"
+
+    private static func number(_ screen: NSScreen) -> Int? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue
+    }
+
+    static func save(_ w: NSWindow) {
+        guard let screen = w.screen, !w.styleMask.contains(.fullScreen) else { return }
+        let f = w.frame, s = screen.frame
+        UserDefaults.standard.set(["screen": number(screen) ?? 0, "x": f.minX, "y": f.minY, "w": f.width, "h": f.height,
+                                   "sx": s.minX, "sy": s.minY, "sw": s.width, "sh": s.height], forKey: key)
+    }
+
+    /// The place AppKit's autosave last kept, "x y w h  sx sy sw sh", read once until one of our own is saved.
+    private static func fromAutosave() -> [String: Any]? {
+        guard let text = UserDefaults.standard.string(forKey: "NSWindow Frame RumkapselMain") else { return nil }
+        let n = text.split(separator: " ").compactMap { Double($0) }
+        guard n.count >= 8 else { return nil }
+        return ["x": n[0], "y": n[1], "w": n[2], "h": n[3], "sx": n[4], "sy": n[5], "sw": n[6], "sh": n[7]]
+    }
+
+    /// Back where it was, when that screen is connected: found by its number, else by its place and size.
+    static func restore(_ w: NSWindow) -> Bool {
+        guard let d = UserDefaults.standard.dictionary(forKey: key) ?? fromAutosave(), let x = d["x"] as? Double, let y = d["y"] as? Double,
+              let width = d["w"] as? Double, let height = d["h"] as? Double else { return false }
+        let id = d["screen"] as? Int
+        let was = NSRect(x: d["sx"] as? Double ?? 0, y: d["sy"] as? Double ?? 0, width: d["sw"] as? Double ?? 0, height: d["sh"] as? Double ?? 0)
+        guard let screen = NSScreen.screens.first(where: { number($0) == id }) ?? NSScreen.screens.first(where: { $0.frame == was || $0.visibleFrame == was }) else { return false }
+        let room = screen.visibleFrame
+        var f = NSRect(x: x, y: y, width: min(width, room.width), height: min(height, room.height))
+        f.origin.x = min(max(f.minX, room.minX), room.maxX - f.width)
+        f.origin.y = min(max(f.minY, room.minY), room.maxY - f.height)
+        w.setFrame(f, display: false)
+        return true
+    }
+}
+
 enum Scripted {
     static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-ledger" || $0 == "--dump-bodies" || $0.hasSuffix("-tests") }
 }
@@ -115,11 +156,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         controller.view.postsFrameChangedNotifications = true
         menuNeedsUpdate(viewMenu)
 
-        if !window.setFrameUsingName("RumkapselMain"), let screen = NSScreen.main {
+        // Where it was last time, on the screen it was on; a screen no longer connected means the default
+        // corner. A scripted run (a snapshot, the scenarios, the simulator) neither reads nor writes the
+        // saved place, or its window would take the user's.
+        let remembers = !Scripted.run && !simulatorOnly
+        if !(remembers && WindowPlace.restore(window)), let screen = NSScreen.main {
             let f = screen.visibleFrame
-            window.setFrameOrigin(NSPoint(x: f.maxX - size.width - 24, y: f.minY + 24))
+            window.setFrameOrigin(NSPoint(x: f.maxX - window.frame.width - 24, y: f.minY + 24))
         }
-        window.setFrameAutosaveName("RumkapselMain")
+        if remembers {
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    if let w = self?.window { WindowPlace.save(w) }
+                }
+            }
+        }
         if !simulatorOnly {
             if Scripted.run {
                 window.orderBack(nil)   // a render still needs the window drawn, just not in front
