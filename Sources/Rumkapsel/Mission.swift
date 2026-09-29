@@ -22,6 +22,8 @@ struct Mission {
     var ended: (outcome: DeployOutcome, at: Double, progress: Double)?
     /// How long the deploy took, from its start to its end.
     var took: Double?
+    /// When its window opened: a flight joined late still gets its minute in full before it shrinks.
+    var shownAt = 0.0
     var dustRaised = false
     /// The lifter has let go of the tip.
     var separated = false
@@ -137,6 +139,7 @@ extension StationController {
 
     private func launch(_ m: Mission) {
         mission = m
+        mission?.shownAt = clock
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
@@ -206,6 +209,8 @@ extension StationController {
     }
 
     func endMission(repo: String, outcome: DeployOutcome) {
+        // The ending opens the window once, to be watched; a × after that holds.
+        if mission?.repo == repo { DispatchQueue.main.async { [self] in missionUserSmall = false } }
         if let i = queuedMissions.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
             queuedMissions[i].ended = (outcome, clock, queuedMissions[i].progress(at: clock))
             queuedMissions[i].took = clock - queuedMissions[i].started
@@ -356,7 +361,7 @@ extension StationController {
 
         let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.started) / 60, Int(clock - m.started) % 60)
         let landed = (landing ?? 0) >= 10.5
-        let auto = m.ended == nil && clock - m.started > 60, ended = m.ended != nil
+        let auto = m.ended == nil && clock - m.shownAt > 60, ended = m.ended != nil
         let shown = clockText + "|" + m.phase(at: clock) + "|\(Int(heat * 12))|\(landed)|\(auto)|\(ended)"
         guard shown != missionShown else { return }
         missionShown = shown
@@ -628,6 +633,7 @@ extension StationController {
             }
             screen.onClose = { [weak self] in
                 self?.missionUserSmall = true; self?.missionUserOpened = false
+                if self?.missionSize != 0 { self?.missionSize = 2; self?.cycleMissionSize() }   // back to its corner size, behind the chip
                 self?.sizeMission(auto: false, ended: false, chip: self?.missionChip?.text ?? "")
             }
             pip.autoresizingMask = [.minXMargin]
@@ -656,7 +662,7 @@ extension StationController {
     /// again, and the ending opens it by itself. Main thread.
     func sizeMission(auto: Bool, ended: Bool, chip text: String) {
         guard let pip = missionView, let screen = missionScreen else { return }
-        let small = !ended && (missionUserSmall || (auto && !missionUserOpened))
+        let small = missionUserSmall || (!ended && auto && !missionUserOpened)
         if small, missionChip == nil {
             let chip = MissionChip(frame: NSRect(x: view.bounds.width - 12 - 240, y: 44, width: 240, height: 26))
             chip.autoresizingMask = [.minXMargin]
