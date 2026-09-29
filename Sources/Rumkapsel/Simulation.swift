@@ -19,6 +19,10 @@ struct Cargo {
     var hurry = false
     /// Who gave this carry up: passed over for it while anyone else is free.
     var gaveUp: Set<String> = []
+    /// On the X-ray's belt: the carrier waits at its far end for the verdict.
+    var onBelt = false
+    /// Through the X-ray and passed: bound for its stack by the rocket, not the belt again.
+    var pastGate = false
 }
 
 /// Something the simulation decided this tick that the scene shows once.
@@ -48,11 +52,10 @@ enum Cue {
     /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
     case palletLift(station: String, crate: CrateRef)
     case palletLanded(station: String, crate: CrateRef, aboard: Bool)
-    /// The security unit's scan: passed or not.
+    /// The X-ray's verdict: passed or not.
     case gateScan(station: String, passed: Bool)
-    /// A crate leaves the ground by the gate or its stack, and comes down through the gate.
-    case gateLift(station: String, crate: CrateRef)
-    case gateLanded(station: String, crate: CrateRef)
+    /// A crate off the belt at one of its ends, for a hand to carry on: to its stack, or to the untested row.
+    case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, riding: Bool)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
@@ -241,7 +244,7 @@ final class Simulation<B: Body> {
     /// was when the order went out. The order keeps its id; only its destination moves.
     func reaim(_ id: Int) {
         guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
+              let fresh = world.slotNow(for: crate, toward: yard, pastGate: job.pastGate), fresh.pos != job.aim.pos else { return }
         cargo[id]?.aim = fresh
     }
 

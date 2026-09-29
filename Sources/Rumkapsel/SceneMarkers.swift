@@ -43,13 +43,19 @@ extension StationController {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
-        // The security unit on its post is walked round.
+        // The X-ray is walked round: the belt and its tunnel the length of their half of the arch, and the
+        // operator with its monitor.
         for name in gates.keys {
-            guard let st = fleet.stations[name], let post = st.securityPost else { continue }
-            let r = 0.2, f = Double(Station.fine)
-            for sx in Int(((Double(post.x) - r) * f).rounded())...Int(((Double(post.x) + r) * f).rounded()) {
-                for sy in Int(((Double(post.y) - r) * f).rounded())...Int(((Double(post.y) + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
+            guard let st = fleet.stations[name], let belt = st.belt else { continue }
+            let f = Double(Station.fine)
+            func block(_ p: SIMD2<Double>, _ r: Double) {
+                for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
+                    for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
+                }
             }
+            let a = SIMD2(belt.start.x - st.offset.x, belt.start.z - st.offset.y), b = SIMD2(belt.exit.x - st.offset.x, belt.exit.z - st.offset.y)
+            for k in 0...8 { block(a + (b - a) * Double(k) / 8, 0.3) }
+            if let op = st.operatorCell { block(SIMD2(Double(op.x), Double(op.y)), 0.3) }
         }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
         // static redraw and read from there: nothing on the static root moves between redraws.

@@ -278,8 +278,8 @@ extension StationController {
 
     /// Takes a carry command and the crate it moves. The simulation speaks for the crate from here on;
     /// the node is what the scene lifts when the carrier's body says the crate is on its arms.
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, onDone: onDone) else { return }
+    func carry(_ command: Command, node: SCNNode, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) {
+        guard simulation.carry(command, roomKey: roomKey, pastGate: pastGate, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
     }
@@ -433,8 +433,6 @@ extension StationController {
 
     /// Clearance taken back: the crate comes out through the gate to the untested row, the scan red.
     func carryBackToDeck(station: Station, repo: String, number: Int) {
-        // The security unit fetches it, where the station has one; else a carrier walks it out.
-        if simulation.gateEject(CrateRef(station: station.name, repo: repo, number: number)) { rebuildMarkers(); return }
         for command in world.carryBackToUntested(station: station, repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
             carry(command, node: node) { [weak self] in

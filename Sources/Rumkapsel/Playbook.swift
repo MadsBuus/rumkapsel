@@ -46,7 +46,20 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// Set down on the deck's untested row, or on its stack by the rocket, by where it was put down last.
     static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
     static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on its stack by the rocket") { $0.area == .tested && !$0.inTransit } }
+    /// Picked up: on somebody's arms.
+    static func pickedUp(_ n: Int) -> PlaybookWait {
+        .until("#\(n) picked up") { c in c.minions.values.contains { m in
+            if m.carried != nil, case .crate(let crate)? = m.load { return crate.number == n }
+            return false
+        } }
+    }
     static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { $0.area == .pad } }
+    /// Bodies spawned: the seed's scan has come back.
+    static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
+    /// Web's rocket has its place on the pad, so web's tested crates stand on their stack beside it.
+    static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in
+        c.fleet.stations.values.contains { c.world.testedStack(station: $0, repo: "web") != nil }
+    }
     /// Somebody standing on the deck.
     static let bodyOnDeck = PlaybookWait.until("somebody on the deck") { c in
         c.minions.values.contains { m in c.fleet.stations[m.station]?.deckCells.contains(m.cell) ?? false }
@@ -155,10 +168,10 @@ enum Playbook {
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA approves a crate", "crate carried to the gate, scanned green, floats to the rocket", [("1x", 0.5), (passQA, .onStack(tested))],
-                      camera: .area("yard", 2.3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA rejects a crate", "crate scanned red, floats back to the deck", [("1x", 0.5), (rejectQA, .onDeck(approved))],
-                      camera: .area("yard", 2.3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "QA approves a crate", "crate set on the X-ray belt, scanned green, out small on the pad, carried to the rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
+                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("release", "QA rejects a crate", "crate carried back through the arch, scanned red, set in the untested row", [("4x", 0.5), (rejectQA, .pickedUp(approved)), ("1x", .onDeck(approved))],
+                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
         PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
@@ -366,7 +379,9 @@ final class PlaybookController {
         // One move at a time: pressed, then its wait, looked at every quarter second. A fact that never
         // comes is said in the log after two minutes and the play goes on, so a broken entry shows itself.
         // Anything in the yard needs someone free to carry: laid with the floor, before the first move.
-        let moves: [(String, PlaybookWait)] = (entry.yard ? [("Hands: one free on the deck", PlaybookWait.bodyOnDeck)] : []) + entry.moves
+        // An empty name presses nothing and only waits.
+        let hands: [(String, PlaybookWait)] = [("", .bodiesUp), ("GitHub: Poll", .rocketOnPad), ("Hands: one free on the deck", .bodyOnDeck)]
+        let moves = (entry.yard ? hands : []) + entry.moves
         var next = 0, pressedAt = 0.0, waited = 0.0
         script.append(Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
@@ -390,7 +405,10 @@ final class PlaybookController {
                     return
                 }
                 let name = moves[next].0
-                self.sim.press(name == "1x" ? self.model.speed : name)
+                if !name.isEmpty {
+                    FileHandle.standardError.write("playbook \(entry.name): \(String(format: "%.2f", waited))s press \(name)\n".data(using: .utf8)!)
+                    self.sim.press(name == "1x" ? self.model.speed : name)
+                }
                 next += 1; pressedAt = waited
             }
         })

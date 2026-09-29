@@ -73,12 +73,12 @@ extension Simulation {
     /// Takes a carry command. The crate is spoken for from here on, so nothing else is told to move it
     /// and the yard layout leaves its spot alone. False when the yard has no place for it.
     @discardableResult
-    func carry(_ command: Command, roomKey: String = "", onDone: @escaping () -> Void) -> Bool {
+    func carry(_ command: Command, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) -> Bool {
         guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim)
+        guard let aim = world.slotNow(for: crate, toward: yard, pastGate: pastGate) else { return false }
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, pastGate: pastGate)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
@@ -284,6 +284,15 @@ extension Simulation {
             case .walk:
                 advance(m); return .spent
             case .approach:
+                // At the X-ray's far end, facing the tunnel, until the belt brings the crate out.
+                if job.onBelt {
+                    m.waitingOn = "the crate through the X-ray"
+                    if let belt = station.belt {
+                        let d = SIMD2(belt.tunnel.x - station.offset.x, belt.tunnel.z - station.offset.y) - m.pos
+                        m.facing = atan2(d.x, d.y)
+                    }
+                    return .spent
+                }
                 // Stand an arm's length from the crate, facing it, before taking hold.
                 guard atArmsLength(m, of: boxAt, dt: dt) else { return .spent }
                 advance(m)
@@ -320,9 +329,20 @@ extension Simulation {
                 if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
-                cargo[id] = nil
                 world.setDown(crate, at: to)
-                if to.area == .gate { gateReceived(crate, at: to) }
+                if to.area == .gate, let belt = station.belt {
+                    // On the belt, and the carry goes on: through the arch to the belt's far end, to take
+                    // it off again once it has been looked at.
+                    gateReceived(crate, at: to)
+                    let far = beltEnd(station, belt, passed: true, crate: crate)
+                    cargo[id]?.onBelt = true
+                    cargo[id]?.command = job.command.from(far)
+                    m.current = cargo[id]?.command
+                    m.phase = 0
+                    walk(m, to: standCell(station, near: far.cell))
+                    return .spent
+                }
+                cargo[id] = nil
                 cue(.landed(job))
                 finish(m)
                 return .spent
