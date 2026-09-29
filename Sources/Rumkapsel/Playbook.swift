@@ -67,6 +67,8 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// The pallet out and loaded, and gone again once emptied.
     static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
+    /// Across on the deck, still loaded, waiting for staging.
+    static let palletStaged = PlaybookWait.until("the pallet on the deck") { c in c.world.truth.pallets.values.contains { $0.state == .staged } }
     /// The flight most of the way to its planet.
     static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
 }
@@ -164,8 +166,17 @@ enum Playbook {
         // The release, through the yard: web's crates already stand in storage and on the deck.
         PlaybookEntry("release", "Staging PR opened", "pallet loads crates from storage", [("1x", 0.5), ("Release: Staging opens", .palletLoaded)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, unloaded", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", .palletGone)],
+        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, waits there loaded while staging deploys",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged)],
+                      camera: .area("deck", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging deploy goes live", "the waiting pallet is unloaded onto the deck",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
+                       ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging deploy fails", "the waiting pallet's light turns red; it stays loaded",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
+                       ("1x", 1), ("Deploy: Staging fails", 6)],
+                      camera: .area("deck", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "QA approves a crate", "crate set on the X-ray belt, scanned green, out small on the pad, carried to the rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],

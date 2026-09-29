@@ -45,10 +45,12 @@ extension StationController {
             v.shadow.scale = SCNVector3(1.06 - high * 0.12, 1.06 - high * 0.12, 1)
             v.shadow.opacity = v.node.opacity * CGFloat(1.06 - high * 0.26)
             // The corner light: half a second on, half off, off the station's own clock.
+            // Red while the staging deploy of what it carries has failed.
             if let beacon = v.beacon {
                 let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
-                beacon.geometry?.firstMaterial?.diffuse.contents = on ? Props.palletAmber : Props.palletAmberOff
-                beacon.geometry?.firstMaterial?.emission.contents = on ? Props.palletAmber : NSColor.black
+                let lit = p.deploy == .failed ? Props.scanRed : Props.palletAmber
+                beacon.geometry?.firstMaterial?.diffuse.contents = on ? lit : p.deploy == .failed ? lit.darker(0.6) : Props.palletAmberOff
+                beacon.geometry?.firstMaterial?.emission.contents = on ? lit : NSColor.black
             }
             let m = minions[p.dispatcher]
             if m?.tool == .telekinesis { m?.setWand(lifting: p.flight != nil) }

@@ -379,7 +379,8 @@ struct StationTruth {
 
     /// The one hover pallet a station may have out, and what stands on it.
     struct Pallet {
-        enum State: String { case arriving, loading, loaded, moving, unloading }
+        /// `staged`: across on the deck, still loaded, until the staging deploy is live.
+        enum State: String { case arriving, loading, loaded, moving, staged, unloading }
         var repo: String
         var number: Int
         /// Where it stands: a storage cell on the row nearest the deck, or a deck cell once pushed.

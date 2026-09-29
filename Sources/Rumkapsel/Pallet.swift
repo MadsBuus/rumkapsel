@@ -62,6 +62,12 @@ final class PalletJob {
     /// while there is a way it can take.
     var blockedAt = 0.0
     var askedAt = 0.0
+    /// The staging deploy of the release it carries, as heard since the release merged.
+    var deploy = StagingDeploy.unheard
+    /// When it came to stand on the deck, for how long a deploy that never shows is waited for.
+    var stagedAt = 0.0
+
+    enum StagingDeploy { case unheard, running, live, failed }
 
     /// A crate on its way through the air, in world coordinates, on the station clock: onto the
     /// pallet, or off it onto a slot in a yard.
@@ -196,6 +202,13 @@ extension Simulation {
         case .waitPallet(_, let repo):
             guard m.phaseKind != .walk else { advance(m); return .spent }
             m.waitingOn = m.current?.words   // standing by is the errand: the release, or a pallet, is what it waits on
+            if let p = pallets[station.name], p.repo == repo, world.truth.pallets[station.name]?.state == .staged {
+                // On the deck, loaded, until what it carries is live on staging. A deploy that never shows
+                // is not waited for forever.
+                let late = p.deploy == .unheard && clock - p.stagedAt > Deployments.findWithin
+                if p.deploy == .live || late { beginUnload(m, station: station, p, back: false) }
+                return .spent
+            }
             if let p = pallets[station.name], p.repo == repo {
                 // Beside a loaded pallet, waiting for the release to go one way or the other.
                 if p.wantsBack { beginUnload(m, station: station, p, back: true) }
@@ -338,7 +351,28 @@ extension Simulation {
         p.askedAt = 0
         world.truth.movePallet(station: station.name, cell: p.cellUnder,
                                pos: SIMD3(station.offset.x + p.spot.x, PalletGeometry.lift, station.offset.y + p.spot.y))
-        beginUnload(m, station: station, p, back: false)
+        // What it carries goes onto the deck once it is live on staging: it waits for a deploy under way,
+        // or one the repository runs on a merge to staging. Anything else is unloaded now.
+        guard p.deploy != .live, p.deploy != .unheard || world.deploysStaging(station: station.name, repo: p.repo) else {
+            beginUnload(m, station: station, p, back: false)
+            return
+        }
+        world.truth.setPallet(station: station.name, state: .staged)
+        p.stagedAt = clock
+        handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "waiting for the staging deploy"), announce: true)
+    }
+
+    /// A staging deploy started or ended for a repository: the pallet carrying its release hears of it.
+    func stagingDeploy(station name: String, repo: String, outcome: DeployOutcome?) {
+        // Heard while it is out, merge or no merge yet: the deploy watcher and the release poll answer in
+        // either order.
+        guard let p = pallets[name], p.repo == repo, world.truth.pallets[name]?.state != .unloading else { return }
+        switch outcome {
+        case nil: p.deploy = .running
+        case .live?: p.deploy = .live
+        default: p.deploy = .failed
+        }
+        if let outcome { onLog("\(repo): staging deploy \(outcome == .live ? "is live" : "\(outcome)")") }
     }
 
     /// What a hover pallet must not pass through: the crates on either yard's rows, and the bodies on
@@ -591,6 +625,7 @@ extension Simulation {
         switch world.truth.pallets[p.station]?.state ?? .arriving {
         case .loading: handOver(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
         case .loaded, .arriving: handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "taking over the pallet, waiting for the release to merge"), announce: true)
+        case .staged: handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "taking over the pallet, waiting for the staging deploy"), announce: true)
         default:
             // Half way across: it goes no further, the crates come off where it stands.
             world.truth.setPallet(station: station.name, state: .unloading)

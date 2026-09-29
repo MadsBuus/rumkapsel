@@ -695,6 +695,13 @@ final class World {
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
+    /// Whether a repository's merges to staging are deployed by a workflow the station has seen run.
+    func deploysStaging(station: String, repo: String) -> Bool {
+        repoRoots.contains { root, info in
+            info.station == station && info.repo == repo && github.deploys(repoRoot: root).contains { !$0.production && $0.newest != nil }
+        }
+    }
+
     /// Whether a production release stands open for this repository. While it does, staging keeps
     /// moving: anything merged there afterwards is carried by that same release, so a rocket already
     /// loaded for it is not finished loading.

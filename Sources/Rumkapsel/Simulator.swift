@@ -913,6 +913,9 @@ final class SimulatorModel: ObservableObject {
                 button("Deploy: Goes live", "…it goes live", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
                 button("Deploy: Fails", "…it fails", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
                 button("Deploy: Cancelled", "…it is cancelled", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
+                button("Deploy: Staging starts", "A staging deploy starts"),
+                button("Deploy: Staging goes live", "…staging is live"),
+                button("Deploy: Staging fails", "…the staging deploy fails"),
                 button("Repo: No staging", shown: false),
                 button("Repo: Ships on merge", shown: false),
             ]),
@@ -1229,6 +1232,11 @@ final class SimulatorModel: ObservableObject {
         case "Deploy: Goes live", "Deploy: Fails", "Deploy: Cancelled":
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
+        case "Deploy: Staging starts":
+            station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 60, release: ""))
+        case "Deploy: Staging goes live", "Deploy: Staging fails":
+            let outcome: DeployOutcome = name.hasSuffix("live") ? .live : .failed
+            station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: false, outcome: outcome))
         case "Release: Production opens":
             let cfg = ConfigStore.shared.current
             nextRelease += 1

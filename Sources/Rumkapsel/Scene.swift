@@ -1189,8 +1189,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted, .deployEnded:
-            break
+        case .deployStarted(let stationName, let repo, false, _, _, _):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil)
+        case .deployEnded(let stationName, let repo, false, let outcome):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
