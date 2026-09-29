@@ -67,6 +67,12 @@ enum DeployTests {
             expect(c.count == 2 && c.last == .ended(run(2), .live), "both, got \(c)")
         }
 
+        test("an answer older than what is known is stale: GitHub serves old snapshots now and then") {
+            expect(Deployments.isStale([run(1)], known: run(2)), "older newest")
+            expect(!Deployments.isStale([run(3), run(2)], known: run(2)), "newer or the same is fine")
+            expect(!Deployments.isStale([run(1)], known: nil), "nothing known yet")
+        }
+
         test("the release is the pull request the merge names") {
             expect(run(1).release == "#5466", "from the merge's title")
             expect(run(1, title: "chore: bump").release == "", "nothing named: nothing")

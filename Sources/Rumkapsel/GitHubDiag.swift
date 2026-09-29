@@ -41,6 +41,7 @@ enum GitHubDiag {
                 github.refreshFeed(repoRoot: root)
                 github.refreshOpenPRs(repoRoot: root)
                 github.refreshDeploys(repoRoot: root)
+                github.watchPulls(repoRoot: root)
                 for d in github.deploys(repoRoot: root) {
                     say("  deploys on \(d.branch): usual \(Int(d.usual))s · newest \(d.newest.map { "\($0.workflow) \($0.status) \($0.conclusion) \($0.release)" } ?? "none")")
                 }

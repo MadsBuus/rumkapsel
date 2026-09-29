@@ -660,6 +660,11 @@ final class GitHubResolver {
         if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
+    /// The REST API asked directly and conditionally: an unchanged answer costs nothing, so these are asked often.
+    private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
+    /// Per checkout: each recently updated pull request's last update, as the watch last saw them.
+    private var pullsSeen: [String: [Int: String]] = [:]
+    private var pullsWatchedAt: [String: Date] = [:]
     /// Per "root|branch": the newest deploy read there, and how long that repository's deploys usually take.
     private var deployNewest: [String: DeployRun] = [:]
     private var deployUsual: [String: TimeInterval] = [:]
@@ -761,7 +766,9 @@ final class GitHubResolver {
     func refreshDeploys(repoRoot: String) {
         if frozen { return }
         lock.lock()
-        if let at = deploysRead[repoRoot], Date().timeIntervalSince(at) < gate("deploys:" + repoRoot, base: interval) { lock.unlock(); return }
+        // Asked directly, an unchanged answer is free: every quarter minute. Through `gh`, on the slow cadence.
+        let slow = owners[repoRoot] != nil && http.hasToken ? 15 : interval
+        if let at = deploysRead[repoRoot], Date().timeIntervalSince(at) < gate("deploys:" + repoRoot, base: slow) { lock.unlock(); return }
         if inFlight.contains("d:" + repoRoot) || pipelines[repoRoot] == nil { lock.unlock(); return }
         inFlight.insert("d:" + repoRoot)
         lock.unlock()
@@ -770,14 +777,23 @@ final class GitHubResolver {
             defer { lock.lock(); inFlight.remove("d:" + repoRoot); deploysRead[repoRoot] = Date(); lock.unlock() }
             var running = false, ended = false
             // One read of every push's runs, sorted by branch here: GitHub's own branch filter can answer weeks behind.
-            guard let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
-                                 "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
-                  let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
-            let all = arr.compactMap(DeployRun.init(json:))
+            var all: [DeployRun]
+            lock.lock(); let owner = owners[repoRoot]; lock.unlock()
+            if let owner, let answer = http.get("repos/\(owner)/actions/runs?event=push&per_page=60") {
+                guard let o = try? JSONSerialization.jsonObject(with: answer.data) as? [String: Any],
+                      let arr = o["workflow_runs"] as? [[String: Any]] else { return }
+                all = arr.compactMap(DeployRun.init(api:))
+            } else {
+                guard let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
+                                     "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
+                all = arr.compactMap(DeployRun.init(json:))
+            }
             for (branch, production) in deployBranches(p) {
                 let key = repoRoot + "|" + branch
                 let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deployingWorkflows(branch: branch, repoRoot: repoRoot))
                 lock.lock()
+                if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
                 let first = deployNewest[key] == nil && deploysRead[repoRoot] == nil
                 let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date())
                 let usual = Deployments.usual(runs)
@@ -800,6 +816,43 @@ final class GitHubResolver {
             else if ended { lock.lock(); expected["deploys:" + repoRoot] = nil; lock.unlock() }
             lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
             if any { DispatchQueue.main.async { self.onUpdate?() } }
+        }
+    }
+
+    /// The doorbell that costs nothing: the repository's most recently updated pull requests, asked every
+    /// ten seconds, conditionally. Any that moved since the last look ring for their own reads at once; a
+    /// release merged rings the releases and the deploys. The first look only notes what is there.
+    func watchPulls(repoRoot: String) {
+        if frozen { return }
+        lock.lock()
+        guard let owner = owners[repoRoot], Date().timeIntervalSince(pullsWatchedAt[repoRoot] ?? .distantPast) >= 10,
+              !inFlight.contains("w:" + repoRoot) else { lock.unlock(); return }
+        inFlight.insert("w:" + repoRoot)
+        pullsWatchedAt[repoRoot] = Date()
+        lock.unlock()
+        let p = pipeline(repoRoot: repoRoot)
+        queue.async { [self] in
+            defer { lock.lock(); inFlight.remove("w:" + repoRoot); lock.unlock() }
+            guard let answer = http.get("repos/\(owner)/pulls?state=all&sort=updated&direction=desc&per_page=20"), answer.changed,
+                  let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
+            lock.lock(); let before = pullsSeen[repoRoot]; lock.unlock()
+            var now: [Int: String] = [:]
+            for o in arr {
+                guard let n = o["number"] as? Int, let updated = o["updated_at"] as? String else { continue }
+                now[n] = updated
+                guard let before, before[n] != updated else { continue }
+                let base = (o["base"] as? [String: Any])?["ref"] as? String ?? ""
+                let head = (o["head"] as? [String: Any])?["ref"] as? String ?? ""
+                trace("watch: #\(n) moved (\(head) → \(base))")
+                expect("openPRs:" + repoRoot, for: 60, every: 5)
+                expect("pull#:" + repoRoot + "#\(n)", for: 60, every: 5)
+                if !head.isEmpty { expect("pull:" + repoRoot + "@" + head, for: 60, every: 5) }
+                if base == p.staging || base == p.production || (o["merged_at"] as? String) != nil {
+                    expect("releases:" + repoRoot, for: 60, every: 5)
+                    expect("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
+                }
+            }
+            lock.lock(); pullsSeen[repoRoot] = now; lock.unlock()
         }
     }
 

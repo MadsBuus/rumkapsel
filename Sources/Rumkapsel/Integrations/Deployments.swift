@@ -43,6 +43,16 @@ struct DeployRun: Equatable {
                   updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:)), title: o["displayTitle"] as? String ?? "")
     }
 
+    /// From one entry of the REST API's `workflow_runs`.
+    init?(api o: [String: Any]) {
+        guard let id = o["id"] as? Int else { return nil }
+        let iso = ISO8601DateFormatter()
+        self.init(id: id, workflow: o["name"] as? String ?? "", branch: o["head_branch"] as? String ?? "",
+                  status: o["status"] as? String ?? "", conclusion: o["conclusion"] as? String ?? "",
+                  startedAt: (o["run_started_at"] as? String).flatMap(iso.date(from:)),
+                  updatedAt: (o["updated_at"] as? String).flatMap(iso.date(from:)), title: o["display_title"] as? String ?? "")
+    }
+
     init(id: Int, workflow: String, branch: String, status: String, conclusion: String, startedAt: Date?, updatedAt: Date?, title: String) {
         self.id = id; self.workflow = workflow; self.branch = branch; self.status = status; self.conclusion = conclusion
         self.startedAt = startedAt; self.updatedAt = updatedAt; self.title = title
@@ -90,6 +100,13 @@ enum Deployments {
         let took = runs.filter { $0.outcome == .live }.compactMap(\.took).sorted()
         guard !took.isEmpty else { return fallback }
         return took.count % 2 == 1 ? took[took.count / 2] : (took[took.count / 2 - 1] + took[took.count / 2]) / 2
+    }
+
+    /// An answer whose newest run is older than one already seen: GitHub's run listing now and then serves
+    /// a snapshot weeks old. Run ids only grow, so such an answer is left alone.
+    static func isStale(_ runs: [DeployRun], known: DeployRun?) -> Bool {
+        guard let known, let newest = runs.first else { return false }
+        return newest.id < known.id
     }
 
     enum Change: Equatable {

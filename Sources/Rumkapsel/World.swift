@@ -584,6 +584,7 @@ final class World {
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
             github.refreshDeploys(repoRoot: root)
+            github.watchPulls(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }
         for d in github.takeDeploys() {
