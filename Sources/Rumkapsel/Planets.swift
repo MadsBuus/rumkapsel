@@ -26,7 +26,7 @@ enum Planets {
     private static var tinted: [String: CGImage] = [:]
     private static let lock = NSLock()
 
-    /// A lit globe with a rim of atmosphere, not turning; the saturn surface keeps its ring.
+    /// A lit globe with a rim of atmosphere; the saturn surface keeps its ring. The scene turns the globe.
     static func make(name: String, color: NSColor, radius: Double) -> SCNNode {
         let node = SCNNode()
         let surface = surfaceName(for: name)

@@ -1243,6 +1243,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tickHullLamps()
         drawRockets()
         drawPallets()
+        turnPlanets(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }

@@ -60,8 +60,15 @@ struct Mission {
         }
         let p = progress(at: clock)
         if clock - started > expected { return "Holding short · longer than usual" }
-        return p < 0.04 ? "Liftoff" : p < 0.3 ? "Climbing" : p < 0.6 ? "Coasting" : "Approaching \(repo)"
+        return p < 0.04 ? "Liftoff" : p < Mission.separation - 0.04 ? "Climbing" : p < Mission.correction.lowerBound ? "Stage separation"
+            : Mission.correction.contains(p) ? "Course correction" : p < 0.8 ? "Coasting" : "Approaching \(repo)"
     }
+
+    /// Where along the flight the lifter lets go, and the tip's short burn that sets it on course.
+    static let separation = 0.5
+    static let correction = 0.53..<0.62
+    /// Out of the atmosphere: past here nothing shakes.
+    static let space = 0.3
 
     static func duration(_ s: Double) -> String {
         let m = Int(s) / 60, sec = Int(s) % 60
@@ -218,6 +225,15 @@ extension StationController {
         }
     }
 
+    /// The planets turn slowly, once in ten minutes; one holds still while its own flight comes down onto it.
+    func turnPlanets(dt: Double) {
+        let landing = mission.flatMap { $0.ended?.outcome == .live ? $0.repo : nil }
+        for (repo, node) in planets where repo != landing {
+            guard let globe = node.childNode(withName: "globe", recursively: false) else { continue }
+            globe.eulerAngles.y += CGFloat(dt * 2 * .pi / 600)
+        }
+    }
+
     /// Where the camera is and what it looks at, every frame, from the flight's progress.
     func stepMission() {
         guard let m = mission else { return }
@@ -277,7 +293,7 @@ extension StationController {
             if l >= 10, !m.touchedDown { mission?.touchedDown = true; settleLegs() }
             if l >= 8.4, !m.dustRaised { mission?.dustRaised = true; raiseDust(at: planet + normal * r, normal: normal, color: NSColor(fleet.color(forRepo: m.repo))) }
         }
-        if s >= 0.5, !m.separated, m.ended?.outcome.signalLost != true {
+        if s >= Mission.separation, !m.separated, m.ended?.outcome.signalLost != true {
             mission?.separated = true
             separateStage(heading: heading)
         }
@@ -286,8 +302,10 @@ extension StationController {
         missionCraft.position = v3(craft.x, craft.y, craft.z)
         missionCraft.look(at: v3(craft.x + heading.x, craft.y + heading.y, craft.z + heading.z),
                           up: v3(tangent.x, tangent.y, tangent.z), localFront: SCNVector3(0, 1, 0))
+        // The lifter burns from the pad to separation; the tip only for its course correction and its landing.
+        let tipBurns = m.ended == nil ? Mission.correction.contains(s) : burning
         missionCraft.childNode(withName: "lifter plume", recursively: true)?.isHidden = !burning || separated
-        missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !burning || !separated
+        missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
 
         // The camera: on the hull looking aft on the climb, behind the craft over the top, beside it coming down.
         var sideways = simd_cross(SIMD3(0.0, 1, 0), toStation)
@@ -318,8 +336,9 @@ extension StationController {
         }
         up /= max(0.001, simd_length(up))
         let heat = landing.map { $0 >= 4 && $0 < 7.5 ? sin(.pi * ($0 - 4) / 3.5) : 0 } ?? 0
-        var shake = m.ended == nil ? 0.012 + 0.05 * (1 - min(1, s / 0.05)) : 0
-        if let l = landing { shake = l < 4 ? 0.006 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
+        // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
+        var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
+        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
         if shake > 0 { at += SIMD3(Double.random(in: -shake...shake), Double.random(in: -shake...shake), Double.random(in: -shake...shake)) }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
@@ -407,7 +426,7 @@ extension StationController {
         big.name = "lifter plume"
         big.position = v3(0, Double(lo.y), 0)
         lifter.addChildNode(big)
-        let small = plume(scale: 0.45)
+        let small = plume(scale: 0.32, vacuum: true)
         small.name = "tip plume"
         small.position = v3(0, split, 0)
         small.isHidden = true
@@ -543,10 +562,13 @@ extension StationController {
     }
 
     /// An engine's plume: a hot core, a flame and a glow round it, flickering. Its top is at the node.
-    private func plume(scale k: Double) -> SCNNode {
+    /// An engine's flame: orange in the air off the pad, a short blue-white one in vacuum.
+    private func plume(scale k: Double, vacuum: Bool = false) -> SCNNode {
         let flame = SCNNode()
-        for (radius, length, color, alpha) in [(0.05, 0.9, NSColor(rgb: (1, 0.95, 0.8)), 1.0), (0.11, 1.9, NSColor(rgb: (1, 0.55, 0.2)), 0.75),
-                                               (0.26, 3.2, NSColor(rgb: (1, 0.75, 0.4)), 0.25)] {
+        let layers = vacuum
+            ? [(0.05, 0.7, NSColor(rgb: (0.95, 0.97, 1)), 1.0), (0.1, 1.3, NSColor(rgb: (0.5, 0.7, 1)), 0.6), (0.18, 1.9, NSColor(rgb: (0.65, 0.8, 1)), 0.2)]
+            : [(0.05, 0.9, NSColor(rgb: (1, 0.95, 0.8)), 1.0), (0.11, 1.9, NSColor(rgb: (1, 0.55, 0.2)), 0.75), (0.26, 3.2, NSColor(rgb: (1, 0.75, 0.4)), 0.25)]
+        for (radius, length, color, alpha) in layers {
             let cone = SCNNode(geometry: faceted(SCNCone(topRadius: radius * k, bottomRadius: 0, height: length * k), 8))
             let m = flat(color)
             m.blendMode = .add
