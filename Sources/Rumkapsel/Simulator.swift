@@ -1,27 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// A station driven by hand. The window holds a real `StationController` with the scanner, GitHub
-/// and the network switched off, and a panel that writes synthetic facts into the same entry points
-/// production uses: `applyScan`, `applyGitHub`, `applyPeer`. Every `WorldEvent` and every `Command`
-/// shows up in the log at the bottom, so a cue that never fires is visible.
+/// A station driven by presses. It holds a real `StationController` with the scanner, GitHub and the
+/// network switched off, and a model that writes synthetic facts into the same entry points production
+/// uses: `applyScan`, `applyGitHub`, `applyPeer`. Every `WorldEvent` and every `Command` goes to the log,
+/// so a cue that never fires is visible. The scenarios press it, `--simulate` presses it, and the
+/// playbook presses it to lay a floor and play one moment; there is no panel of its own any more.
 ///
-/// The panel is a chess board and the moves on it, with a line between them.
-///
-/// **The board** is the position: one knob per fact, each saying what is so and setting it when
-/// moved — the session in the target office and what it is doing, its commits, whether its branch
-/// is pushed, its pull request, its column, its repository's pipeline and open releases, whether
-/// the peer is on the network, whether it is night. A knob is not a quieter kind of button: the
-/// station reacts to a knob as it reacts to anything. It is the other half of the panel.
-///
-/// **The moves** are the things that happen, one press each. A move is one press away whatever the
-/// board says: a move whose ground is not laid lays it first, quietly, and plays a beat later on
-/// the station clock, saying in the log what it set up. So "Merge PR" on an office with no pull
-/// request opens one and then merges it, rather than greying out and leaving you to work out the
-/// order. Only a move that has already happened — a second staging release while one is open — is
-/// out of reach, and it says why.
-///
-/// Everything the panel does is scriptable, which is how a picture is taken of a position:
+/// The presses are a board and the moves on it. **The board** is the position: one knob per fact —
+/// the session in the target office and what it is doing, its commits, whether its branch is pushed,
+/// its pull request, its column, its repository's pipeline and open releases, whether the peer is on
+/// the network, whether it is night. **The moves** are the things that happen, one press each. A move
+/// whose ground is not laid lays it first, quietly, and plays a beat later on the station clock, saying
+/// in the log what it set up. So "Merge PR" on an office with no pull request opens one and then merges
+/// it. Only a move that has already happened — a second staging release while one is open — is out of
+/// reach, and it says why.
 ///
 ///     Target: web#455                     the office every knob and move acts on
 ///     Set: <knob> = <value>               a knob, by its name or its last words
@@ -29,7 +22,7 @@ import SwiftUI
 ///     Set: commits ahead = 8              a count takes a number, a flag "yes" or "no"
 ///     Merge PR                            a move, by the name below
 ///
-/// The names a move keeps, whatever the panel shows, since the scenarios press them:
+/// The moves, by name:
 ///
 ///     Mine:      New branch in repo, Prompt, Commit, Session ends, Switch branch, Open PR,
 ///                Approve PR, Checks failing, Merge PR, Close PR
@@ -45,15 +38,14 @@ import SwiftUI
 ///                Release: Staging merges, Release: Staging merges (board lags),
 ///                Release: Staging closes, Release: Production opens, Release: Mark tested,
 ///                Release: Production merges
+///     Deploys:   Deploy: Staging starts, Deploy: Staging goes live, Deploy: Staging fails,
+///                Deploy: Production starts, Deploy: Goes live, Deploy: Fails, Deploy: Cancelled
 ///     Everyone:  Night, Day, Everyone to lounge, Breather, Everyone asleep, Bath, Chore, Workout,
-///                Meet in the hall,
-///                Wedge carrier
+///                Meet in the hall, Wedge carrier
+///     Floor:     Hands: one free on the deck
 ///     Time:      Pause, Resume, Step, ¼x, ½x, 1x, 4x, 16x
 ///
-/// Six of those have no button of their own, because a knob works them — the night, the peer and the
-/// pipeline — and they keep their names only because the scenarios press them. Starting a session and
-/// making one busy or quiet were dropped outright: the session knob is the whole of it.
-/// Without a target the panel starts on the first office of mine, ios#298.
+/// Without a target the presses act on the first office of mine, ios#298.
 @MainActor
 final class SimulatorController {
     let station: StationController
@@ -61,47 +53,21 @@ final class SimulatorController {
     /// Set by whoever owns the window: tear everything down and seed again.
     var onReset: (() -> Void)? { get { model.onReset } set { model.onReset = newValue } }
     let view = NSView()
-    private let panelWidth = 330.0
 
     init(frame: NSRect) {
-        let stationRect = NSRect(x: 0, y: 0, width: frame.width - panelWidth, height: frame.height)
-        station = StationController(frame: stationRect, demo: false, simulated: true)
+        station = StationController(frame: NSRect(origin: .zero, size: frame.size), demo: false, simulated: true)
         model = SimulatorModel(station: station)
         view.frame = frame
         view.autoresizingMask = [.width, .height]
-        station.view.frame = stationRect
+        station.view.frame = view.bounds
         station.view.autoresizingMask = [.width, .height]
-        station.viewSize = stationRect.size
+        station.viewSize = frame.size
         station.drone.isEnabled = false
         view.addSubview(station.view)
-        let panel = NSHostingView(rootView: SimulatorPanel(model: model))
-        panel.frame = NSRect(x: frame.width - panelWidth, y: 0, width: panelWidth, height: frame.height)
-        panel.autoresizingMask = [.height, .minXMargin]
-        view.addSubview(panel)
         model.seed()
     }
 
-    /// The station beside the panel: SceneKit renders itself, the panel is cached off the view.
-    func snapshot(to path: String) {
-        let stationShot = station.composedSnapshot()
-        let image = NSImage(size: view.bounds.size)
-        image.lockFocus()
-        NSColor.windowBackgroundColor.setFill()
-        NSBezierPath.fill(NSRect(origin: .zero, size: view.bounds.size))
-        stationShot.draw(in: station.view.frame)
-        if let panel = view.subviews.last, panel !== station.view, let layer = panel.layer,
-           let ctx = NSGraphicsContext.current?.cgContext {
-            ctx.saveGState()
-            ctx.translateBy(x: panel.frame.minX, y: panel.frame.maxY)
-            ctx.scaleBy(x: 1, y: -1)
-            layer.render(in: ctx)
-            ctx.restoreGState()
-        }
-        image.unlockFocus()
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: URL(fileURLWithPath: path))
-    }
+    func snapshot(to path: String) { station.snapshot(to: path) }
 }
 
 // MARK: the made-up org
@@ -144,6 +110,9 @@ private struct SimSession {
 
 @MainActor
 final class SimulatorModel: ObservableObject {
+    /// The clock rate a speed press stands for.
+    static func speedValue(_ name: String) -> Double { ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1 }
+
     var onReset: (() -> Void)?
     let station: StationController
     private var github: GitHubResolver { station.world.github }
@@ -1031,7 +1000,7 @@ final class SimulatorModel: ObservableObject {
         case "Resume": paused = false; station.sim?.paused = false
         case "Step": station.sim?.steps += 6
         default:
-            speed = SimulatorPanel.speedValue(name)
+            speed = SimulatorModel.speedValue(name)
             station.sim?.timeScale = speed
         }
     }
@@ -1431,192 +1400,6 @@ final class SimLog: @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 }
-// MARK: the panel
-
-/// Two halves, with a line between them. Above it, the board: what the position *is*, one knob per
-/// fact — the session in the office, its commits, its pull request, its column, the repository's
-/// pipeline and releases, whether the peer is on the network, whether it is night. Below it, the
-/// moves: one press each, and each of them one press away whatever the board says, because a move
-/// whose ground is not laid lays it first and then plays.
-struct SimulatorPanel: View {
-    /// The clock rate a speed button stands for.
-    static func speedValue(_ name: String) -> Double { ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1 }
-
-    @ObservedObject var model: SimulatorModel
-    /// The board folds away once the position is set, so the moves are not pushed off the bottom.
-    @AppStorage("simBoardOpen") private var boardOpen = true
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    time
-                    targetBox
-                    boardBox
-                    Divider().padding(.vertical, 2)
-                    ForEach(model.groups) { g in
-                        let shown = g.buttons.filter(\.shown)
-                        if !shown.isEmpty {
-                            VStack(alignment: .leading, spacing: 5) {
-                                header(g.id)
-                                if let n = g.note {
-                                    Text(n).font(.system(size: 9)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-                                }
-                                if g.id.hasPrefix("A source speaks") {
-                                    Picker("", selection: $model.stageSource) {
-                                        ForEach(Source.allCases, id: \.self) { Text($0.title).tag($0) }
-                                    }.labelsHidden().controlSize(.small)
-                                }
-                                ForEach(shown) { b in move(b) }
-                            }
-                        }
-                    }
-                }
-                .padding(12)
-            }
-            Divider()
-            logView
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// One move. A move that has to lay its own ground says so rather than going grey: only a move
-    /// that has already happened is out of reach.
-    @ViewBuilder private func move(_ b: SimulatorModel.Button) -> some View {
-        let lays: String? = { if case .missing(let what, _) = b.blocked { return what }; return nil }()
-        let done: String? = { if case .already(let why) = b.blocked { return why }; return nil }()
-        Button {
-            model.press(b.name)
-        } label: {
-            HStack(spacing: 4) {
-                Text(b.label)
-                if lays != nil {
-                    Image(systemName: "arrow.turn.down.right").font(.system(size: 8)).foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .controlSize(.small)
-        .disabled(done != nil)
-        .help(done ?? lays.map { "sets up \($0) first, then plays" } ?? b.name)
-    }
-
-    private func header(_ text: String) -> some View {
-        Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-    }
-
-    /// The one office everything below acts on, and what it has right now.
-    @ViewBuilder private var targetBox: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            header("Target office")
-            Picker("", selection: $model.target) {
-                ForEach(model.offices) { Text($0.label).tag($0.uid) }
-            }.labelsHidden().controlSize(.small)
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(model.status, id: \.self) { line in
-                    Text(line).font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(6)
-            .background(Color.secondary.opacity(0.08))
-            .cornerRadius(4)
-        }
-    }
-
-    /// The position: set it to whatever you want to watch a move land on.
-    @ViewBuilder private var boardBox: some View {
-        DisclosureGroup(isExpanded: $boardOpen) {
-            VStack(alignment: .leading, spacing: 6) {
-                knobs
-            }
-            .padding(.top, 4)
-        } label: {
-            header("The board")
-        }
-    }
-
-    @ViewBuilder private var knobs: some View {
-        Group {
-            ForEach(model.position) { s in
-                switch s.kind {
-                case .pick(let options, let now, let set):
-                    knob(s.id) {
-                        Picker("", selection: Binding(get: { now }, set: { if $0 != now { set($0) } })) {
-                            ForEach(options, id: \.self) { Text($0).tag($0) }
-                        }.labelsHidden().controlSize(.small)
-                    }
-                case .flag(let on, let set):
-                    knob(s.id) {
-                        Toggle("", isOn: Binding(get: { on }, set: { if $0 != on { set($0) } }))
-                            .labelsHidden().controlSize(.mini).toggleStyle(.switch)
-                    }
-                case .count(let now, let of, let set):
-                    knob(s.id) {
-                        Picker("", selection: Binding(get: { now }, set: { if $0 != now { set($0) } })) {
-                            // Whatever it stands at now belongs in the list, even off the usual steps.
-                            ForEach(of.contains(now) ? of : (of + [now]).sorted(), id: \.self) { Text("\($0)").tag($0) }
-                        }.labelsHidden().controlSize(.small)
-                    }
-                }
-            }
-        }
-    }
-
-    /// One knob: its name on the left, the control on the right.
-    private func knob<C: View>(_ name: String, @ViewBuilder _ control: () -> C) -> some View {
-        HStack(spacing: 6) {
-            Text(name).font(.system(size: 10)).foregroundStyle(.secondary)
-                .frame(width: 96, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-            control()
-        }
-    }
-
-    @ViewBuilder private var time: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            header("Time")
-            HStack(spacing: 6) {
-                Button { model.press(model.paused ? "Resume" : "Pause") } label: {
-                    Image(systemName: model.paused ? "play.fill" : "pause.fill").frame(width: 22)
-                }
-                .help(model.paused ? "Resume" : "Pause")
-                Button { model.press("Step") } label: { Image(systemName: "forward.frame.fill").frame(width: 22) }
-                    .help("Step: a fifth of a second")
-                Button("Reset org") { model.onReset?() }.help("Start over with a fresh station and org")
-            }
-            .controlSize(.small)
-            HStack(spacing: 6) {
-                ForEach(["¼x", "½x", "1x", "4x", "16x"], id: \.self) { s in
-                    Button(s) { model.press(s) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(model.speed == Self.speedValue(s) ? .accentColor : .gray)
-                }
-            }
-            .controlSize(.small)
-        }
-    }
-
-    private var logView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            header("Log")
-                .padding(.horizontal, 12).padding(.top, 8)
-            ScrollView {
-                Text(model.logText)
-                    .font(.system(size: 10, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-            }
-        }
-        .frame(height: 200)
-    }
-}
-
 // MARK: the simulator's way in
 
 /// What a simulator window plants in a live controller: the event and command taps, its own clock,
