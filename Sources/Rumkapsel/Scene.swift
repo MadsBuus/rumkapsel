@@ -358,6 +358,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var missionChip: MissionChip?
     /// Main thread: the × pressed, or the chip clicked to keep the window open.
     var missionUserSmall = false, missionUserOpened = false
+    /// The window's size: 0 in its corner, 1 medium, 2 filling the station. Filled, it can be turned a little.
+    var missionSize = 0
+    /// How far it is turned about the craft or the colony: yaw and pitch, in radians.
+    var missionOrbit = SIMD2<Double>(0, 0)
     /// Production flights waiting for the window while another is shown.
     var queuedMissions: [Mission] = []
     /// What the mission window last showed, so it is redrawn only when that changes.
@@ -1243,6 +1247,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tickHullLamps()
         drawRockets()
         drawPallets()
+        turnPlanets(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }

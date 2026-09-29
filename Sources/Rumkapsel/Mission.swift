@@ -60,8 +60,15 @@ struct Mission {
         }
         let p = progress(at: clock)
         if clock - started > expected { return "Holding short · longer than usual" }
-        return p < 0.04 ? "Liftoff" : p < 0.3 ? "Climbing" : p < 0.6 ? "Coasting" : "Approaching \(repo)"
+        return p < 0.04 ? "Liftoff" : p < Mission.separation - 0.04 ? "Climbing" : p < Mission.correction.lowerBound ? "Stage separation"
+            : Mission.correction.contains(p) ? "Course correction" : p < 0.8 ? "Coasting" : "Approaching \(repo)"
     }
+
+    /// Where along the flight the lifter lets go, and the tip's short burn that sets it on course.
+    static let separation = 0.5
+    static let correction = 0.53..<0.62
+    /// Out of the atmosphere: past here nothing shakes.
+    static let space = 0.3
 
     static func duration(_ s: Double) -> String {
         let m = Int(s) / 60, sec = Int(s) % 60
@@ -218,6 +225,15 @@ extension StationController {
         }
     }
 
+    /// The planets turn slowly, once in ten minutes; one holds still while its own flight comes down onto it.
+    func turnPlanets(dt: Double) {
+        let landing = mission.flatMap { $0.ended?.outcome == .live ? $0.repo : nil }
+        for (repo, node) in planets where repo != landing {
+            guard let globe = node.childNode(withName: "globe", recursively: false) else { continue }
+            globe.eulerAngles.y += CGFloat(dt * 2 * .pi / 600)
+        }
+    }
+
     /// Where the camera is and what it looks at, every frame, from the flight's progress.
     func stepMission() {
         guard let m = mission else { return }
@@ -277,7 +293,7 @@ extension StationController {
             if l >= 10, !m.touchedDown { mission?.touchedDown = true; settleLegs() }
             if l >= 8.4, !m.dustRaised { mission?.dustRaised = true; raiseDust(at: planet + normal * r, normal: normal, color: NSColor(fleet.color(forRepo: m.repo))) }
         }
-        if s >= 0.5, !m.separated, m.ended?.outcome.signalLost != true {
+        if s >= Mission.separation, !m.separated, m.ended?.outcome.signalLost != true {
             mission?.separated = true
             separateStage(heading: heading)
         }
@@ -286,8 +302,10 @@ extension StationController {
         missionCraft.position = v3(craft.x, craft.y, craft.z)
         missionCraft.look(at: v3(craft.x + heading.x, craft.y + heading.y, craft.z + heading.z),
                           up: v3(tangent.x, tangent.y, tangent.z), localFront: SCNVector3(0, 1, 0))
+        // The lifter burns from the pad to separation; the tip only for its course correction and its landing.
+        let tipBurns = m.ended == nil ? Mission.correction.contains(s) : burning
         missionCraft.childNode(withName: "lifter plume", recursively: true)?.isHidden = !burning || separated
-        missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !burning || !separated
+        missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
 
         // The camera: on the hull looking aft on the climb, behind the craft over the top, beside it coming down.
         var sideways = simd_cross(SIMD3(0.0, 1, 0), toStation)
@@ -317,9 +335,20 @@ extension StationController {
             look = look + (droneLook - look) * k
         }
         up /= max(0.001, simd_length(up))
+        // Filling the station, the view can be turned a little about the craft, or the colony once it lands.
+        if missionSize == 2, missionOrbit != .zero {
+            let pivot = (landing ?? 0) >= 7 ? ground : craft
+            var side = simd_cross(at - pivot, up)
+            side /= max(0.001, simd_length(side))
+            let turn = simd_quatd(angle: missionOrbit.x, axis: up) * simd_quatd(angle: missionOrbit.y, axis: side)
+            at = pivot + turn.act(at - pivot)
+            look = pivot + turn.act(look - pivot)
+            up = turn.act(up)
+        }
         let heat = landing.map { $0 >= 4 && $0 < 7.5 ? sin(.pi * ($0 - 4) / 3.5) : 0 } ?? 0
-        var shake = m.ended == nil ? 0.012 + 0.05 * (1 - min(1, s / 0.05)) : 0
-        if let l = landing { shake = l < 4 ? 0.006 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
+        // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
+        var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
+        if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.004 + 0.03 * heat : l < 10 ? 0.012 : 0 }
         if shake > 0 { at += SIMD3(Double.random(in: -shake...shake), Double.random(in: -shake...shake), Double.random(in: -shake...shake)) }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
@@ -407,7 +436,7 @@ extension StationController {
         big.name = "lifter plume"
         big.position = v3(0, Double(lo.y), 0)
         lifter.addChildNode(big)
-        let small = plume(scale: 0.45)
+        let small = plume(scale: 0.32, vacuum: true)
         small.name = "tip plume"
         small.position = v3(0, split, 0)
         small.isHidden = true
@@ -543,10 +572,13 @@ extension StationController {
     }
 
     /// An engine's plume: a hot core, a flame and a glow round it, flickering. Its top is at the node.
-    private func plume(scale k: Double) -> SCNNode {
+    /// An engine's flame: orange in the air off the pad, a short blue-white one in vacuum.
+    private func plume(scale k: Double, vacuum: Bool = false) -> SCNNode {
         let flame = SCNNode()
-        for (radius, length, color, alpha) in [(0.05, 0.9, NSColor(rgb: (1, 0.95, 0.8)), 1.0), (0.11, 1.9, NSColor(rgb: (1, 0.55, 0.2)), 0.75),
-                                               (0.26, 3.2, NSColor(rgb: (1, 0.75, 0.4)), 0.25)] {
+        let layers = vacuum
+            ? [(0.05, 0.7, NSColor(rgb: (0.95, 0.97, 1)), 1.0), (0.1, 1.3, NSColor(rgb: (0.5, 0.7, 1)), 0.6), (0.18, 1.9, NSColor(rgb: (0.65, 0.8, 1)), 0.2)]
+            : [(0.05, 0.9, NSColor(rgb: (1, 0.95, 0.8)), 1.0), (0.11, 1.9, NSColor(rgb: (1, 0.55, 0.2)), 0.75), (0.26, 3.2, NSColor(rgb: (1, 0.75, 0.4)), 0.25)]
+        for (radius, length, color, alpha) in layers {
             let cone = SCNNode(geometry: faceted(SCNCone(topRadius: radius * k, bottomRadius: 0, height: length * k), 8))
             let m = flat(color)
             m.blendMode = .add
@@ -586,7 +618,14 @@ extension StationController {
             pip.isPlaying = true
             pip.rendersContinuously = true
             let screen = MissionScreen(frame: frame)
-            screen.onClick = { [weak self] in self?.toggleMissionFull() }
+            screen.onClick = { [weak self] p in
+                guard let self else { return }
+                if !openLandedFlag(near: p) { cycleMissionSize() }
+            }
+            screen.onOrbit = { [weak self] dx, dy in
+                guard let self, missionSize == 2 else { return }
+                missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
+            }
             screen.onClose = { [weak self] in
                 self?.missionUserSmall = true; self?.missionUserOpened = false
                 self?.sizeMission(auto: false, ended: false, chip: self?.missionChip?.text ?? "")
@@ -607,6 +646,7 @@ extension StationController {
         missionScreen?.removeFromSuperview(); missionScreen = nil
         missionChip?.removeFromSuperview(); missionChip = nil
         missionUserSmall = false; missionUserOpened = false
+        missionSize = 0; missionOrbit = .zero
     }
 
     /// The window's place: the bottom right corner, over the log.
@@ -632,11 +672,28 @@ extension StationController {
         pip.isHidden = small; screen.isHidden = small
     }
 
-    /// The window fills the station, or goes back to its corner.
-    func toggleMissionFull() {
+    /// Landed, a click on the colony's flag opens the release it flies: the pull request, or the tag.
+    /// True when the click was the flag's.
+    private func openLandedFlag(near p: NSPoint) -> Bool {
+        guard let m = mission, m.ended?.outcome == .live, let pip = missionView,
+              let flag = planets[m.repo]?.childNode(withName: "colony", recursively: false)?.childNode(withName: "cloth", recursively: true) else { return false }
+        let at = pip.projectPoint(flag.presentation.worldPosition)
+        guard at.z < 1, hypot(Double(at.x - p.x), Double(at.y - p.y)) < 40,
+              let root = world.repoRoots.first(where: { $0.value.repo == m.repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return false }
+        let path = m.release.hasPrefix("#") ? "pull/\(m.release.dropFirst())" : "releases/tag/\(m.release)"
+        guard !m.release.isEmpty, let url = URL(string: "https://github.com/\(owner)/\(path)") else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
+    /// The window a size up: from its corner to medium, to filling the station, and back to its corner.
+    func cycleMissionSize() {
         guard let pip = missionView, let screen = missionScreen else { return }
-        let full = pip.frame.width < view.bounds.width - 1
-        let frame = full ? view.bounds : missionFrame
+        missionSize = (missionSize + 1) % 3
+        if missionSize != 2 { missionOrbit = .zero }
+        let full = missionSize == 2
+        let w = min(view.bounds.width * 0.55, 820), medium = NSRect(x: view.bounds.width - 12 - w, y: 44, width: w, height: w * 232 / 384)
+        let frame = full ? view.bounds : missionSize == 1 ? medium : missionFrame
         pip.frame = frame; screen.frame = frame
         pip.autoresizingMask = full ? [.width, .height] : [.minXMargin]
         screen.autoresizingMask = full ? [.width, .height] : [.minXMargin]
@@ -651,9 +708,13 @@ extension StationController {
 /// What lies over the camera's picture: the edge of a lens, faint scan lines, where the camera is, and
 /// the mission clock. Static when the signal is lost.
 final class MissionScreen: NSView {
-    var onClick: (() -> Void)?
+    /// A click that is not the ×, where it landed in the window.
+    var onClick: ((NSPoint) -> Void)?
     /// The × in the top right corner: the window shrinks to its chip.
     var onClose: (() -> Void)?
+    /// A drag, a two-finger scroll or a twist over the window: how far, across and up.
+    var onOrbit: ((Double, Double) -> Void)?
+    private var dragged = false
     private var repo = "", clock = "", phase = "", usual = ""
     private var outcome: DeployOutcome?
     private var climbing = false
@@ -761,9 +822,15 @@ final class MissionScreen: NSView {
         }
     }
 
-    override func mouseDown(with event: NSEvent) {}
+    override func mouseDown(with event: NSEvent) { dragged = false }
+    override func mouseDragged(with event: NSEvent) { dragged = true; onOrbit?(Double(event.deltaX), Double(event.deltaY)) }
+    override func scrollWheel(with event: NSEvent) { onOrbit?(Double(event.scrollingDeltaX), Double(event.scrollingDeltaY)) }
+    override func rotate(with event: NSEvent) { onOrbit?(Double(event.rotation) * 4, 0) }
+    override func magnify(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
-        if closeRect.contains(convert(event.locationInWindow, from: nil)) { onClose?() } else { onClick?() }
+        if dragged { dragged = false; return }
+        let p = convert(event.locationInWindow, from: nil)
+        if closeRect.contains(p) { onClose?() } else { onClick?(p) }
     }
     private var closeRect: NSRect { NSRect(x: bounds.width - 30, y: bounds.height - 30, width: 26, height: 26) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
