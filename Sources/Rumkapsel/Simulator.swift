@@ -1233,7 +1233,7 @@ final class SimulatorModel: ObservableObject {
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
         case "Deploy: Staging starts":
-            station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 60, release: ""))
+            station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 24, release: ""))
         case "Deploy: Staging goes live", "Deploy: Staging fails":
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : .failed
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: false, outcome: outcome))

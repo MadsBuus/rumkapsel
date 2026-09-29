@@ -773,7 +773,7 @@ final class World {
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
         let label = "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
-        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: true, cargo: n,
+        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: stage.rank >= 3, cargo: n,
                               command: .rocket(stage, station: station.name, repo: repo))
     }
 
@@ -1482,7 +1482,7 @@ final class World {
     func padSlots(station: Station) -> [SIMD2<Double>] { station.padSlots }
 
     /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one takes
-    /// the lowest free; with the pad full, one going up or with a release open takes a slot from one with neither.
+    /// the lowest free; with the pad full, one going up, with a release open or with its tip being built takes a slot from one with none of these.
     private(set) var padSlotOf: [String: Int] = [:]
 
     /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
@@ -1495,6 +1495,8 @@ final class World {
             func urgent(_ key: String) -> Bool {
                 if mergeLaunches.contains(key) || rocketBusy(key) { return true }
                 let repo = String(key.dropFirst(prefix.count))
+                // A release on its way to staging: its tip is being built.
+                if let p = truth.pallets[station.name], p.repo == repo, [.loaded, .moving, .staged].contains(p.state) { return true }
                 return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
             }
             let keys = wanted.filter { $0.hasPrefix(prefix) }.sorted { a, b in urgent(a) != urgent(b) ? urgent(a) : a < b }

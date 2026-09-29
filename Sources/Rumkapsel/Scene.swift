@@ -1189,8 +1189,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted(let stationName, let repo, false, _, _, _):
-            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil)
+        case .deployStarted(let stationName, let repo, false, let expected, _, _):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected)
         case .deployEnded(let stationName, let repo, false, let outcome):
             simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):

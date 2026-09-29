@@ -434,6 +434,13 @@ extension StationController {
         missionCraft.childNodes.forEach { $0.removeFromParentNode() }
         missionCraft.removeAllActions()
         let rocket = Looks.current.rocket(color: NSColor(fleet.color(forRepo: repo)), tall: true, cargo: 6)
+        // A rocket built as tip and lifter is taken apart into its pieces, the cradle left behind.
+        Props.part(rocket, "cradle")?.removeFromParentNode()
+        for name in ["tip", "lifter"] {
+            guard let group = Props.part(rocket, name) else { continue }
+            for c in group.childNodes { c.removeFromParentNode(); c.position.y += group.position.y; rocket.addChildNode(c) }
+            group.removeFromParentNode()
+        }
         let (lo, hi) = rocket.boundingBox
         let split = Double(lo.y) + Double(hi.y - lo.y) * 0.5
         let lifter = SCNNode(), tip = SCNNode()

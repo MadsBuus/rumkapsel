@@ -67,6 +67,10 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// The pallet out and loaded, and gone again once emptied.
     static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
+    /// A repository's tip all but built: every panel on but the last, which waits for staging to be live.
+    static func tipAlmost(_ repo: String) -> PlaybookWait {
+        .until("\(repo)'s tip nearly built") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.panels >= RocketJob.hullPanels - 1 } }
+    }
     /// Across on the deck, still loaded, waiting for staging.
     static let palletStaged = PlaybookWait.until("the pallet on the deck") { c in c.world.truth.pallets.values.contains { $0.state == .staged } }
     /// The flight most of the way to its planet.
@@ -183,7 +187,16 @@ enum Playbook {
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
         PlaybookEntry("release", "QA rejects a crate", "crate carried back through the arch, scanned red, set in the untested row", [("4x", 0.5), (rejectQA, .pickedUp(approved)), ("1x", .onDeck(approved))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
+        PlaybookEntry("release", "Staging deploy builds a new tip", "api's first release to staging: the pusher welds the tip together panel by panel on its cradle",
+                      [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
+                       ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", 0.25), ("1x", .tipAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
+                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging deploy re-welds the tip", "web's tip is already built: the pusher goes over its seams while staging deploys",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
+                       ("Deploy: Staging starts", .palletStaged), ("1x", 10), ("Deploy: Staging goes live", .palletGone)],
+                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Production PR opened", "the lifter rises out of the pad under the tip; the approved crate is loaded",
+                      [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                            ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],

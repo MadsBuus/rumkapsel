@@ -302,15 +302,60 @@ enum Props {
         return n
     }
 
+    /// A rocket in two parts: the tip, which is what stands on staging, and the lifter under it, which a
+    /// production release adds. Without the lifter the tip stands on a cradle on the pad. The tip's hull is
+    /// `hullPanels` panels on a dark frame, so it can be shown part built; a whole one looks as it always
+    /// did. The groups are named "tip", "lifter" and "cradle"; the flame stays at the top, under the engine.
+    static let hullPanels = 30
+    /// How high the cradle holds a tip with no lifter under it.
+    static let cradleTop = 0.3
+
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
-        // A production rocket grows with what it will carry: small for a couple of boxes, big for a dozen.
-        let grow = tall ? min(1.6, 0.85 + Double(cargo) * 0.06) : 1.0
-        let h = (tall ? 1.5 : 0.9) * grow, r = (tall ? 0.17 : 0.12) * (0.7 + 0.3 * grow)
+        let h = 1.5, r = 0.17
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        let tip = SCNNode(), lifter = SCNNode(), cradle = SCNNode()
+        tip.name = "tip"; lifter.name = "lifter"; cradle.name = "cradle"
+        let base = 0.12 + h * 0.49
+        tip.setValue(base, forKey: "base")
+        n.addChildNode(lifter); n.addChildNode(tip); n.addChildNode(cradle)
+
+        // The tip: a dark frame, its panels, the nose, the hatch and the portholes. The hull has six flat
+        // sides, one of them facing +x where the hatch is.
+        let hullR = r * 0.9, hullH = h * 0.4, apothem = hullR * 0.866
+        let rings = hullPanels / 6, ringH = hullH / Double(rings)
+        let core = SCNNode(geometry: faceted(SCNCylinder(radius: apothem * 0.9, height: hullH)))
+        core.geometry!.firstMaterial = dark
+        core.position = v3(0, base + hullH / 2, 0)
+        core.name = "frame"
+        tip.addChildNode(core)
+        for k in 0..<6 {
+            let a = Double(k) * .pi / 3 + .pi / 3   // the corners, between the sides
+            let rib = SCNNode(geometry: SCNBox(width: 0.014, height: hullH, length: 0.014, chamferRadius: 0))
+            rib.geometry!.firstMaterial = dark
+            rib.position = v3(sin(a) * hullR * 0.97, base + hullH / 2, cos(a) * hullR * 0.97)
+            rib.name = "frame"
+            tip.addChildNode(rib)
+        }
+        for ring in 0..<rings {
+            for k in 0..<6 {
+                let a = .pi / 2 + Double(k) * .pi / 3
+                let panel = SCNNode(geometry: SCNBox(width: hullR - 0.006, height: ringH - 0.006, length: 0.014, chamferRadius: 0))
+                panel.geometry!.firstMaterial = white
+                panel.position = v3(sin(a) * apothem, base + ringH * (Double(ring) + 0.5), cos(a) * apothem)
+                panel.eulerAngles.y = CGFloat(a)
+                panel.name = "panel\(ring * 6 + k)"
+                tip.addChildNode(panel)
+            }
+        }
+        let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: hullR, height: r * 2.6)))
+        nose.geometry!.firstMaterial = lit(color)
+        nose.position = v3(0, base + hullH + r * 1.3, 0)
+        nose.name = "nose"
+        tip.addChildNode(nose)
         // The loading hatch: a door in the hull, white with a dark seam round it, a latch bar and two hinge
-        // knuckles; open, the door is the black of the hold. The seam sits inside the hull so nothing floats.
+        // knuckles; open, the door is the black of the hold.
         let hatch = SCNNode()
         hatch.name = "hatch"
         let frameW = r * 0.9, frameH = 0.2
@@ -318,11 +363,11 @@ enum Props {
         frame.geometry!.firstMaterial = dark
         frame.position = v3(0, 0, -0.012)
         hatch.addChildNode(frame)
-        let panel = SCNNode(geometry: SCNBox(width: frameW - 0.02, height: frameH - 0.02, length: 0.02, chamferRadius: 0))
-        panel.geometry!.firstMaterial = white
-        panel.name = "door"
-        panel.position = v3(0, 0, 0.004)
-        hatch.addChildNode(panel)
+        let door = SCNNode(geometry: SCNBox(width: frameW - 0.02, height: frameH - 0.02, length: 0.02, chamferRadius: 0))
+        door.geometry!.firstMaterial = white
+        door.name = "door"
+        door.position = v3(0, 0, 0.004)
+        hatch.addChildNode(door)
         let latch = SCNNode(geometry: SCNBox(width: frameW * 0.45, height: 0.016, length: 0.014, chamferRadius: 0))
         latch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
         latch.position = v3(frameW * 0.08, 0, 0.02)
@@ -333,37 +378,28 @@ enum Props {
             hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
             hatch.addChildNode(hinge)
         }
-        // High on the payload section, on the tower's side, where cargo comes in. The hull has six flat sides
-        // and this is the middle of one, at the apothem.
-        hatch.position = v3(r * 0.866 + 0.003, 0.12 + h * 0.6, 0)
+        hatch.position = v3(apothem + 0.01, 0.12 + h * 0.6, 0)
         hatch.eulerAngles.y = .pi / 2
-        n.addChildNode(hatch)
-        // Body, a slightly wider lower stage, and a nose cone in the repo colour.
+        tip.addChildNode(hatch)
+        for k in 0..<3 {
+            let a = .pi / 2 + Double(2 * k + 1) * .pi / 3   // the three sides the hatch is not on or beside
+            let port = SCNNode(geometry: SCNBox(width: r * 0.36, height: r * 0.36, length: 0.02, chamferRadius: 0))
+            port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
+            port.position = v3(sin(a) * (apothem + 0.008), 0.12 + h * 0.75, cos(a) * (apothem + 0.008))
+            port.eulerAngles.y = CGFloat(a)
+            port.name = "port"
+            tip.addChildNode(port)
+        }
+
+        // The lifter: the wider lower stage with its band, the fins, the engine and the landing legs.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
         lower.geometry!.firstMaterial = white
         lower.position = v3(0, 0.12 + h * 0.225, 0)
-        n.addChildNode(lower)
+        lifter.addChildNode(lower)
         let band = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.02, height: h * 0.08)))
         band.geometry!.firstMaterial = lit(color)
         band.position = v3(0, 0.12 + h * 0.45, 0)
-        n.addChildNode(band)
-        let upper = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.9, height: h * 0.4)))
-        upper.geometry!.firstMaterial = white
-        upper.position = v3(0, 0.12 + h * 0.49 + h * 0.2, 0)
-        n.addChildNode(upper)
-        let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: r * 0.9, height: r * 2.6)))
-        nose.geometry!.firstMaterial = lit(color)
-        nose.position = v3(0, 0.12 + h * 0.89 + r * 1.3, 0)
-        n.addChildNode(nose)
-        // Portholes on the upper stage.
-        for k in 0..<3 {
-            let port = SCNNode(geometry: SCNBox(width: r * 0.36, height: r * 0.36, length: 0.02, chamferRadius: 0))   // a flat pane, not a cube
-            port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
-            let a = Double(k) * 2 * .pi / 3
-            port.position = v3(sin(a) * r * 0.86, 0.12 + h * 0.75, cos(a) * r * 0.86)
-            port.eulerAngles.y = a
-            n.addChildNode(port)
-        }
+        lifter.addChildNode(band)
         // Four tail fins: each a plate leaning in, its top edge buried in the lower stage, its bottom outer
         // corner out by the pad.
         for k in 0..<4 {
@@ -372,21 +408,20 @@ enum Props {
             let finH = r * 2.6, finL = r * 1.3, lean = 0.42
             let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
             fin.geometry!.firstMaterial = lit(color)
-            // Placed so that leaning by `lean` puts the top inner corner inside the hull.
             fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
             fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)
-            n.addChildNode(pivot)
+            lifter.addChildNode(pivot)
         }
         // The engine: a throat under the hull opening into a bell, its mouth just off the pad.
         let throat = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.35, height: 0.04)))
         throat.geometry!.firstMaterial = dark
         throat.position = v3(0, 0.11, 0)
-        n.addChildNode(throat)
+        lifter.addChildNode(throat)
         let bell = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.35, bottomRadius: r * 0.75, height: 0.09)))
         bell.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.36)))
         bell.position = v3(0, 0.055, 0)
-        n.addChildNode(bell)
+        lifter.addChildNode(bell)
         // Landing legs, splayed out at the foot: the knee on the hull above the fin roots, the pad out on the ground.
         for k in 0..<3 {
             let pivot = SCNNode()
@@ -400,21 +435,60 @@ enum Props {
             foot.geometry!.firstMaterial = dark
             foot.position = v3(0, 0.01, r * 1.15 + 0.12 * sin(0.55))
             pivot.addChildNode(foot)
-            n.addChildNode(pivot)
+            lifter.addChildNode(pivot)
         }
+
+        // The cradle: a collar the tip sits in and three legs down to the pad.
+        let collar = SCNNode(geometry: faceted(SCNCylinder(radius: hullR * 1.12, height: 0.05)))
+        collar.geometry!.firstMaterial = dark
+        collar.position = v3(0, cradleTop - 0.025, 0)
+        cradle.addChildNode(collar)
+        for k in 0..<3 {
+            let a = Double(k) * 2 * .pi / 3 + .pi / 3
+            let leg = SCNNode(geometry: SCNBox(width: 0.035, height: cradleTop, length: 0.035, chamferRadius: 0))
+            leg.geometry!.firstMaterial = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
+            leg.position = v3(sin(a) * hullR * 1.2, cradleTop / 2, cos(a) * hullR * 1.2)
+            cradle.addChildNode(leg)
+        }
+
         let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
         flame.position = v3(0, -0.2, 0)
         flame.name = "flame"
         flame.opacity = 0
         n.addChildNode(flame)
+        // The parts keep their names under a key of their own: on the pad every node is named for the hover.
+        n.enumerateChildNodes { c, _ in if let name = c.name { c.setValue(name, forKey: "part") } }
+        shape(n, lifter: tall, panels: hullPanels)
         return n
+    }
+
+    /// A rocket's part by the name the prop gave it, whatever the node is called now.
+    static func part(_ rocket: SCNNode, _ name: String) -> SCNNode? {
+        rocket.childNodes.first { ($0.value(forKey: "part") as? String) == name }
+    }
+
+    /// A rocket drawn as it stands: with its lifter or on the cradle, and the tip's hull built to `panels`.
+    /// The nose, the hatch and the portholes go on with the last panel. A rocket from a look without these
+    /// parts is left as it is.
+    static func shape(_ rocket: SCNNode, lifter: Bool, panels: Int) {
+        guard let tip = part(rocket, "tip") else { return }
+        let base = (tip.value(forKey: "base") as? Double) ?? 0
+        part(rocket, "lifter")?.isHidden = !lifter
+        part(rocket, "cradle")?.isHidden = lifter
+        tip.position.y = CGFloat(lifter ? 0 : cradleTop - base)
+        let whole = panels >= hullPanels
+        for c in tip.childNodes {
+            let name = (c.value(forKey: "part") as? String) ?? ""
+            if name.hasPrefix("panel"), let i = Int(name.dropFirst(5)) { c.isHidden = i >= panels }
+            else if name == "nose" || name == "hatch" || name == "port" { c.isHidden = !whole }
+        }
     }
 
     /// The service tower stood beside a rocket, its conveyor at the hatch: on the pad from the moment the
     /// rocket stands to the moment it goes. The beacon is lit red while the rocket is held.
     static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
-        let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.position.y) }
+        let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.convertPosition(SCNVector3Zero, to: rocket).y) }
         let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
         deco.name = "hold"
         rocket.addChildNode(deco)
