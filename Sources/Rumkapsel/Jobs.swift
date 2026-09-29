@@ -417,17 +417,27 @@ extension StationController {
         }
     }
 
-    /// A tested crate crosses the aisle to the tested row on someone's arms, wearing its tested tag from
-    /// the moment it is lifted. Anything stacked on top of it is moved aside first, one carry each, and
-    /// those go first.
+    /// A tested crate goes through the gate on someone's arms, to stand small beside its rocket. Anything
+    /// stacked on top of it is moved aside first, one carry each, and those go first.
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
         for command in world.carryToTested(station: station, repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
-            if crate.number == number { tagOnLift.insert(command.id) }
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 node.removeFromParentNode()
                 if crate.number == number { drone.ping(seed: number) }
+                rebuildMarkers()
+            }
+        }
+    }
+
+    /// Clearance taken back: the crate comes out through the gate to the untested row, the scan red.
+    func carryBackToDeck(station: Station, repo: String, number: Int) {
+        for command in world.carryBackToUntested(station: station, repo: repo, number: number) {
+            guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
+            carry(command, node: node) { [weak self] in
+                guard let self else { return }
+                node.removeFromParentNode()
                 rebuildMarkers()
             }
         }

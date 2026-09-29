@@ -28,7 +28,7 @@ enum Props {
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
     /// a square strapped crate is a pull request, a pyramid is a session input.
-    static func package(color: NSColor, band: NSColor, size: Double, approved: Bool = false, blink: Bool = false, mine: Bool = false) -> SCNNode {
+    static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
@@ -56,7 +56,6 @@ enum Props {
         plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
         if blink { plate.runAction(Props.blinking()) }
         n.addChildNode(plate)
-        if approved { n.addChildNode(tag(size: size)) }
         n.addChildNode(foot(size: size * 1.3))
         return n
     }
@@ -68,22 +67,6 @@ enum Props {
     /// The blink a plate carries while checks run.
     static func blinking() -> SCNAction {
         .repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.5), .fadeOpacity(to: 1, duration: 0.5)]))
-    }
-
-    /// Passed QA: a pale sticker on the lid with a green mark. Placed on a crate of this size, whether
-    /// the crate is being built or the tag is slapped on one that already stands, in a carrier's arms.
-    static func tag(size: Double) -> SCNNode {
-        let h = size * 0.8
-        let sticker = SCNNode(geometry: SCNBox(width: size * 0.42, height: 0.012, length: size * 0.42, chamferRadius: 0))
-        sticker.geometry!.firstMaterial = flat(NSColor(rgb: (0.93, 0.95, 0.9)))
-        sticker.position = v3(-size * 0.1, h + 0.006, size * 0.1)
-        sticker.eulerAngles.y = 0.2
-        let mark = SCNNode(geometry: SCNBox(width: size * 0.22, height: 0.012, length: size * 0.22, chamferRadius: 0))
-        mark.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.85, 0.45)))
-        mark.position = v3(0, 0.006, 0)
-        mark.eulerAngles.y = .pi / 4
-        sticker.addChildNode(mark)
-        return sticker
     }
 
     /// The welding arc at a cone: a warm lamp with a billboard spark in it, put where the cone stands

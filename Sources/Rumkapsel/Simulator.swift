@@ -1324,6 +1324,7 @@ final class SimulatorModel: ObservableObject {
         case .officeMerged(_, let key, let repo, let n): return "officeMerged \(key) \(repo)#\(n)"
         case .carryToDeck(_, let repo, let cs): return "carryToDeck \(repo) x\(cs.count)"
         case .crateCleared(_, let repo, let n): return "crateCleared \(repo)#\(n)"
+        case .crateUncleared(_, let repo, let n): return "crateUncleared \(repo)#\(n)"
         case .crewRoster(let m): return "crewRoster \(m.keys.sorted().joined(separator: ","))"
         case .deconArrived(let st, let repo, let ns): return "deconArrived \(st) \(repo) \(ns.map { "#\($0)" }.joined(separator: ","))"
         case .deconCleared(_, let repo, let n): return "deconCleared \(repo)#\(n)"

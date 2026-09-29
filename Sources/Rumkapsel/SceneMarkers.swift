@@ -16,7 +16,7 @@ extension StationController {
         func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>, into: inout [String: Set<Cell>]) {
             let (lo, hi) = node.boundingBox
             let p = SIMD2(Double(node.position.x) - offset.x, Double(node.position.z) - offset.y)
-            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8
+            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8 * Double(node.scale.x)
             let f = Double(Station.fine)
             for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
                 for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { into[station, default: []].insert(Cell(x: sx, y: sy)) }
@@ -41,6 +41,14 @@ extension StationController {
             let hull = 0.3, f = Double(Station.fine)
             for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
+            }
+        }
+        // The security unit on its post is walked round.
+        for name in gates.keys {
+            guard let st = fleet.stations[name], let post = st.securityPost else { continue }
+            let r = 0.2, f = Double(Station.fine)
+            for sx in Int(((Double(post.x) - r) * f).rounded())...Int(((Double(post.x) + r) * f).rounded()) {
+                for sy in Int(((Double(post.y) - r) * f).rounded())...Int(((Double(post.y) + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
@@ -315,7 +323,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "")
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "") + (slot.small ? " small" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -340,12 +348,13 @@ extension StationController {
                     // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
                     // tint of the repository it came for, so a bump for ios still reads as ios.
                     let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    // In the yard the light is off, except green with a sticker on a tested crate, and
-                    // the unscreened green of decon on what still waits there.
-                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
+                    // In the yard the light is off, except green on a crate through the gate, and the
+                    // unscreened green of decon on what still waits there.
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight : NSColor(rgb: (0.3, 0.32, 0.38))
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien, mine: slot.mine)
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine)
+                    if slot.small { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name

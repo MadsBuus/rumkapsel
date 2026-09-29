@@ -312,9 +312,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
-    /// Carries whose crate has passed QA: the tested tag goes on as the crate comes off the row, by the
-    /// hands that carry it, not when it is set down again across the aisle.
-    var tagOnLift: Set<Int> = []
+    /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
+    var gates: [String: GateView] = [:]
+    /// Which side of the gate each carrier was on last frame, by minion id: true on the pad.
+    var gateSide: [String: Bool] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -1113,6 +1114,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crateCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             carryAcrossDeck(station: station, repo: repo, number: number)
+        case .crateUncleared(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            carryBackToDeck(station: station, repo: repo, number: number)
         case .crewRoster(let members):
             setCrewRoster(members)
         case .deconArrived(let stationName, let repo, let numbers):
@@ -1247,6 +1251,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         drawRockets()
         drawPallets()
         turnPlanets(dt: dt)
+        tickGates(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }
