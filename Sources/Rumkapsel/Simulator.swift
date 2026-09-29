@@ -83,7 +83,7 @@ final class SimulatorController {
 
     /// The station beside the panel: SceneKit renders itself, the panel is cached off the view.
     func snapshot(to path: String) {
-        let stationShot = station.view.snapshot()
+        let stationShot = station.composedSnapshot()
         let image = NSImage(size: view.bounds.size)
         image.lockFocus()
         NSColor.windowBackgroundColor.setFill()
@@ -907,6 +907,11 @@ final class SimulatorModel: ObservableObject {
                                : .missing("an untested release on \(repo)", { [weak self] in self?.layProduction() }))
                            : (onDeck(repo).isEmpty ? .missing("something on \(repo)'s deck", { [weak self] in self?.layOnDeck() }) : nil)),
                 button("Release: Production merges", "Production merges: it ships", productionOpen),
+                button("Deploy: Production starts", "A production deploy starts (usually a minute)",
+                       station.mission == nil ? nil : .already("a deploy is in flight")),
+                button("Deploy: Goes live", "…it goes live", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
+                button("Deploy: Fails", "…it fails", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
+                button("Deploy: Cancelled", "…it is cancelled", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
                 button("Repo: No staging", shown: false),
                 button("Repo: Ships on merge", shown: false),
             ]),
@@ -928,6 +933,11 @@ final class SimulatorModel: ObservableObject {
 
     /// Stops the beats this model keeps, for a station that is being thrown away.
     func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
+
+    /// The station a repository's deploy belongs to.
+    private func deployStation(_ repo: String) -> String {
+        station.world.repoRoots.values.first { $0.repo == repo }?.station ?? station.fleet.ordered.first?.name ?? "work"
+    }
 
     func press(_ name: String) {
         note("press", name, .press(name))
@@ -1212,6 +1222,11 @@ final class SimulatorModel: ObservableObject {
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "CLOSED",
                                            url: pr.url, labels: pr.labels, mergedAt: nil, production: pr.production, staging: pr.staging)
             pushGitHub()
+        case "Deploy: Production starts":
+            station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: true, expected: 60, release: "#\(nextRelease + 1)"))
+        case "Deploy: Goes live", "Deploy: Fails", "Deploy: Cancelled":
+            let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
+            station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
         case "Release: Production opens":
             let cfg = ConfigStore.shared.current
             nextRelease += 1
@@ -1327,6 +1342,8 @@ final class SimulatorModel: ObservableObject {
         case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
         case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
         case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"
+        case .deployStarted(_, let repo, let production, let expected, let release): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
+        case .deployEnded(_, let repo, let production, let outcome): return "deployEnded \(repo) \(production ? "production" : "staging") \(outcome)"
         case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"
         }
     }

@@ -418,11 +418,11 @@ final class Invariants {
     // MARK: nothing is round
 
     /// One sweep of the scene graph: a sphere, or a cylinder, cone or tube smooth enough to read as
-    /// round, is a shape the rulebook does not have.
+    /// round, is a shape the rulebook does not have. The planets are the world beyond, not the station.
     private func scanShapes(_ c: StationController) {
         var found: [String: String] = [:]
         c.scene.rootNode.enumerateHierarchy { node, _ in
-            guard let g = node.geometry else { return }
+            guard let g = node.geometry, node.categoryBitMask & (Pick.planet | Pick.colony) == 0 else { return }
             let name = node.name ?? g.name ?? String(describing: type(of: g))
             switch g {
             case is SCNSphere: found[name] = "SCNSphere"

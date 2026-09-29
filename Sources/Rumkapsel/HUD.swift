@@ -393,6 +393,7 @@ extension StationController {
         if clock - hudClock > 0.5 {
             hudClock = clock
             layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
+            if !headless { placePlanets() }
             if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
             // Sharing indicator: green dot when broadcasting, with how many stations are in range.
             let sharing = peers.isRunning

@@ -101,6 +101,8 @@ protocol Look {
     func tileDetail(_ tile: Tile) -> SCNNode?
     /// Recolour a floor tile and whatever the look hung on it.
     func tint(tile: SCNNode, _ color: NSColor)
+    /// A repository's production on the horizon, in its colour.
+    func planet(name: String, color: NSColor, radius: Double) -> SCNNode
     /// A prop for an office, in the station's own cells. `sign` is what the scene would have written on the
     /// floor, for a look that marks an office some other way.
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode?
@@ -177,6 +179,7 @@ extension Look {
     func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
     func tileDetail(_ tile: Tile) -> SCNNode? { nil }
     func tint(tile: SCNNode, _ color: NSColor) { tile.geometry?.firstMaterial?.diffuse.contents = color }
+    func planet(name: String, color: NSColor, radius: Double) -> SCNNode { Planets.make(name: name, color: color, radius: radius) }
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? { nil }
 
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }

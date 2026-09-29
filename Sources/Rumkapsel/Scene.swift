@@ -68,6 +68,12 @@ func v3(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(x, y, 
 enum Pick {
     static let normal = 1
     static let scenery = 2
+    /// The planets on the horizon: never picked, and lit by their own sun rather than the station's.
+    static let planet = 16
+    /// The craft the mission camera rides: drawn by that camera only.
+    static let onboard = 32
+    /// A planet's colony: drawn by the mission camera only, lit by the planets' sun and its own light.
+    static let colony = 64
 }
 
 /// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
@@ -342,6 +348,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hudClock = 0.0
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
+    var mission: Mission?
+    let missionCamera = SCNNode()
+    let missionCraft = SCNNode()
+    /// Pad rockets hidden while their flight is on, shown again when it ends.
+    var hiddenRockets: [SCNNode] = []
+    var missionView: SCNView?
+    var missionScreen: MissionScreen?
+    var missionChip: MissionChip?
+    /// Main thread: the × pressed, or the chip clicked to keep the window open.
+    var missionUserSmall = false, missionUserOpened = false
+    /// Production flights waiting for the window while another is shown.
+    var queuedMissions: [Mission] = []
+    /// What the mission window last showed, so it is redrawn only when that changes.
+    var missionShown = ""
+    let planetRoot = SCNNode()
+    var planets: [String: SCNNode] = [:]
     var spaceLogButton: SpaceLogButton?
     var spaceLogPanel: SpaceLogPanel?
     var spaceLogClock = -100.0
@@ -443,7 +465,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node in
             let n = node?.name
@@ -549,6 +571,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         camera.orthographicScale = 8
         camera.zNear = 0.1
         camera.zFar = 400
+        camera.categoryBitMask = ~(Pick.onboard | Pick.colony)
         cameraNode.camera = camera
         cameraNode.position = v3(0, 0, 120)
         pitchNode.eulerAngles.x = -.pi / 6
@@ -562,11 +585,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         sun.light!.type = .directional
         sun.light!.intensity = 700
         sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
+        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
         scene.rootNode.addChildNode(sun)
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light!.type = .ambient
         ambient.light!.intensity = 550
+        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
         scene.rootNode.addChildNode(ambient)
         buildBackdrop()
         rebuildStatic()
@@ -1153,6 +1178,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
+        case .deployStarted(let stationName, let repo, true, let expected, let release):
+            beginMission(station: stationName, repo: repo, expected: expected, release: release)
+        case .deployEnded(_, let repo, true, let outcome):
+            endMission(repo: repo, outcome: outcome)
+        case .deployStarted, .deployEnded:
+            break
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
@@ -1194,6 +1225,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         if demo { tickDemo(dt: dt) }
         if Int(clock) != Int(clock - dt) { updatePower() }
+        stepMission()
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
             simulation.scheduleCarries()
@@ -1379,12 +1411,22 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     /// Renders the current frame to a PNG, used for self-checks.
     func snapshot(to path: String) {
+        let image = composedSnapshot()
+        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// The rendered frame with the overlays on it: the log, and the mission's camera window.
+    func composedSnapshot() -> NSImage {
         let image = view.snapshot()
         let overlays = view.subviews.filter { !$0.isHidden }
         if !overlays.isEmpty {
             image.lockFocus()
             let scale = image.size.width / max(1, view.bounds.width)
             for v in overlays {
+                let at = NSRect(x: v.frame.minX * scale, y: v.frame.minY * scale, width: v.frame.width * scale, height: v.frame.height * scale)
+                if let pip = v as? SCNView { pip.snapshot().draw(in: at, from: .zero, operation: .sourceOver, fraction: 1); continue }
                 guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
                 v.cacheDisplay(in: v.bounds, to: rep)
                 // A plain draw copies rather than blends.
@@ -1393,8 +1435,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             image.unlockFocus()
         }
-        guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-              let png = rep.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: URL(fileURLWithPath: path))
+        return image
     }
 }
