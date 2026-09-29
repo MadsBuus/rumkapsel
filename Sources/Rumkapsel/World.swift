@@ -1660,7 +1660,7 @@ final class World {
         }()
         let c = index % 4, level = index / 4
         let x = Double(cell.x) + (Double(c % 2) - 0.5) * 0.42, z = Double(cell.y) + (Double(c / 2) - 0.5) * 0.42
-        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: cell,
+        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: station.gateStand ?? cell,
                     pos: SIMD3(station.offset.x + x, Double(level) * 0.34, station.offset.y + z), level: level, yaw: 0)
     }
 

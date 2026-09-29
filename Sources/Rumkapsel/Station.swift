@@ -379,6 +379,13 @@ final class Station {
         let c = Cell(x: post.x - (first.pad.x - first.deck.x), y: post.y - (first.pad.y - first.deck.y))
         return deckCells.contains(c) ? c : nil
     }
+    /// Where a carrier stands to set a crate down by the gate: the deck aisle behind that cell, never a doorway.
+    var gateStand: Cell? {
+        guard let inbox = gateInbox, let first = gateDoorway.first else { return nil }
+        let c = Cell(x: inbox.x - (first.pad.x - first.deck.x), y: inbox.y - (first.pad.y - first.deck.y))
+        let doors = Set(yardDoorways.flatMap { [$0.0, $0.1] })
+        return deckCells.contains(c) && !doors.contains(c) ? c : nil
+    }
     /// Where the security unit keeps its post: on the pad, beside the gate's end, off the way through.
     var securityPost: Cell? {
         let pairs = gateDoorway
@@ -388,8 +395,12 @@ final class Station {
         let through = Set(pairs.map(\.pad))
         let pad = Set(padCells)
         func dot(_ c: Cell) -> Int { c.x * along.x + c.y * along.y }
-        let ends = [pairs.max { dot($0.pad) < dot($1.pad) }!.pad, pairs.min { dot($0.pad) < dot($1.pad) }!.pad]
-        for (end, sign) in zip(ends, [1, -1]) {
+        // The end away from where the hallway comes onto the deck: that corner is everybody's way in.
+        let door = yardDoorways.first.map { $0.1 } ?? first.deck
+        func far(_ c: Cell) -> Int { abs(c.x - door.x) + abs(c.y - door.y) }
+        var ends = [(pairs.max { dot($0.pad) < dot($1.pad) }!.pad, 1), (pairs.min { dot($0.pad) < dot($1.pad) }!.pad, -1)]
+        ends.sort { far($0.0) > far($1.0) }
+        for (end, sign) in ends {
             let beside = Cell(x: end.x + along.x * sign, y: end.y + along.y * sign)
             if pad.contains(beside), !through.contains(beside) { return beside }
         }
