@@ -46,6 +46,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// Set down on the deck's untested row, or on its stack by the rocket, by where it was put down last.
     static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
     static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on its stack by the rocket") { $0.area == .tested && !$0.inTransit } }
+    static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { $0.area == .pad } }
     /// Somebody standing on the deck.
     static let bodyOnDeck = PlaybookWait.until("somebody on the deck") { c in
         c.minions.values.contains { m in c.fleet.stations[m.station]?.deckCells.contains(m.cell) ?? false }
@@ -112,7 +113,9 @@ enum Playbook {
     /// The crate on the deck in every seeded station, and the columns QA moves it between.
     private static let tested = 430
     private static var passQA: String { "Board: Move web#\(tested) to \(ConfigStore.shared.current.statuses.cleared)" }
-    private static var backToQA: String { "Board: Move web#\(tested) to \(ConfigStore.shared.current.statuses.deck)" }
+    /// The crate the seed has already approved, standing on its stack by the rocket, and QA sending it back.
+    private static let approved = 431
+    private static var rejectQA: String { "Board: Move web#\(approved) to \(ConfigStore.shared.current.statuses.deck)" }
 
     static let entries: [PlaybookEntry] = [
         // In an office: one session, one body, no yard.
@@ -146,23 +149,23 @@ enum Playbook {
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 
         // The release, through the yard: web's crates already stand in storage and on the deck.
-        PlaybookEntry("release", "Staging PR opened", "pallet loads crates from storage", [("Release: Staging opens", .palletLoaded)],
+        PlaybookEntry("release", "Staging PR opened", "pallet loads crates from storage", [("1x", 0.5), ("Release: Staging opens", .palletLoaded)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, unloaded", [("Release: Staging opens", .palletLoaded), ("Release: Staging merges", .palletGone)],
+        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, unloaded", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", .palletGone)],
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("Release: Staging opens", .palletLoaded), ("Release: Staging closes", .palletGone)],
+        PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA approves a crate", "crate carried to the gate, scanned green, floats to the rocket", [(passQA, .onStack(tested))],
+        PlaybookEntry("release", "QA approves a crate", "crate carried to the gate, scanned green, floats to the rocket", [("1x", 0.5), (passQA, .onStack(tested))],
                       camera: .area("yard", 2.3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA rejects a crate", "crate scanned red, floats back to the deck", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), (backToQA, .onDeck(tested))],
+        PlaybookEntry("release", "QA rejects a crate", "crate scanned red, floats back to the deck", [("1x", 0.5), (rejectQA, .onDeck(approved))],
                       camera: .area("yard", 2.3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("16x", 0.5), (passQA, .onStack(tested)), ("1x", 1), ("Release: Production opens", 20)],
+        PlaybookEntry("release", "Production PR opened", "rocket loads the approved crate", [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("Release: Production opens", 2), ("Release: Production merges", 2),
-                                                                           ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
+        PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
+                                                                           ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production deploy fails", "flight loses signal", [("Release: Production opens", 2), ("Release: Production merges", 2),
-                                                                         ("Deploy: Production starts", .flightFarOut), ("Deploy: Fails", 10)],
+        PlaybookEntry("release", "Production deploy fails", "flight loses signal", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
+                                                                         ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Fails", 10)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
 
         // Other people's work: a teammate's office, a bot's, a neighbour station's.
@@ -254,6 +257,16 @@ struct PlaybookPanel: View {
                 .padding(.vertical, 8)
             }
             Divider()
+            // Tuning: the part being watched plays at the speed picked here; replay starts it over.
+            HStack(spacing: 6) {
+                Button("Replay") { model.play(model.playing) }
+                Button(model.paused ? "Resume" : "Pause") { model.togglePause() }
+                Picker("", selection: $model.speed) {
+                    Text("¼×").tag("¼x"); Text("½×").tag("½x"); Text("1×").tag("1x")
+                }
+                .pickerStyle(.segmented).frame(width: 120)
+            }
+            .controlSize(.small).padding(.horizontal, 10).padding(.top, 8)
             Text(model.status).font(.system(size: 10)).foregroundStyle(.secondary)
                 .padding(.horizontal, 12).padding(.vertical, 8)
         }
@@ -264,6 +277,12 @@ struct PlaybookPanel: View {
 final class PlaybookModel: ObservableObject {
     @Published var playing = 0
     @Published var status = ""
+    /// The speed the watched part plays at, as the station's own speed press names it.
+    @Published var speed = "1x" { didSet { onSpeed?(speed) } }
+    @Published var paused = false
+    var onSpeed: ((String) -> Void)?
+    var onPause: ((Bool) -> Void)?
+    func togglePause() { paused.toggle(); onPause?(paused) }
     /// Rebuilds the station from nothing for the entry it is handed: the only reset that cannot leave
     /// anything of the last run behind.
     var restart: ((Int) -> Void)?
@@ -303,6 +322,8 @@ final class PlaybookController {
         view.addSubview(panel)
         mount(stationRect)
         model.restart = { [weak self] k in self?.start(k) }
+        model.onSpeed = { [weak self] speed in self?.sim.press(speed) }
+        model.onPause = { [weak self] paused in self?.sim.press(paused ? "Pause" : "Resume") }
     }
 
     private func mount(_ rect: NSRect) {
@@ -368,7 +389,8 @@ final class PlaybookController {
                     }
                     return
                 }
-                self.sim.press(moves[next].0)
+                let name = moves[next].0
+                self.sim.press(name == "1x" ? self.model.speed : name)
                 next += 1; pressedAt = waited
             }
         })

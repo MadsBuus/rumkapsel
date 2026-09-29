@@ -237,6 +237,7 @@ final class SimulatorModel: ObservableObject {
             item("web", 441, "profile tidy", statuses.storage, "me"),
             item("api", 5100, "rate limits", statuses.storage, "me"),
             item("web", 430, "checkout copy", statuses.deck, "me"),
+            item("web", 431, "cart summary", statuses.cleared, "me"),
             item("ios", 280, "push permissions", statuses.deck, "me"),
         ]
         addMine(repo: "web", number: 455, slug: "damascus", branch: "gh-455/booking-flow", title: "booking flow", activity: .coding("app"), commits: 4)
