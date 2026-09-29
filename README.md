@@ -45,7 +45,9 @@ rockets and speeders, a desk in every office, fuel by the pad and a rover in the
 about so the pad faces right. The models used live in `Resources/Kenney`.
 
 A production deploy flies: an onboard camera rides the repository's rocket from the pad to its planet on the
-horizon and lands it at the repository's colony (Develop › Rehearse Launch flies a pretend one). The planet
+horizon and lands it at the repository's colony. The station watches the repository's GitHub Actions: a
+workflow that deploys on a push to the production branch is the flight, timed on how long its deploys usually
+take (Develop › Rehearse Launch flies a pretend one). The planet
 surfaces are [Solar System Scope](https://www.solarsystemscope.com/textures/)'s textures (CC BY 4.0), tinted in
 each repository's colour; they live in `Resources/Planets`.
 

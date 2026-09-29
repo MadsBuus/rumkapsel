@@ -583,8 +583,22 @@ final class World {
         if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
         for (root, info) in repoRoots {
             github.refreshReleases(repoRoot: root)
+            github.refreshDeploys(repoRoot: root)
+            github.watchPulls(repoRoot: root)
             if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
         }
+        for d in github.takeDeploys() {
+            guard let info = repoRoots[d.repoRoot] else { continue }
+            if d.production { awaitingDeploy[d.repoRoot] = nil }
+            switch d.change {
+            case .started(let run, let elapsed):
+                events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
+                                             release: run.release, elapsed: elapsed))
+            case .ended(_, let outcome):
+                events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
+            }
+        }
+        events += lostDeploys()
         events += applyBoardMoves()
         for change in github.takeStateChanges() {
             for station in fleet.stations.values {
@@ -717,6 +731,32 @@ final class World {
         return pads
     }
 
+    /// Production releases flying since their merge whose deploy run has not shown yet, by checkout.
+    private var awaitingDeploy: [String: Date] = [:]
+
+    /// The camera goes up with the rocket: a production release that merged in a repository whose deploys
+    /// are watched starts its flight now, and the deploy's run, once it shows, sets the clock and ends it.
+    /// Nothing where the run was seen before the merge was, or where the repository has no deploys to watch.
+    private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
+        guard let d = github.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
+        let merged = pr.mergedAt ?? Date()
+        if let began = newest.startedAt, began > merged.addingTimeInterval(-120) { return [] }
+        awaitingDeploy[repoRoot] = Date()
+        return [.deployStarted(station: station, repo: repo, production: true, expected: d.usual,
+                               release: pr.tag ? pr.title : "#\(pr.number)", elapsed: max(0, Date().timeIntervalSince(merged)))]
+    }
+
+    /// Flights begun at the merge whose run never showed: the signal is lost.
+    private func lostDeploys() -> [WorldEvent] {
+        let now = Date()
+        var out: [WorldEvent] = []
+        for (root, at) in awaitingDeploy where now.timeIntervalSince(at) > Deployments.findWithin {
+            awaitingDeploy[root] = nil
+            if let info = repoRoots[root] { out.append(.deployEnded(station: info.station, repo: info.repo, production: true, outcome: .lost)) }
+        }
+        return out
+    }
+
     /// A rocket for work waiting with no release opened for it: what is stored since the last one went.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
@@ -765,6 +805,7 @@ final class World {
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
+            events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
             // What the release carries is what shipped, wherever the floor had got it to. `waiting` is
             // already that set — from QA up, where staging is the deck — and its records are marked
             // shipped here. Their crates are marked with them, or a crate the release really took stays

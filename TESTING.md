@@ -12,6 +12,7 @@ swift build --build-system native
 .build/debug/Rumkapsel --walk-tests
 .build/debug/Rumkapsel --ledger-tests
 .build/debug/Rumkapsel --work-tests
+.build/debug/Rumkapsel --deploy-tests
 .build/debug/Rumkapsel --pipeline-tests
 .build/debug/Rumkapsel --layout-tests
 .build/debug/Rumkapsel --spacelog-tests

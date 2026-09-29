@@ -1342,7 +1342,7 @@ final class SimulatorModel: ObservableObject {
         case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
         case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
         case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"
-        case .deployStarted(_, let repo, let production, let expected, let release): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
+        case .deployStarted(_, let repo, let production, let expected, let release, _): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
         case .deployEnded(_, let repo, let production, let outcome): return "deployEnded \(repo) \(production ? "production" : "staging") \(outcome)"
         case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"
         }

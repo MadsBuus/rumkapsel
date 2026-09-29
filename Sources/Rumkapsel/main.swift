@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--ledger-tests") { LedgerTests.run() }
         // How a piece of work is named, from whatever a source brought: one office key, one crate number.
         if args.contains("--work-tests") { WorkTests.run() }
+        if args.contains("--deploy-tests") { DeployTests.run() }
         // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }

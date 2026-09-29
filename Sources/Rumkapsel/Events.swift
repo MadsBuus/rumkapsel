@@ -72,7 +72,7 @@ enum WorldEvent {
     case worldLoaded
     /// A deploy began, to production or staging; `expected` is how long this repository's deploys usually take,
     /// `release` what is going out: a tag, or the release pull request's number.
-    case deployStarted(station: String, repo: String, production: Bool, expected: TimeInterval, release: String)
+    case deployStarted(station: String, repo: String, production: Bool, expected: TimeInterval, release: String, elapsed: TimeInterval = 0)
     /// A deploy ended: live, failed or cancelled.
     case deployEnded(station: String, repo: String, production: Bool, outcome: DeployOutcome)
     /// A line for the station log.
