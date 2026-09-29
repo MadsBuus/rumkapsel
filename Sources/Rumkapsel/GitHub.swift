@@ -743,10 +743,10 @@ final class GitHubResolver {
     }
 
     /// What is known of a repository's deploys, per branch it deploys from.
-    func deploys(repoRoot: String) -> [(branch: String, newest: DeployRun?, usual: TimeInterval)] {
+    func deploys(repoRoot: String) -> [(branch: String, production: Bool, newest: DeployRun?, usual: TimeInterval)] {
         let branches = deployBranches(pipeline(repoRoot: repoRoot))
         lock.lock(); defer { lock.unlock() }
-        return branches.map { ($0.branch, deployNewest[repoRoot + "|" + $0.branch], deployUsual[repoRoot + "|" + $0.branch] ?? Deployments.fallback) }
+        return branches.map { ($0.branch, $0.production, deployNewest[repoRoot + "|" + $0.branch], deployUsual[repoRoot + "|" + $0.branch] ?? Deployments.fallback) }
     }
 
     /// The branches a repository deploys from, and whether each is production: staging and production, or
@@ -768,24 +768,36 @@ final class GitHubResolver {
         let p = pipeline(repoRoot: repoRoot)
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("d:" + repoRoot); deploysRead[repoRoot] = Date(); lock.unlock() }
-            var running = false
+            var running = false, ended = false
+            // One read of every push's runs, sorted by branch here: GitHub's own branch filter can answer weeks behind.
+            guard let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
+                                 "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
+                  let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
+            let all = arr.compactMap(DeployRun.init(json:))
             for (branch, production) in deployBranches(p) {
                 let key = repoRoot + "|" + branch
-                guard let out = run(["gh", "run", "list", "--branch", branch, "--event", "push", "--limit", "20",
-                                     "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
-                let runs = Deployments.deploys(arr.compactMap(DeployRun.init(json:)), deploying: deployingWorkflows(branch: branch, repoRoot: repoRoot))
+                let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deployingWorkflows(branch: branch, repoRoot: repoRoot))
                 lock.lock()
                 let first = deployNewest[key] == nil && deploysRead[repoRoot] == nil
                 let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date())
                 let usual = Deployments.usual(runs)
                 deployUsual[key] = usual
-                if let newest = runs.first { deployNewest[key] = newest; running = running || newest.running }
-                for c in changes { pendingDeploys.append((repoRoot, production, c, usual)) }
+                if let newest = runs.first {
+                    deployNewest[key] = newest
+                    // Asked fast while it runs, up to a point: past three times its usual length, the slow pace finds its end.
+                    let age = newest.startedAt.map { Date().timeIntervalSince($0) } ?? 0
+                    running = running || newest.running && age < max(3 * usual, 1800)
+                }
+                for c in changes {
+                    pendingDeploys.append((repoRoot, production, c, usual))
+                    if case .ended = c { ended = true }
+                }
                 lock.unlock()
                 for c in changes { trace("deploy \(branch) \(c)") }
             }
+            // Fast until the deploy is green or red; then back to the slow pace.
             if running { expect("deploys:" + repoRoot, for: 60, every: 10) }
+            else if ended { lock.lock(); expected["deploys:" + repoRoot] = nil; lock.unlock() }
             lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
             if any { DispatchQueue.main.async { self.onUpdate?() } }
         }
@@ -1155,7 +1167,7 @@ final class GitHubResolver {
             let previous = releases[repoRoot]?.0 ?? []
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
-                expectLocked("deploys:" + repoRoot, for: 900, every: 10)   // its deploy starts now
+                expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)   // its deploy starts now
             }
             // A tag nobody has seen before is a launch. The first answer is taken quietly, like every
             // other source's: whatever was tagged before this run had already shipped.

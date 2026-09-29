@@ -4,15 +4,21 @@
 import AppKit
 import SceneKit
 
-enum DeployOutcome { case live, failed, cancelled }
+enum DeployOutcome {
+    case live, failed, cancelled
+    /// A flight begun at the merge whose deploy never showed.
+    case lost
+    /// The signal is gone: the deploy failed, or none was ever seen.
+    var signalLost: Bool { self == .failed || self == .lost }
+}
 
 /// A production deploy in flight, on the station's clock.
 struct Mission {
     let repo: String
     let station: String
-    let started: Double
-    let expected: Double
-    let release: String
+    var started: Double
+    var expected: Double
+    var release: String
     var ended: (outcome: DeployOutcome, at: Double, progress: Double)?
     /// How long the deploy took, from its start to its end.
     var took: Double?
@@ -30,7 +36,7 @@ struct Mission {
             switch end.outcome {
             case .live: return end.progress + (1 - end.progress) * ease((clock - end.at) / 4)
             case .cancelled: return end.progress * (1 - ease((clock - end.at) / 5))
-            case .failed: return end.progress
+            case .failed, .lost: return end.progress
             }
         }
         let f = max(0, clock - started) / max(1, expected)
@@ -46,6 +52,7 @@ struct Mission {
                 return l < 4 ? "Final approach" : l < 7 ? "Entering the atmosphere" : l < 10 ? "Landing burn"
                     : "Landed · live in \(Mission.duration(took ?? end.at - started))"
             case .failed: return "Signal lost · the deploy failed"
+            case .lost: return "Signal lost · no deploy seen"
             case .cancelled: return "Scrubbed · back to the pad"
             }
         }
@@ -98,6 +105,17 @@ extension StationController {
     /// joins its own flight where it has got to, the clock having run for it all along.
     func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
         let m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
+        // Already flying since the merge: the run has turned up, and the clock is set to when it began.
+        if var current = mission, current.repo == repo, current.ended == nil {
+            current.started = m.started; current.expected = expected
+            if !release.isEmpty { current.release = release }
+            mission = current
+            return
+        }
+        if let i = queuedMissions.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
+            queuedMissions[i].started = m.started; queuedMissions[i].expected = expected
+            return
+        }
         if let current = mission {
             if current.repo != repo, !queuedMissions.contains(where: { $0.repo == repo }) { queuedMissions.append(m) }
             logEvent("\(repo): liftoff, deploying to production")
@@ -192,6 +210,7 @@ extension StationController {
             let took = mission.flatMap { $0.repo == repo ? $0.took : nil } ?? queuedMissions.first { $0.repo == repo }?.took ?? 0
             logEvent("\(repo): landed, live in \(Mission.duration(took))")
         case .failed: logEvent("\(repo): the deploy failed")
+        case .lost: logEvent("\(repo): no deploy seen")
         case .cancelled: logEvent("\(repo): deploy cancelled")
         }
     }
@@ -199,7 +218,7 @@ extension StationController {
     /// Where the camera is and what it looks at, every frame, from the flight's progress.
     func stepMission() {
         guard let m = mission else { return }
-        if let end = m.ended, clock - end.at > (end.outcome == .failed ? 5 : end.outcome == .live ? 24 : 8) {
+        if let end = m.ended, clock - end.at > (end.outcome.signalLost ? 5 : end.outcome == .live ? 24 : 8) {
             mission = nil
             hiddenRockets.forEach { $0.isHidden = false }
             hiddenRockets = []
@@ -255,7 +274,7 @@ extension StationController {
             if l >= 10, !m.touchedDown { mission?.touchedDown = true; settleLegs() }
             if l >= 8.4, !m.dustRaised { mission?.dustRaised = true; raiseDust(at: planet + normal * r, normal: normal, color: NSColor(fleet.color(forRepo: m.repo))) }
         }
-        if s >= 0.5, !m.separated, m.ended?.outcome != .failed {
+        if s >= 0.5, !m.separated, m.ended?.outcome.signalLost != true {
             mission?.separated = true
             separateStage(heading: heading)
         }
@@ -301,7 +320,7 @@ extension StationController {
         if shake > 0 { at += SIMD3(Double.random(in: -shake...shake), Double.random(in: -shake...shake), Double.random(in: -shake...shake)) }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
-        if let end = m.ended, end.outcome == .failed { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
+        if let end = m.ended, end.outcome.signalLost { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
 
         let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.started) / 60, Int(clock - m.started) % 60)
         let landed = (landing ?? 0) >= 10.5
@@ -660,7 +679,7 @@ final class MissionScreen: NSView {
                 if Date().timeIntervalSince(self.successSince) > 1.2 { t.invalidate() }
             }
         }
-        if outcome == .failed, noise == nil {
+        if outcome?.signalLost == true, noise == nil {
             noise = Timer.scheduledTimer(withTimeInterval: 1 / 15, repeats: true) { [weak self] _ in self?.needsDisplay = true }
         }
         needsDisplay = true
@@ -691,7 +710,7 @@ final class MissionScreen: NSView {
             glow.draw(in: NSRect(x: 0, y: 0, width: depth, height: b.height), angle: 0)
             glow.draw(in: NSRect(x: b.width - depth, y: 0, width: depth, height: b.height), angle: 180)
         }
-        if outcome == .failed {
+        if outcome?.signalLost == true {
             for _ in 0..<Int(b.width * b.height / 40) {
                 NSColor(white: CGFloat.random(in: 0.2...0.9), alpha: 0.5).setFill()
                 NSRect(x: .random(in: 0..<b.width), y: .random(in: 0..<b.height), width: 2, height: 2).fill()
@@ -716,7 +735,7 @@ final class MissionScreen: NSView {
         let big = NSAttributedString(string: clock, attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 22, weight: .semibold),
                                                                   .foregroundColor: NSColor.white])
         big.draw(at: NSPoint(x: pad, y: pad + 14))
-        let tint = outcome == .failed ? live : outcome == .live ? NSColor(rgb: (0.45, 0.95, 0.55)) : NSColor(rgb: (0.98, 0.72, 0.3))
+        let tint = outcome?.signalLost == true ? live : outcome == .live ? NSColor(rgb: (0.45, 0.95, 0.55)) : NSColor(rgb: (0.98, 0.72, 0.3))
         NSAttributedString(string: phase, attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: tint])
             .draw(at: NSPoint(x: pad + big.size().width + 12, y: pad + 20))
         NSAttributedString(string: usual, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white.withAlphaComponent(0.55)])

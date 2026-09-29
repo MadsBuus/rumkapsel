@@ -54,6 +54,8 @@ struct DeployRun: Equatable {
 enum Deployments {
     /// How long a deploy is taken to last before a repository has finished one.
     static let fallback: TimeInterval = 600
+    /// How long after a release merges its deploy has to show before the flight is given up on.
+    static let findWithin: TimeInterval = 300
 
     /// The runs that are deploys: of a workflow named for deploying, or one whose file deploys on a push
     /// to the branch. Newest first, as GitHub lists them.
