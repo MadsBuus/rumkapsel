@@ -64,18 +64,21 @@ struct DeployRun: Equatable {
 enum Deployments {
     /// How long a deploy is taken to last before a repository has finished one.
     static let fallback: TimeInterval = 600
+    /// A deploy older than this when first heard of is history, never a flight; so is a merge heard of this late.
+    static let recent: TimeInterval = 1800
     /// How long after a release merges its deploy has to show before the flight is given up on.
     static let findWithin: TimeInterval = 300
 
-    /// The runs that are deploys: of a workflow named for deploying, or one whose file deploys on a push
-    /// to the branch. Newest first, as GitHub lists them.
+    /// The runs that are deploys: of a workflow named for deploying where the branch has one, else of one
+    /// whose file deploys on a push to the branch. Newest first, as GitHub lists them.
     static func deploys(_ runs: [DeployRun], deploying: Set<String>) -> [DeployRun] {
-        runs.filter { deploying.contains($0.workflow) || $0.workflow.lowercased().contains("deploy") }
+        let named = runs.filter { $0.workflow.lowercased().contains("deploy") }
+        return named.isEmpty ? runs.filter { deploying.contains($0.workflow) } : named
     }
 
     /// What a deploy step runs, in any workflow: a GitHub environment, or one of the usual deploy tools.
-    static let deployWords = ["environment:", "deploy", "serverless", "flyctl", "vercel", "railway", "heroku", "kubectl",
-                              "helm upgrade", "docker push", "gcloud", "cdk deploy", "netlify", "wrangler"]
+    static let deployWords = ["environment:", "serverless deploy", "sls deploy", "flyctl", "vercel", "railway", "heroku", "kubectl",
+                              "helm upgrade", "docker push", "gcloud", "cdk deploy", "netlify deploy", "wrangler deploy", "firebase deploy", "fly deploy"]
 
     /// Whether a workflow file runs on a push to `branch` and deploys.
     static func deploys(onPushTo branch: String, workflow text: String) -> Bool {
@@ -134,6 +137,8 @@ enum Deployments {
         } else if let was, was.id == newest.id {
             return []
         }
+        // Over already and begun long ago: history, not a flight.
+        if !newest.running, elapsed(newest) > recent { return out }
         out.append(.started(newest, elapsed: elapsed(newest)))
         if let o = newest.outcome { out.append(.ended(newest, o)) }
         return out

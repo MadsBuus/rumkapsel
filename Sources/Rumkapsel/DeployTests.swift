@@ -19,7 +19,8 @@ enum DeployTests {
         test("only deploys count: CI on the same push is left out") {
             let runs = [run(3, "CI"), run(2, "Deploy to Amazon ECS"), run(1, "Ship it")]
             expect(Deployments.deploys(runs, deploying: []).map(\.id) == [2], "named for deploying")
-            expect(Deployments.deploys(runs, deploying: ["Ship it"]).map(\.id) == [2, 1], "or its file deploys")
+            expect(Deployments.deploys(runs, deploying: ["Ship it"]).map(\.id) == [2], "a workflow named for deploying wins")
+            expect(Deployments.deploys([run(3, "CI"), run(1, "Ship it")], deploying: ["Ship it"]).map(\.id) == [1], "else its file deploys")
         }
 
         test("the usual length is the middle of the successful runs, failures and runs under way aside") {
@@ -73,6 +74,12 @@ enum DeployTests {
             expect(!Deployments.isStale([run(1)], known: nil), "nothing known yet")
         }
 
+        test("a deploy long over when first heard of is history, not a flight") {
+            let old = run(2, began: 0, took: 500)
+            let c = Deployments.changes(was: run(1), runs: [old, run(1)], firstLook: false, at: t0.addingTimeInterval(18 * 3600))
+            expect(c.isEmpty, "yesterday's deploy flies nothing, got \(c)")
+        }
+
         test("the release is the pull request the merge names") {
             expect(run(1).release == "#5466", "from the merge's title")
             expect(run(1, title: "chore: bump").release == "", "nothing named: nothing")
@@ -94,7 +101,7 @@ enum DeployTests {
             let listed = "name: 'Ship'\non:\n  push:\n    branches:\n      - main\njobs:\n  go:\n    steps:\n      - run: npx vercel --prod\n"
             expect(Deployments.deploys(onPushTo: "main", workflow: listed), "a list, a deploy tool")
             expect(Deployments.name(ofWorkflow: listed) == "Ship", "quotes taken off")
-            let ci = "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    steps:\n      - run: npm test\n"
+            let ci = "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    steps:\n      - run: npm test  # before deploy\n"
             expect(!Deployments.deploys(onPushTo: "main", workflow: ci), "tests are not a deploy")
             let pr = "name: Preview\non:\n  pull_request:\n    branches: [main]\njobs:\n  d:\n    steps:\n      - run: vercel\n"
             expect(!Deployments.deploys(onPushTo: "main", workflow: pr), "a pull request is not a push")

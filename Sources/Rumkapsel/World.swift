@@ -740,6 +740,7 @@ final class World {
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
         guard let d = github.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
         let merged = pr.mergedAt ?? Date()
+        guard Date().timeIntervalSince(merged) < Deployments.recent else { return [] }   // heard late: long gone, no flight
         if let began = newest.startedAt, began > merged.addingTimeInterval(-120) { return [] }
         awaitingDeploy[repoRoot] = Date()
         return [.deployStarted(station: station, repo: repo, production: true, expected: d.usual,
