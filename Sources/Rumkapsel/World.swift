@@ -87,9 +87,8 @@ final class World {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
             case .qa where t.from == .cleared:
-                // Clearance taken back: out through the gate again, to wait with what is still untested.
-                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
-                events.append(.crateUncleared(station: info.station, repo: record.repo, number: number))
+                // Clearance taken back: nothing is carried; the rows draw it with what is still untested.
+                continue
             case .qa where t.from != nil:
                 // To the staging area, once the crate stands in storage and no pallet has the repository.
                 guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
@@ -1293,7 +1292,7 @@ final class World {
     /// here and the row remembers it. `stillUntested` keeps one deck crate in the untested row even
     /// though the board has cleared it: that is where it still stands. `aside` names crates
     /// ("repo#number") to give a fresh place away from the column they stand in.
-    func yardLayout(station: Station, area: String, stillUntested: Int? = nil, stillTested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
+    func yardLayout(station: Station, area: String, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
         // The deck's rows keep off the X-ray's floor.
         let cells = area == "deck" ? station.deckCells.filter { !station.gateFootprint.contains($0) } : area == "decon" ? station.deconCells : station.storageCells
         let neat = area != "storage"
@@ -1320,7 +1319,6 @@ final class World {
                 let carried = !c.stands(in: yard)
                 var cleared = area == "deck" && c.cleared
                 if cleared, c.number == stillUntested { cleared = false }
-                if !cleared, area == "deck", c.number == stillTested { cleared = true }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
                 var slot = carried ? c.bound : c.slot
                 if let s = slot, s.yard != yard || s.group != group { slot = nil }   // from another yard or row: asked for again
@@ -1690,20 +1688,6 @@ final class World {
     func carryFromGate(station: Station, crate: CrateRef, from spot: Spot) -> Command {
         station.ledger.order(repo: crate.repo, number: crate.number, to: .deck)
         return .carry(crate, from: spot, to: .deck)
-    }
-
-    /// Clearance taken back: a crate beside the rocket comes out through the gate to the untested row.
-    /// Whatever is stacked on it moves aside first.
-    func carryBackToUntested(station: Station, repo: String, number: Int) -> [Command] {
-        let crate = CrateRef(station: station.name, repo: repo, number: number)
-        guard !isCarried(crate) else { return [] }
-        let standing = yardLayout(station: station, area: "deck", stillTested: number).filter { !$0.carried }
-        guard let here = standing.first(where: { $0.repo == repo && $0.number == number }), here.cleared else { return [] }
-        var above: [Int: Int] = [:]
-        var out = aside(station: station, area: "deck", above: here, going: [number], standing: standing, after: &above)
-        station.ledger.order(repo: repo, number: number, to: .deck)
-        out.append(.carry(crate, from: standingSpot(here, area: "deck", station: station), to: .deck, after: above[here.column].map { [$0] } ?? []))
-        return out
     }
 
     /// Cleared to launch: every crate named goes from its row into the rocket on the pad, stacks taken

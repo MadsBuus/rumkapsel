@@ -28,6 +28,8 @@ final class Invariants {
 
     /// Where a crate stood when it was last seen resting, by node name.
     private var resting: [String: SIMD3<Double>] = [:]
+    /// Whether each resting crate had its tested tick when it was last seen.
+    private var restingTested: [String: Bool] = [:]
     /// Command id and phase index per actor, so a phase can only go forward.
     private var lastPhase: [String: (id: Int, phase: Int)] = [:]
     /// A bath in progress: the command it belongs to and when it is due to end.
@@ -158,6 +160,10 @@ final class Invariants {
             // On someone's arms, on the pallet or in the air: it is allowed to move.
             if c.world.crate(crate)?.inTransit == true { resting[s.name] = nil; continue }
             if c.simulation.pallets[s.station]?.flight != nil { continue }
+            // Its tick taken back on the board: the one move nobody carries, straight to the untested row.
+            let tested = c.world.crate(crate)?.cleared ?? false
+            defer { restingTested[s.name] = tested }
+            if restingTested[s.name] == true, !tested { resting[s.name] = s.pos; continue }
             if let was = resting[s.name] {
                 let d = ((was.x - s.pos.x) * (was.x - s.pos.x) + (was.y - s.pos.y) * (was.y - s.pos.y)
                          + (was.z - s.pos.z) * (was.z - s.pos.z)).squareRoot()
@@ -171,7 +177,7 @@ final class Invariants {
                 resting[s.name] = s.pos
             }
         }
-        for name in resting.keys where !live.contains(name) { resting[name] = nil }
+        for name in resting.keys where !live.contains(name) { resting[name] = nil; restingTested[name] = nil }
 
         // Nothing inside anything else.
         for (i, a) in all.enumerated() {

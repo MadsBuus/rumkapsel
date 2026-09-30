@@ -1,7 +1,7 @@
 // The gate between the deck and the pad, and the X-ray in it: a belt through half of the arch, a tunnel with
 // rubber flaps on the gate line, a monitor, and the operator standing at it. The belt, the scan and the verdict
-// are the simulation's (`GateJob`); this draws them. A crate carried through the other half by hand is scanned
-// too: onto the pad it shrinks, packed for flight; an untested one going up sets off the alarm.
+// are the simulation's (`GateJob`); this draws them. The other half of the arch is for people, behind a laser
+// fence with a security check; crates only cross on the belt.
 
 import AppKit
 import SceneKit
@@ -25,8 +25,6 @@ final class GateView {
     let inward: SIMD2<Double>
     let restYaw: Double, watchYaw: Double
     var yaw: Double
-    /// The verdict showing now, and until when; an alarm blinks.
-    var scan: (color: NSColor, until: Double, alarm: Bool)?
     /// Crates on the belt: waiting at its deck end, by crate key, and the one on its way through.
     var waiting: [String: SCNNode] = [:]
     var moving: (key: String, node: SCNNode)?
@@ -112,8 +110,9 @@ extension Props {
                     point.geometry!.firstMaterial = core
                     point.position = v3(x + inward * 0.036, y, 0)
                     n.addChildNode(point)
-                    let halo = SCNNode(geometry: SCNSphere(radius: 0.035))
+                    let halo = SCNNode(geometry: SCNBox(width: 0.05, height: 0.05, length: 0.05, chamferRadius: 0))
                     halo.geometry!.firstMaterial = glowing(laserRed, alpha: 0.4)
+                    halo.eulerAngles = SCNVector3(0.62, 0.785, 0)
                     halo.position = v3(x + inward * 0.04, y, 0)
                     halo.name = "glow"
                     n.addChildNode(halo)
@@ -125,11 +124,11 @@ extension Props {
                 beam.setValue(from, forKey: "lo")
                 beam.setValue(to, forKey: "hi")
                 beam.position = v3((from + to) / 2, y, 0)
-                let hot = SCNNode(geometry: SCNCylinder(radius: 0.0035, height: length))
+                let hot = SCNNode(geometry: SCNBox(width: 0.007, height: length, length: 0.007, chamferRadius: 0))
                 hot.geometry!.firstMaterial = core
                 hot.eulerAngles.z = .pi / 2
                 beam.addChildNode(hot)
-                let aura = SCNNode(geometry: SCNCylinder(radius: 0.02, height: length))
+                let aura = SCNNode(geometry: SCNBox(width: 0.035, height: length, length: 0.035, chamferRadius: 0))
                 aura.geometry!.firstMaterial = glow
                 aura.eulerAngles.z = .pi / 2
                 aura.name = "glow"
@@ -440,25 +439,20 @@ extension StationController {
                                        inward: g.inward, restYaw: facingDeck, watchYaw: watch)
     }
 
-    /// One frame of every gate: hand carries crossing the arch shrink or grow and are scanned; the X-ray's
-    /// belt, crates, lights, screen and operator are drawn where the simulation has them.
+    /// One frame of every gate: the X-ray's belt, crates, lights, screen and operator are drawn where the
+    /// simulation has them, and the fence where its bodies are.
     func tickGates(dt: Double) {
         for (name, gv) in gates {
-            guard let station = fleet.stations[name], let g = station.gate else { continue }
+            guard let station = fleet.stations[name] else { continue }
             let pad = Set(station.padCells)
             for m in minions.values where m.station == name {
-                guard let node = m.carried, case .crate(let crate)? = m.load else { gateSide[m.id] = nil; continue }
-                let onPad = pad.contains(Cell(x: Int(m.pos.x.rounded()), y: Int(m.pos.y.rounded())))
-                // On the pad a crate is packed small; off it, crate-sized again. The change takes a moment.
-                let want = onPad ? Station.testedScale : 1, now = Double(node.scale.x)
+                guard let node = m.carried, case .crate? = m.load else { continue }
+                // On the pad a crate is packed small; off it, crate-sized. The change takes a moment.
+                let want = pad.contains(m.cell) ? Station.testedScale : 1, now = Double(node.scale.x)
                 if abs(want - now) > 0.001 {
                     let k = CGFloat(now + (want - now) * min(1, dt * 7))
                     node.scale = SCNVector3(k, k, k)
                 }
-                if let was = gateSide[m.id], was != onPad, simd_distance(m.pos, g.center) < g.width / 2 + 1.2 {
-                    scanned(crate, station: station, onto: onPad, gv: gv, node: node)
-                }
-                gateSide[m.id] = onPad
             }
             drawXRay(simulation.gates[name], gv: gv, station: station, dt: dt)
             drawFence(gv, station: station, dt: dt)
@@ -477,7 +471,9 @@ extension StationController {
             if clock < m.checkUntil {
                 // At its check: the ring, from the head down to the floor.
                 let ring = gv.rings[m.id] ?? {
-                    let r = SCNNode(geometry: SCNTube(innerRadius: 0.15, outerRadius: 0.17, height: 0.01))
+                    let tube = SCNTube(innerRadius: 0.15, outerRadius: 0.17, height: 0.01)
+                    tube.radialSegmentCount = 8
+                    let r = SCNNode(geometry: tube)
                     r.geometry!.firstMaterial = flat(Props.scanIdle)
                     propRoot.addChildNode(r)
                     gv.rings[m.id] = r
@@ -513,9 +509,7 @@ extension StationController {
         // Lights: amber at rest, a quick cyan pulse while looking, the verdict after.
         var light = Props.gateIdle
         if scanning != nil { light = clock.truncatingRemainder(dividingBy: 0.4) < 0.2 ? Props.scanIdle : Props.scanIdle.darker(0.5) }
-        if let s = gv.scan, clock <= s.until {
-            light = s.alarm ? (clock.truncatingRemainder(dividingBy: 0.4) < 0.2 ? s.color : s.color.darker(0.6)) : s.color
-        } else if let s = job?.scan, clock <= s.until {
+        if let s = job?.scan, clock <= s.until {
             light = s.passed ? Props.passedLight : Props.scanRed
         }
         for l in gv.lights { l.geometry?.firstMaterial?.diffuse.contents = light }
@@ -572,7 +566,7 @@ extension StationController {
             }
         } else {
             gv.sweep?.opacity = 0
-            if job?.scan.map({ clock > $0.until }) ?? true, gv.scan.map({ clock > $0.until }) ?? true, !gv.showing.isEmpty {
+            if job?.scan.map({ clock > $0.until }) ?? true, !gv.showing.isEmpty {
                 gv.showing = ""
                 gv.screen?.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.03, 0.07, 0.14))
             }
@@ -661,35 +655,6 @@ extension StationController {
             node.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
-        }
-    }
-
-    /// A crate carried through the arch by hand: onto the pad it passes green, or sets off the alarm when
-    /// it is going up untested; out again it is scanned red.
-    private func scanned(_ crate: CrateRef, station: Station, onto pad: Bool, gv: GateView, node: SCNNode) {
-        let row = station.ledger[crate.repo, crate.number]
-        let passes = row?.cleared == true || row?.alien == true || !world.workflow(repo: crate.repo).has(.cleared)
-        let color: NSColor = pad && passes ? Props.passedLight : Props.scanRed
-        // Going up untested sets off the alarm; coming back out, sent back by QA, sets off the same strobe,
-        // and the operator puts its picture up crossed out.
-        let alarm = !(pad && passes)
-        gv.scan = (color, clock + (alarm ? 2.6 : 0.9), alarm)
-        gv.reaction = (!alarm, clock)
-        if !pad {
-            drone.ping(seed: 3)
-            let commits = world.works.find(repo: crate.repo, crate: crate.number)?.pulls.count ?? 0
-            gv.screen?.geometry?.firstMaterial?.diffuse.contents = XRay.image(repo: crate.repo, number: crate.number,
-                                                                               commits: max(2, commits * 2 + crate.number % 4), sentBack: true)
-            gv.showing = crate.key + " back"
-        }
-        if let plate = node.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
-            plate.removeAllActions()
-            plate.opacity = 1
-            plate.geometry?.firstMaterial?.diffuse.contents = pad ? color : NSColor(rgb: (0.3, 0.32, 0.38))
-        }
-        if alarm {
-            drone.ping(seed: crate.number)
-            logEvent("\(crate.repo) #\(crate.number) went through the gate untested")
         }
     }
 }

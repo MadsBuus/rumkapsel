@@ -40,8 +40,6 @@ enum WorldEvent {
     case carryToDeck(station: String, repo: String, commands: [Command])
     /// One crate passed QA: it goes through the gate to stand beside its rocket.
     case crateCleared(station: String, repo: String, number: Int)
-    /// Its clearance was taken back: it comes out through the gate to the untested row.
-    case crateUncleared(station: String, repo: String, number: Int)
     /// A release pull request appeared: a rocket belongs on the pad.
     case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
     /// A release pull request merged. A production one ships; a staging one moves the yard.

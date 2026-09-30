@@ -430,16 +430,4 @@ extension StationController {
             }
         }
     }
-
-    /// Clearance taken back: the crate comes out through the gate to the untested row, the scan red.
-    func carryBackToDeck(station: Station, repo: String, number: Int) {
-        for command in world.carryBackToUntested(station: station, repo: repo, number: number) {
-            guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
-            carry(command, node: node) { [weak self] in
-                guard let self else { return }
-                node.removeFromParentNode()
-                rebuildMarkers()
-            }
-        }
-    }
 }

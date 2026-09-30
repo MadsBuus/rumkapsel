@@ -14,6 +14,7 @@
 // Exits non-zero if anything failed. Every wait is in station seconds: "press, wait 40, judge".
 
 import AppKit
+import simd
 
 /// One thing the run must, or must not, have recorded. `matches` is the judge; `words` only names
 /// the expectation in a failure line.
@@ -363,6 +364,26 @@ enum Scenarios {
             if loads != 2 { return "\(loads) carries into the rocket for two crates" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
+        }),
+
+        Scenario("ready to ship moved back to QA: nothing carried, the crate stands untested", [
+            ("Target: web#455", 4.8),
+            ("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)", 32),
+        ], tail: 16, expects: [
+            .press("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)"),
+        ], floor: { sim in
+            let carried = Scenario.commands(sim).contains {
+                if case .carry(let crate, let from, _) = $0.command.kind { return crate.number == 431 && from.area == .tested }; return false
+            }
+            if carried { return "#431 was carried off its stack" }
+            guard let station = sim.station.fleet.stations.values.first,
+                  let slot = sim.station.world.yardLayout(station: station, area: "deck").first(where: { $0.repo == "web" && $0.number == 431 }) else {
+                return "#431 is not on the deck"
+            }
+            if slot.cleared { return "#431 still stands with the tested" }
+            guard let node = sim.station.crateNode(CrateRef(station: station.name, repo: "web", number: 431)) else { return "#431 is not drawn" }
+            let off = simd_distance(SIMD2(Double(node.position.x), Double(node.position.z)), SIMD2(slot.pos.x, slot.pos.z))
+            return off < 0.05 ? nil : "#431 is drawn \(off) from its place in the untested row"
         }),
 
         Scenario("PR closed unmerged: red, nothing carried", [

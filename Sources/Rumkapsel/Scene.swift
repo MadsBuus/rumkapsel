@@ -317,8 +317,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var cargoNodes: [Int: SCNNode] = [:]
     /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
     var gates: [String: GateView] = [:]
-    /// Which side of the gate each carrier was on last frame, by minion id: true on the pad.
-    var gateSide: [String: Bool] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -1116,9 +1114,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crateCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             carryAcrossDeck(station: station, repo: repo, number: number)
-        case .crateUncleared(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
-            carryBackToDeck(station: station, repo: repo, number: number)
         case .crewRoster(let members):
             setCrewRoster(members)
         case .deconArrived(let stationName, let repo, let numbers):

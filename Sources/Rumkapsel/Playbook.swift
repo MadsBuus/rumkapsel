@@ -132,9 +132,8 @@ enum Playbook {
     /// The crate on the deck in every seeded station, and the columns QA moves it between.
     private static let tested = 430
     private static var passQA: String { "Board: Move web#\(tested) to \(ConfigStore.shared.current.statuses.cleared)" }
-    /// The crate the seed has already approved, standing on its stack by the rocket, and QA sending it back.
+    /// The crate the seed has already approved, standing on its stack by the rocket.
     private static let approved = 431
-    private static var rejectQA: String { "Board: Move web#\(approved) to \(ConfigStore.shared.current.statuses.deck)" }
 
     static let entries: [PlaybookEntry] = [
         // In an office: one session, one body, no yard.
@@ -183,8 +182,6 @@ enum Playbook {
                        ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "QA approves a crate", "through the X-ray, out small on the pad, carried to its rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
-                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "QA rejects a crate", "back out through the arch, scanned red, to the untested row", [("4x", 0.5), (rejectQA, .pickedUp(approved)), ("1x", .onDeck(approved))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
         PlaybookEntry("release", "Production PR opened", "the lifter rises under the tip and the approved crate goes aboard",
                       [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
