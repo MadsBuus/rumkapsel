@@ -53,6 +53,8 @@ struct Opening {
     var only: String?
     /// This body takes it first when it is free: a session's own worker fetching its new office.
     var prefer: String?
+    /// Only a worker on standby, with no session of its own, may take it: walking the rows.
+    var standby = false
 
     enum Work {
         /// A carry, by its command's id.
@@ -63,6 +65,8 @@ struct Opening {
         case weld(station: String, repo: String)
         /// Fetching a new office's crate from the bay, by its delivery order.
         case delivery(Int)
+        /// Walking a station's untested rows.
+        case qa(station: String)
     }
 }
 
@@ -91,6 +95,10 @@ extension Simulation {
             out.append(Opening(work: .delivery(order.id), rank: .yard, station: order.station, at: station.bayStand(slot: order.slot),
                                postedAt: Double(order.id), gaveUp: order.gaveUp, only: crew ? order.session : nil, prefer: crew ? nil : order.session))
         }
+        for station in fleet.stations.values where qaWanted(station) {
+            guard !bodies.values.contains(where: { $0.station == station.name && $0.isQA }), let at = station.deckCells.first else { continue }
+            out.append(Opening(work: .qa(station: station.name), rank: .qa, station: station.name, at: at, postedAt: 0, standby: true))
+        }
         for station in fleet.stations.values where station.hasPad && !station.storageCells.isEmpty {
             let name = station.name
             let onIt = { (match: (Command.Kind) -> Bool) in self.bodies.values.contains { $0.station == name && $0.current.map { match($0.kind) } ?? false } }
@@ -114,6 +122,18 @@ extension Simulation {
             }
         }
         return out.sorted { $0.rank != $1.rank ? $0.rank > $1.rank : $0.postedAt < $1.postedAt }
+    }
+
+    /// Whether a station's deck wants someone walking its untested rows: work there still to be tested,
+    /// and no rocket already cleared to go. What came through decon is never QA's.
+    func qaWanted(_ station: Station) -> Bool {
+        guard !station.deckCells.isEmpty, station.staged.values.reduce(0, +) > 0,
+              !rockets.values.contains(where: { $0.station == station.name && $0.isSteaming }) else { return false }
+        return world.repoRoots.contains { _, info in
+            guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
+            let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
+            return world.works.records(repo: info.repo).contains { r in r.stage == .qa && !(r.number.map(alien.contains) ?? false) }
+        }
     }
 
     /// The step a pallet is at that wants hands, if any: nil while it waits on its own.
@@ -158,7 +178,7 @@ extension Simulation {
         case .dispatch: return m.phaseKind == .walk
         case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
         case .pushPallet(let s, _): return pallets[s]?.pushing == false
-        case .weld: return true
+        case .weld, .qa: return true
         case .deliverOffice: return !m.hasLoad
         default: return false
         }
@@ -167,7 +187,7 @@ extension Simulation {
     /// Whether a body may take orders from the board at all: not a teammate, a peer or a subagent,
     /// not the one walking the rows, not leaving, not still stepping out of the shuttle.
     private func onStaff(_ m: B) -> Bool {
-        !m.isSubagent && !m.isCrew && !m.isPeer && !m.isQA && m.state != .leaving && m.wakeUntil == 0
+        !m.isSubagent && !m.isCrew && !m.isPeer && m.state != .leaving && m.wakeUntil == 0
     }
 
     /// Whether a body on lower work may be taken off it for work of `rank`: its order can go back on
@@ -196,10 +216,12 @@ extension Simulation {
     /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
     /// it — a free one if there is one, else one on lower work that can be taken off it.
     func assignOrders() {
+        standDownQA()
         var taken = Set<String>()
         for o in openings() {
             // Allowed to take it: only the body it is kept for, or anyone on the staff.
-            let staff = bodies.values.filter { $0.station == o.station && !taken.contains($0.id) && (o.only != nil ? $0.id == o.only : onStaff($0)) }
+            let staff = bodies.values.filter { $0.station == o.station && !taken.contains($0.id) && (o.only != nil ? $0.id == o.only : onStaff($0))
+                && (!o.standby || $0.freeSince > 0) }
             let idle = staff.filter { o.only != nil ? free($0) : $0.isFree }
             let pool = idle.isEmpty ? staff.filter { canTakeOff($0, for: o.rank) } : idle
             let fresh = pool.filter { !o.gaveUp.contains($0.id) }
@@ -212,12 +234,23 @@ extension Simulation {
         hurryCarriers()
     }
 
+    /// Nothing left to test on a deck: whoever was walking its rows is done, and looks at the board.
+    private func standDownQA() {
+        for m in bodies.values where m.isQA {
+            guard let station = fleet.stations[m.station], !qaWanted(station) else { continue }
+            m.busy = false
+            m.activity = .waiting   // the outfit drops the scanner: nothing here has to remember to
+            finish(m)
+        }
+    }
+
     /// The body's order goes back on the board as it stands, and the body stands a beat before the
     /// next thing.
     private func takeOff(_ m: B, for o: Opening) {
         guard let c = m.current else { return }
         switch c.kind {
         case .carry: cargo[c.id]?.carrier = nil
+        case .qa: m.busy = false; m.activity = .waiting
         case .loadPallet(let s, _), .pushPallet(let s, _), .unloadPallet(let s, _, _): pallets[s]?.hand = nil
         default: break
         }
@@ -271,6 +304,13 @@ extension Simulation {
             m.fetchSpot = station.hangarSlots[min(order.slot, station.hangarSlots.count - 1)]
             walk(m, to: station.bayStand(slot: order.slot))
             if order.landed { onEvent(.log("\(m.home.name) picks up the office for \(room.name) from \(Words.current.theBay)")) }
+        case .qa:
+            m.activity = .qa
+            m.busy = true
+            send(m, to: .room("kind:deck"))
+            start(m, .qa(deck: station.name))
+            guard m.isQA else { return false }
+            onEvent(.log("staging ready for QA · \(m.home.name) walks the rows"))
         case .weld(_, let repo):
             guard let side = weldSide(station: station, repo: repo) else { return false }
             start(m, .weld(station: station.name, repo: repo, side: side), announce: true)

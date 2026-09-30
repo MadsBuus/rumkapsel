@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         window.level = floatOn ? .floating : .normal
         window.isReleasedWhenClosed = false
 
-        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly)
+        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)   // the playbook plays its own stations; the app's stays quiet
         window.contentView = controller.view
         controller.viewSize = controller.view.bounds.size
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: controller.view, queue: .main) { [weak self] _ in

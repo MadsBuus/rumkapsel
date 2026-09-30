@@ -368,9 +368,9 @@ final class PlaybookController {
         station.viewSize = rect.size
         // Told of every resize, as the station's own window tells its station.
         station.view.postsFrameChangedNotifications = true
-        let view = station.view, station = station
-        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: .main) { [weak station, weak view] _ in
-            MainActor.assumeIsolated { if let view { station?.viewSize = view.bounds.size } }
+        let shown = station.view, told = station
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: shown, queue: .main) { [weak told, weak shown] _ in
+            MainActor.assumeIsolated { if let shown { told?.viewSize = shown.bounds.size } }
         }
         station.drone.isEnabled = false
         station.settlesView = false

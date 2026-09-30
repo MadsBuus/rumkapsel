@@ -805,7 +805,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     send(m, to: restPlace)
                 }
             }
-            assignTester(station: station, free: free)
         }
         // Offices that appeared without a shuttle ever ordered for them just show up. One with an order
         // out, in the air or on the floor, is the delivery queue's: it is walked in, never conjured.

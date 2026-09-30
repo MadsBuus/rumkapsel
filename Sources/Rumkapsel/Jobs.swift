@@ -442,29 +442,4 @@ extension StationController {
             }
         }
     }
-
-    /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
-    func assignTester(station: Station, free: [Minion]) {
-        // QA is done once every crate on the deck is cleared, by the record's word. What came through
-        // decon is never QA's: on the deck it counts as tested from the start.
-        let cargoOnDeck = station.staged.values.reduce(0, +) > 0 && world.repoRoots.contains { _, info in
-            guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
-            let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
-            return world.works.records(repo: info.repo).contains { r in r.stage == .qa && !(r.number.map(alien.contains) ?? false) }
-        }
-        let cleared = simulation.rockets.values.contains { $0.station == station.name && $0.isSteaming }
-        let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
-        let current = minions.values.first { $0.station == station.name && $0.isQA }
-        if wanted, current == nil, let m = free.first(where: { !$0.onJob }) {
-            m.activity = .qa
-            m.busy = true
-            send(m, to: .room("kind:deck"))
-            start(m, .qa(deck: station.name))
-            logEvent("staging ready for QA · \(m.home.name) walks the rows")
-        } else if !wanted, let m = current {
-            m.busy = false
-            m.activity = .waiting
-            send(m, to: .lounge)   // the outfit drops the scanner: nothing here has to remember to
-        }
-    }
 }
