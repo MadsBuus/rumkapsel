@@ -8,9 +8,15 @@ import SceneKit
 
 /// The gate as the scene draws it, one per station.
 final class GateView {
-    let arch: SCNNode, belt: SCNNode, tunnel: SCNNode, monitor: SCNNode, operatorNode: SCNNode
-    /// The arch's and the tunnel's lights, the operator's eye, the screen and the line that sweeps it.
+    let fence: SCNNode, belt: SCNNode, tunnel: SCNNode, monitor: SCNNode, operatorNode: SCNNode
+    /// The tunnel's lights, the operator's eye, the screen and the line that sweeps it.
     var lights: [SCNNode] = []
+    /// The fence's lanes, along its x: a stretch of beams, switched off for a body that has been checked.
+    var lanes: [(lo: Double, hi: Double, beams: [SCNNode])] = []
+    /// The ring of light sweeping down a body at its check, by body.
+    var rings: [String: SCNNode] = [:]
+    /// The lasers' glows and the emitters' halos, which shimmer.
+    var glows: [SCNNode] = []
     let eye: SCNNode?
     let screen: SCNNode?
     let sweep: SCNNode?
@@ -32,9 +38,9 @@ final class GateView {
     var reaction: (passed: Bool, since: Double)?
     let standsAt: SCNVector3
 
-    init(arch: SCNNode, belt: SCNNode, tunnel: SCNNode, monitor: SCNNode, operatorNode: SCNNode, inward: SIMD2<Double>,
+    init(fence: SCNNode, belt: SCNNode, tunnel: SCNNode, monitor: SCNNode, operatorNode: SCNNode, inward: SIMD2<Double>,
          restYaw: Double, watchYaw: Double) {
-        self.arch = arch; self.belt = belt; self.tunnel = tunnel; self.monitor = monitor; self.operatorNode = operatorNode
+        self.fence = fence; self.belt = belt; self.tunnel = tunnel; self.monitor = monitor; self.operatorNode = operatorNode
         self.inward = inward; self.restYaw = restYaw; self.watchYaw = watchYaw; yaw = restYaw
         eye = operatorNode.childNode(withName: "eye", recursively: true)
         head = operatorNode.childNode(withName: "head", recursively: true)
@@ -43,7 +49,15 @@ final class GateView {
         standsAt = operatorNode.position
         screen = monitor.childNode(withName: "screen", recursively: true)
         sweep = monitor.childNode(withName: "sweep", recursively: true)
-        for n in [arch, tunnel] { n.enumerateChildNodes { c, _ in if c.name == "light" { lights.append(c) } } }
+        tunnel.enumerateChildNodes { c, _ in if c.name == "light" { lights.append(c) } }
+        // A lane is the beams that share a stretch of the fence.
+        var byStretch: [Int: (lo: Double, hi: Double, beams: [SCNNode])] = [:]
+        fence.enumerateChildNodes { c, _ in
+            guard c.name == "beam", let lo = c.value(forKey: "lo") as? Double, let hi = c.value(forKey: "hi") as? Double else { return }
+            byStretch[Int((lo * 100).rounded()), default: (lo, hi, [])].beams.append(c)
+        }
+        lanes = byStretch.values.sorted { $0.lo < $1.lo }
+        fence.enumerateChildNodes { c, _ in if c.name == "glow" { glows.append(c) } }
         belt.enumerateChildNodes { c, _ in if c.name == "roller" { rollers.append(c) } }
     }
 }
@@ -56,43 +70,84 @@ extension Props {
     /// The gate's lights at rest.
     static let gateIdle = NSColor(rgb: (0.95, 0.7, 0.15))
 
-    static func securityGate(width: Double) -> SCNNode {
-        let n = SCNNode()
-        let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.3, 0.32, 0.38)))
-        let h = 0.95
-        for side in [-1.0, 1.0] {
-            let post = SCNNode(geometry: SCNBox(width: 0.1, height: h, length: 0.14, chamferRadius: 0))
-            post.geometry!.firstMaterial = steel
-            post.position = v3(side * (width / 2 + 0.05), h / 2, 0)
-            n.addChildNode(post)
-            let stripe = SCNNode(geometry: SCNBox(width: 0.104, height: 0.05, length: 0.144, chamferRadius: 0))
-            stripe.geometry!.firstMaterial = flat(gateIdle)
-            stripe.name = "light"
-            stripe.position = v3(side * (width / 2 + 0.05), 0.12, 0)
-            n.addChildNode(stripe)
-            // A strip down the inside of each post, facing the opening: the scanner's light.
-            let strip = SCNNode(geometry: SCNBox(width: 0.02, height: h - 0.3, length: 0.06, chamferRadius: 0))
-            strip.geometry!.firstMaterial = flat(gateIdle)
-            strip.name = "light"
-            strip.position = v3(side * (width / 2 - 0.001), (h - 0.3) / 2 + 0.2, 0)
-            n.addChildNode(strip)
-        }
-        let lintel = SCNNode(geometry: SCNBox(width: width + 0.2, height: 0.1, length: 0.16, chamferRadius: 0))
-        lintel.geometry!.firstMaterial = dark
-        lintel.position = v3(0, h + 0.05, 0)
-        n.addChildNode(lintel)
-        let beam = SCNNode(geometry: SCNBox(width: width, height: 0.025, length: 0.08, chamferRadius: 0))
-        beam.geometry!.firstMaterial = flat(scanIdle.darker(0.4))
-        beam.name = "scan"
-        beam.position = v3(0, h - 0.02, 0)
-        n.addChildNode(beam)
-        let sill = SCNNode(geometry: SCNBox(width: width + 0.2, height: 0.012, length: 0.1, chamferRadius: 0))
-        sill.geometry!.firstMaterial = dark
-        sill.position = v3(0, 0.006, 0)
-        n.addChildNode(sill)
-        return n
+    /// The X-ray's tunnel, across: the walls and the opening between them. The fence leaves this open.
+    static let xrayTunnelInner = 0.52, xrayTunnelWall = 0.07
+    static var xrayTunnelWidth: Double { xrayTunnelInner + 2 * xrayTunnelWall }
+
+    /// The red of the fence's lasers.
+    static let laserRed = NSColor(rgb: (1.0, 0.18, 0.22))
+
+    /// Light that adds to what is behind it: a laser's core and glow, an emitter's halo.
+    private static func glowing(_ color: NSColor, alpha: CGFloat) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = color.withAlphaComponent(alpha)
+        m.blendMode = .add
+        m.writesToDepthBuffer = false
+        m.isDoubleSided = true
+        return m
     }
 
+    /// The security fence across the doorway from the deck onto the pad: on each side of the X-ray's
+    /// tunnel, three lasers from one end post to the other, at knee, waist and head height, each a hot
+    /// core in a red glow, and a faint red on the floor under them. It spans `width` along its x, standing
+    /// on the origin, and leaves `gap` open for the tunnel. Each side is a lane the scene switches off for
+    /// a body that has been checked: its lasers are named "beam", with "lo" and "hi" along the x, and
+    /// their glows "glow", which shimmer.
+    static func laserFence(width: Double, gap: ClosedRange<Double>) -> SCNNode {
+        let n = SCNNode()
+        let steel = lit(NSColor(rgb: (0.24, 0.25, 0.3)))
+        let postHeight = 0.64, heights = [0.14, 0.32, 0.5]
+        let core = glowing(NSColor(rgb: (1.0, 0.85, 0.85)), alpha: 1), glow = glowing(laserRed, alpha: 0.45)
+        for (from, to) in [(-width / 2, gap.lowerBound), (gap.upperBound, width / 2)] where to - from > 0.05 {
+            let length = to - from - 0.07
+            for (x, inward) in [(from, 1.0), (to, -1.0)] {
+                let post = SCNNode(geometry: SCNBox(width: 0.07, height: postHeight, length: 0.09, chamferRadius: 0))
+                post.geometry!.firstMaterial = steel
+                post.position = v3(x, postHeight / 2, 0)
+                n.addChildNode(post)
+                for y in heights {
+                    // Where a laser leaves the post: a bright point and its halo.
+                    let point = SCNNode(geometry: SCNBox(width: 0.012, height: 0.03, length: 0.03, chamferRadius: 0))
+                    point.geometry!.firstMaterial = core
+                    point.position = v3(x + inward * 0.036, y, 0)
+                    n.addChildNode(point)
+                    let halo = SCNNode(geometry: SCNSphere(radius: 0.035))
+                    halo.geometry!.firstMaterial = glowing(laserRed, alpha: 0.4)
+                    halo.position = v3(x + inward * 0.04, y, 0)
+                    halo.name = "glow"
+                    n.addChildNode(halo)
+                }
+            }
+            for y in heights {
+                let beam = SCNNode()
+                beam.name = "beam"
+                beam.setValue(from, forKey: "lo")
+                beam.setValue(to, forKey: "hi")
+                beam.position = v3((from + to) / 2, y, 0)
+                let hot = SCNNode(geometry: SCNCylinder(radius: 0.0035, height: length))
+                hot.geometry!.firstMaterial = core
+                hot.eulerAngles.z = .pi / 2
+                beam.addChildNode(hot)
+                let aura = SCNNode(geometry: SCNCylinder(radius: 0.02, height: length))
+                aura.geometry!.firstMaterial = glow
+                aura.eulerAngles.z = .pi / 2
+                aura.name = "glow"
+                beam.addChildNode(aura)
+                n.addChildNode(beam)
+            }
+            // The red the lasers throw on the floor under them.
+            let floor = SCNNode(geometry: SCNPlane(width: to - from, height: 0.22))
+            floor.geometry!.firstMaterial = glowing(laserRed, alpha: 0.12)
+            floor.eulerAngles.x = -.pi / 2
+            floor.position = v3((from + to) / 2, 0.004, 0)
+            floor.name = "beam"
+            floor.setValue(from, forKey: "lo")
+            floor.setValue(to, forKey: "hi")
+            n.addChildNode(floor)
+        }
+        return n
+    }
 
     /// The operator: a boxy robot on a squat base, a visor for an eye and two arms reaching for the monitor.
     /// Its front is +z.
@@ -179,7 +234,7 @@ extension Props {
     static func xrayTunnel() -> SCNNode {
         let n = SCNNode()
         let shell = lit(NSColor(rgb: (0.8, 0.82, 0.86))), dark = lit(NSColor(rgb: (0.16, 0.17, 0.2)))
-        let length = 0.72, height = 0.62, wall = 0.07, inner = 0.52
+        let length = 0.72, height = 0.62, wall = xrayTunnelWall, inner = xrayTunnelInner
         let top = SCNNode(geometry: SCNBox(width: inner + 2 * wall, height: 0.14, length: length, chamferRadius: 0))
         top.geometry!.firstMaterial = shell
         top.position = v3(0, height - 0.07, 0)
@@ -341,12 +396,16 @@ extension StationController {
         if let old = gates[station.name] { for n in [old.belt, old.tunnel, old.monitor, old.operatorNode] { n.removeFromParentNode() } }
         gates[station.name] = nil
         guard world.deckInUse(station: station.name), let g = station.gate, let belt = station.belt else { return }
-        let arch = Looks.current.gate(width: g.width) ?? Props.securityGate(width: g.width)
-        // The arch spans along its x: turned so that x runs along the gate's line.
-        arch.eulerAngles.y = CGFloat(atan2(g.inward.x, g.inward.y))
-        arch.position = v3(station.offset.x + g.center.x, 0, station.offset.y + g.center.y)
-        arch.name = "station:" + station.name
-        staticRoot.addChildNode(arch)
+        // The fence spans along its x, turned so that x runs along the gate's line, open where the tunnel
+        // stands on it.
+        let fenceX = SIMD2(g.inward.y, -g.inward.x)
+        let tunnelAt = (belt.tunnel.x - station.offset.x - g.center.x) * fenceX.x + (belt.tunnel.z - station.offset.y - g.center.y) * fenceX.y
+        let gap = (tunnelAt - Props.xrayTunnelWidth / 2)...(tunnelAt + Props.xrayTunnelWidth / 2)
+        let fence = Looks.current.gate(width: g.width, gap: gap) ?? Props.laserFence(width: g.width, gap: gap)
+        fence.eulerAngles.y = CGFloat(atan2(g.inward.x, g.inward.y))
+        fence.position = v3(station.offset.x + g.center.x, 0, station.offset.y + g.center.y)
+        fence.name = "station:" + station.name
+        staticRoot.addChildNode(fence)
         // Belt and tunnel along the way through: their z runs pad-ward.
         let along = CGFloat(atan2(g.inward.x, g.inward.y))
         let length = simd_distance(belt.start, belt.exit) + 0.5
@@ -377,7 +436,7 @@ extension StationController {
         operatorNode.name = "gate:" + station.name
         propRoot.addChildNode(operatorNode)
         let watch = atan2(screenAt.x - standAt.x, screenAt.y - standAt.y)
-        gates[station.name] = GateView(arch: arch, belt: beltNode, tunnel: tunnel, monitor: monitor, operatorNode: operatorNode,
+        gates[station.name] = GateView(fence: fence, belt: beltNode, tunnel: tunnel, monitor: monitor, operatorNode: operatorNode,
                                        inward: g.inward, restYaw: facingDeck, watchYaw: watch)
     }
 
@@ -402,6 +461,46 @@ extension StationController {
                 gateSide[m.id] = onPad
             }
             drawXRay(simulation.gates[name], gv: gv, station: station, dt: dt)
+            drawFence(gv, station: station, dt: dt)
+        }
+    }
+
+    /// The fence at work: a ring of light sweeps down a body while it is checked, and the lasers of its
+    /// stretch switch off once it is through the check, on again behind it.
+    private func drawFence(_ gv: GateView, station: Station, dt: Double) {
+        guard let g = station.gate else { return }
+        let fenceX = SIMD2(g.inward.y, -g.inward.x)
+        var open = Set<Int>()
+        for m in minions.values where m.station == station.name {
+            let d = m.pos - g.center
+            let side = d.x * g.inward.x + d.y * g.inward.y, across = d.x * fenceX.x + d.y * fenceX.y
+            if clock < m.checkUntil {
+                // At its check: the ring, from the head down to the floor.
+                let ring = gv.rings[m.id] ?? {
+                    let r = SCNNode(geometry: SCNTube(innerRadius: 0.15, outerRadius: 0.17, height: 0.01))
+                    r.geometry!.firstMaterial = flat(Props.scanIdle)
+                    propRoot.addChildNode(r)
+                    gv.rings[m.id] = r
+                    return r
+                }()
+                let t = 1 - (m.checkUntil - clock) / SecurityCheck.seconds
+                ring.position = v3(station.offset.x + m.pos.x, 0.6 * (1 - t), station.offset.y + m.pos.y)
+            } else if let ring = gv.rings.removeValue(forKey: m.id) {
+                ring.removeFromParentNode()
+            }
+            // Checked for this crossing and at the line: its lane stands open.
+            guard m.checkedCrossing, clock >= m.checkUntil - 0.1, abs(side) < 0.5 else { continue }
+            for (i, lane) in gv.lanes.enumerated() where across > lane.lo - 0.15 && across < lane.hi + 0.15 { open.insert(i) }
+        }
+        for (id, ring) in gv.rings where minions[id] == nil { ring.removeFromParentNode(); gv.rings[id] = nil }
+        for (i, lane) in gv.lanes.enumerated() {
+            // Off and on like a laser, not a fade: a flicker as they come back.
+            let back = !open.contains(i)
+            for b in lane.beams { b.isHidden = !back || (b.isHidden && Double.random(in: 0...1) < 0.5) }
+        }
+        // The glow is never quite still.
+        for (k, g) in gv.glows.enumerated() {
+            g.opacity = CGFloat(0.75 + 0.25 * sin(clock * 23 + Double(k) * 1.7) * sin(clock * 7.3 + Double(k)))
         }
     }
 

@@ -80,7 +80,7 @@ enum LookTests {
             "crate": look.crate(color: .white) != nil,
             "hold": look.hold(tall: true) != nil,
             "pallet": look.pallet(color: .white) != nil,
-            "gate": look.gate(width: 4) != nil,
+            "gate": look.gate(width: 4, gap: -0.33...0.33) != nil,
             "security unit": look.securityUnit() != nil,
             "tool": look.tool(.hammer, height: 0.5, depth: 0.3) != nil,
             "message": look.message(color: .white, floor: .white) != nil,

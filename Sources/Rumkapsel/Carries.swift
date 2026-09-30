@@ -315,11 +315,12 @@ extension Simulation {
                 putDown(m, on: to)
                 world.setDown(crate, at: to)
                 if to.area == .gate, let belt = station.belt, case .carry(_, _, let yard) = job.command.kind {
-                    // On the belt: this carry is done. Taking the crate off the far end, once it has been
-                    // looked at, is a carry of its own, on the board for the same hands first.
+                    // On the belt: this carry is done. Taking the crate off once it has been looked at is a
+                    // carry of its own, on the board for the same hands first. It waits at the deck end, on
+                    // this side of the fence, until the verdict says which end the crate comes out of.
                     gateReceived(crate, at: to)
                     cargo[id] = nil
-                    let collect = Command.carry(crate, from: beltEnd(station, belt, passed: true, crate: crate), to: yard)
+                    let collect = Command.carry(crate, from: beltEnd(station, belt, passed: false, crate: crate), to: yard)
                     if carry(collect, onDone: job.onDone) {
                         cargo[collect.id]?.onBelt = true
                         cargo[collect.id]?.prefer = m.id

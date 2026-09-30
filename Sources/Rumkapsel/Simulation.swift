@@ -667,6 +667,21 @@ final class Simulation<B: Body> {
 
     /// One frame of one body's walk: the wake from a bed or a shuttle, then a step along the path,
     /// passing whoever is in the way (`Walk`).
+    /// A body about to step across the fence between the deck and the pad, not yet checked for this
+    /// crossing: near the line on one side, its way going on to the other.
+    private func atSecurityFence(_ m: B, station: Station) -> Bool {
+        guard let g = station.gate, !m.path.isEmpty else { return false }
+        func side(_ p: SIMD2<Double>) -> Double { (p.x - g.center.x) * g.inward.x + (p.y - g.center.y) * g.inward.y }
+        let here = side(m.pos)
+        if abs(here) > SecurityCheck.clearAt { m.checkedCrossing = false }
+        guard !m.checkedCrossing, abs(here) < SecurityCheck.stopAt else { return false }
+        let along = SIMD2(-g.inward.y, g.inward.x)
+        let across = (m.pos.x - g.center.x) * along.x + (m.pos.y - g.center.y) * along.y
+        guard abs(across) <= g.width / 2 + 0.3 else { return false }   // beside the doorway, not in it
+        // Crossing: the way ahead ends up on the other side of the line.
+        return m.path.contains { side($0) * here < 0 && abs(side($0)) > 0.05 } && abs(here) > 0.05
+    }
+
     func stepWalk(_ m: B, station: Station, dt: Double) -> Stride {
         m.waitingOn = nil
         // Pace by the task, not by who: a loaded body is the slowest thing on the station, below
@@ -694,6 +709,12 @@ final class Simulation<B: Body> {
             m.wakeUntil = 0
             // Out of the shuttle: a job handed over while still stepping out begins now.
             if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
+        }
+        if clock < m.checkUntil { m.waitingOn = "the security check"; return .wondering }
+        if !m.path.isEmpty, atSecurityFence(m, station: station) {
+            m.checkUntil = clock + SecurityCheck.seconds
+            m.checkedCrossing = true
+            return .wondering
         }
         if !m.path.isEmpty, clock >= m.wonderUntil {
             // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto

@@ -7,6 +7,16 @@
 import Foundation
 import simd
 
+/// The security check at the fence between the deck and the pad: a body about to cross stops at the
+/// fence, is looked over, and only then steps through.
+enum SecurityCheck {
+    static let seconds = 0.8
+    /// How near the fence line a body stops for its check.
+    static let stopAt = 0.45
+    /// How far from the line a body has to be before its next crossing is checked again.
+    static let clearAt = 0.8
+}
+
 /// One station's X-ray: what waits on the belt and what the belt is doing.
 final class GateJob {
     let station: String
