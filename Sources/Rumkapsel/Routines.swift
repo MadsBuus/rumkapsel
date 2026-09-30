@@ -148,9 +148,10 @@ enum Routines {
     /// wand only comes out once there is a pallet standing there to load.
     private static func hands(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Minion.Tool? {
         switch m.current?.kind {
-        case .dispatch: return .tablet
-        case .loadPallet, .unloadPallet: return .telekinesis
-        case .weld: return .goggles   // the same as welding at a cone
+        // Out when it is there and at it, away the moment it leaves.
+        case .dispatch: return m.phaseKind == .act ? .tablet : nil
+        case .loadPallet, .unloadPallet: return m.phaseKind == .act ? .telekinesis : nil
+        case .weld: return m.phaseKind == .act ? .goggles : nil   // the same as welding at a cone
         case .pushPallet: return pallet?.pushing == true ? .hands : nil
         default: break
         }

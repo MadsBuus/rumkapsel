@@ -340,7 +340,7 @@ extension StationController {
     func buildGate(_ station: Station) {
         if let old = gates[station.name] { for n in [old.belt, old.tunnel, old.monitor, old.operatorNode] { n.removeFromParentNode() } }
         gates[station.name] = nil
-        guard world.deckInUse(station: station.name), let g = station.gate, let belt = station.belt, let op = station.operatorCell else { return }
+        guard world.deckInUse(station: station.name), let g = station.gate, let belt = station.belt else { return }
         let arch = Looks.current.gate(width: g.width) ?? Props.securityGate(width: g.width)
         // The arch spans along its x: turned so that x runs along the gate's line.
         arch.eulerAngles.y = CGFloat(atan2(g.inward.x, g.inward.y))
@@ -363,18 +363,16 @@ extension StationController {
         propRoot.addChildNode(tunnel)
         // The operator on the deck across from its post, the monitor beside it toward the belt, both facing
         // back over the deck, where the crates come from and where anyone watching is.
-        let at = SIMD2(station.offset.x + Double(op.x), station.offset.y + Double(op.y))
-        let toBelt = SIMD2(belt.start.x, belt.start.z) - at
-        let side = simd_length(toBelt) > 0.001 ? simd_normalize(toBelt) : SIMD2(1.0, 0)
+        guard let stand = station.operatorSpot, let screen = station.monitorSpot else { return }
         let facingDeck = atan2(-g.inward.x, -g.inward.y)
         let monitor = Props.xrayMonitor()
-        let screenAt = at + side * 0.42 - g.inward * 0.05
+        let screenAt = screen + station.offset
         monitor.position = v3(screenAt.x, 0, screenAt.y)
         monitor.eulerAngles.y = CGFloat(facingDeck)
         monitor.name = "station:" + station.name
         propRoot.addChildNode(monitor)
         let operatorNode = Looks.current.securityUnit() ?? Props.securityUnit()
-        let standAt = at - side * 0.12 - g.inward * 0.18
+        let standAt = stand + station.offset
         operatorNode.position = v3(standAt.x, 0.02, standAt.y)
         operatorNode.name = "gate:" + station.name
         propRoot.addChildNode(operatorNode)

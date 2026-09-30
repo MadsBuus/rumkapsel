@@ -239,7 +239,7 @@ final class Simulation<B: Body> {
             // body while the visit lasted, so it is planned now, with nothing in hand for a moment.
             if case .react(_, let where_, _) = next.kind, m.place != where_ { send(m, to: where_) }
             begin(m, next, announce: next.isJob)
-        } else { send(m, to: place ?? restPlace(m)) }
+        } else if place != nil || !takeNext(m) { send(m, to: place ?? restPlace(m)) }
     }
 
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
@@ -382,8 +382,8 @@ final class Simulation<B: Body> {
         }
         // The hover pallet where it stands this instant. It is read here rather than from the obstacle
         // grid because it slides while it is pushed, and that grid is only rebuilt when the markers are.
-        // Its own pusher walks round to its edge and must not be kept off it.
-        if let p = pallets[m.station], p.hand != m.id { out.formUnion(palletFootprint(p)) }
+        // Its pusher, hands on it while it moves, stands at its edge and is not kept off it.
+        if let p = pallets[m.station], !(p.pushing && p.hand == m.id) { out.formUnion(palletFootprint(p)) }
         return out
     }
 
@@ -431,7 +431,7 @@ final class Simulation<B: Body> {
             // A pallet is met between waypoints as often as on one, and it moves: the line itself is
             // walked, a step at a time, rather than only the corners of it.
             var inside = false
-            if let p = pallets[m.station], p.hand != m.id {
+            if let p = pallets[m.station], !(p.pushing && p.hand == m.id) {
                 inside = insidePallet(p, m.pos)
                 blocked = blocked || inside || crosses(p, from: m.pos, along: m.path)
             }

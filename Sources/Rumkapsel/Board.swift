@@ -163,6 +163,15 @@ extension Simulation {
         return !m.hasLoad && releasable(m, c)
     }
 
+    /// A body just done with an order looks at the board before anything else: the best order it may
+    /// take, if there is one, leaving alone any it gave up (the board's own pass hands one of those back
+    /// only when nobody else can take it). False when there is nothing for it and it may go and rest.
+    func takeNext(_ m: B) -> Bool {
+        guard onStaff(m) else { return false }
+        for o in openings() where o.station == m.station && !o.gaveUp.contains(m.id) && give(o, to: m) { return true }
+        return false
+    }
+
     /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
     /// it — a free one if there is one, else one on lower work that can be taken off it.
     func assignOrders() {
@@ -228,11 +237,12 @@ extension Simulation {
                 return false
             }
             m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
-            walk(m, to: standCell(station, near: p.cellUnder))   // beside it, never onto it
+            m.path = []   // the step walks it up to the pallet from here, not wherever it was going
         case .weld(_, let repo):
             guard let side = weldSide(station: station, repo: repo) else { return false }
             start(m, .weld(station: station.name, repo: repo, side: side), announce: true)
             guard case .weld = m.current?.kind else { return false }
+            m.path = []   // the weld walks it round to its side of the hull from here
         }
         m.bed = nil
         m.couch = nil   // off the couch: the seat is free for someone else

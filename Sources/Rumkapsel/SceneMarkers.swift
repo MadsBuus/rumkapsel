@@ -55,7 +55,7 @@ extension StationController {
             }
             let a = SIMD2(belt.start.x - st.offset.x, belt.start.z - st.offset.y), b = SIMD2(belt.exit.x - st.offset.x, belt.exit.z - st.offset.y)
             for k in 0...8 { block(a + (b - a) * Double(k) / 8, 0.3) }
-            if let op = st.operatorCell { block(SIMD2(Double(op.x), Double(op.y)), 0.3) }
+            for p in [st.operatorSpot, st.monitorSpot].compactMap({ $0 }) { block(p, 0.3) }
         }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
         // static redraw and read from there: nothing on the static root moves between redraws.

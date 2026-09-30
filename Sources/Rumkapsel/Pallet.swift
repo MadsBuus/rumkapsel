@@ -179,9 +179,10 @@ extension Simulation {
             faceConsole(m, station)
             beginPallet(m, station: station, repo: repo, number: number)
         case .loadPallet(_, let repo):
-            guard m.phaseKind != .walk else { advance(m); return .spent }
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return .spent }
-            guard p.isSettled else { m.waitingOn = "the pallet to settle"; return .spent }
+            guard m.phaseKind != .walk else { if atPallet(m, p, dt: dt) { advance(m) }; return .spent }
+            facePallet(m, p)
+            guard p.isSettled else { m.waitingOn = "the pallet to settle"; return .posed }
             world.truth.setPallet(station: station.name, state: .loaded)
             nextStep(m, station: station, p)
         case .pushPallet(_, let repo):
@@ -227,9 +228,10 @@ extension Simulation {
                 walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
             }
         case .unloadPallet(_, let repo, let back):
-            guard m.phaseKind != .walk else { advance(m); return .spent }
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return .spent }
-            guard p.isEmpty else { return .spent }
+            guard m.phaseKind != .walk else { if atPallet(m, p, dt: dt) { advance(m) }; return .spent }
+            facePallet(m, p)
+            guard p.isEmpty else { return .posed }
             endPallet(p, station: station)
             finish(m)
             send(m, to: .lounge)
@@ -238,6 +240,36 @@ extension Simulation {
             return nil
         }
         return .spent
+    }
+
+    /// Beside the pallet to work it with the wand: stepped up from outside to an arm's length off the
+    /// edge nearest where the body came from, facing it, like anyone at a crate. The edge is chosen once,
+    /// on the way, so the walk does not change its mind as it goes round.
+    private func atPallet(_ m: B, _ p: PalletJob, dt: Double) -> Bool {
+        let edge = m.fetchSpot ?? palletEdge(p, from: m.pos)
+        m.fetchSpot = edge
+        let d = edge - p.spot
+        let out = abs(d.x) / (PalletGeometry.width / 2) >= abs(d.y) / (PalletGeometry.depth / 2)
+            ? SIMD2(d.x < 0 ? -1.0 : 1.0, 0) : SIMD2(0, d.y < 0 ? -1.0 : 1.0)
+        guard atArmsLength(m, of: edge, from: out, dt: dt) else { return false }
+        m.fetchSpot = nil
+        return true
+    }
+
+    /// The point on the pallet's edge nearest a place, kept off the corners.
+    private func palletEdge(_ p: PalletJob, from at: SIMD2<Double>) -> SIMD2<Double> {
+        let d = at - p.spot
+        let hx = PalletGeometry.width / 2, hy = PalletGeometry.depth / 2
+        if abs(d.x) / hx >= abs(d.y) / hy {
+            return SIMD2(p.spot.x + (d.x < 0 ? -hx : hx), p.spot.y + min(max(d.y, -hy + 0.15), hy - 0.15))
+        }
+        return SIMD2(p.spot.x + min(max(d.x, -hx + 0.3), hx - 0.3), p.spot.y + (d.y < 0 ? -hy : hy))
+    }
+
+    /// Turned to the pallet while working it.
+    private func facePallet(_ m: B, _ p: PalletJob) {
+        let d = p.spot - m.pos
+        if d.x * d.x + d.y * d.y > 0.01 { m.facing = atan2(d.x, d.y) }
     }
 
     // MARK: the pallet itself

@@ -78,6 +78,36 @@ extension Station {
         let c = Cell(x: post.x - (first.pad.x - first.deck.x), y: post.y - (first.pad.y - first.deck.y))
         return deckCells.contains(c) ? c : nil
     }
+
+    /// Where the operator stands and where its monitor stands, on the floor plan: the monitor beside the
+    /// operator toward the belt. The scene draws them here, and the floor keeps clear of them.
+    var operatorSpot: SIMD2<Double>? { operatorPlaces?.stand }
+    var monitorSpot: SIMD2<Double>? { operatorPlaces?.monitor }
+    private var operatorPlaces: (stand: SIMD2<Double>, monitor: SIMD2<Double>)? {
+        guard let op = operatorCell, let belt, let g = gate else { return nil }
+        let at = SIMD2(Double(op.x), Double(op.y))
+        let toBelt = SIMD2(belt.start.x - offset.x, belt.start.z - offset.y) - at
+        let length = (toBelt.x * toBelt.x + toBelt.y * toBelt.y).squareRoot()
+        let side = length > 0.001 ? toBelt / length : SIMD2(1.0, 0)
+        return (at - side * 0.12 - g.inward * 0.18, at + side * 0.42 - g.inward * 0.05)
+    }
+
+    /// The floor the X-ray stands on, cell by cell: the belt the length and width of its frame, the operator
+    /// and its monitor. No crate row is laid on these cells, and nobody walks through them.
+    var gateFootprint: Set<Cell> {
+        guard let belt else { return [] }
+        func cell(_ p: SIMD2<Double>) -> Cell { Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded())) }
+        let a = SIMD2(belt.start.x - offset.x, belt.start.z - offset.y) - belt.inward * 0.25
+        let b = SIMD2(belt.exit.x - offset.x, belt.exit.z - offset.y) + belt.inward * 0.25
+        let across = SIMD2(-belt.inward.y, belt.inward.x)
+        var out = Set<Cell>()
+        for k in 0...12 {
+            let p = a + (b - a) * Double(k) / 12
+            for w in [-0.24, 0, 0.24] { out.insert(cell(p + across * w)) }
+        }
+        for p in [operatorSpot, monitorSpot].compactMap({ $0 }) { out.insert(cell(p)) }
+        return out
+    }
 }
 
 extension Simulation {

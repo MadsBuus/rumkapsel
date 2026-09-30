@@ -1294,7 +1294,8 @@ final class World {
     /// though the board has cleared it: that is where it still stands. `aside` names crates
     /// ("repo#number") to give a fresh place away from the column they stand in.
     func yardLayout(station: Station, area: String, stillUntested: Int? = nil, stillTested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
-        let cells = area == "deck" ? station.deckCells : area == "decon" ? station.deconCells : station.storageCells
+        // The deck's rows keep off the X-ray's floor.
+        let cells = area == "deck" ? station.deckCells.filter { !station.gateFootprint.contains($0) } : area == "decon" ? station.deconCells : station.storageCells
         let neat = area != "storage"
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         guard !cells.isEmpty else { return [] }

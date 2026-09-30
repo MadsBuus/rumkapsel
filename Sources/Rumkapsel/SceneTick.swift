@@ -359,7 +359,7 @@ extension StationController {
             let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
-                : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
+                : (m.path.isEmpty && !onFixture && !m.onJob ? Double(rig.eulerAngles.y) : m.facing)   // idle faces you; at work, its work
             // At a rocket with the torch: the tip it is welding, and the seam the torch is on.
             let welding: (rocket: RocketJob, point: SIMD2<Double>)? = {
                 guard simulation.isWelding(m), case .weld(_, let repo, let side)? = m.current?.kind,

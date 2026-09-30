@@ -167,41 +167,40 @@ enum Playbook {
         PlaybookEntry("pull request", "PR closed unmerged", "crate turns red", at([("Open PR", 2), ("Close PR", 2)]),
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 
-        // The release, through the yard: web's crates already stand in storage and on the deck.
-        PlaybookEntry("release", "Staging PR opened", "pallet loads crates from storage", [("1x", 0.5), ("Release: Staging opens", .palletLoaded)],
+        // The release, start to finish, one moment each in the order a release has them: web's crates
+        // already stand in storage and on the deck.
+        PlaybookEntry("release", "Staging PR opened", "the pallet loads crates from storage", [("1x", 0.5), ("Release: Staging opens", .palletLoaded)],
                       camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR merged", "pallet pushed to the deck, waits there loaded while staging deploys",
+        PlaybookEntry("release", "Staging PR merged", "the pallet is pushed to the deck and waits there loaded",
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged)],
                       camera: .area("deck", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy goes live", "the waiting pallet is unloaded onto the deck",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
-                       ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
-                      camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy fails", "the waiting pallet's light turns red; it stays loaded",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
-                       ("1x", 1), ("Deploy: Staging fails", 6)],
-                      camera: .area("deck", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR closed unmerged", "pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
-                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA approves a crate", "crate set on the X-ray belt, scanned green, out small on the pad, carried to the rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
-                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "QA rejects a crate", "crate carried back through the arch, scanned red, set in the untested row", [("4x", 0.5), (rejectQA, .pickedUp(approved)), ("1x", .onDeck(approved))],
-                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Staging deploy builds a new tip", "api's first release to staging: the pusher welds the tip together panel by panel on its cradle",
+        PlaybookEntry("release", "Staging deploy running", "the tip is welded together panel by panel on its cradle (api's first release)",
                       [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
                        ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", 0.25), ("1x", .tipAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy re-welds the tip", "web's tip is already built: the pusher goes over its seams while staging deploys",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
-                       ("Deploy: Staging starts", .palletStaged), ("1x", 10), ("Deploy: Staging goes live", .palletGone)],
-                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production PR opened", "the lifter rises out of the pad under the tip; the approved crate is loaded",
+        PlaybookEntry("release", "Staging deploy live", "the pallet is unloaded onto the deck",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
+                       ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
+                      camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "QA approves a crate", "through the X-ray, out small on the pad, carried to its rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
+                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("release", "QA rejects a crate", "back out through the arch, scanned red, to the untested row", [("4x", 0.5), (rejectQA, .pickedUp(approved)), ("1x", .onDeck(approved))],
+                      camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("release", "Production PR opened", "the lifter rises under the tip and the approved crate goes aboard",
                       [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production deploy succeeds", "rocket flies to the colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
+        PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                            ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Production deploy fails", "flight loses signal", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
+
+        // When a release goes another way.
+        PlaybookEntry("detours", "Staging PR closed unmerged", "the pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
+                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("detours", "Staging deploy fails", "the waiting pallet's light turns red; it stays loaded",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
+                       ("1x", 1), ("Deploy: Staging fails", 6)],
+                      camera: .area("deck", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("detours", "Production deploy fails", "the flight loses signal", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                          ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Fails", 10)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
 
@@ -249,10 +248,10 @@ enum Playbook {
 
     /// The shelves, in the order the list shows them: what a session does, what comes of it, what a body
     /// does when it is not working, and everyone else.
-    static let groups = ["office", "pull request", "release", "others", "life"]
+    static let groups = ["office", "pull request", "release", "detours", "others", "life"]
     /// What a shelf is called in the list.
     static func shelfTitle(_ group: String) -> String {
-        ["office": "Session", "pull request": "Pull request", "release": "Release",
+        ["office": "Session", "pull request": "Pull request", "release": "Release", "detours": "When a release goes another way",
          "others": "Other people", "life": "Idle"][group] ?? group
     }
     static func onShelf(_ group: String) -> [(offset: Int, entry: PlaybookEntry)] {
