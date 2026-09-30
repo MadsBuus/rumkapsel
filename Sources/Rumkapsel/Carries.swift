@@ -78,7 +78,7 @@ extension Simulation {
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard, pastGate: pastGate) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, pastGate: pastGate)
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, pastGate: pastGate, postedAt: clock)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
@@ -95,24 +95,8 @@ extension Simulation {
         }
     }
 
-    /// Gives waiting carries to free bodies on the same station.
-    func scheduleCarries() {
-        for (id, job) in cargo where job.carrier == nil {
-            guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
-            // Crates stacked above this one are still on their way: wait, deadline and all.
-            guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            let all = bodies.values.filter { $0.station == crate.station && $0.isFree }
-            let fresh = all.filter { !job.gaveUp.contains($0.id) }
-            let free = fresh.isEmpty ? all : fresh
-            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else { continue }
-            start(m, job.command, announce: true)
-            guard m.current?.id == job.command.id else { continue }
-            cargo[id]?.carrier = m.id
-            m.bed = nil
-            m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = route(m, to: standCell(station, near: from.cell))
-        }
-        // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
+    /// A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
+    func hurryCarriers() {
         for (id, job) in cargo where job.carrier != nil && !job.hurry {
             guard let crate = job.command.crate, case .carry(_, _, let to) = job.command.kind, let m = job.carrier.flatMap({ bodies[$0] }) else { continue }
             let queued = cargo.values.filter { $0.carrier == nil && $0.command.crate?.station == crate.station && $0.command.crate?.repo == crate.repo }.count
@@ -293,8 +277,8 @@ extension Simulation {
                     }
                     return .spent
                 }
-                // Stand an arm's length from the crate, facing it, before taking hold.
-                guard atArmsLength(m, of: boxAt, dt: dt) else { return .spent }
+                // Stand an arm's length from the crate, facing it, before taking hold: off the belt from beside it.
+                guard atArmsLength(m, of: boxAt, from: from.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
                 advance(m)
                 startLift(m, height: from.pos.y)
                 return .spent
@@ -321,7 +305,7 @@ extension Simulation {
                 let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
                     // A step back from the spot so the crate goes down in front, not underfoot.
-                    guard atArmsLength(m, of: spot, dt: dt) else { return .spent }
+                    guard atArmsLength(m, of: spot, from: to.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
                     startSetDown(m, on: to)
                     return .spent
                 }
@@ -339,7 +323,7 @@ extension Simulation {
                     cargo[id]?.command = job.command.from(far)
                     m.current = cargo[id]?.command
                     m.phase = 0
-                    walk(m, to: standCell(station, near: far.cell))
+                    walk(m, to: besideBelt(station, belt, at: belt.exit))
                     return .spent
                 }
                 cargo[id] = nil

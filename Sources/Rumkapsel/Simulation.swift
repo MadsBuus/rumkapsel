@@ -23,6 +23,8 @@ struct Cargo {
     var onBelt = false
     /// Through the X-ray and passed: bound for its stack by the rocket, not the belt again.
     var pastGate = false
+    /// When it went up on the board.
+    var postedAt = 0.0
 }
 
 /// Something the simulation decided this tick that the scene shows once.
@@ -457,17 +459,22 @@ final class Simulation<B: Body> {
     // MARK: hands
 
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
-    func atArmsLength(_ m: B, of spot: SIMD2<Double>, dt: Double) -> Bool {
+    func atArmsLength(_ m: B, of spot: SIMD2<Double>, from side: SIMD2<Double>? = nil, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
         if dist > 0.05 { m.facing = atan2(to.x, to.y) }
-        // Far off: walked to the cell beside it, round whatever stands in the way. From there the last
-        // bit is a shuffle, and a cell it already stands on is never walked to again.
+        // Far off: walked to the cell beside it, round whatever stands in the way — on the side asked for,
+        // a tile out, when it matters which side (a crate on the belt is taken from beside the belt). From
+        // there the last bit is a shuffle, and the shuffle never sends it walking again: a body already
+        // nearer than the cell it walked to is stepping up, not lost.
         if dist > 0.9, let st = fleet.stations[m.station] {
-            let stand = standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+            let near = side.map { spot + $0 } ?? spot
+            let stand = standCell(st, near: Cell(x: Int(near.x.rounded()), y: Int(near.y.rounded())))
+            let fromStand = SIMD2(Double(stand.x), Double(stand.y)) - spot
+            let stepping = dist < (fromStand.x * fromStand.x + fromStand.y * fromStand.y).squareRoot() + 0.1
             // A walk that can get no closer, a cell short (someone standing on the one way through a small
             // office), leaves the rest to the shuffle rather than a body waiting there for good.
-            if m.path.isEmpty, m.cell != stand {
+            if m.path.isEmpty, m.cell != stand, !stepping {
                 let path = route(m, to: stand)
                 let end = path.last.map { Cell(x: Int($0.x.rounded()), y: Int($0.y.rounded())) } ?? m.cell
                 if end != m.cell || dist > 1.6 { m.path = path; return false }

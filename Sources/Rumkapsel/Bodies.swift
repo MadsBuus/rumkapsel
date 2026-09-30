@@ -3,7 +3,7 @@
 // Every command in hand is either making progress, or waiting on a fact it has named. Anything else
 // is a stall, and after ten station seconds the minion gives up: it says so in the log, puts down what
 // it holds where it stands, and is free again. Nothing is lost by giving up, because the work is not
-// kept in the minion: a carry goes back into the cargo queue from where the crate now lies, a new
+// kept in the minion: a carry goes back on the board from where the crate now lies, a new
 // office's crate stays on the floor for whoever is free next, and a visit simply ends. The ordinary
 // rules then re-issue whatever truth still wants, so a stranded job is retried rather than abandoned,
 // and a job whose conditions went away is dropped without a body left standing somewhere.
@@ -36,7 +36,7 @@ extension Simulation {
         queueDeliveries()
     }
 
-    /// The command goes back to truth and the minion is free: a carry is re-queued from where the
+    /// The command goes back to truth and the minion is free: a carry goes back on the board from where the
     /// crate now lies; a new office's crate waits on the floor for the next free hands; anything
     /// else just ends. Said in the log every time, so a repeat is a bug that shows rather than hides.
     func giveUp(_ m: B, _ c: Command, why: String) {

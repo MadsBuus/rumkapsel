@@ -42,6 +42,9 @@ final class GateJob {
 struct Belt {
     let start: SIMD3<Double>, tunnel: SIMD3<Double>, exit: SIMD3<Double>
     let inward: SIMD2<Double>
+    /// Across the belt, toward the half of the arch people walk through: the side a crate is set on
+    /// and taken off from.
+    let side: SIMD2<Double>
     static let top = 0.14
     static let intakeSeconds = 1.4, scanSeconds = 2.8, outSeconds = 1.4
 
@@ -64,7 +67,10 @@ extension Station {
     var belt: Belt? {
         guard let arch = throughGate(height: Belt.top), let g = gate else { return nil }
         let d = SIMD3(g.inward.x, 0, g.inward.y)
-        return Belt(start: arch.middle - d * 0.75, tunnel: arch.middle, exit: arch.middle + d * 0.8, inward: g.inward)
+        let along = SIMD2(-g.inward.y, g.inward.x)
+        let toWalk = g.center + offset - SIMD2(arch.middle.x, arch.middle.z)
+        let side = (toWalk.x * along.x + toWalk.y * along.y) >= 0 ? along : -along
+        return Belt(start: arch.middle - d * 0.75, tunnel: arch.middle, exit: arch.middle + d * 0.8, inward: g.inward, side: side)
     }
     /// The operator's place: on the deck, across the gate line from the post, beside the belt.
     var operatorCell: Cell? {
@@ -75,6 +81,13 @@ extension Station {
 }
 
 extension Simulation {
+    /// The floor beside the belt at one of its ends, on the side people walk through: where a carrier
+    /// waits for a crate to come off, and stands to take it.
+    func besideBelt(_ station: Station, _ belt: Belt, at end: SIMD3<Double>) -> Cell {
+        let near = SIMD2(end.x - station.offset.x, end.z - station.offset.y) + belt.side
+        return standCell(station, near: Cell(x: Int(near.x.rounded()), y: Int(near.y.rounded())))
+    }
+
     /// Where a crate comes off the belt: the far end, on the pad, when it passed; the deck end when it did not.
     func beltEnd(_ station: Station, _ belt: Belt, passed: Bool, crate: CrateRef) -> Spot {
         let at = passed ? belt.exit : belt.start
@@ -131,7 +144,7 @@ extension Simulation {
                     if let who = cargo[id]?.carrier, let m = bodies[who], m.current?.id == id {
                         m.current = command
                         m.waitingOn = nil
-                        if !passed { m.phase = 0; m.phaseUntil = 0; walk(m, to: standCell(station, near: spot.cell)) }
+                        if !passed { m.phase = 0; m.phaseUntil = 0; walk(m, to: besideBelt(station, belt, at: belt.start)) }
                     }
                 }
                 cue(.gateHandoff(station: name, crate: crate, from: spot, passed: passed, riding: riding != nil))

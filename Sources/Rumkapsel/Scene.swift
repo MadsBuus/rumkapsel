@@ -1240,7 +1240,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         stepMission()
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
-            simulation.scheduleCarries()
+            simulation.assignOrders()
             simulation.stepRockets()
             simulation.servicePallets()
             simulation.reconcileBodies()
