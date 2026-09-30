@@ -356,10 +356,11 @@ enum Scenarios {
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),
         ], floor: { sim in
-            // One crate of web was on the deck; it goes aboard once. A board still saying "ready to ship"
-            // after the crate is in the hold must not put it back on the deck to be carried again.
+            // Two crates of web were on the deck, one untested and one approved; each goes aboard once. A
+            // board still saying "ready to ship" after a crate is in the hold must not put it back on the
+            // deck to be carried again.
             let loads = Scenario.count(sim, .carry(to: .pad))
-            if loads != 1 { return "\(loads) carries into the rocket for one crate" }
+            if loads != 2 { return "\(loads) carries into the rocket for two crates" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),

@@ -548,13 +548,14 @@ extension StationController {
 
     /// Off the belt at one of its ends. Whoever set it on the belt takes it from here, the same crate
     /// they put down; one that came on the pallet waits there for the next free hands.
-    func gateHandoff(station name: String, crate: CrateRef, from spot: Spot, passed: Bool, riding: Bool) {
+    func gateHandoff(station name: String, crate: CrateRef, from spot: Spot, passed: Bool, collect: Int?) {
         guard let gv = gates[name], let station = fleet.stations[name] else { return }
         let node = gv.moving?.key == crate.key ? gv.moving!.node : (crateNode(crate) ?? gateCrate(crate))
         gv.moving = nil
         if node.parent == nil { propRoot.addChildNode(node) }
         node.position = v3(spot.pos.x, spot.pos.y, spot.pos.z)
-        guard !riding else { return }
+        // Collected by the carry waiting for it: this is the crate it lifts.
+        if let collect { cargoNodes[collect] = node; return }
         let command = world.carryFromGate(station: station, crate: crate, from: spot)
         carry(command, node: node, pastGate: passed) { [weak self] in
             guard let self else { return }

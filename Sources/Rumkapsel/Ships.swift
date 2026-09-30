@@ -360,20 +360,29 @@ extension Simulation {
 
     /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away. The crate is
     /// the scene's to draw: ordered, it lies unseen on its slot; dropped, it comes down onto the floor.
+    /// Fetching it is an order on the board, for the body it was ordered for first.
     func startDelivery(_ m: B, roomKey: String) {
         guard let station = fleet.stations[m.station], station.hasHangar, !station.hangarSlots.isEmpty,
-              let room = station.rooms[roomKey] else { return }
+              station.rooms[roomKey] != nil else { return }
+        orderDelivery(station: station, roomKey: roomKey, for: m)
+        assignOrders()
+    }
+
+    /// The shuttle for a new office, ordered for a body or for whoever is free.
+    func orderDelivery(station: Station, roomKey: String, for m: B?) {
+        guard station.hasHangar, !station.hangarSlots.isEmpty, let room = station.rooms[roomKey] else { return }
+        let repo = room.repo ?? m?.home.repo ?? ""
         let key = "\(station.name)|\(roomKey)"
         // A slot with nothing on it and no ship bound for it; every slot taken, the least recently ordered.
         let slotIndex = world.truth.freeSlots(station: station.name, of: station.hangarSlots.count).first
-            ?? shipsInFlight(m.station) % station.hangarSlots.count
-        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m.id)
-        cue(.crateOrdered(key: key, station: station.name, slot: slotIndex, repo: room.repo ?? m.home.repo))
+            ?? shipsInFlight(station.name) % station.hangarSlots.count
+        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m?.id)
+        cue(.crateOrdered(key: key, station: station.name, slot: slotIndex, repo: repo))
         let spot = station.hangarSlots[slotIndex]
-        let command = Command.flight(.dropCrate(order: order), station: m.station, slot: slotIndex,
+        let command = Command.flight(.dropCrate(order: order), station: station.name, slot: slotIndex,
                                      what: "the office for \(room.name)")
         let style = flightStyle()
-        let flight = Flight(station: m.station, repo: room.repo ?? m.home.repo, command: command,
+        let flight = Flight(station: station.name, repo: repo, command: command,
                             arrival: style.arrival, departure: style.departure,
                             at: SIMD3(spot.x, 0, spot.y), rest: Station.restOverCrate, side: style.side,
                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
@@ -382,7 +391,7 @@ extension Simulation {
         }
         // A hard sequence: the crate comes out only once its carrier stands at the slot. With no carrier
         // left for it, the ship unloads anyway and the crate waits on the floor.
-        let stationName = m.station
+        let stationName = station.name
         flight.ready = { [weak self] in
             guard let self, let carrier = self.bodies.values.first(where: { o in
                 guard o.station == stationName, case .deliverOffice(let k) = o.current?.kind else { return false }
@@ -391,10 +400,6 @@ extension Simulation {
             return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
         }
         launch(flight)
-        start(m, .deliverOffice(order: order, name: room.name), announce: false)
-        m.place = .hangar
-        m.fetchSpot = spot
-        walk(m, to: station.bayStand(slot: slotIndex))
     }
 
     // MARK: rockets

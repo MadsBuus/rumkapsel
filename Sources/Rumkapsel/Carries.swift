@@ -314,16 +314,17 @@ extension Simulation {
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
                 world.setDown(crate, at: to)
-                if to.area == .gate, let belt = station.belt {
-                    // On the belt, and the carry goes on: through the arch to the belt's far end, to take
-                    // it off again once it has been looked at.
+                if to.area == .gate, let belt = station.belt, case .carry(_, _, let yard) = job.command.kind {
+                    // On the belt: this carry is done. Taking the crate off the far end, once it has been
+                    // looked at, is a carry of its own, on the board for the same hands first.
                     gateReceived(crate, at: to)
-                    let far = beltEnd(station, belt, passed: true, crate: crate)
-                    cargo[id]?.onBelt = true
-                    cargo[id]?.command = job.command.from(far)
-                    m.current = cargo[id]?.command
-                    m.phase = 0
-                    walk(m, to: besideBelt(station, belt, at: belt.exit))
+                    cargo[id] = nil
+                    let collect = Command.carry(crate, from: beltEnd(station, belt, passed: true, crate: crate), to: yard)
+                    if carry(collect, onDone: job.onDone) {
+                        cargo[collect.id]?.onBelt = true
+                        cargo[collect.id]?.prefer = m.id
+                    }
+                    finish(m)
                     return .spent
                 }
                 cargo[id] = nil

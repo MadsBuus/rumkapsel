@@ -171,13 +171,14 @@ extension Simulation {
                     cargo[id]?.command = command
                     cargo[id]?.onBelt = false
                     cargo[id]?.pastGate = passed
+                    // Whoever is waiting for it steps up to wherever it came out, walking round to the deck end
+                    // through the arch for one sent back.
                     if let who = cargo[id]?.carrier, let m = bodies[who], m.current?.id == id {
                         m.current = command
                         m.waitingOn = nil
-                        if !passed { m.phase = 0; m.phaseUntil = 0; walk(m, to: besideBelt(station, belt, at: belt.start)) }
                     }
                 }
-                cue(.gateHandoff(station: name, crate: crate, from: spot, passed: passed, riding: riding != nil))
+                cue(.gateHandoff(station: name, crate: crate, from: spot, passed: passed, collect: riding))
                 job.phase = .rest
             }
         }

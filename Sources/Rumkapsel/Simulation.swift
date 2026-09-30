@@ -25,6 +25,8 @@ struct Cargo {
     var pastGate = false
     /// When it went up on the board.
     var postedAt = 0.0
+    /// The hands it goes to first when they are free: whoever set the crate on the belt collects it.
+    var prefer: String?
 }
 
 /// Something the simulation decided this tick that the scene shows once.
@@ -57,7 +59,8 @@ enum Cue {
     /// The X-ray's verdict: passed or not.
     case gateScan(station: String, passed: Bool)
     /// A crate off the belt at one of its ends, for a hand to carry on: to its stack, or to the untested row.
-    case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, riding: Bool)
+    /// A crate off the belt at one of its ends; `collect` is the carry already waiting for it, if any.
+    case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, collect: Int?)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.

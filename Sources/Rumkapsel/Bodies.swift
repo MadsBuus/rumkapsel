@@ -78,43 +78,20 @@ extension Simulation {
         }
     }
 
-    /// New offices are a queue, not an errand tied to one body. A crate on the bay floor is a fact,
-    /// and the station always acts on it: with nobody fetching it, it goes to the next free minion,
-    /// the session it was ordered for first, whoever gave it up last. It goes into whatever room its
-    /// order names now, and if that room is gone it folds away where it lies. A pending office with no
-    /// order at all, no ship and nobody on it, has its shuttle ordered again.
+    /// New offices are orders on the board, not errands tied to one body. A crate whose office went away
+    /// while it lay on the bay floor folds away where it lies. A pending office with no order at all, no
+    /// ship and nobody on it, has its shuttle ordered again, for its own session if it is here.
     func queueDeliveries() {
         for station in fleet.stations.values {
-            let fetching = Set(bodies.values.compactMap { m -> Int? in
-                guard m.station == station.name, case .deliverOffice(let id) = m.current?.kind else { return nil }
-                return id
-            })
-            let free = bodies.values.filter { $0.station == station.name && $0.isFree }
-            for order in world.truth.deliveries.values where order.station == station.name && order.landed && !fetching.contains(order.id) {
-                guard let room = station.rooms[order.roomKey] else {
-                    // The office went away while its crate was on the floor: the crate folds away where it lies.
-                    cue(.foldCrate(order.key))
-                    world.truth.officeDelivered(order.key)
-                    onEvent(.log("the office for \(order.roomKey) is gone: \(Words.current.foldsAway)"))
-                    continue
-                }
-                let box = bayCrate(order, station: station).at
-                func distance(_ a: B) -> Double { abs(a.pos.x - box.x) + abs(a.pos.y - box.y) }
-                let fresh = free.filter { !order.gaveUp.contains($0.id) }
-                let pool = fresh.isEmpty ? free : fresh
-                guard let m = pool.first(where: { $0.id == order.session }) ?? pool.min(by: { distance($0) < distance($1) }) else { continue }
-                start(m, .deliverOffice(order: order.id, name: room.name), announce: false)
-                guard case .deliverOffice = m.current?.kind else { continue }
-                m.couch = nil; m.bed = nil
-                m.place = .hangar
-                onEvent(.log("\(m.home.name) picks up the office for \(room.name) from \(Words.current.theBay)"))
+            for order in world.truth.deliveries.values where order.station == station.name && order.landed && station.rooms[order.roomKey] == nil {
+                cue(.foldCrate(order.key))
+                world.truth.officeDelivered(order.key)
+                onEvent(.log("the office for \(order.roomKey) is gone: \(Words.current.foldsAway)"))
             }
-            // Pending with no order and no ship: the shuttle never came, or the app was relaunched under it.
             for key in world.truth.pendingOffices where key.hasPrefix(station.name + "|") && world.truth.delivery(for: key) == nil {
                 let roomKey = String(key.dropFirst(station.name.count + 1))
-                guard station.rooms[roomKey] != nil,
-                      let m = free.first(where: { $0.home.key == roomKey }) ?? free.first else { continue }
-                startDelivery(m, roomKey: roomKey)
+                guard station.rooms[roomKey] != nil else { continue }
+                orderDelivery(station: station, roomKey: roomKey, for: bodies.values.first { $0.station == station.name && $0.home.key == roomKey })
             }
         }
     }

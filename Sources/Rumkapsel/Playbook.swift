@@ -343,10 +343,10 @@ final class PlaybookController {
     private var clock = 0.0
     private var loop: Timer?
     private let listWidth = 240.0
-    private var frame: NSRect
+    /// Where the station goes: right of the list, the whole of the rest of the window as it is now.
+    private var stationRect: NSRect { NSRect(x: listWidth, y: 0, width: max(1, view.bounds.width - listWidth), height: view.bounds.height) }
 
     init(frame: NSRect) {
-        self.frame = frame
         let stationRect = NSRect(x: listWidth, y: 0, width: frame.width - listWidth, height: frame.height)
         station = StationController(frame: stationRect, demo: false, simulated: true)
         sim = SimulatorModel(station: station)
@@ -366,6 +366,12 @@ final class PlaybookController {
         station.view.frame = rect
         station.view.autoresizingMask = [.width, .height]
         station.viewSize = rect.size
+        // Told of every resize, as the station's own window tells its station.
+        station.view.postsFrameChangedNotifications = true
+        let view = station.view, station = station
+        NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: .main) { [weak station, weak view] _ in
+            MainActor.assumeIsolated { if let view { station?.viewSize = view.bounds.size } }
+        }
         station.drone.isEnabled = false
         station.settlesView = false
         view.addSubview(station.view)
@@ -384,7 +390,7 @@ final class PlaybookController {
         sim.quiesce()
         station.quiesce()
         station.view.removeFromSuperview()
-        let stationRect = NSRect(x: listWidth, y: 0, width: frame.width - listWidth, height: frame.height)
+        let stationRect = self.stationRect
         station = StationController(frame: stationRect, demo: false, simulated: true)
         sim = SimulatorModel(station: station)
         mount(stationRect)
