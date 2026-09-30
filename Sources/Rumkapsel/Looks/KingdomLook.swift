@@ -948,7 +948,7 @@ struct KingdomLook: Look {
             light.name = "wandLight"
             pivot.addChildNode(light)
             n.addChildNode(pivot)
-        case .hands:
+        case .hands, .torch:
             return nil
         }
         return n

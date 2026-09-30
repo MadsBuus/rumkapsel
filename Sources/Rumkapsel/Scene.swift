@@ -74,6 +74,9 @@ enum Pick {
     static let onboard = 32
     /// A planet's colony: drawn by the mission camera only, lit by the planets' sun and its own light.
     static let colony = 64
+    /// A rocket lifting off the pad while its flight is on: drawn by the station's camera only, since the
+    /// mission camera is riding it.
+    static let launching = 128
 }
 
 /// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred

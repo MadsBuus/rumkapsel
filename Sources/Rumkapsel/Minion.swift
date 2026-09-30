@@ -16,7 +16,7 @@ final class Minion: Body {
     private(set) var hammerPivot: SCNNode?
     /// The flashlight's grip, swept about to play its cone over the work.
     private(set) var lightPivot: SCNNode?
-    enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis, hands }
+    enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis, hands, torch }
     /// The wand's tip and the little light in it, lit only while a crate is in the air.
     private(set) var wandTip: SCNNode?
     private(set) var wandLight: SCNNode?
@@ -255,6 +255,37 @@ final class Minion: Body {
             pivot.addChildNode(handle)
             n.addChildNode(pivot)
             hammerPivot = pivot
+        case .torch:
+            // A welding torch held up and forward at the work, its nozzle burning blue-white, and a
+            // visor down over the face.
+            let pivot = SCNNode()
+            pivot.position = v3(0.06, h * 0.5, d / 2 + 0.04)
+            pivot.eulerAngles.x = -0.5
+            let grip = SCNNode(geometry: SCNBox(width: 0.035, height: 0.035, length: 0.16, chamferRadius: 0))
+            grip.geometry!.firstMaterial = dark
+            grip.position = v3(0, 0, 0.08)
+            pivot.addChildNode(grip)
+            let nozzle = SCNNode(geometry: SCNBox(width: 0.022, height: 0.022, length: 0.06, chamferRadius: 0))
+            nozzle.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.6, 0.3)))
+            nozzle.position = v3(0, 0, 0.19)
+            pivot.addChildNode(nozzle)
+            let flame = SCNNode(geometry: SCNBox(width: 0.03, height: 0.03, length: 0.05, chamferRadius: 0))
+            flame.geometry!.firstMaterial = flat(NSColor(rgb: (0.8, 0.92, 1)))
+            flame.position = v3(0, 0, 0.245)
+            pivot.addChildNode(flame)
+            let glow = SCNNode()
+            glow.light = SCNLight()
+            glow.light!.type = .omni
+            glow.light!.color = NSColor(rgb: (0.75, 0.88, 1))
+            glow.light!.intensity = 700
+            glow.light!.attenuationEndDistance = 1.2
+            glow.position = v3(0, 0, 0.26)
+            pivot.addChildNode(glow)
+            n.addChildNode(pivot)
+            let visor = SCNNode(geometry: SCNBox(width: w * 0.9, height: 0.07, length: 0.02, chamferRadius: 0))
+            visor.geometry!.firstMaterial = lit(NSColor(rgb: (0.12, 0.13, 0.16)))
+            visor.position = v3(0, h * 0.8, d / 2 + 0.011)
+            n.addChildNode(visor)
         case .hands:
             // Both hands out at chest height: what you put on a heavy thing to shove it.
             for side in [-1.0, 1.0] {

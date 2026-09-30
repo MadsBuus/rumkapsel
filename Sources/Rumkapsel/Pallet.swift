@@ -4,6 +4,7 @@
 // slab, the shadow, the light, the pusher's lean and the flying crate from these facts.
 
 import Foundation
+import simd
 
 /// The hover pallet's shape, as numbers: the slab's size, how high it hovers, and where its crate
 /// slots are on the top plate.
@@ -211,12 +212,17 @@ extension Simulation {
                 let welding = rockets[station.name + "|" + repo]?.welding ?? false
                 // The pusher is the welder: over at the rocket while the tip is welded, back beside the
                 // pallet to take the crates off.
-                let at = welding ? weldCell(station: station, repo: repo) : standCell(station, near: p.cellUnder)
-                if let at, m.path.isEmpty, abs(m.pos.x - Double(at.x)) + abs(m.pos.y - Double(at.y)) > 0.6 {
+                let spot = welding ? weldSpot(station: station, repo: repo) : nil
+                let at = spot.flatMap { _ in weldCell(station: station, repo: repo) } ?? standCell(station, near: p.cellUnder)
+                let there = spot.map { simd_distance(m.pos, $0) < 0.1 } ?? false
+                if m.path.isEmpty, !there, abs(m.pos.x - Double(at.x)) + abs(m.pos.y - Double(at.y)) > 0.6 {
                     walk(m, to: at)
                     return .spent
                 }
-                if welding, m.path.isEmpty, let slot = rocketSpot(station: station, repo: repo) {
+                if let spot, m.path.isEmpty, let slot = rocketSpot(station: station, repo: repo) {
+                    // The last step up to the work is taken at a walking pace, off the grid the walk keeps to.
+                    let d = spot - m.pos, gap = simd_length(d)
+                    if gap > 0.02 { m.pos += d / gap * min(gap, 1.4 * dt) }
                     m.facing = atan2(slot.x - m.pos.x, slot.y - m.pos.y)
                 }
                 guard m.path.isEmpty, !welding else { return .spent }
@@ -382,10 +388,27 @@ extension Simulation {
         return station.padSlots[slot % station.padSlots.count]
     }
 
-    /// Where the welder stands: beside the rocket on the side away from its tower.
+    /// Where the welder works: in front of the rocket on the side away from its tower and its stack, so
+    /// nothing of this rocket or the next stands between it and the tip. The cell it walks to, and the
+    /// spot it steps up to from there.
+    func weldSpot(station: Station, repo: String) -> SIMD2<Double>? {
+        guard let at = rocketSpot(station: station, repo: repo), let g = station.gate else { return nil }
+        let front = -g.inward   // toward the deck, where the gate and anyone watching are
+        let side = SIMD2(-front.y, front.x)
+        let away = simd_dot(side, SIMD2(1, 0)) > 0 ? -side : side   // the tower stands on +x
+        return at + front * 0.42 + away * 0.32
+    }
     func weldCell(station: Station, repo: String) -> Cell? {
-        guard let at = rocketSpot(station: station, repo: repo) else { return nil }
-        return standCell(station, near: Cell(x: Int((at.x - 0.8).rounded()), y: Int(at.y.rounded())))
+        guard let s = weldSpot(station: station, repo: repo) else { return nil }
+        return standCell(station, near: Cell(x: Int(s.x.rounded()), y: Int(s.y.rounded())))
+    }
+
+    /// A body at the rocket with the torch: the pallet's pusher while its tip is welded, standing there.
+    func isWelding(_ m: B) -> Bool {
+        guard case .waitPallet(let st, let repo)? = m.current?.kind, let p = pallets[st], p.dispatcher == m.id,
+              rockets[st + "|" + repo]?.welding == true, m.path.isEmpty, let station = fleet.stations[st],
+              let spot = weldSpot(station: station, repo: repo) else { return false }
+        return simd_distance(m.pos, spot) < 0.1
     }
 
     /// Every tip being welded while its staging deploy runs: a new one gains its panels at the pace the
@@ -405,8 +428,15 @@ extension Simulation {
             let welder = p.flatMap { bodies[$0.dispatcher] }
             r.welding = p != nil && (running || (live && r.panels < RocketJob.hullPanels)) && welder != nil
             guard r.welding, clock >= r.seamAt else { continue }
-            // Building: the torch is on the panel just set. Whole: from seam to seam, a moment on each.
-            r.seam = r.panels < RocketJob.hullPanels ? max(0, r.panels - 1) : (r.seam + 7) % RocketJob.hullPanels
+            // Building: the torch is on the panel just set. Whole: from seam to seam on the sides that face
+            // the welder, up and down the hull, a moment on each.
+            if r.panels < RocketJob.hullPanels { r.seam = max(0, r.panels - 1) }
+            else if let station = fleet.stations[r.station], let at = rocketSpot(station: station, repo: r.repo),
+                    let spot = weldSpot(station: station, repo: r.repo) {
+                let a = atan2(spot.x - at.x, spot.y - at.y)
+                let facing = Int(((a - .pi / 2) / (.pi / 3)).rounded()), side = ((facing + Int.random(in: -1...0)) % 6 + 6) % 6
+                r.seam = Int.random(in: 0..<(RocketJob.hullPanels / 6)) * 6 + side
+            }
             r.seamAt = clock + (r.panels < RocketJob.hullPanels ? 0.2 : 0.9)
         }
     }

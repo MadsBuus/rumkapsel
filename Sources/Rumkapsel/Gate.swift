@@ -26,12 +26,21 @@ final class GateView {
     var moving: (key: String, node: SCNNode)?
     /// The picture on the screen, and the crate it is of.
     var showing = ""
+    /// The operator's head and arms, and what it is reacting to since when: a crate through, or one
+    /// sent back.
+    let head: SCNNode?, armL: SCNNode?, armR: SCNNode?
+    var reaction: (passed: Bool, since: Double)?
+    let standsAt: SCNVector3
 
     init(arch: SCNNode, belt: SCNNode, tunnel: SCNNode, monitor: SCNNode, operatorNode: SCNNode, inward: SIMD2<Double>,
          restYaw: Double, watchYaw: Double) {
         self.arch = arch; self.belt = belt; self.tunnel = tunnel; self.monitor = monitor; self.operatorNode = operatorNode
         self.inward = inward; self.restYaw = restYaw; self.watchYaw = watchYaw; yaw = restYaw
         eye = operatorNode.childNode(withName: "eye", recursively: true)
+        head = operatorNode.childNode(withName: "head", recursively: true)
+        armL = operatorNode.childNode(withName: "armL", recursively: true)
+        armR = operatorNode.childNode(withName: "armR", recursively: true)
+        standsAt = operatorNode.position
         screen = monitor.childNode(withName: "screen", recursively: true)
         sweep = monitor.childNode(withName: "sweep", recursively: true)
         for n in [arch, tunnel] { n.enumerateChildNodes { c, _ in if c.name == "light" { lights.append(c) } } }
@@ -103,15 +112,32 @@ extension Props {
         _ = box(0.08, 0.08, 0.08, v3(0, 0.12, 0), dark)
         _ = box(0.28, 0.24, 0.2, v3(0, 0.28, 0), shell)
         _ = box(0.12, 0.08, 0.01, v3(0, 0.3, 0.101), dark)
-        _ = box(0.24, 0.17, 0.2, v3(0, 0.5, 0), shell)
-        _ = box(0.244, 0.02, 0.204, v3(0, 0.595, 0), trim)
-        let eye = box(0.19, 0.05, 0.012, v3(0, 0.51, 0.101), flat(scanIdle))
+        // The head turns on its neck; the arms swing at the shoulder. Named for the scene to move.
+        let head = SCNNode()
+        head.name = "head"
+        head.position = v3(0, 0.42, 0)
+        n.addChildNode(head)
+        func part(_ w: Double, _ h: Double, _ l: Double, _ at: SCNVector3, _ m: SCNMaterial, on parent: SCNNode) -> SCNNode {
+            let b = SCNNode(geometry: SCNBox(width: w, height: h, length: l, chamferRadius: 0))
+            b.geometry!.firstMaterial = m
+            b.position = at
+            parent.addChildNode(b)
+            return b
+        }
+        _ = part(0.24, 0.17, 0.2, v3(0, 0.08, 0), shell, on: head)
+        _ = part(0.244, 0.02, 0.204, v3(0, 0.175, 0), trim, on: head)
+        let eye = part(0.19, 0.05, 0.012, v3(0, 0.09, 0.101), flat(scanIdle), on: head)
         eye.name = "eye"
-        _ = box(0.015, 0.08, 0.015, v3(0.08, 0.64, -0.04), dark)
+        _ = part(0.015, 0.08, 0.015, v3(0.08, 0.22, -0.04), dark, on: head)
         for side in [-1.0, 1.0] {
             _ = box(0.05, 0.05, 0.05, v3(side * 0.165, 0.36, 0), dark)
-            let arm = box(0.04, 0.04, 0.2, v3(side * 0.165, 0.32, 0.1), shell)
+            let shoulder = SCNNode()
+            shoulder.name = side < 0 ? "armL" : "armR"
+            shoulder.position = v3(side * 0.165, 0.36, 0)
+            n.addChildNode(shoulder)
+            let arm = part(0.04, 0.04, 0.2, v3(0, -0.035, 0.095), shell, on: shoulder)
             arm.eulerAngles.x = 0.35
+            _ = part(0.055, 0.03, 0.05, v3(0, -0.07, 0.19), dark, on: shoulder)
         }
         return n
     }
@@ -232,8 +258,8 @@ enum XRay {
         return h % 3 == 0 ? finds[Int((h / 3) % UInt64(finds.count))] : nil
     }
 
-    static func image(repo: String, number: Int, commits: Int) -> NSImage {
-        let key = "\(repo)#\(number)"
+    static func image(repo: String, number: Int, commits: Int, sentBack: Bool = false) -> NSImage {
+        let key = "\(repo)#\(number)" + (sentBack ? " back" : "")
         if let i = cache[key] { return i }
         var seed = stableHash("cubes \(key)") | 1
         func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
@@ -289,6 +315,17 @@ enum XRay {
             let label = NSAttributedString(string: "#\(number)" + (found.map { "   ·   \($0)?" } ?? ""),
                                            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 22, weight: .medium), .foregroundColor: bone])
             label.draw(at: NSPoint(x: 18, y: 14))
+            // Sent back: a red cross over the whole picture, and a red frame round it.
+            if sentBack {
+                let red = NSColor(rgb: (1.0, 0.25, 0.22))
+                red.withAlphaComponent(0.18).setFill(); r.fill()
+                red.setStroke()
+                let frame = NSBezierPath(rect: r.insetBy(dx: 6, dy: 6)); frame.lineWidth = 12; frame.stroke()
+                let x = NSBezierPath(); x.lineWidth = 26; x.lineCapStyle = .round
+                x.move(to: NSPoint(x: crate.minX - 20, y: crate.minY - 10)); x.line(to: NSPoint(x: crate.maxX + 20, y: crate.maxY + 10))
+                x.move(to: NSPoint(x: crate.minX - 20, y: crate.maxY + 10)); x.line(to: NSPoint(x: crate.maxX + 20, y: crate.minY - 10))
+                x.stroke()
+            }
             return true
         }
         cache[key] = img
@@ -390,6 +427,33 @@ extension StationController {
         let want = scanning != nil ? gv.watchYaw : gv.restYaw
         gv.yaw += atan2(sin(want - gv.yaw), cos(want - gv.yaw)) * min(1, dt * 6)
         gv.operatorNode.eulerAngles.y = CGFloat(gv.yaw)
+        // What the operator does with itself: looks over the deck at rest, types at the monitor while a crate
+        // is in the tunnel, raises an arm for one through, and both, shaking, for one sent back.
+        let reacting = gv.reaction.flatMap { clock - $0.since < ($0.passed ? 1.6 : 2.6) ? $0 : nil }
+        var headYaw = 0.0, left = 0.0, right = 0.0, shake = 0.0
+        if let r = reacting {
+            let t = clock - r.since
+            if r.passed { right = -1.9 * min(1, t / 0.25) * (t > 1.3 ? max(0, (1.6 - t) / 0.3) : 1) }
+            else {
+                left = -1.55 * min(1, t / 0.2); right = left
+                shake = sin(clock * 55) * 0.012
+                headYaw = sin(clock * 9) * 0.35
+            }
+        } else if scanning != nil {
+            left = -0.25 + sin(clock * 16) * 0.2
+            right = -0.25 - sin(clock * 16) * 0.2
+            headYaw = sin(clock * 3) * 0.08
+        } else {
+            headYaw = sin(clock * 2 * .pi / 5) * 0.5
+        }
+        gv.head?.eulerAngles.y = CGFloat(headYaw)
+        gv.armL?.eulerAngles.x = CGFloat(left)
+        gv.armR?.eulerAngles.x = CGFloat(right)
+        gv.operatorNode.position = SCNVector3(gv.standsAt.x + CGFloat(shake), gv.standsAt.y, gv.standsAt.z)
+        if let r = reacting {
+            let on = r.passed || clock.truncatingRemainder(dividingBy: 0.3) < 0.15
+            gv.eye?.geometry?.firstMaterial?.diffuse.contents = r.passed ? Props.passedLight : on ? Props.scanRed : Props.scanRed.darker(0.6)
+        }
         // The screen: the crate's X-ray while it is in the tunnel, a line sweeping down it; dark otherwise.
         if let c = scanning, case .scanning(_, let since) = phase {
             if gv.showing != c.key {
@@ -400,9 +464,18 @@ extension StationController {
             let t = ((clock - since) / 1.1).truncatingRemainder(dividingBy: 1)
             gv.sweep?.opacity = 0.9
             gv.sweep?.position.y = CGFloat(0.82 + 0.18 - t * 0.36)
+        } else if case .outgoing(let c, _, false) = phase {
+            // Sent back out the way it came: its picture stays up, crossed out.
+            gv.sweep?.opacity = 0
+            if gv.showing != c.key + " back" {
+                gv.showing = c.key + " back"
+                let commits = world.works.find(repo: c.repo, crate: c.number)?.pulls.count ?? 0
+                gv.screen?.geometry?.firstMaterial?.diffuse.contents = XRay.image(repo: c.repo, number: c.number,
+                                                                                   commits: max(2, commits * 2 + c.number % 4), sentBack: true)
+            }
         } else {
             gv.sweep?.opacity = 0
-            if job?.scan.map({ clock > $0.until }) ?? true, !gv.showing.isEmpty {
+            if job?.scan.map({ clock > $0.until }) ?? true, gv.scan.map({ clock > $0.until }) ?? true, !gv.showing.isEmpty {
                 gv.showing = ""
                 gv.screen?.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.03, 0.07, 0.14))
             }
@@ -472,6 +545,7 @@ extension StationController {
     /// The X-ray's verdict, heard once.
     func gateScanned(station: String, passed: Bool) {
         drone.ping(seed: passed ? 7 : 3)
+        gates[station]?.reaction = (passed, clock)
     }
 
     /// Off the belt at one of its ends. Whoever set it on the belt takes it from here, the same crate
@@ -498,8 +572,18 @@ extension StationController {
         let row = station.ledger[crate.repo, crate.number]
         let passes = row?.cleared == true || row?.alien == true || !world.workflow(repo: crate.repo).has(.cleared)
         let color: NSColor = pad && passes ? Props.passedLight : Props.scanRed
-        let alarm = pad && !passes
-        gv.scan = (color, clock + (alarm ? 2.4 : 0.9), alarm)
+        // Going up untested sets off the alarm; coming back out, sent back by QA, sets off the same strobe,
+        // and the operator puts its picture up crossed out.
+        let alarm = !(pad && passes)
+        gv.scan = (color, clock + (alarm ? 2.6 : 0.9), alarm)
+        gv.reaction = (!alarm, clock)
+        if !pad {
+            drone.ping(seed: 3)
+            let commits = world.works.find(repo: crate.repo, crate: crate.number)?.pulls.count ?? 0
+            gv.screen?.geometry?.firstMaterial?.diffuse.contents = XRay.image(repo: crate.repo, number: crate.number,
+                                                                               commits: max(2, commits * 2 + crate.number % 4), sentBack: true)
+            gv.showing = crate.key + " back"
+        }
         if let plate = node.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
             plate.removeAllActions()
             plate.opacity = 1

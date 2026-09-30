@@ -246,9 +246,7 @@ extension StationController {
             s.node.opacity = CGFloat(1 - t / life)
             return true
         }
-        guard r.welding, let p = simulation.pallets[r.station], let m = minions[p.dispatcher], m.path.isEmpty,
-              let station = fleet.stations[r.station], let spot = simulation.weldCell(station: station, repo: r.repo),
-              abs(m.pos.x - Double(spot.x)) + abs(m.pos.y - Double(spot.y)) < 0.8, clock >= v.sparkAt,
+        guard r.welding, let p = simulation.pallets[r.station], let m = minions[p.dispatcher], simulation.isWelding(m), clock >= v.sparkAt,
               let seam = piece("panel\(r.seam)") else { return }
         v.sparkAt = clock + 0.04
         let w = seam.convertPosition(SCNVector3(Double.random(in: -0.06...0.06), -0.05, 0.02), to: propRoot)

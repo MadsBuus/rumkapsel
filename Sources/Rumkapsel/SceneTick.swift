@@ -187,7 +187,7 @@ extension StationController {
     /// out for itself, so it is handed in; everything else follows from the body.
     func kit(_ m: Minion) -> Routines.Outfit {
         let p = simulation.pallets[m.station]
-        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
+        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) }, welding: simulation.isWelding(m))
     }
 
     func tickMinions(dt: Double) {
