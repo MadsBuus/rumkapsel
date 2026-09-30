@@ -186,6 +186,32 @@ final class Flight {
 
 /// One repository's rocket. It runs one command at a time — standing by, loading, steaming, lifting
 /// off — and a stage only ever moves forward.
+/// A rocket's measurements, shared by the prop that draws it and the simulation that works on it.
+enum RocketGeometry {
+    static let height = 1.5, radius = 0.17
+    /// The tip's hull: six flat sides of panels, in rings of six, standing on the lifter.
+    static let panels = 30
+    static var hullRadius: Double { radius * 0.9 }
+    /// From the middle of the hull out to the middle of a side.
+    static var apothem: Double { hullRadius * cos(.pi / 6) }
+    static var hullBase: Double { 0.12 + height * 0.49 }
+    static var hullHeight: Double { height * 0.4 }
+    /// How high the cradle holds a tip with no lifter under it.
+    static let cradleTop = 0.3
+    /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
+    static func facing(side k: Int) -> SIMD2<Double> {
+        let a = .pi / 2 + Double(k) * .pi / 3
+        return SIMD2(sin(a), cos(a))
+    }
+    /// The side facing most nearly the way asked.
+    static func side(facing way: SIMD2<Double>) -> Int {
+        (0..<6).max { a, b in
+            let fa = facing(side: a), fb = facing(side: b)
+            return fa.x * way.x + fa.y * way.y < fb.x * way.x + fb.y * way.y
+        } ?? 0
+    }
+}
+
 final class RocketJob {
     let station: String
     let repo: String
@@ -201,11 +227,11 @@ final class RocketJob {
     var cargo = 0
     /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
     /// deploy runs; `built` is the same count as it creeps up.
-    static let hullPanels = 30
-    var panels = RocketJob.hullPanels
-    var built = Double(RocketJob.hullPanels)
-    /// A staging deploy under way: the tip is being welded, built panel by panel or, whole already, gone
-    /// over seam by seam. `seam` is the panel the torch is on.
+    var panels = RocketGeometry.panels
+    var built = Double(RocketGeometry.panels)
+    /// The tip wants welding: its staging deploy is under way, and it is built panel by panel or, whole
+    /// already, gone over seam by seam by whoever takes the weld off the board. `seam` is the panel the
+    /// torch is on.
     var welding = false
     var seam = 0
     var seamAt = 0.0

@@ -19,7 +19,7 @@ extension Simulation {
             // left on it. A wait on a named fact is allowed its time, but not forever: a fact that has not
             // come in ninety station seconds is one that is not coming, and the wait is given up too.
             let steady = (c.isRest && m.path.isEmpty) || m.lying || (m.path.isEmpty && clock < m.phaseUntil)   // any timed phase: an act, a reaction, a crouch
-                || m.isQA || { if case .leave = c.kind { return true }; if case .waitPallet = c.kind { return true }; return false }()   // walking the rows, the airlock's cycle, standing by a pallet for a release that may take hours: standing is the work
+                || m.isQA || isWelding(m) || { if case .leave = c.kind { return true }; return false }()   // walking the rows, at the hull with the torch, the airlock's cycle: standing is the work
             if steady { m.stallMark = ""; continue }
             let s = Station.sub(m.pos)
             let mark = "\(c.id)|\(m.phase)|\(s.x),\(s.y)|\(m.path.count)|\(m.waitingOn ?? "")"

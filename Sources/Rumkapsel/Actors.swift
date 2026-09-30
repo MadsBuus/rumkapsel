@@ -27,12 +27,10 @@ final class RocketView {
     /// Whether the lifter was under the tip when the tower was stood, which sets its arm's height.
     var towerLifter: Bool
     /// On the station clock, like everything else that moves: when it came, the panels in the air and
-    /// when each set off, the lifter coming up or going down, and the sparks.
+    /// when each set off, and the lifter coming up or going down.
     var bornAt: Double
     var flying: [Int: Double] = [:]
     var rise: (up: Bool, since: Double)?
-    var sparks: [(node: SCNNode, from: SIMD3<Double>, velocity: SIMD3<Double>, at: Double)] = []
-    var sparkAt = 0.0
     init(node: SCNNode, untested: Bool, panels: Int, lifter: Bool, at clock: Double) {
         self.node = node; untestedShown = untested; panelsShown = panels; lifterShown = lifter; towerLifter = lifter; bornAt = clock
     }
@@ -168,7 +166,7 @@ extension StationController {
             weld(r, v)
             stepLifter(v)
             // Going up from the cradle, with no time for the lifter to rise: it is simply there.
-            if r.stage.rank >= 3, !v.lifterShown { v.lifterShown = true; Props.shape(v.node, lifter: true, panels: RocketJob.hullPanels) }
+            if r.stage.rank >= 3, !v.lifterShown { v.lifterShown = true; Props.shape(v.node, lifter: true, panels: RocketGeometry.panels) }
             guard r.stage.rank < 3, !v.node.hasActions else { continue }
             if r.tall != v.lifterShown, v.rise == nil {
                 v.lifterShown = r.tall
@@ -198,9 +196,8 @@ extension StationController {
         }
     }
 
-    /// The tip as the welders have it: each new panel flies across from the top of the tower onto its
-    /// place, the nose and the hatch go on with the last; sparks fly where the torch is while the welder
-    /// stands at the rocket.
+    /// The tip as it is built: each new panel flies across from the top of the tower onto its place, and
+    /// the nose and the hatch go on with the last.
     private func weld(_ r: RocketJob, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip") else { return }
         func piece(_ name: String) -> SCNNode? { tip.childNodes.first { ($0.value(forKey: "part") as? String) == name } }
@@ -225,7 +222,7 @@ extension StationController {
             if t >= 1 { panel.position = rest; v.flying[i] = nil }
         }
         // With the last panel home, the nose, the hatch and the portholes go on.
-        let whole = r.panels >= RocketJob.hullPanels && v.flying.isEmpty
+        let whole = r.panels >= RocketGeometry.panels && v.flying.isEmpty
         for name in ["nose", "hatch", "port"] {
             for c in tip.childNodes where (c.value(forKey: "part") as? String) == name {
                 if whole, c.isHidden { c.isHidden = false; c.setValue(clock, forKey: "on") }
@@ -236,28 +233,13 @@ extension StationController {
                 }
             }
         }
-        // Sparks: each on its own arc, gone in half a second.
-        let life = 0.45
-        v.sparks = v.sparks.filter { s in
-            let t = clock - s.at
-            guard t < life else { s.node.removeFromParentNode(); return false }
-            let p = s.from + s.velocity * t + SIMD3(0, -1.6 * t * t, 0)
-            s.node.position = v3(p.x, p.y, p.z)
-            s.node.opacity = CGFloat(1 - t / life)
-            return true
-        }
-        guard r.welding, let p = simulation.pallets[r.station], let m = minions[p.dispatcher], simulation.isWelding(m), clock >= v.sparkAt,
-              let seam = piece("panel\(r.seam)") else { return }
-        v.sparkAt = clock + 0.04
-        let w = seam.convertPosition(SCNVector3(Double.random(in: -0.06...0.06), -0.05, 0.02), to: propRoot)
-        for _ in 0..<2 {
-            let spark = SCNNode(geometry: SCNBox(width: 0.018, height: 0.018, length: 0.018, chamferRadius: 0))
-            spark.geometry!.firstMaterial = flat(Bool.random() ? NSColor(rgb: (1, 0.9, 0.55)) : NSColor(rgb: (0.75, 0.9, 1)))
-            spark.position = w
-            propRoot.addChildNode(spark)
-            let velocity = SIMD3(Double.random(in: -0.5...0.5), Double.random(in: 0.1...0.6), Double.random(in: -0.5...0.5))
-            v.sparks.append((spark, SIMD3(Double(w.x), Double(w.y), Double(w.z)), velocity, clock))
-        }
+    }
+
+    /// Where the torch is on a rocket being welded: the seam panel, in the scene.
+    func seamPoint(_ r: RocketJob) -> SCNVector3? {
+        guard let tip = rocketViews[r.key].flatMap({ Props.part($0.node, "tip") }),
+              let seam = tip.childNodes.first(where: { ($0.value(forKey: "part") as? String) == "panel\(r.seam)" }) else { return nil }
+        return seam.convertPosition(SCNVector3Zero, to: propRoot)
     }
 
     /// A production release opened: the lifter comes up out of the pad under the tip and lifts it off
@@ -266,7 +248,7 @@ extension StationController {
         guard let rise = v.rise else { return }
         guard let tip = Props.part(v.node, "tip"), let lifter = Props.part(v.node, "lifter") else { v.rise = nil; return }
         let base = (tip.value(forKey: "base") as? Double) ?? 0
-        let low = Props.cradleTop - base, deep = -(base + 0.2)
+        let low = RocketGeometry.cradleTop - base, deep = -(base + 0.2)
         let cradle = Props.part(v.node, "cradle")
         func ease(_ t: Double) -> Double { let k = min(1, max(0, t)); return k * k * (3 - 2 * k) }
         let t = (clock - rise.since) / 3.5

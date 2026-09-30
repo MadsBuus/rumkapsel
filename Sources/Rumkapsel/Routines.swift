@@ -131,11 +131,11 @@ enum Routines {
 
     /// The kit for what this body is doing now. `pallet` is what the station's hover pallet is up
     /// to, which only the simulation can say; everything else the body knows for itself.
-    static func outfit(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?, welding: Bool = false) -> Outfit {
+    static func outfit(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Outfit {
         var kit = Outfit()
         kit.pixels = m.bathing && m.phaseKind == .act && m.path.isEmpty
         kit.towel = m.drying
-        kit.tool = welding ? .torch : hands(m, at: clock, pallet: pallet)
+        kit.tool = hands(m, at: clock, pallet: pallet)
         return kit
     }
 
@@ -149,8 +149,8 @@ enum Routines {
     private static func hands(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Minion.Tool? {
         switch m.current?.kind {
         case .dispatch: return .tablet
-        case .waitPallet(_, let repo): return pallet?.repo == repo ? .telekinesis : .tablet
         case .loadPallet, .unloadPallet: return .telekinesis
+        case .weld: return .goggles   // the same as welding at a cone
         case .pushPallet: return pallet?.pushing == true ? .hands : nil
         default: break
         }

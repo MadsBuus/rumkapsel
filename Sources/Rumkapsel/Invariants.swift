@@ -114,7 +114,7 @@ final class Invariants {
                 }
             }
             // The pusher has its hands on it and leans into it: its place is at the edge, and in it.
-            for m in c.minions.values where m.station == name && m.id != p.dispatcher {
+            for m in c.minions.values where m.station == name && m.id != p.hand {
                 let deep = into(Double(m.node.position.x), Double(m.node.position.z), 0.28)
                 if deep > 0.05 {
                     let state = c.world.truth.pallets[name]?.state.rawValue ?? "?"

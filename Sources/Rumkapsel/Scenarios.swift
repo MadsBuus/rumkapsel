@@ -121,9 +121,6 @@ struct Expect {
     static func loadPallet(_ repo: String) -> Expect {
         command("loadPallet \(repo)") { if case .loadPallet(_, let r) = $0 { return r == repo }; return false }
     }
-    static func waitPallet(_ repo: String) -> Expect {
-        command("waitPallet \(repo)") { if case .waitPallet(_, let r) = $0 { return r == repo }; return false }
-    }
     static func pushPallet(_ repo: String) -> Expect {
         command("pushPallet \(repo)") { if case .pushPallet(_, let r) = $0 { return r == repo }; return false }
     }
@@ -244,7 +241,6 @@ enum Scenarios {
             .stagingOpened("web"),
             .dispatch("web"),
             .loadPallet("web"),
-            .waitPallet("web"),
             .stagingMerged("web"),
             .pushPallet("web"),
             .unloadPallet("web", back: false),
@@ -262,9 +258,10 @@ enum Scenarios {
             .stagingClosed("web"),
             .unloadPallet("web", back: true),
         ], floor: { sim in
-            // One web crate stood on the deck from the start; nothing new may have joined it.
+            // Two web crates stood on the deck from the start, one untested and one approved; nothing new
+            // may have joined them.
             let deck = Scenario.crates(sim, "deck", "web")
-            if deck > 1 { return "\(deck) web crates on the deck after a release that never merged" }
+            if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
             let storage = Scenario.crates(sim, "storage", "web")
             return storage >= 2 ? nil : "only \(storage) web crates back in storage"
         }),

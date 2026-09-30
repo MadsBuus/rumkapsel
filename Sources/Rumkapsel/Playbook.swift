@@ -69,7 +69,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
     /// A repository's tip all but built: every panel on but the last, which waits for staging to be live.
     static func tipAlmost(_ repo: String) -> PlaybookWait {
-        .until("\(repo)'s tip nearly built") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.panels >= RocketJob.hullPanels - 1 } }
+        .until("\(repo)'s tip nearly built") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.panels >= RocketGeometry.panels - 1 } }
     }
     /// Across on the deck, still loaded, waiting for staging.
     static let palletStaged = PlaybookWait.until("the pallet on the deck") { c in c.world.truth.pallets.values.contains { $0.state == .staged } }

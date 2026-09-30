@@ -150,7 +150,7 @@ extension StationController {
             leaving.name = nil
             leaving.opacity = 1
             leaving.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.launching }
-            Props.shape(leaving, lifter: true, panels: RocketJob.hullPanels)
+            Props.shape(leaving, lifter: true, panels: RocketGeometry.panels)
             leaving.childNode(withName: "flame", recursively: false)?.opacity = 1
             rocketRoot.addChildNode(leaving)
             leaving.runAction(.sequence([Looks.current.launch(leaving), .removeFromParentNode()]))

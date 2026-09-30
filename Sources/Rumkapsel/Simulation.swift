@@ -383,7 +383,7 @@ final class Simulation<B: Body> {
         // The hover pallet where it stands this instant. It is read here rather than from the obstacle
         // grid because it slides while it is pushed, and that grid is only rebuilt when the markers are.
         // Its own pusher walks round to its edge and must not be kept off it.
-        if let p = pallets[m.station], p.dispatcher != m.id { out.formUnion(palletFootprint(p)) }
+        if let p = pallets[m.station], p.hand != m.id { out.formUnion(palletFootprint(p)) }
         return out
     }
 
@@ -431,7 +431,7 @@ final class Simulation<B: Body> {
             // A pallet is met between waypoints as often as on one, and it moves: the line itself is
             // walked, a step at a time, rather than only the corners of it.
             var inside = false
-            if let p = pallets[m.station], p.dispatcher != m.id {
+            if let p = pallets[m.station], p.hand != m.id {
                 inside = insidePallet(p, m.pos)
                 blocked = blocked || inside || crosses(p, from: m.pos, along: m.path)
             }
@@ -712,6 +712,7 @@ final class Simulation<B: Body> {
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
         if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
+        if let weld = stepWeld(m, station: station, dt: dt) { return weld }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.

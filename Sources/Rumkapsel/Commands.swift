@@ -83,16 +83,16 @@ struct Command {
         case rocket(stage: RocketStage, station: String, repo: String)
         /// A teammate acting on something they just did, until the time runs out.
         case react(activity: Activity, place: Place, for: TimeInterval)
-        /// The dispatcher's errand: tablet in hand, to the storage console to order a pallet.
+        /// Ordering a pallet: tablet in hand, to the storage console.
         case dispatch(station: String, repo: String, number: Int)
         /// Lifting a repository's crates off their slots and onto the pallet, one at a time.
         case loadPallet(station: String, repo: String)
-        /// Standing by: at the console for a pallet, or beside a loaded one for the merge.
-        case waitPallet(station: String, repo: String)
         /// Hands on its edge, the pallet pushed out of storage and across to the deck.
         case pushPallet(station: String, repo: String)
         /// Floating the crates off again: onto the deck, or back into storage when the release closed.
         case unloadPallet(station: String, repo: String, back: Bool)
+        /// Welding a rocket's tip while its staging deploy runs, at one side of the hull.
+        case weld(station: String, repo: String, side: Int)
     }
 
     enum Bath { case shower, quick }
@@ -182,7 +182,8 @@ struct Command {
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
-        case .dispatch, .loadPallet, .waitPallet, .unloadPallet: return [.walk, .act]   // a pallet errand is a job: nothing calls the operator away
+        case .dispatch, .loadPallet, .unloadPallet: return [.walk, .act]
+        case .weld: return [.walk, .approach, .act]
         case .bath, .exercise, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
         case .rocket(let stage, _, _):
             switch stage {
@@ -198,7 +199,7 @@ struct Command {
     var isJob: Bool {
         switch kind {
         case .carry, .deliverOffice, .leave: return true
-        case .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet: return true
+        case .dispatch, .loadPallet, .pushPallet, .unloadPallet, .weld: return true
         default: return false
         }
     }
@@ -322,12 +323,12 @@ struct Command {
         Command(kind: .loadPallet(station: station, repo: repo), words: "loading \(Words.current.pallet) for \(repo)")
     }
 
-    static func waitPallet(station: String, repo: String, words: String) -> Command {
-        Command(kind: .waitPallet(station: station, repo: repo), words: words)
-    }
-
     static func pushPallet(station: String, repo: String) -> Command {
         Command(kind: .pushPallet(station: station, repo: repo), words: "pushing \(Words.current.pallet) to \(Words.current.theDeck)")
+    }
+
+    static func weld(station: String, repo: String, side: Int) -> Command {
+        Command(kind: .weld(station: station, repo: repo, side: side), words: "welding \(repo)'s rocket")
     }
 
     static func unloadPallet(station: String, repo: String, back: Bool) -> Command {

@@ -9,9 +9,9 @@
 // again, by it or by someone else. Work of the same rank never takes a body off another, so nobody
 // flips between two. A body taken off its work stands a beat, head up, before it goes.
 //
-// Carries are on the board. The pallet's errands, deliveries, packing, QA, the desk and the crew's
-// reactions still run as a body's own commands; each is given its rank here so the board knows what it
-// may take a body off, and none of them can be taken off yet.
+// Carries, the pallet's steps and welding a rocket's tip are on the board. Deliveries, packing, QA, the
+// desk and the crew's reactions still run as a body's own commands; each is given its rank here so the
+// board knows what it may take a body off, and none of them can be taken off yet.
 
 import Foundation
 
@@ -39,8 +39,8 @@ enum Rank: Int, Comparable {
 
 /// An order on the board that nobody has: what the board needs to hand it out.
 struct Opening {
-    /// The order's own id: a carry's is its command's.
-    let id: Int
+    /// What the order is.
+    let work: Work
     let rank: Rank
     let station: String
     /// Where the work starts, so it goes to the nearest body.
@@ -48,7 +48,23 @@ struct Opening {
     /// When it went up, so the oldest of a rank goes first.
     let postedAt: Double
     /// Who gave it up: passed over for it while anyone else can take it.
-    let gaveUp: Set<String>
+    var gaveUp: Set<String> = []
+
+    enum Work {
+        /// A carry, by its command's id.
+        case carry(Int)
+        /// The next step a station's pallet is at, or ordering one.
+        case pallet(station: String, step: PalletStep)
+        /// Welding a repository's rocket tip.
+        case weld(station: String, repo: String)
+    }
+}
+
+/// A pallet's steps, each one an order: out at the console, loaded, pushed across, and unloaded onto the
+/// deck, or back into storage when its release closed.
+enum PalletStep {
+    case order, load, push
+    case unload(back: Bool)
 }
 
 extension Simulation {
@@ -59,10 +75,47 @@ extension Simulation {
             guard case .carry(let crate, let from, _) = job.command.kind else { continue }
             // Crates stacked above this one are still on their way: it waits for them.
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            out.append(Opening(id: id, rank: rank(of: job.command), station: crate.station, at: from.cell,
+            out.append(Opening(work: .carry(id), rank: rank(of: job.command), station: crate.station, at: from.cell,
                                postedAt: job.postedAt, gaveUp: job.gaveUp))
         }
+        for station in fleet.stations.values where station.hasPad && !station.storageCells.isEmpty {
+            let name = station.name
+            let onIt = { (match: (Command.Kind) -> Bool) in self.bodies.values.contains { $0.station == name && $0.current.map { match($0.kind) } ?? false } }
+            if let p = pallets[name] {
+                // Nobody holding it, or whoever was has gone on to something else.
+                let held = p.hand.flatMap { bodies[$0] }.map { palletErrand(of: $0)?.station == name } ?? false
+                if !held, let step = palletStep(p) {
+                    let rank: Rank
+                    if case .unload(back: false) = step { rank = .release } else { rank = .yard }
+                    out.append(Opening(work: .pallet(station: name, step: step), rank: rank, station: name, at: p.cellUnder, postedAt: p.bornAt))
+                }
+            } else if world.truth.nextPallet(station: name) != nil,
+                      !onIt({ if case .dispatch(let s, _, _) = $0 { return s == name }; return false }) {
+                out.append(Opening(work: .pallet(station: name, step: .order), rank: .yard, station: name, at: station.storageConsole.cell, postedAt: 0))
+            }
+            for r in rockets.values where r.station == name && r.welding {
+                guard !onIt({ if case .weld(let s, let repo, _) = $0 { return s == name && repo == r.repo }; return false }),
+                      let at = rocketSpot(station: station, repo: r.repo) else { continue }
+                out.append(Opening(work: .weld(station: name, repo: r.repo), rank: .release, station: name,
+                                   at: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded())), postedAt: 0))
+            }
+        }
         return out.sorted { $0.rank != $1.rank ? $0.rank > $1.rank : $0.postedAt < $1.postedAt }
+    }
+
+    /// The step a pallet is at that wants hands, if any: nil while it waits on its own.
+    func palletStep(_ p: PalletJob) -> PalletStep? {
+        switch world.truth.pallets[p.station]?.state {
+        case .loading?: return .load
+        case .loaded?: return p.wantsBack ? .unload(back: true) : p.wantsPush ? .push : nil
+        case .moving?: return .push
+        case .staged?:
+            // On the deck until what it carries is live on staging; a deploy that never shows is not waited for.
+            let late = p.deploy == .unheard && clock - p.stagedAt > Deployments.findWithin
+            return p.deploy == .live || late ? .unload(back: false) : nil
+        case .unloading?: return .unload(back: p.wantsBack)
+        default: return nil
+        }
     }
 
     /// What a command is worth on the board.
@@ -73,7 +126,9 @@ extension Simulation {
             let job = cargo[c.id]
             if to == .pad || from.area == .tested || from.area == .gate || job?.onBelt == true || job?.aim.area == .gate { return .release }
             return .yard
-        case .deliverOffice, .pack, .stow, .dispatch, .loadPallet, .waitPallet, .pushPallet, .unloadPallet: return .yard
+        case .unloadPallet(_, _, let back): return back ? .yard : .release
+        case .weld: return .release
+        case .deliverOffice, .pack, .stow, .dispatch, .loadPallet, .pushPallet: return .yard
         case .qa: return .qa
         case .work: return .desk
         case .react: return .crew
@@ -82,11 +137,17 @@ extension Simulation {
         }
     }
 
-    /// Whether the board can take a body off the command it is on and put the command back: only a
-    /// carry, so far.
-    private func releasable(_ c: Command) -> Bool {
-        if case .carry = c.kind { return cargo[c.id] != nil }
-        return false
+    /// Whether the board can take a body off the command it is on, here and now, and put the command
+    /// back: at a safe point, never mid-lift, mid-leg of a push, or with a crate in the air off the wand.
+    private func releasable(_ m: B, _ c: Command) -> Bool {
+        switch c.kind {
+        case .carry: return cargo[c.id] != nil && m.phaseKind.interruptible
+        case .dispatch: return m.phaseKind == .walk
+        case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
+        case .pushPallet(let s, _): return pallets[s]?.pushing == false
+        case .weld: return true
+        default: return false
+        }
     }
 
     /// Whether a body may take orders from the board at all: not a teammate, a peer or a subagent,
@@ -98,8 +159,8 @@ extension Simulation {
     /// Whether a body on lower work may be taken off it for work of `rank`: its order can go back on
     /// the board, ranks lower, and it is at a safe point, walking or standing with empty hands.
     private func canTakeOff(_ m: B, for rank: Rank) -> Bool {
-        guard let c = m.current, releasable(c), self.rank(of: c) < rank else { return false }
-        return !m.hasLoad && m.phaseKind.interruptible
+        guard let c = m.current, self.rank(of: c) < rank else { return false }
+        return !m.hasLoad && releasable(m, c)
     }
 
     /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
@@ -123,7 +184,11 @@ extension Simulation {
     /// next thing.
     private func takeOff(_ m: B, for o: Opening) {
         guard let c = m.current else { return }
-        if case .carry = c.kind { cargo[c.id]?.carrier = nil }
+        switch c.kind {
+        case .carry: cargo[c.id]?.carrier = nil
+        case .loadPallet(let s, _), .pushPallet(let s, _), .unloadPallet(let s, _, _): pallets[s]?.hand = nil
+        default: break
+        }
         onEvent(.log("\(m.home.name) leaves \(c.words) for something more urgent"))
         m.current = nil; m.phase = 0; m.phaseUntil = 0; m.fetchSpot = nil; m.path = []
         m.wonderUntil = clock + 0.5
@@ -131,13 +196,46 @@ extension Simulation {
 
     /// The order is the body's now, and it sets off. False when the body could not take it.
     private func give(_ o: Opening, to m: B) -> Bool {
-        guard let job = cargo[o.id], case .carry(_, let from, _) = job.command.kind, let station = fleet.stations[m.station] else { return false }
-        start(m, job.command, announce: true)
-        guard m.current?.id == job.command.id else { return false }
-        cargo[o.id]?.carrier = m.id
+        guard let station = fleet.stations[m.station] else { return false }
+        switch o.work {
+        case .carry(let id):
+            guard let job = cargo[id], case .carry(_, let from, _) = job.command.kind else { return false }
+            start(m, job.command, announce: true)
+            guard m.current?.id == job.command.id else { return false }
+            cargo[id]?.carrier = m.id
+            m.path = route(m, to: standCell(station, near: from.cell))
+        case .pallet(_, .order):
+            guard let want = world.truth.nextPallet(station: station.name) else { return false }
+            start(m, .dispatch(station: station.name, repo: want.repo, number: want.number), announce: true)
+            guard case .dispatch = m.current?.kind else { return false }
+            m.place = .room("kind:storage")
+            walk(m, to: station.storageConsole.cell)
+        case .pallet(_, let step):
+            guard let p = pallets[station.name] else { return false }
+            switch step {
+            case .load:
+                start(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
+                guard case .loadPallet = m.current?.kind else { return false }
+                p.hand = m.id
+            case .push:
+                guard m.current == nil || m.isFree else { return false }
+                beginPush(m, station: station, p)
+                return true
+            case .unload(let back):
+                guard m.current == nil || m.isFree else { return false }
+                beginUnload(m, station: station, p, back: back)
+            case .order:
+                return false
+            }
+            m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
+            walk(m, to: standCell(station, near: p.cellUnder))   // beside it, never onto it
+        case .weld(_, let repo):
+            guard let side = weldSide(station: station, repo: repo) else { return false }
+            start(m, .weld(station: station.name, repo: repo, side: side), announce: true)
+            guard case .weld = m.current?.kind else { return false }
+        }
         m.bed = nil
         m.couch = nil   // off the couch: the seat is free for someone else
-        m.path = route(m, to: standCell(station, near: from.cell))
         return true
     }
 }

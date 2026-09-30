@@ -1242,7 +1242,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             lastHaulSchedule = clock
             simulation.assignOrders()
             simulation.stepRockets()
-            simulation.servicePallets()
             simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             timed("obstacles") { refreshObstacles() }

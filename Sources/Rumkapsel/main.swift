@@ -10,13 +10,15 @@ import SwiftUI
 /// window back on the main screen whenever the saved screen's frame does not match exactly, which with
 /// several displays is most of the time.
 enum WindowPlace {
-    private static let key = "windowPlace"
+    /// The station's window; other windows keep their own place under a key of their own.
+    static let station = "windowPlace"
+    static let playbook = "playbookPlace"
 
     private static func number(_ screen: NSScreen) -> Int? {
         (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue
     }
 
-    static func save(_ w: NSWindow) {
+    static func save(_ w: NSWindow, as key: String = station) {
         guard let screen = w.screen, !w.styleMask.contains(.fullScreen) else { return }
         let f = w.frame, s = screen.frame
         UserDefaults.standard.set(["screen": number(screen) ?? 0, "x": f.minX, "y": f.minY, "w": f.width, "h": f.height,
@@ -32,8 +34,8 @@ enum WindowPlace {
     }
 
     /// Back where it was, when that screen is connected: found by its number, else by its place and size.
-    static func restore(_ w: NSWindow) -> Bool {
-        guard let d = UserDefaults.standard.dictionary(forKey: key) ?? fromAutosave(), let x = d["x"] as? Double, let y = d["y"] as? Double,
+    static func restore(_ w: NSWindow, as key: String = station) -> Bool {
+        guard let d = UserDefaults.standard.dictionary(forKey: key) ?? (key == station ? fromAutosave() : nil), let x = d["x"] as? Double, let y = d["y"] as? Double,
               let width = d["w"] as? Double, let height = d["h"] as? Double else { return false }
         let id = d["screen"] as? Int
         let was = NSRect(x: d["sx"] as? Double ?? 0, y: d["sy"] as? Double ?? 0, width: d["sw"] as? Double ?? 0, height: d["sh"] as? Double ?? 0)
@@ -84,6 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let args = CommandLine.arguments
         let demo = args.contains("--demo")
         let simulatorOnly = args.contains("--simulator")
+        // The playbook on its own: its window only, never the station's over whatever else is open.
+        let playbookOnly = args.contains("--playbook")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
         // Every test run reads the log in Classic's words, whatever theme is picked: scenarios expect lines by their words.
@@ -159,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // Where it was last time, on the screen it was on; a screen no longer connected means the default
         // corner. A scripted run (a snapshot, the scenarios, the simulator) neither reads nor writes the
         // saved place, or its window would take the user's.
-        let remembers = !Scripted.run && !simulatorOnly
+        let remembers = !Scripted.run && !simulatorOnly && !playbookOnly
         if !(remembers && WindowPlace.restore(window)), let screen = NSScreen.main {
             let f = screen.visibleFrame
             window.setFrameOrigin(NSPoint(x: f.maxX - window.frame.width - 24, y: f.minY + 24))
@@ -171,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 }
             }
         }
-        if !simulatorOnly {
+        if !simulatorOnly && !playbookOnly {
             if Scripted.run {
                 window.orderBack(nil)   // a render still needs the window drawn, just not in front
             } else {
@@ -211,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 for e in Playbook.entries { print(e.name) }
                 exit(0)
             }
-            openPlaybook()
+            openPlaybook(activating: false)
             // One play, whichever was asked for: starting one in the window and another from the flag
             // runs two stations in the time it takes to look at one.
             let wanted = args.firstIndex(of: "--entry").flatMap { args.count > $0 + 1 ? Playbook.find(args[$0 + 1]) : nil }
@@ -369,7 +373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let develop = menu("Develop")
         let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
-        let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook), keyEquivalent: "p")
+        let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook as () -> Void), keyEquivalent: "p")
         play.keyEquivalentModifierMask = [.command, .shift]
         develop.addItem(.separator())
         // A reading of the station as it stands, onto the clipboard. A picture of a floor gone wrong says
@@ -460,7 +464,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     @objc func rehearseLaunch() { controller.rehearseLaunch(.live) }
     @objc func rehearseFailedLaunch() { controller.rehearseLaunch(.failed) }
 
-    @objc func openPlaybook() {
+    @objc func openPlaybook() { openPlaybook(activating: true) }
+
+    /// The playbook's window, where it was left last time. Opened from the menu it comes to the front;
+    /// launched to play an entry it shows where it was without taking the keyboard from what you are doing.
+    func openPlaybook(activating: Bool) {
         if playbookWindow == nil {
             let size = NSSize(width: 1100, height: 720)
             let sc = PlaybookController(frame: NSRect(origin: .zero, size: size))
@@ -469,15 +477,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             w.title = "rumkapsel playbook"
             w.contentView = sc.view
             w.isReleasedWhenClosed = false
-            w.center()
+            if Scripted.run || !WindowPlace.restore(w, as: WindowPlace.playbook) { w.center() }
+            if !Scripted.run {
+                for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification] {
+                    NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { _ in WindowPlace.save(w, as: WindowPlace.playbook) }
+                }
+            }
             playbook = sc
             playbookWindow = w
         }
         if Scripted.run {
             playbookWindow?.orderBack(nil)
-        } else {
+        } else if activating {
             playbookWindow?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+        } else {
+            playbookWindow?.orderFrontRegardless()
         }
     }
 

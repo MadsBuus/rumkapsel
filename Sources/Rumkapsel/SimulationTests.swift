@@ -406,7 +406,7 @@ enum SimulationTests {
             _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
             sim.orderPallet(station: station, repo: "web", number: 9001)
             expect(m.exercising && m.path.isEmpty && sim.palletErrand(of: m) == nil, "the one body is mid-turn and is left to it: \(m.words), path \(m.path.count)")
-            _ = step(sim, seconds: m.actFor + 30, until: { sim.palletErrand(of: m) != nil }, beat: { sim.servicePallets() })   // the half-second pass asks again
+            _ = step(sim, seconds: m.actFor + 30, until: { sim.palletErrand(of: m) != nil }, beat: { sim.assignOrders() })   // the half-second pass asks again
             expect(sim.palletErrand(of: m) != nil && !m.exercising, "once the turn is over it takes the errand: \(m.words)")
         }
 
@@ -512,7 +512,7 @@ enum SimulationTests {
             expect(step(sim, seconds: 60, until: { sim.pallets["work"] != nil }), "a pallet comes out once the dispatcher is at the console")
             expect(step(sim, seconds: 30, until: { sim.pallets["work"]?.isSettled == true }), "and is loaded, one crate at a time")
             expect(sim.pallets["work"]?.aboard.count == 2 && sim.world.truth.pallets["work"]?.crates.count == 2, "both crates aboard, on the pallet in truth")
-            expect(commands.contains("loadPallet") && commands.last == "waitPallet", "then the dispatcher waits for the release: \(commands)")
+            expect(commands.contains("loadPallet") && m.current?.isRest == true, "loaded, it waits for the release on its own, and the hands are free: \(commands)")
             sim.palletMerged(station: station, repo: "web")
             expect(step(sim, seconds: 90, until: { sim.world.truth.pallets["work"]?.state == .unloading }), "merged: pushed across and unloading; state \(String(describing: sim.world.truth.pallets["work"]?.state))")
             let onDeck = station.deckCells.contains(sim.pallets["work"]?.cellUnder ?? Cell(x: 99, y: 99))
@@ -521,8 +521,8 @@ enum SimulationTests {
             let placed = station.ledger.crates(of: "web").map(\.placed)
             expect(placed == [.deck, .deck], "both crates on the deck in the ledger: \(placed)")
             let errand = commands.filter { $0 != "goTo" }
-            expect(errand == ["dispatch", "loadPallet", "waitPallet", "pushPallet", "unloadPallet"], "in order: \(commands)")
-            expect(m.current?.isRest == true, "and the dispatcher is back to rest: \(m.words)")
+            expect(errand == ["dispatch", "loadPallet", "pushPallet", "unloadPallet"], "in order: \(commands)")
+            expect(m.current?.isRest == true, "and the hands are back to rest: \(m.words)")
         }
 
         test("a crowded yard: the pallet's way across is measured, never assumed") {

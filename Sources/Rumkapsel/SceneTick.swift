@@ -187,7 +187,7 @@ extension StationController {
     /// out for itself, so it is handed in; everything else follows from the body.
     func kit(_ m: Minion) -> Routines.Outfit {
         let p = simulation.pallets[m.station]
-        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) }, welding: simulation.isWelding(m))
+        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
     }
 
     func tickMinions(dt: Double) {
@@ -360,7 +360,14 @@ extension StationController {
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
                 : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
-            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
+            // At a rocket with the torch: the tip it is welding, and the seam the torch is on.
+            let welding: (rocket: RocketJob, point: SIMD2<Double>)? = {
+                guard simulation.isWelding(m), case .weld(_, let repo, let side)? = m.current?.kind,
+                      let r = simulation.rockets[station.name + "|" + repo],
+                      let point = simulation.weldPoint(station: station, repo: repo, side: side) else { return nil }
+                return (r, point)
+            }()
+            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) && welding == nil {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
                 m.smoothFacing += delta * min(1, dt * 12)
@@ -382,8 +389,14 @@ extension StationController {
                 let toCone = conePos - m.pos
                 m.smoothFacing = atan2(toCone.x, toCone.y)
             }
-            if atCone {
-                let slot = m.toolSlot(at: clock)
+            if let w = welding {
+                // Facing the hull, where the simulation stood it: the body is not moved here.
+                let toHull = w.point - m.pos
+                m.smoothFacing = atan2(toHull.x, toHull.y)
+            }
+            if atCone || welding != nil {
+                // Welding at a rocket is the cone's welding, torch on the seam.
+                let slot = welding != nil ? 0 : m.toolSlot(at: clock)
                 let cone = m.pyramids.last
                 let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
@@ -396,7 +409,11 @@ extension StationController {
                         propRoot.addChildNode(l)
                         m.weldLight = l
                     }
-                    if let l = m.weldLight, let cone {
+                    if let l = m.weldLight, let seam = welding.flatMap({ seamPoint($0.rocket) }) {
+                        l.position = seam
+                        l.light?.intensity = intensity
+                        l.opacity = on ? 1 : 0
+                    } else if let l = m.weldLight, let cone {
                         l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
                         l.light?.intensity = intensity
                         l.opacity = on ? 1 : 0
@@ -407,7 +424,7 @@ extension StationController {
                 default: break
                 }
             }
-            if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if welding == nil, !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

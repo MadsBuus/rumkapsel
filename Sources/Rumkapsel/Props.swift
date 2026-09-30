@@ -304,27 +304,24 @@ enum Props {
 
     /// A rocket in two parts: the tip, which is what stands on staging, and the lifter under it, which a
     /// production release adds. Without the lifter the tip stands on a cradle on the pad. The tip's hull is
-    /// `hullPanels` panels on a dark frame, so it can be shown part built; a whole one looks as it always
-    /// did. The groups are named "tip", "lifter" and "cradle"; the flame stays at the top, under the engine.
-    static let hullPanels = 30
-    /// How high the cradle holds a tip with no lifter under it.
-    static let cradleTop = 0.3
+    /// panels on a dark frame, so it can be shown part built. Its measurements are `RocketGeometry`'s. The
+    /// groups are named "tip", "lifter" and "cradle"; the flame stays at the top, under the engine.
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
-        let h = 1.5, r = 0.17
+        let h = RocketGeometry.height, r = RocketGeometry.radius, cradleTop = RocketGeometry.cradleTop
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         let tip = SCNNode(), lifter = SCNNode(), cradle = SCNNode()
         tip.name = "tip"; lifter.name = "lifter"; cradle.name = "cradle"
-        let base = 0.12 + h * 0.49
+        let base = RocketGeometry.hullBase
         tip.setValue(base, forKey: "base")
         n.addChildNode(lifter); n.addChildNode(tip); n.addChildNode(cradle)
 
         // The tip: a dark frame, its panels, the nose, the hatch and the portholes. The hull has six flat
         // sides, one of them facing +x where the hatch is.
-        let hullR = r * 0.9, hullH = h * 0.4, apothem = hullR * 0.866
-        let rings = hullPanels / 6, ringH = hullH / Double(rings)
+        let hullR = RocketGeometry.hullRadius, hullH = RocketGeometry.hullHeight, apothem = RocketGeometry.apothem
+        let rings = RocketGeometry.panels / 6, ringH = hullH / Double(rings)
         let core = SCNNode(geometry: faceted(SCNCylinder(radius: apothem * 0.9, height: hullH)))
         core.geometry!.firstMaterial = dark
         core.position = v3(0, base + hullH / 2, 0)
@@ -340,11 +337,11 @@ enum Props {
         }
         for ring in 0..<rings {
             for k in 0..<6 {
-                let a = .pi / 2 + Double(k) * .pi / 3
+                let f = RocketGeometry.facing(side: k)
                 let panel = SCNNode(geometry: SCNBox(width: hullR - 0.006, height: ringH - 0.006, length: 0.014, chamferRadius: 0))
                 panel.geometry!.firstMaterial = white
-                panel.position = v3(sin(a) * apothem, base + ringH * (Double(ring) + 0.5), cos(a) * apothem)
-                panel.eulerAngles.y = CGFloat(a)
+                panel.position = v3(f.x * apothem, base + ringH * (Double(ring) + 0.5), f.y * apothem)
+                panel.eulerAngles.y = CGFloat(atan2(f.x, f.y))
                 panel.name = "panel\(ring * 6 + k)"
                 tip.addChildNode(panel)
             }
@@ -459,7 +456,7 @@ enum Props {
         n.addChildNode(flame)
         // The parts keep their names under a key of their own: on the pad every node is named for the hover.
         n.enumerateChildNodes { c, _ in if let name = c.name { c.setValue(name, forKey: "part") } }
-        shape(n, lifter: tall, panels: hullPanels)
+        shape(n, lifter: tall, panels: RocketGeometry.panels)
         return n
     }
 
@@ -476,8 +473,8 @@ enum Props {
         let base = (tip.value(forKey: "base") as? Double) ?? 0
         part(rocket, "lifter")?.isHidden = !lifter
         part(rocket, "cradle")?.isHidden = lifter
-        tip.position.y = CGFloat(lifter ? 0 : cradleTop - base)
-        let whole = panels >= hullPanels
+        tip.position.y = CGFloat(lifter ? 0 : RocketGeometry.cradleTop - base)
+        let whole = panels >= RocketGeometry.panels
         for c in tip.childNodes {
             let name = (c.value(forKey: "part") as? String) ?? ""
             if name.hasPrefix("panel"), let i = Int(name.dropFirst(5)) { c.isHidden = i >= panels }
