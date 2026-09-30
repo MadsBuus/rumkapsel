@@ -74,6 +74,9 @@ enum Pick {
     static let onboard = 32
     /// A planet's colony: drawn by the mission camera only, lit by the planets' sun and its own light.
     static let colony = 64
+    /// A rocket lifting off the pad while its flight is on: drawn by the station's camera only, since the
+    /// mission camera is riding it.
+    static let launching = 128
 }
 
 /// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
@@ -312,9 +315,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
-    /// Carries whose crate has passed QA: the tested tag goes on as the crate comes off the row, by the
-    /// hands that carry it, not when it is set down again across the aisle.
-    var tagOnLift: Set<Int> = []
+    /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
+    var gates: [String: GateView] = [:]
+    /// Which side of the gate each carrier was on last frame, by minion id: true on the pad.
+    var gateSide: [String: Bool] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -1026,7 +1030,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             layoutDirty = false; markersDirty = false
             timed("floor") { rebuildStatic() }
-            if firstRun, !viewPinned { restoreView() }
+            if firstRun, !viewPinned, !world.simulated { restoreView() }   // a playbook's station is framed by its entry, never by your view
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
             // is about to grow again is the jitter.
             if !floorSettling { timed("settle") { for st in fleet.stations.values { resettle(st) } } }
@@ -1113,6 +1117,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crateCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
             carryAcrossDeck(station: station, repo: repo, number: number)
+        case .crateUncleared(let stationName, let repo, let number):
+            guard let station = fleet.stations[stationName] else { return }
+            carryBackToDeck(station: station, repo: repo, number: number)
         case .crewRoster(let members):
             setCrewRoster(members)
         case .deconArrived(let stationName, let repo, let numbers):
@@ -1185,8 +1192,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted, .deployEnded:
-            break
+        case .deployStarted(let stationName, let repo, false, let expected, _, _):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected)
+        case .deployEnded(let stationName, let repo, false, let outcome):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
@@ -1241,12 +1250,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         simulation.stepShuttles()
         simulation.stepPallets(dt: dt)
+        simulation.stepGates(dt: dt)
         drawShuttles(dt: dt)
         updateBerths()
         tickHullLamps()
         drawRockets()
         drawPallets()
         turnPlanets(dt: dt)
+        tickGates(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }

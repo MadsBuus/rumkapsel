@@ -86,6 +86,10 @@ final class World {
                 if let number = record.pulls.keys.min() {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
+            case .qa where t.from == .cleared:
+                // Clearance taken back: out through the gate again, to wait with what is still untested.
+                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
+                events.append(.crateUncleared(station: info.station, repo: record.repo, number: number))
             case .qa where t.from != nil:
                 // To the staging area, once the crate stands in storage and no pallet has the repository.
                 guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
@@ -691,6 +695,13 @@ final class World {
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
+    /// Whether a repository's merges to staging are deployed by a workflow the station has seen run.
+    func deploysStaging(station: String, repo: String) -> Bool {
+        repoRoots.contains { root, info in
+            info.station == station && info.repo == repo && github.deploys(repoRoot: root).contains { !$0.production && $0.newest != nil }
+        }
+    }
+
     /// Whether a production release stands open for this repository. While it does, staging keeps
     /// moving: anything merged there afterwards is carried by that same release, so a rocket already
     /// loaded for it is not finished loading.
@@ -762,7 +773,7 @@ final class World {
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
         let label = "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
-        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: true, cargo: n,
+        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: stage.rank >= 3, cargo: n,
                               command: .rocket(stage, station: station.name, repo: repo))
     }
 
@@ -968,6 +979,7 @@ final class World {
         let inDecon = station.ledger.allCrates.contains { $0.alien && $0.placed == .decon }
         guard !open.isEmpty || !feed.isEmpty || !boardOffices.isEmpty || inDecon else {
             if changed || deconMoved { events.append(changed ? .layoutChanged : .markersChanged) }
+            noteAnswered()
             return events
         }
 
@@ -1078,8 +1090,13 @@ final class World {
                                                      label: e.prNumber.map { "#\($0)" } ?? (e.branch ?? ""),
                                                      detail: e.detail, branch: e.branch, title: e.title, ready: isReady(repo))))
         }
-        // Each repository counts as answered from its first reply on; the reply itself was taken quietly above.
-        let lookedBefore = repoRoots.keys.filter { github.answered(repoRoot: $0) }.count
+        noteAnswered()
+        return events
+    }
+
+    /// Each repository counts as answered from its first reply on, an empty one included; the reply
+    /// itself was taken quietly.
+    private func noteAnswered() {
         let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
         // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
@@ -1090,7 +1107,6 @@ final class World {
             github.saveKnowledge(repoRoots.mapValues(\.repo))
             if seenPeople != savedPeople { savedPeople = seenPeople; SeenPerson.save(seenPeople) }
         }
-        return events
     }
 
     /// Decon: bot pull requests, one object each. An arrival is a new number on a repository's open
@@ -1240,6 +1256,8 @@ final class World {
         /// Not standing here: on its way in, its place spoken for. The rows do not draw it and nothing
         /// else is put there.
         var carried = false
+        /// Through the gate and beside its rocket: drawn at `Station.testedScale`.
+        var small = false
     }
 
     /// What the yard reconciliation decided for one repository.
@@ -1252,16 +1270,30 @@ final class World {
         case waiting
     }
 
+    /// Where a repository's tested crates stand: on the pad beside its rocket, in the station's own
+    /// coordinates. Nil while the repository has no rocket on the pad; its tested crates then keep to the
+    /// deck's row nearest the pad.
+    func testedStack(station: Station, repo: String) -> SIMD2<Double>? {
+        guard !station.deckCells.isEmpty, station.gate != nil, let slot = padSlotOf[station.name + "|" + repo] else { return nil }
+        let slots = station.padSlots
+        let at = slots[slot % slots.count]
+        // Beside the rocket on the side away from the X-ray's belt, so the belt never hems it in.
+        let off = Station.testedStackOffset
+        let away = station.belt.map { ($0.exit.x - station.offset.x) > at.x } ?? true
+        return at + SIMD2(away ? off.x : -off.x, off.y)
+    }
+
     /// Where every crate stands in storage or on the deck, from the ledger's rows, so a carrier can be
     /// sent to the exact spot a crate will occupy and nothing jumps when the layout is redrawn.
-    /// Every other row holds crates with aisles between; the deck keeps tested crates on the row nearest
-    /// the pad and untested on the far row; within a row, crates group by repository in stacks of three.
+    /// Every other row holds crates with aisles between; the deck keeps untested crates on the far row, and
+    /// tested ones through the gate, small, beside their rocket (on the row nearest the pad while it has
+    /// none); within a row, crates group by repository in stacks of three.
     /// A crate keeps the place its row records until it leaves; a crate bound for the yard holds the
     /// place spoken for ahead of it and comes back `carried`. A crate with no place yet is given one
     /// here and the row remembers it. `stillUntested` keeps one deck crate in the untested row even
     /// though the board has cleared it: that is where it still stands. `aside` names crates
     /// ("repo#number") to give a fresh place away from the column they stand in.
-    func yardLayout(station: Station, area: String, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
+    func yardLayout(station: Station, area: String, stillUntested: Int? = nil, stillTested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
         let cells = area == "deck" ? station.deckCells : area == "decon" ? station.deconCells : station.storageCells
         let neat = area != "storage"
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
@@ -1279,15 +1311,19 @@ final class World {
 
         struct Entry { let crate: Ledger.Crate; let group: Int; let cleared: Bool; let carried: Bool; let index: Int; var slot: Ledger.Slot? }
         var entries: [Entry] = []
+        var stacks: [String: SIMD2<Double>] = [:]
         for repo in Set(station.ledger.crates.values.map(\.repo)).sorted() {
             let mine = station.ledger.crates(of: repo).filter { $0.stands(in: yard) || $0.heading == yard }.prefix(48)
+            if area == "deck", rowList.count > 1, let at = testedStack(station: station, repo: repo) { stacks[repo] = at }
             for (k, c) in mine.enumerated() {
                 let carried = !c.stands(in: yard)
                 var cleared = area == "deck" && c.cleared
                 if cleared, c.number == stillUntested { cleared = false }
+                if !cleared, area == "deck", c.number == stillTested { cleared = true }
                 let group = (area == "deck" && rowList.count > 1) ? (cleared ? 0 : 1) : 0
                 var slot = carried ? c.bound : c.slot
                 if let s = slot, s.yard != yard || s.group != group { slot = nil }   // from another yard or row: asked for again
+                if let s = slot, group == 0, stacks[repo] != nil, s.column >= 4 { slot = nil }   // beside the rocket there are four squares
                 if aside["\(repo)#\(c.number)"] != nil { slot = nil }
                 entries.append(Entry(crate: c, group: group, cleared: cleared, carried: carried, index: k, slot: slot))
             }
@@ -1295,10 +1331,14 @@ final class World {
         // Decon shows a dozen objects at most, the oldest first; the rest are counted, not stacked to the ceiling.
         if area == "decon" { entries = Array(entries.sorted { $0.crate.number < $1.crate.number }.prefix(12)) }
         // Places already held come first, so a newcomer sees them; then each crate without one is given one.
+        // Beside its rocket a repository stacks on its own four squares; the tested row is shared by the rest.
+        func onPad(_ repo: String, _ group: Int) -> Bool { group == 0 && stacks[repo] != nil }
+        func sharing(_ repo: String, _ group: Int, _ other: String) -> Bool { onPad(repo, group) ? other == repo : !onPad(other, group) }
         var held: [(repo: String, slot: Ledger.Slot)] = entries.compactMap { e in e.slot.map { (e.crate.repo, $0) } }
         for i in entries.indices where entries[i].slot == nil {
             let e = entries[i]
-            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: row(e.group).count * 2,
+            let among = held.filter { sharing(e.crate.repo, e.group, $0.repo) }
+            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: among, cap: onPad(e.crate.repo, e.group) ? 4 : row(e.group).count * 2,
                                     avoiding: aside["\(e.crate.repo)#\(e.crate.number)"], tall: area == "decon")
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
@@ -1309,7 +1349,18 @@ final class World {
         var out: [YardSlot] = []
         for e in entries {
             let s = e.slot!
-            let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
+            let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order
+                && sharing(e.crate.repo, s.group, $0.repo) }.count
+            if onPad(e.crate.repo, s.group), let stack = stacks[e.crate.repo] {
+                let c = s.column % 4, k = Station.testedScale
+                let at = stack + SIMD2((Double(c % 2) - 0.5) * 0.42 * k * 1.1, (Double(c / 2) - 0.5) * 0.42 * k * 1.1)
+                let pos = SIMD3(station.offset.x + at.x, Double(level) * 0.34 * k, station.offset.y + at.y)
+                out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,
+                                    mine: !e.crate.alien && isMine(repo: e.crate.repo, number: e.crate.number), group: s.group,
+                                    column: s.column, level: level, cell: padSpot(station: station, repo: e.crate.repo).cell,
+                                    pos: pos, yaw: 0, carried: e.carried, small: true))
+                continue
+            }
             let cellsOfRow = row(s.group)
             let cell = cellsOfRow[min(s.column / 2, cellsOfRow.count - 1)], side = Double(s.column % 2) * 0.5 - 0.25
             let (jx, jz, yaw) = neat ? (0, 0, 0) : World.jitter(repo: e.crate.repo, number: e.crate.number)
@@ -1405,7 +1456,7 @@ final class World {
 
     /// The place a crate bound for a yard will land on, asked for now: the row holds it from the
     /// first ask. Storage or the deck by the rows; the rocket by its hatch.
-    func slotNow(for crate: CrateRef, toward yard: Yard) -> Spot? {
+    func slotNow(for crate: CrateRef, toward yard: Yard, pastGate: Bool = false) -> Spot? {
         guard let station = fleet.stations[crate.station] else { return nil }
         switch yard {
         case .storage, .deck, .decon:
@@ -1416,6 +1467,8 @@ final class World {
                 return floorSpot(plain, station: station, repo: crate.repo,
                                  cell: (yard == .deck ? station.deckCells : yard == .decon ? station.deconCells : station.storageCells).first ?? Cell(x: 0, y: 0))
             }
+            // Bound for its stack beside the rocket: set on the X-ray's belt first, unless it has been through.
+            if s.small, !pastGate, let inbox = gateSpot(station: station, crate: crate) { return inbox }
             return yardSpot(s.cleared ? .tested : plain, station: station, repo: crate.repo, slot: grounded(s, in: layout))
         case .pad:
             return padSpot(station: station, repo: crate.repo)
@@ -1429,7 +1482,7 @@ final class World {
     func padSlots(station: Station) -> [SIMD2<Double>] { station.padSlots }
 
     /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one takes
-    /// the lowest free; with the pad full, one going up or with a release open takes a slot from one with neither.
+    /// the lowest free; with the pad full, one going up, with a release open or with its tip being built takes a slot from one with none of these.
     private(set) var padSlotOf: [String: Int] = [:]
 
     /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
@@ -1442,6 +1495,8 @@ final class World {
             func urgent(_ key: String) -> Bool {
                 if mergeLaunches.contains(key) || rocketBusy(key) { return true }
                 let repo = String(key.dropFirst(prefix.count))
+                // A release on its way to staging: its tip is being built.
+                if let p = truth.pallets[station.name], p.repo == repo, [.loaded, .moving, .staged].contains(p.state) { return true }
                 return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
             }
             let keys = wanted.filter { $0.hasPrefix(prefix) }.sorted { a, b in urgent(a) != urgent(b) ? urgent(a) : a < b }
@@ -1485,12 +1540,14 @@ final class World {
         guard level != slot.level else { return slot }
         return YardSlot(repo: slot.repo, number: slot.number, index: slot.index, cleared: slot.cleared, alien: slot.alien, mine: slot.mine,
                         group: slot.group, column: slot.column, level: level, cell: slot.cell,
-                        pos: SIMD3(slot.pos.x, Double(level) * 0.34, slot.pos.z), yaw: slot.yaw, carried: slot.carried)
+                        pos: SIMD3(slot.pos.x, Double(level) * 0.34 * (slot.small ? Station.testedScale : 1), slot.pos.z), yaw: slot.yaw,
+                        carried: slot.carried, small: slot.small)
     }
 
     private func yardSpot(_ area: Spot.Area, station: Station, repo: String, slot: YardSlot) -> Spot {
+        // A small crate's stack stands half as high: the hands go where its height says, not its count.
         Spot(area: area, station: station.name, owner: repo, label: repo, cell: slot.cell, pos: slot.pos,
-             level: slot.level, yaw: slot.yaw)
+             level: slot.small ? slot.level / 2 : slot.level, yaw: slot.yaw)
     }
 
     /// The floor of a yard cell, for when the layout has nothing to say.
@@ -1510,7 +1567,8 @@ final class World {
     /// is moved aside first, top down, each to a fresh place on another of the repository's columns in
     /// the same yard: a carry within the yard. Nothing is ever pulled out from under another crate.
     private func aside(station: Station, area: String, above slot: YardSlot, going: Set<Int>, standing: [YardSlot], after: inout [Int: Int]) -> [Command] {
-        let blockers = standing.filter { $0.group == slot.group && $0.column == slot.column && $0.level > slot.level && !going.contains($0.number) }
+        let blockers = standing.filter { $0.group == slot.group && $0.column == slot.column && $0.level > slot.level && !going.contains($0.number)
+            && $0.small == slot.small && (!slot.small || $0.repo == slot.repo) }
             .sorted { $0.level > $1.level }
         guard !blockers.isEmpty else { return [] }
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
@@ -1597,6 +1655,49 @@ final class World {
         guard !isCarried(crate) else { return [] }
         let standing = yardLayout(station: station, area: "deck", stillUntested: number).filter { !$0.carried }
         guard let here = standing.first(where: { $0.repo == repo && $0.number == number }) else { return [] }
+        var above: [Int: Int] = [:]
+        var out = aside(station: station, area: "deck", above: here, going: [number], standing: standing, after: &above)
+        station.ledger.order(repo: repo, number: number, to: .deck)
+        out.append(.carry(crate, from: standingSpot(here, area: "deck", station: station), to: .deck, after: above[here.column].map { [$0] } ?? []))
+        return out
+    }
+
+    /// The places by the gate, per crate that holds one: four squares on the deck cell by the unit's post,
+    /// stacked when more wait. A crate keeps its place until the unit takes it.
+    private var gateSlots: [String: Int] = [:]
+
+    /// Where a crate waits by the gate for the security unit, when the station has a gate with a post.
+    func gateSpot(station: Station, crate: CrateRef) -> Spot? {
+        guard deckInUse(station: station.name), let belt = station.belt, let first = station.gateInbox.first else { return nil }
+        let prefix = station.name + "|"
+        let index = gateSlots[crate.key] ?? {
+            let taken = Set(gateSlots.filter { $0.key.hasPrefix(prefix) }.values)
+            let free = (0...).first { !taken.contains($0) }!
+            gateSlots[crate.key] = free
+            return free
+        }()
+        // On the belt's deck end; more wait stacked there, the belt taking them in turn.
+        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: station.gateStand ?? first,
+                    pos: SIMD3(belt.start.x, Belt.top + Double(index) * 0.34, belt.start.z), level: index, yaw: 0)
+    }
+
+    /// The unit has taken it: its place by the gate is free.
+    func freeGateSlot(_ crate: CrateRef) { gateSlots[crate.key] = nil }
+
+
+    /// Off the X-ray's belt: from its end to its stack by the rocket, or to the untested row.
+    func carryFromGate(station: Station, crate: CrateRef, from spot: Spot) -> Command {
+        station.ledger.order(repo: crate.repo, number: crate.number, to: .deck)
+        return .carry(crate, from: spot, to: .deck)
+    }
+
+    /// Clearance taken back: a crate beside the rocket comes out through the gate to the untested row.
+    /// Whatever is stacked on it moves aside first.
+    func carryBackToUntested(station: Station, repo: String, number: Int) -> [Command] {
+        let crate = CrateRef(station: station.name, repo: repo, number: number)
+        guard !isCarried(crate) else { return [] }
+        let standing = yardLayout(station: station, area: "deck", stillTested: number).filter { !$0.carried }
+        guard let here = standing.first(where: { $0.repo == repo && $0.number == number }), here.cleared else { return [] }
         var above: [Int: Int] = [:]
         var out = aside(station: station, area: "deck", above: here, going: [number], standing: standing, after: &above)
         station.ledger.order(repo: repo, number: number, to: .deck)

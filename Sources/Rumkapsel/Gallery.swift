@@ -612,8 +612,9 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             ]
             for (k, spot) in spread(p, states.count, gap: 0.46).enumerated() {
                 let s = states[k]
-                let pkg = Props.package(color: s.shell, band: s.band, size: 0.38, approved: s.tested, blink: s.blink)
+                let pkg = Props.package(color: s.shell, band: s.band, size: 0.38, blink: s.blink)
                 if s.failing { pkg.addChildNode(Props.failingShell(size: 0.38 * 1.2)) }
+                if s.tested { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
                 pkg.position = v3(spot.x, 0, spot.y)
                 scene.rootNode.addChildNode(pkg)
             }

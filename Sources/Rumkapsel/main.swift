@@ -369,8 +369,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let develop = menu("Develop")
         let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
-        let sim = develop.addItem(withTitle: "Simulator…", action: #selector(openSimulator), keyEquivalent: "s")
-        sim.keyEquivalentModifierMask = [.command, .shift]
         let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook), keyEquivalent: "p")
         play.keyEquivalentModifierMask = [.command, .shift]
         develop.addItem(.separator())

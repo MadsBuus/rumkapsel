@@ -143,8 +143,18 @@ extension StationController {
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
-        // The pad's own rocket is the one that flies: it leaves the pad while the flight is on.
-        rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true }.forEach {
+        // The pad's own rocket is the one that flies: seen from the station it lifts off the pad and climbs
+        // out of sight, and the pad stands empty while the flight is on. The camera riding it never sees it.
+        rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
+            let leaving = $0.clone()
+            leaving.name = nil
+            leaving.opacity = 1
+            leaving.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.launching }
+            Props.shape(leaving, lifter: true, panels: RocketJob.hullPanels)
+            leaving.childNode(withName: "flame", recursively: false)?.opacity = 1
+            rocketRoot.addChildNode(leaving)
+            leaving.runAction(.sequence([Looks.current.launch(leaving), .removeFromParentNode()]))
+            drone.sweep(up: true)
             $0.isHidden = true
             hiddenRockets.append($0)
         }
@@ -157,6 +167,7 @@ extension StationController {
             cam.fieldOfView = 58
             cam.zNear = 0.05
             cam.zFar = 600
+            cam.categoryBitMask = ~Pick.launching
             missionCamera.camera = cam
             scene.rootNode.addChildNode(missionCamera)
         }
@@ -434,6 +445,13 @@ extension StationController {
         missionCraft.childNodes.forEach { $0.removeFromParentNode() }
         missionCraft.removeAllActions()
         let rocket = Looks.current.rocket(color: NSColor(fleet.color(forRepo: repo)), tall: true, cargo: 6)
+        // A rocket built as tip and lifter is taken apart into its pieces, the cradle left behind.
+        Props.part(rocket, "cradle")?.removeFromParentNode()
+        for name in ["tip", "lifter"] {
+            guard let group = Props.part(rocket, name) else { continue }
+            for c in group.childNodes { c.removeFromParentNode(); c.position.y += group.position.y; rocket.addChildNode(c) }
+            group.removeFromParentNode()
+        }
         let (lo, hi) = rocket.boundingBox
         let split = Double(lo.y) + Double(hi.y - lo.y) * 0.5
         let lifter = SCNNode(), tip = SCNNode()

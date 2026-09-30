@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 /// A hash that is the same in every run, for the little disorder that must not change between launches:
 /// Swift's own `hashValue` is seeded afresh per process. FNV-1a over the UTF-8 bytes.
@@ -347,6 +348,76 @@ final class Station {
         return fits.isEmpty ? [padCenter] : fits
     }
     var padCenter: SIMD2<Double> { yardCenter(2) }
+    /// How big a crate is once it is through the gate: packed for flight, beside its rocket.
+    static let testedScale = 0.5
+    /// Where a rocket's tested crates stand, from the rocket's spot: by its foot, on the side away from its
+    /// tower, in reach of whoever stands at the foot to load it.
+    static let testedStackOffset = SIMD2(-0.42, 0.55)
+
+    /// The gate: the doorway from the deck onto the pad, each pair as its deck cell and its pad cell.
+    var gateDoorway: [(deck: Cell, pad: Cell)] {
+        let deck = Set(deckCells), pad = Set(padCells)
+        return yardDoorways.compactMap { a, b in
+            deck.contains(a) && pad.contains(b) ? (a, b) : deck.contains(b) && pad.contains(a) ? (b, a) : nil
+        }
+    }
+    /// The gate's line: its middle, the way through it from the deck onto the pad, and how wide the opening is.
+    var gate: (center: SIMD2<Double>, inward: SIMD2<Double>, width: Double)? {
+        let pairs = gateDoorway
+        guard let first = pairs.first else { return nil }
+        let inward = SIMD2(Double(first.pad.x - first.deck.x), Double(first.pad.y - first.deck.y))
+        let along = SIMD2(-inward.y, inward.x)
+        let mids = pairs.map { SIMD2(Double($0.deck.x + $0.pad.x) / 2, Double($0.deck.y + $0.pad.y) / 2) }
+        let spans = mids.map { simd_dot($0, along) }
+        let centre = mids.reduce(SIMD2<Double>(0, 0), +) / Double(mids.count)
+        let mid = (spans.min()! + spans.max()!) / 2 - simd_dot(centre, along)
+        return (centre + along * mid, inward, spans.max()! - spans.min()! + 1)
+    }
+    /// Where cleared crates wait for the unit: in front of the arch on the deck side, in the half of the
+    /// opening nearer its post. The other half stays the way through for everyone else.
+    var gateInbox: [Cell] {
+        guard let post = securityPost else { return [] }
+        let pairs = gateDoorway.sorted { abs($0.pad.x - post.x) + abs($0.pad.y - post.y) < abs($1.pad.x - post.x) + abs($1.pad.y - post.y) }
+        return pairs.prefix(max(1, pairs.count / 2)).map(\.deck).filter { deckCells.contains($0) }
+    }
+    /// Where a carrier stands to set a crate down in front of the gate: the deck aisle behind the waiting
+    /// crates, never a doorway.
+    var gateStand: Cell? {
+        guard let inbox = gateInbox.first, let first = gateDoorway.first else { return nil }
+        let c = Cell(x: inbox.x - (first.pad.x - first.deck.x), y: inbox.y - (first.pad.y - first.deck.y))
+        let doors = Set(yardDoorways.flatMap { [$0.0, $0.1] })
+        return deckCells.contains(c) && !doors.contains(c) ? c : nil
+    }
+    /// Through the arch, in world coordinates at a height: the deck side, the middle of the opening, the pad side.
+    func throughGate(height: Double) -> (deck: SIMD3<Double>, middle: SIMD3<Double>, pad: SIMD3<Double>)? {
+        guard let g = gate else { return nil }
+        let inbox = gateInbox.map { SIMD2(Double($0.x), Double($0.y)) }
+        let along = SIMD2(-g.inward.y, g.inward.x)
+        // Straight through the half of the opening the waiting crates stand in, so nothing crosses a post.
+        let mid = inbox.isEmpty ? g.center : g.center + along * simd_dot(inbox.reduce(.zero, +) / Double(inbox.count) - g.center, along)
+        func w(_ p: SIMD2<Double>) -> SIMD3<Double> { SIMD3(offset.x + p.x, height, offset.y + p.y) }
+        return (w(mid - g.inward * 0.6), w(mid), w(mid + g.inward * 0.6))
+    }
+    /// Where the security unit keeps its post: on the pad, beside the gate's end, off the way through.
+    var securityPost: Cell? {
+        let pairs = gateDoorway
+        guard let first = pairs.first else { return nil }
+        let inward = Cell(x: first.pad.x - first.deck.x, y: first.pad.y - first.deck.y)
+        let along = Cell(x: -inward.y, y: inward.x)
+        let through = Set(pairs.map(\.pad))
+        let pad = Set(padCells)
+        func dot(_ c: Cell) -> Int { c.x * along.x + c.y * along.y }
+        // The end away from where the hallway comes onto the deck: that corner is everybody's way in.
+        let door = yardDoorways.first.map { $0.1 } ?? first.deck
+        func far(_ c: Cell) -> Int { abs(c.x - door.x) + abs(c.y - door.y) }
+        var ends = [(pairs.max { dot($0.pad) < dot($1.pad) }!.pad, 1), (pairs.min { dot($0.pad) < dot($1.pad) }!.pad, -1)]
+        ends.sort { far($0.0) > far($1.0) }
+        for (end, sign) in ends {
+            let beside = Cell(x: end.x + along.x * sign, y: end.y + along.y * sign)
+            if pad.contains(beside), !through.contains(beside) { return beside }
+        }
+        return nil
+    }
     /// The storage row nearest the deck: the row the deck doorway opens onto.
     var storageNearRow: Int { storageCells.map(\.y).min() ?? 0 }
     /// The aisle a pallet floats in. Every other row of a yard holds crates, so the rows themselves

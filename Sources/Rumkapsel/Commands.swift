@@ -18,7 +18,7 @@ struct CrateRef: Hashable {
 
 /// Somewhere on the floor a crate can stand, and enough to walk there.
 struct Spot {
-    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, decon, floor }
+    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, decon, floor, gate }
     var area: Area
     var station: String
     /// The room key of an office, the repository of a yard row; empty elsewhere.
@@ -39,6 +39,7 @@ struct Spot {
         case .storage: return Words.current.inStorage
         case .deck: return Words.current.theDeck
         case .tested: return Words.current.testedRow
+        case .gate: return Words.current.theGate
         case .pad: return Words.current.theRocket
         case .decon: return Words.current.inDecon
         case .floor: return "the floor"
@@ -378,7 +379,8 @@ struct StationTruth {
 
     /// The one hover pallet a station may have out, and what stands on it.
     struct Pallet {
-        enum State: String { case arriving, loading, loaded, moving, unloading }
+        /// `staged`: across on the deck, still loaded, until the staging deploy is live.
+        enum State: String { case arriving, loading, loaded, moving, staged, unloading }
         var repo: String
         var number: Int
         /// Where it stands: a storage cell on the row nearest the deck, or a deck cell once pushed.

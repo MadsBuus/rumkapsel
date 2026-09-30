@@ -199,6 +199,16 @@ final class RocketJob {
     var tall = true
     /// How much cargo waits for it, for the size the scene draws it at while standing by.
     var cargo = 0
+    /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
+    /// deploy runs; `built` is the same count as it creeps up.
+    static let hullPanels = 30
+    var panels = RocketJob.hullPanels
+    var built = Double(RocketJob.hullPanels)
+    /// A staging deploy under way: the tip is being welded, built panel by panel or, whole already, gone
+    /// over seam by seam. `seam` is the panel the torch is on.
+    var welding = false
+    var seam = 0
+    var seamAt = 0.0
     /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
     /// them have been set down on the pad and not one moment before: a rocket never launches empty.
     var assigned: Set<String> = []
@@ -374,13 +384,18 @@ extension Simulation {
             // on untested work while it waits is a rocket carrying untested work, and the tape saying
             // otherwise would be the floor telling you something the release will not honour. Once it is
             // climbing nothing changes what went up.
-            if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested }
+            if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested; r.tall = tall }
             guard stage.rank > r.stage.rank else { return }
             take(r, command)
             return
         }
         let r = RocketJob(station: station, repo: repo, command: command)
         r.label = label; r.untested = untested; r.tall = tall; r.cargo = cargo
+        // New while its release is on its way to staging: the tip is built as the deploy runs.
+        if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
+            r.panels = 0
+            r.built = 0
+        }
         rockets[key] = r
         take(r, command)
     }
@@ -390,7 +405,7 @@ extension Simulation {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }   // one going up already: the next goes when it has climbed
         world.mergeLaunches.insert(key)
-        rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: false, cargo: 1,
+        rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: true, cargo: 1,
                command: .rocket(.launch, station: station.name, repo: repo))
     }
 
