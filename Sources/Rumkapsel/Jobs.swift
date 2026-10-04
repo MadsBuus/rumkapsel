@@ -250,9 +250,14 @@ extension StationController {
         m.pyramids.append(n)
         m.pyramidCell = cell
         refreshObstacles()
+        // A session's own body is sent to it: an order for that body, above anything but leaving.
+        if !m.isCrew && !m.isPeer && !m.isSubagent {
+            simulation.post(Command(kind: .work(office: key), words: "working your message in \(m.home.name)"), for: m, rank: .message, at: cell, place: .room(key))
+            return
+        }
+        // A teammate's cone stands where they are working.
         guard !m.onJob else { return }
         m.place = .room(key)
-        // Working the message is a job like any other: it shows in the log and on hover.
         if m.isResting { start(m, Command(kind: .work(office: key), words: "working your message in \(m.home.name)")) }
         walk(m, to: cell)
     }

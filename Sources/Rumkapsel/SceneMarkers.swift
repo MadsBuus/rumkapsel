@@ -213,7 +213,7 @@ extension StationController {
                 // same boxes: they stay as they are, cubes, package, shells and all.
                 let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + [
                     "\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
-                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(world.isDusty(room))",
+                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(stowHeld.contains(key))", "\(world.isDusty(room))",
                 ]).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
                 if packaged {
@@ -292,19 +292,16 @@ extension StationController {
                     markerRoot.addChildNode(n)
                     keep.insert(ObjectIdentifier(n))
                 }
-                // More commits than last time while the owner is in: the newest cube is not on the floor
-                // yet. The worker carries it over on its head and stows it where it goes: a command.
+                newestCube[key] = newest
+                if stowHeld.contains(key) { newest?.opacity = 0 }
+                // More commits than last time: the newest cube is not on the floor yet. The office's worker
+                // carries it over on its head and stows it where it goes, once it is free to.
                 if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && !$0.hasLoad && $0.stowing == nil }) {
+                   let m = minions.values.first(where: { $0.station == station.name && $0.home.key == room.key && !$0.isPeer && !$0.isSubagent }) {
+                    stowHeld.insert(key)
                     box.opacity = 0
-                    let cube = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
-                    cube.geometry!.firstMaterial = lit(color)
-                    cube.position = v3(0, m.headHeight + 0.14, 0)
-                    m.node.addChildNode(cube)
-                    m.stowing = (cube, box)
-                    start(m, .stow(office: room.key), announce: true)
                     let at = Cell(x: Int((Double(box.position.x) - station.offset.x).rounded()), y: Int((Double(box.position.z) - station.offset.y).rounded()))
-                    walk(m, to: standCell(station, near: at))
+                    simulation.post(.stow(office: room.key), for: m, rank: .yard, at: standCell(station, near: at), place: .room(room.key), announce: true)
                 }
                 lastBoxCount[key] = count + ghosts
             }

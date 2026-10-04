@@ -49,6 +49,9 @@ enum Cue {
     case foldCrate(String)
     /// The cube on a body's head goes down onto its place on the floor.
     case stow(String)
+    /// A body took one of its own orders; one of its own orders went off the board unfinished.
+    case ownTaken(String, Command)
+    case ownDropped(String, Command)
     /// An office's package is packed and strapped, by key.
     case packed(String)
     /// The rows are drawn again.
@@ -58,7 +61,6 @@ enum Cue {
     case palletLanded(station: String, crate: CrateRef, aboard: Bool)
     /// The X-ray's verdict: passed or not.
     case gateScan(station: String, passed: Bool)
-    /// A crate off the belt at one of its ends, for a hand to carry on: to its stack, or to the untested row.
     /// A crate off the belt at one of its ends; `collect` is the carry already waiting for it, if any.
     case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, collect: Int?)
     /// A carry was ordered: the scene finds the crate's node for the arms.
@@ -115,8 +117,10 @@ final class Simulation<B: Body> {
     /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
     /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
     var pallets: [String: PalletJob] = [:]
-    /// Each station's gate and the security unit's errands there.
+    /// Each station's X-ray.
     var gates: [String: GateJob] = [:]
+    /// Orders kept for one body, by command id: a message, packing or stowing at its office, a reaction.
+    var ownOrders: [Int: OwnOrder] = [:]
     var palletWishes: [String: Bool] = [:]
     /// Every shuttle in the air, and one rocket per repository with a release on the pad, by "station|repo".
     var flights: [Flight] = []
@@ -229,8 +233,8 @@ final class Simulation<B: Body> {
         if m.phase + 1 < c.phases.count { m.phase += 1 }
     }
 
-    /// Done, or given up: whatever was queued starts now, else the body goes back to resting.
-    /// The destination, when given, is where the body goes back to: one order, not a rest and then another.
+    /// Done, or given up: whatever was queued starts now, else the board's next order for it, else the
+    /// body goes back to resting: to the destination when given, one walk rather than a rest and another.
     func finish(_ m: B, to place: Place? = nil) {
         m.current = nil
         m.phase = 0
@@ -242,7 +246,7 @@ final class Simulation<B: Body> {
             // body while the visit lasted, so it is planned now, with nothing in hand for a moment.
             if case .react(_, let where_, _) = next.kind, m.place != where_ { send(m, to: where_) }
             begin(m, next, announce: next.isJob)
-        } else if place != nil || !takeNext(m) { send(m, to: place ?? restPlace(m)) }
+        } else if !takeNext(m) { send(m, to: place ?? restPlace(m)) }
     }
 
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
@@ -621,14 +625,14 @@ final class Simulation<B: Body> {
 
     // MARK: crew
 
-    /// Hands a teammate a reaction: where to be, what to do there, and until when.
+    /// Hands a teammate a reaction: where to be, what to do there, and until when. A new reaction ends
+    /// the one in hand.
     func react(_ m: B, _ activity: Activity, place: Place, minutes: Double, words: String) {
         m.activity = activity
         m.busy = true
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
+        if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
         if m.lying { m.napping = false; m.bed = nil; m.beddedDown = false }
-        if m.place != place || m.path.isEmpty { send(m, to: place) }
-        start(m, .react(activity, place: place, for: minutes * 60, words: words))
+        post(.react(activity, place: place, for: minutes * 60, words: words), for: m, rank: .crew, at: m.cell, place: place)
     }
 
     /// A teammate's reaction has run its course: back to the quarters.
@@ -637,7 +641,7 @@ final class Simulation<B: Body> {
         m.activity = .sleeping
         m.pyramidCell = nil
         cue(.clearCones(m.id))
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
+        if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
         send(m, to: .quarters)
     }
 
@@ -748,6 +752,8 @@ final class Simulation<B: Body> {
             switch c.kind {
             case .goTo, .bath, .exercise, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
+                // At the cone: the message is being worked, and from here on it is the desk.
+                if case .work = c.kind { ownOrders[c.id] = nil }
                 // A visit's time starts here, on arrival, not when the walk began.
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
             default: break

@@ -291,6 +291,7 @@ extension StationController {
             // The cube comes off the head and goes down onto its place on the floor, and the box drawn
             // there takes over as it lands.
             guard let m = minions[id], let (cube, box) = m.stowing else { return }
+            let key: String? = { if case .stow(let office)? = m.current?.kind { return m.station + "|" + office }; return nil }()
             let world = cube.worldPosition
             stopCrate(cube)
             cube.removeFromParentNode()
@@ -300,8 +301,40 @@ extension StationController {
             moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box, weak m] in
                 self?.drone.thud()
                 box?.opacity = 1
+                if let self, let key {
+                    self.stowHeld.remove(key)
+                    self.newestCube[key]?.opacity = 1
+                }
                 cube.removeFromParentNode()
                 m?.stowing = nil
+            }
+        case .ownTaken(let id, let c):
+            guard let m = minions[id] else { return }
+            switch c.kind {
+            case .pack: clearPyramids(m)
+            case .stow(let office):
+                // The newest cube comes up onto the head, to be carried to its place.
+                guard m.stowing == nil, let box = newestCube[m.station + "|" + office] else { return }
+                let cube = SCNNode(geometry: box.geometry?.copy() as? SCNGeometry)
+                cube.position = v3(0, m.headHeight + 0.14, 0)
+                m.node.addChildNode(cube)
+                m.stowing = (cube, box)
+            default: break
+            }
+        case .ownDropped(let id, let c):
+            // Never done: what was held back for it is drawn where it is.
+            switch c.kind {
+            case .pack(let office):
+                guard let m = minions[id] else { return }
+                packing.remove(m.station + "|" + office)
+                markersDirty = true
+            case .stow(let office):
+                guard let m = minions[id] else { return }
+                let key = m.station + "|" + office
+                stowHeld.remove(key)
+                newestCube[key]?.opacity = 1
+                if let (cube, _) = m.stowing { cube.removeFromParentNode(); m.stowing = nil }
+            default: break
             }
         case .packed(let key):
             // The crate is there, strapped, as the worker straightens up.

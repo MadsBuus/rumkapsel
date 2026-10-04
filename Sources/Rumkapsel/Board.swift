@@ -9,9 +9,10 @@
 // again, by it or by someone else. Work of the same rank never takes a body off another, so nobody
 // flips between two. A body taken off its work stands a beat, head up, before it goes.
 //
-// Carries, the pallet's steps and welding a rocket's tip are on the board. Deliveries, packing, QA, the
-// desk and the crew's reactions still run as a body's own commands; each is given its rank here so the
-// board knows what it may take a body off, and none of them can be taken off yet.
+// Some orders are one body's own: a message for a session's body, packing and stowing at its office, a
+// teammate's reaction. They wait on the board like any other until that body may take them, and a body
+// keeps one of each kind waiting: a newer one replaces it. The desk is no order: it is where a session's
+// body rests while its session works, and any work may borrow it from there.
 
 import Foundation
 
@@ -57,6 +58,8 @@ struct Opening {
     var standby = false
 
     enum Work {
+        /// One body's own order, by its command's id.
+        case own(Int)
         /// A carry, by its command's id.
         case carry(Int)
         /// The next step a station's pallet is at, or ordering one.
@@ -70,6 +73,20 @@ struct Opening {
     }
 }
 
+/// An order kept for one body, and where it is: waiting, or in that body's hands.
+struct OwnOrder {
+    let command: Command
+    let body: String
+    let rank: Rank
+    /// Where the work is: the cone, the package slot, the cube's place.
+    let at: Cell
+    /// Where the body is while on it.
+    let place: Place
+    let postedAt: Double
+    let announce: Bool
+    var held = false
+}
+
 /// A pallet's steps, each one an order: out at the console, loaded, pushed across, and unloaded onto the
 /// deck, or back into storage when its release closed.
 enum PalletStep {
@@ -81,6 +98,10 @@ extension Simulation {
     /// Every order nobody has, highest rank first, oldest first within a rank.
     func openings() -> [Opening] {
         var out: [Opening] = []
+        for (id, o) in ownOrders where !o.held {
+            guard let m = bodies[o.body] else { continue }
+            out.append(Opening(work: .own(id), rank: o.rank, station: m.station, at: o.at, postedAt: o.postedAt, only: o.body))
+        }
         for (id, job) in cargo where job.carrier == nil {
             guard case .carry(let crate, let from, _) = job.command.kind else { continue }
             // Crates stacked above this one are still on their way: it waits for them.
@@ -153,6 +174,7 @@ extension Simulation {
 
     /// What a command is worth on the board.
     func rank(of c: Command) -> Rank {
+        if let o = ownOrders[c.id] { return o.rank }
         switch c.kind {
         case .carry(_, let from, let to):
             // Part of a release going out: into the rocket, off its stack, through the gate.
@@ -178,7 +200,7 @@ extension Simulation {
         case .dispatch: return m.phaseKind == .walk
         case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
         case .pushPallet(let s, _): return pallets[s]?.pushing == false
-        case .weld, .qa: return true
+        case .weld, .qa, .work, .react: return true
         case .deliverOffice: return !m.hasLoad
         default: return false
         }
@@ -216,6 +238,7 @@ extension Simulation {
     /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
     /// it — a free one if there is one, else one on lower work that can be taken off it.
     func assignOrders() {
+        dropLostOrders()
         standDownQA()
         var taken = Set<String>()
         for o in openings() {
@@ -234,6 +257,27 @@ extension Simulation {
         hurryCarriers()
     }
 
+    /// Puts an order on the board for one body. It replaces any of the same kind still waiting for it.
+    func post(_ c: Command, for m: B, rank: Rank, at: Cell, place: Place, announce: Bool = false) {
+        for (id, o) in ownOrders where o.body == m.id && !o.held && o.command.kindName == c.kindName { drop(id) }
+        ownOrders[c.id] = OwnOrder(command: c, body: m.id, rank: rank, at: at, place: place, postedAt: clock, announce: announce)
+        assignOrders()
+    }
+
+    /// Off the board unfinished: the scene puts back whatever it held aside for it.
+    private func drop(_ id: Int) {
+        guard let o = ownOrders.removeValue(forKey: id) else { return }
+        cue(.ownDropped(o.body, o.command))
+    }
+
+    /// Orders whose body has gone or is leaving, and orders in hand that the body is no longer on.
+    private func dropLostOrders() {
+        for (id, o) in ownOrders {
+            guard let m = bodies[o.body], m.state != .leaving else { drop(id); continue }
+            if o.held, m.current?.id != id { drop(id) }
+        }
+    }
+
     /// Nothing left to test on a deck: whoever was walking its rows is done, and looks at the board.
     private func standDownQA() {
         for m in bodies.values where m.isQA {
@@ -248,6 +292,7 @@ extension Simulation {
     /// next thing.
     private func takeOff(_ m: B, for o: Opening) {
         guard let c = m.current else { return }
+        ownOrders[c.id]?.held = false
         switch c.kind {
         case .carry: cargo[c.id]?.carrier = nil
         case .qa: m.busy = false; m.activity = .waiting
@@ -263,6 +308,19 @@ extension Simulation {
     private func give(_ o: Opening, to m: B) -> Bool {
         guard let station = fleet.stations[m.station] else { return false }
         switch o.work {
+        case .own(let id):
+            guard let own = ownOrders[id] else { return false }
+            // A reaction plans its own walk, as rest does, before it is in hand.
+            if case .react = own.command.kind { if m.place != own.place || m.path.isEmpty { send(m, to: own.place) } }
+            else { m.place = own.place }
+            start(m, own.command, announce: own.announce)
+            guard m.current?.id == own.command.id else {
+                if m.pending?.id == own.command.id { m.pending = nil }
+                return false
+            }
+            ownOrders[id]?.held = true
+            if case .react = own.command.kind {} else { walk(m, to: own.at) }
+            cue(.ownTaken(m.id, own.command))
         case .carry(let id):
             guard let job = cargo[id], case .carry(_, let from, _) = job.command.kind else { return false }
             start(m, job.command, announce: true)

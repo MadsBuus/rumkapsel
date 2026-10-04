@@ -172,6 +172,7 @@ extension Simulation {
                 return .spent
             }
             if clock < m.phaseUntil { return .spent }
+            if let id = m.current?.id { ownOrders[id] = nil }
             finish(m)
             send(m, to: m.place)
             return .spent
@@ -253,6 +254,7 @@ extension Simulation {
             }
             if clock < m.phaseUntil { return .spent }
             cue(.packed("\(m.station)|\(office)"))
+            if let id = m.current?.id { ownOrders[id] = nil }
             finish(m)
             send(m, to: m.place)
             return .spent

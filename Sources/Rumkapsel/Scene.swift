@@ -262,6 +262,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var undelivered: Set<String> { world.truth.pendingOffices }
     /// Offices whose pull request crate is being packed right now: drawn only once the worker is done.
     var packing: Set<String> = []
+    /// Offices whose newest cube is off the floor, waiting for its worker or on its head: drawn once it is
+    /// stowed. And each office's newest cube as last drawn.
+    var stowHeld: Set<String> = []
+    var newestCube: [String: SCNNode] = [:]
     var boxes: [String: SCNNode] = [:]
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
@@ -774,9 +778,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.state = .leaving; m.path = []
         }
         for station in fleet.stations.values {
-            // A standing crew of two, always present, so the station is never empty.
+            // A standing crew of two, always present, so the station is never empty: standing by in the
+            // lounge, so only where there is one.
             let workers = minions.values.filter { $0.station == station.name && !$0.isSubagent && !$0.isCrew && $0.state != .leaving }
-            if workers.count < 2, !station.rooms.isEmpty {
+            if workers.count < 2, !station.cells(of: .lounge).isEmpty {
                 for k in workers.count..<2 {
                     let home = Home(key: "kind:lounge", name: "standby", repo: station.rooms.values.first { $0.repo != nil }?.repo ?? "crew", issue: nil)
                     let start = station.cells(of: .lounge).randomElement() ?? station.coreCenter
@@ -1168,17 +1173,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         case .pullRequestOpened(let repo, let number, let author, let roomKey):
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
-            // My own office with a worker in it: the crate does not appear by itself. The worker
-            // clears the cones and packs it at the office's package slot.
-            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && !$0.hasLoad && !$0.onJob }),
+            // My own office with a worker: the crate does not appear by itself. The worker clears the
+            // cones and packs it at the office's package slot, once it is free to.
+            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.isPeer && $0.home.key == roomKey }),
                let st = fleet.stations[m.station], let room = st.rooms[roomKey] {
-                let cell = packageCell(st, room)
                 let key = m.station + "|" + roomKey
                 packing.insert(key)
                 markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 0 }
-                clearPyramids(m)
-                start(m, .pack(office: roomKey), announce: true)
-                walk(m, to: standCell(st, near: cell))
+                simulation.post(.pack(office: roomKey), for: m, rank: .yard, at: standCell(st, near: packageCell(st, room)), place: .room(roomKey), announce: true)
             }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
@@ -1289,8 +1291,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
 
         if let id = following {
-            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours.
-            if let m = minions[id], m.opacity > 0.05 {
+            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours. One
+            // still stepping out of its shuttle is kept; one gone out through the airlock is let go.
+            if let m = minions[id], m.state != .leaving || m.opacity > 0.05 {
                 userPan = SIMD2(Double(m.node.position.x), Double(m.node.position.z)) - targetFocus
             } else { following = nil }
         }
