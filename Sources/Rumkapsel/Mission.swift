@@ -1,5 +1,6 @@
-// A production deploy as a flight: the repository's planet on the horizon, a camera riding up from the
-// pad to it, and the mission clock in a window in the corner, timed on how long its deploys usually take.
+// A production deploy as a flight: the repository's planet on the horizon, cameras bolted to the rocket riding
+// up from the pad to it, and the mission clock in a window in the corner, timed on how long its deploys
+// usually take.
 
 import AppKit
 import SceneKit
@@ -25,10 +26,14 @@ struct Mission {
     /// When its window opened: a flight joined late still gets its minute in full before it shrinks.
     var shownAt = 0.0
     var dustRaised = false
-    /// The lifter has let go of the tip.
+    /// The lifter has let go of the tip, and when.
     var separated = false
+    var separatedAt = 0.0
     var legsOut = false
     var touchedDown = false
+    /// Which way the craft's cameras face out from the hull, square to its heading: carried over from frame
+    /// to frame, so the craft never rolls on its own.
+    var cameraSide: SIMD3<Double>?
 
     /// How far along the flight is: most of the way by the usual length, creeping on past it, and after
     /// the end, docking, falling back to the pad, or stopped where the signal was lost.
@@ -62,13 +67,20 @@ struct Mission {
         }
         let p = progress(at: clock)
         if clock - started > expected { return "Holding short · longer than usual" }
-        return p < 0.04 ? "Liftoff" : p < Mission.separation - 0.04 ? "Climbing" : p < Mission.correction.lowerBound ? "Stage separation"
-            : Mission.correction.contains(p) ? "Course correction" : p < 0.8 ? "Coasting" : "Approaching \(repo)"
+        if separated {
+            let since = clock - separatedAt
+            if since < Mission.correction.lowerBound { return "Stage separation" }
+            if Mission.correction.contains(since) { return "Course correction" }
+        }
+        return p < 0.04 ? "Liftoff" : p < Mission.separation - 0.04 ? "Climbing" : p < Mission.separation ? "Stage separation"
+            : p < 0.8 ? "Coasting" : "Approaching \(repo)"
     }
 
-    /// Where along the flight the lifter lets go, and the tip's short burn that sets it on course.
+    /// Where along the flight the lifter lets go; the tip's one short burn that sets it on course, in
+    /// seconds after that; and when the picture cuts from the camera looking down the hull to the one at the nose.
     static let separation = 0.5
-    static let correction = 0.53..<0.62
+    static let correction = 1.2..<2.7
+    static let noseCut = 3.4
     /// Out of the atmosphere: past here nothing shakes.
     static let space = 0.3
 
@@ -165,7 +177,7 @@ extension StationController {
         if missionCamera.camera == nil {
             let cam = SCNCamera()
             cam.fieldOfView = 58
-            cam.zNear = 0.05
+            cam.zNear = 0.01
             cam.zFar = 600
             cam.categoryBitMask = ~Pick.launching
             missionCamera.camera = cam
@@ -280,7 +292,8 @@ extension StationController {
         func path(_ s: Double) -> SIMD3<Double> {
             if s <= 0.45 { return pad + SIMD3(0, 0.9 + 48 * pow(s / 0.45, 1.8), 0) }
             let t = min(1, (s - 0.45) / 0.55), u = 1 - t
-            let c1 = top + SIMD3(0, 6, 0), c2 = dock + normal * r * 5
+            // The curve leaves the top at the climb's own speed, so the turn onto the course is gradual.
+            let c1 = top + SIMD3(0, 48 * 1.8 / 0.45 * 0.55 / 3, 0), c2 = dock + normal * r * 5
             return top * (u * u * u) + c1 * (3 * u * u * t) + c2 * (3 * u * t * t) + dock * (t * t * t)
         }
         func ease(_ t: Double) -> Double { let k = max(0, min(1, t)); return k * k * (3 - 2 * k) }
@@ -309,34 +322,40 @@ extension StationController {
         }
         if s >= Mission.separation, !m.separated, m.ended?.outcome.signalLost != true {
             mission?.separated = true
+            mission?.separatedAt = clock
             separateStage(heading: heading)
         }
         let separated = mission?.separated ?? false
         missionCraft.scale = SCNVector3(0.55 * scale, 0.55 * scale, 0.55 * scale)
         missionCraft.position = v3(craft.x, craft.y, craft.z)
-        missionCraft.look(at: v3(craft.x + heading.x, craft.y + heading.y, craft.z + heading.z),
-                          up: v3(tangent.x, tangent.y, tangent.z), localFront: SCNVector3(0, 1, 0))
+        // Nose along the heading, and the side its cameras are on carried on from the last frame: off the pad
+        // it faces the station, and it only ever turns as far as the heading makes it.
+        var side = m.cameraSide ?? SIMD3(centre.x - pad.x, 0, centre.z - pad.z)
+        side -= heading * simd_dot(side, heading)
+        if simd_length(side) < 1e-4 { side = tangent - heading * simd_dot(tangent, heading) }
+        side /= max(1e-6, simd_length(side))
+        mission?.cameraSide = side
+        let bearing = Self.cameraBearing, square = simd_cross(side, heading)
+        let x = side * cos(bearing) - square * sin(bearing), z = side * sin(bearing) + square * cos(bearing)
+        func f(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3(Float(v.x), Float(v.y), Float(v.z)) }
+        missionCraft.simdOrientation = simd_quatf(simd_float3x3(columns: (f(x), f(heading), f(z))))
         // The lifter burns from the pad to separation; the tip only for its course correction and its landing.
-        let tipBurns = m.ended == nil ? Mission.correction.contains(s) : burning
+        let since = separated ? clock - (mission?.separatedAt ?? clock) : -1
+        let tipBurns = m.ended == nil ? Mission.correction.contains(since) : burning
         missionCraft.childNode(withName: "lifter plume", recursively: true)?.isHidden = !burning || separated
         missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
 
-        // The camera: on the hull looking aft on the climb, behind the craft over the top, beside it coming down.
-        var sideways = simd_cross(SIMD3(0.0, 1, 0), toStation)
-        sideways /= max(0.001, simd_length(sideways))
-        let aftAt = craft + sideways * 0.5 + SIMD3(0, 0.35, 0), aftLook = aftAt - SIMD3(0, 30, 0) + sideways * 7
-        let chaseAt = craft - heading * 2.4 + SIMD3(0, 1.0, 0), chaseLook = craft + heading * 12 + SIMD3(0, 0.8, 0)
-        let b = max(0, min(1, (s - 0.4) / 0.25)), blend = b * b * (3 - 2 * b)
-        var at = aftAt + (chaseAt - aftAt) * blend
-        var look = aftLook + (chaseLook - aftLook) * blend
-        var up = toStation + (SIMD3(0, 1, 0) - toStation) * blend
-        if let l = landing, l >= 4 {
-            let k = ease((l - 4) / 1.5)
-            let sideAt = craft + tangent * 0.5 + normal * 0.16, sideLook = craft + normal * 0.03
-            at = at + (sideAt - at) * k
-            look = look + (sideLook - look) * k
-            up = up + (normal - up) * k
-        }
+        // The cameras are the tip's own, bolted to its hull: the one at the foot looking down the hull on the
+        // climb, through separation and the correction burn, and again for the landing; the one at the
+        // shoulder looking past the nose for the coast and the approach. The picture cuts between them.
+        let nose = since >= Mission.noseCut && (landing ?? 0) < 4
+        let mount = (missionCraft.childNode(withName: nose ? "nose cam" : "foot cam", recursively: true)?.simdWorldTransform)
+            ?? simd_float4x4(diagonal: SIMD4(1, 1, 1, 1))
+        func column(_ c: SIMD4<Float>) -> SIMD3<Double> { SIMD3(Double(c.x), Double(c.y), Double(c.z)) }
+        var at = column(mount.columns.3)
+        let forward = -column(mount.columns.2)
+        var look = at + forward / max(0.001, simd_length(forward)) * 10
+        var up = column(mount.columns.1)
         // Landed: a drone lifts off beside it and circles the tip slowly, low over the ground.
         if let l = landing, l >= 10.5 {
             let k = ease((l - 10.5) / 2)
@@ -349,9 +368,9 @@ extension StationController {
             look = look + (droneLook - look) * k
         }
         up /= max(0.001, simd_length(up))
-        // Filling the station, the view can be turned a little about the craft, or the colony once it lands.
+        // Filling the station, the camera can be turned a little on its mount, or the drone about the colony.
         if missionSize == 2, missionOrbit != .zero {
-            let pivot = (landing ?? 0) >= 7 ? ground : craft
+            let pivot = (landing ?? 0) >= 10.5 ? ground : at
             var side = simd_cross(at - pivot, up)
             side /= max(0.001, simd_length(side))
             let turn = simd_quatd(angle: missionOrbit.x, axis: up) * simd_quatd(angle: missionOrbit.y, axis: side)
@@ -364,12 +383,13 @@ extension StationController {
         var shake = m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
         if let l = landing { shake = l < 4 ? 0 : l < 7 ? 0.002 + 0.01 * heat : l < 10 ? 0.004 : 0 }
         // A rumble, not a twitch: a few slow sines out of step with each other, never a fresh jolt a frame.
+        // The camera is bolted to the hull, so the hull rumbles with it: the view trembles, it is not shoved.
         if shake > 0 {
-            let t = clock, k = shake / 1.5
+            let t = clock, k = shake / 1.5 * 0.35 * simd_length(look - at)
             let x: Double = sin(t * 23.1) + 0.5 * sin(t * 37.7)
             let y: Double = sin(t * 29.3 + 1.3) + 0.5 * sin(t * 41.9)
             let z: Double = sin(t * 19.7 + 2.1) + 0.5 * sin(t * 33.1)
-            at += SIMD3(x, y, z) * k
+            look += SIMD3(x, y, z) * k
         }
         missionCamera.position = v3(at.x, at.y, at.z)
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
@@ -562,6 +582,19 @@ extension StationController {
         antenna.position = v3(radius * 0.7, top - (top - base) * 0.3, 0)
         antenna.eulerAngles.z = -0.35
         tip.addChildNode(antenna)
+        // The onboard cameras, between a thruster block and a leg: one just above the foot looking down the
+        // hull, one at the shoulder looking past the nose. Each looks along its -z with its y away from the hull.
+        let out = SIMD3<Float>(Float(cos(Self.cameraBearing)), 0, Float(sin(Self.cameraBearing)))
+        let reach = Float(radius) * 1.7
+        for (name, y, toward) in [("foot cam", base + 0.14, SIMD3<Float>(0, -1, 0)), ("nose cam", top - (top - base) * 0.25, SIMD3<Float>(0, 1, 0))] {
+            let cam = SCNNode()
+            cam.name = name
+            cam.simdPosition = out * reach + SIMD3(0, Float(y), 0)
+            let ahead = simd_normalize(toward + out * 0.12)
+            let right = simd_normalize(simd_cross(ahead, out)), up = simd_cross(right, ahead)
+            cam.simdOrientation = simd_quatf(simd_float3x3(columns: (right, up, -ahead)))
+            tip.addChildNode(cam)
+        }
         let beacon = SCNNode(geometry: SCNBox(width: 0.05, height: 0.05, length: 0.05, chamferRadius: 0))
         beacon.geometry!.firstMaterial = flat(color.lighter(0.5))
         beacon.position = v3(0, top + 0.02, 0)
@@ -569,6 +602,9 @@ extension StationController {
                                                    .fadeOpacity(to: 0.15, duration: 0.25), .wait(duration: 0.5)])))
         tip.addChildNode(beacon)
     }
+
+    /// Where round the tip its cameras sit: between the thruster block at half a turn and the leg after it.
+    static let cameraBearing = Double.pi * 1.125
 
     /// Folded up flush along the hull, and swung down and out, as angles of a leg's fold.
     static let legStowed = Double.pi - 0.06, legDeployed = 0.62
@@ -616,9 +652,10 @@ extension StationController {
             cone.position = v3(0, -length * k / 2, 0)
             flame.addChildNode(cone)
         }
-        flame.runAction(.repeatForever(.sequence((0..<6).map { _ in
-            .scale(to: CGFloat.random(in: 0.82...1.18), duration: Double.random(in: 0.04...0.09))
-        })))
+        // In the air the flame flickers; in vacuum it burns steady, breathing a little.
+        flame.runAction(.repeatForever(vacuum
+            ? .sequence([.scale(to: 1.04, duration: 0.5), .scale(to: 0.97, duration: 0.6)])
+            : .sequence((0..<6).map { _ in .scale(to: CGFloat.random(in: 0.82...1.18), duration: Double.random(in: 0.04...0.09)) })))
         return flame
     }
 

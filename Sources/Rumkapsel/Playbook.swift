@@ -474,7 +474,7 @@ final class PlaybookController {
     }
 
     func snapshot(to path: String) {
-        let shot = station.view.snapshot()
+        let shot = station.composedSnapshot()
         guard let tiff = shot.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return }
         try? png.write(to: URL(fileURLWithPath: path))
