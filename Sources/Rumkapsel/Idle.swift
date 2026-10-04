@@ -28,6 +28,32 @@ struct IdleClock {
     }
 }
 
+/// What a body does the moment an order ends and the board has nothing for it: by night, rest; after
+/// hard work, now and then the bath first; after work at a desk, a message or QA, now and then a look
+/// round the station; otherwise rest, where the idle clock takes over.
+enum IdleAfter: Equatable {
+    case rest
+    case bath(shower: Bool)
+    case roam
+
+    /// A breather in the bath after hard work this often, a shower the hardest; a look round after quiet
+    /// work this often.
+    static let bathBelow = 0.35, showerBelow = 0.12, roamBelow = 0.3
+
+    /// The choice for one roll in 0..<1, after an order of `rank` (nil when none was in hand).
+    static func after(_ rank: Rank?, roll: Double, night: Bool, bath: Bool) -> IdleAfter {
+        if night { return .rest }
+        switch rank {
+        case .yard?, .release?:
+            return bath && roll < bathBelow ? .bath(shower: roll < showerBelow) : .rest
+        case .desk?, .message?, .qa?:
+            return roll < roamBelow ? .roam : .rest
+        default:
+            return .rest
+        }
+    }
+}
+
 /// What a lounger does when the clock runs out.
 enum IdlePick: Equatable {
     case roam

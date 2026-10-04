@@ -41,8 +41,8 @@ extension StationController {
     // MARK: the simulation's side of a body
 
     /// The orders, the rest and the walks are the simulation's (`Simulation.swift`); these forward to it.
-    func start(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
-    private func assign(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.start(m, c, announce: announce) }
+    @discardableResult
+    func start(_ m: Minion, _ c: Command, announce: Bool = false) -> Bool { simulation.start(m, c, announce: announce) }
     func handOver(_ m: Minion, _ c: Command, announce: Bool = false) { simulation.handOver(m, c, announce: announce) }
     func issue(_ c: Command, by who: String, announce: Bool = false) { simulation.issue(c, by: who, announce: announce) }
     func advance(_ m: Minion) { simulation.advance(m) }
@@ -68,7 +68,7 @@ extension StationController {
         for m in minions.values.sorted(by: { $0.home.name < $1.home.name }) {
             let job = m.current.map { "\($0.words) · \(m.phaseKind)" } ?? "nothing"
             let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""
-            let more = [m.carried != nil ? "carrying" : nil, m.waitingOn.map { "waiting on \($0)" }, m.pending.map { "pending: \($0.words)" },
+            let more = [m.carried != nil ? "carrying" : nil, m.waitingOn.map { "waiting on \($0)" },
                         m.wakeUntil > 0 ? "waking" : nil, m.busy ? "busy" : nil, m.isCrew ? "crew" : nil, m.wedged ? "wedged" : nil].compactMap { $0 }
             StationLog.write("dump", "\(m.home.name) [\(m.station)]: \(job) at \(m.cell.x),\(m.cell.y) path \(m.path.count)\(spot) \(more.joined(separator: ", "))")
         }

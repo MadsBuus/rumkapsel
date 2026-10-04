@@ -140,7 +140,7 @@ extension StationController {
     /// It asks what the simulation asks — whether the doing in hand can be cut into — so a minion walking
     /// to the gym can still be turned round, while a turn under way stays its own until it is over.
     func canOrder(_ m: Minion) -> Bool {
-        m.state == .settled && !m.busy && m.pending == nil && !m.hasLoad && !m.onJob
+        m.state == .settled && !m.busy && !m.hasLoad && !m.onJob
             && (m.current == nil || m.phaseKind.interruptible)
     }
 

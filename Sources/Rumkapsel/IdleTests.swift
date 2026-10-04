@@ -12,6 +12,18 @@ enum IdleTests {
     static func run() -> Never {
         let span = { 200.0 }
 
+        test("what the empty board leaves a body to: the night, the work it did, and chance") {
+            expect(IdleAfter.after(.yard, roll: 0, night: true, bath: true) == .rest, "by night, rest, whatever it did")
+            expect(IdleAfter.after(.release, roll: 0.05, night: false, bath: true) == .bath(shower: true), "after hard work, the lowest rolls a shower")
+            expect(IdleAfter.after(.yard, roll: 0.2, night: false, bath: true) == .bath(shower: false), "then the bowl")
+            expect(IdleAfter.after(.yard, roll: 0.5, night: false, bath: true) == .rest, "and mostly rest")
+            expect(IdleAfter.after(.yard, roll: 0.05, night: false, bath: false) == .rest, "no bath on the station: rest")
+            expect(IdleAfter.after(.message, roll: 0.1, night: false, bath: true) == .roam, "after a message, now and then a look round")
+            expect(IdleAfter.after(.qa, roll: 0.9, night: false, bath: true) == .rest, "mostly rest")
+            expect(IdleAfter.after(.idle, roll: 0, night: false, bath: true) == .rest, "after idling, simply rest")
+            expect(IdleAfter.after(nil, roll: 0, night: false, bath: true) == .rest, "after nothing, rest")
+        }
+
         test("the clock arms on the couch and runs out once, on the station clock") {
             var c = IdleClock()
             expect(!c.armed, "unarmed to begin with")

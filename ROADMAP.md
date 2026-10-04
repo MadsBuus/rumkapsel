@@ -24,11 +24,8 @@ couple of seconds; judge looks against references and Mads' eyes, not alone.
 
 ### The order board (`Board.swift`)
 Agreed design: every piece of work is an order with a rank, taken at safe points, put back when preempted; idle
-is the empty board. Slices 1–4c are done.
+is the empty board. Slices 1–6 are done.
 
-- **Slice 5: idle from the empty board.** What a body does with nothing on the board follows the time of day,
-  its last order, or chance.
-- **Slice 6: remove `pending`, `canInterrupt` and `adopt`.** The board replaces them.
 - **Minimum headcount.** The station always keeps enough bodies free to take orders, so nothing deadlocks or
   starves.
 - **The playbook posts orders.** An entry lays its floor, starts with an empty board and posts its one order,
