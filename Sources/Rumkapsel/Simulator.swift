@@ -138,6 +138,8 @@ final class SimulatorModel: ObservableObject {
     private var noStaging: Set<String> = []
     /// Repositories pressed to deploy on every merge, with no release at all.
     private var shipsOnMerge: Set<String> = []
+    /// Repositories pressed to ship by tagging the trunk, as rumkapsel does.
+    private var shipsOnTag: Set<String> = []
     private var launches: [(repo: String, pr: ReleasePR)] = []
     /// Dependabot's open pull requests per repository: objects in decon, not offices.
     private var botPRs: [String: [(number: Int, title: String, branch: String)]] = [:]
@@ -549,9 +551,10 @@ final class SimulatorModel: ObservableObject {
         setPull(pr, on: o.uid)
     }
 
-    static let pipelines = ["trunk → staging → production", "no staging branch", "every merge deploys"]
+    static let pipelines = ["trunk → staging → production", "no staging branch", "every merge deploys", "ships on tags"]
     private var pipelineOf: String {
         if shipsOnMerge.contains(targetRepo) { return SimulatorModel.pipelines[2] }
+        if shipsOnTag.contains(targetRepo) { return SimulatorModel.pipelines[3] }
         return noStaging.contains(targetRepo) ? SimulatorModel.pipelines[1] : SimulatorModel.pipelines[0]
     }
 
@@ -561,6 +564,7 @@ final class SimulatorModel: ObservableObject {
         let repo = targetRepo, cfg = ConfigStore.shared.current
         noStaging.remove(repo)
         shipsOnMerge.remove(repo)
+        shipsOnTag.remove(repo)
         github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: cfg.stagingBranch, production: cfg.productionBranch),
                       for: root(repo))
         pushGitHub()
@@ -619,6 +623,7 @@ final class SimulatorModel: ObservableObject {
             switch pick {
             case SimulatorModel.pipelines[1]: press("Repo: No staging")
             case SimulatorModel.pipelines[2]: press("Repo: Ships on merge")
+            case SimulatorModel.pipelines[3]: press("Repo: Ships on tags")
             default: normalPipeline(); note("sim", "\(targetRepo): trunk → staging → production")
             }
         }))
@@ -887,6 +892,8 @@ final class SimulatorModel: ObservableObject {
                 button("Deploy: Staging fails", "…the staging deploy fails"),
                 button("Repo: No staging", shown: false),
                 button("Repo: Ships on merge", shown: false),
+                button("Repo: Ships on tags", shown: false),
+                button("Release: Tag", "A release is tagged: it ships", shipsOnTag.contains(repo) ? nil : .already("\(repo) does not ship on tags")),
             ]),
             Group(id: "Everyone", note: nil, buttons: [
                 button("Everyone to lounge", "To the lounge"), button("Breather", "One takes a break"),
@@ -1164,6 +1171,25 @@ final class SimulatorModel: ObservableObject {
             shipsOnMerge.insert(repo)
             let cfg = ConfigStore.shared.current
             github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "workflow", why: "deploys on every push", ship: "merge"), for: root(repo))
+            pushGitHub()
+        case "Repo: Ships on tags":
+            shipsOnTag.insert(repo)
+            let cfg = ConfigStore.shared.current
+            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "tags",
+                                             why: "no release branch: what is tagged on \(cfg.trunkBranch) has shipped", ship: "tag"), for: root(repo))
+            // Without staging nothing of the repository is ever on a deck: whatever the seed put there waits in storage.
+            move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
+            pushGitHub()
+        case "Release: Tag":
+            // The tag is the release, and it has happened by the time anyone sees it.
+            let cfg = ConfigStore.shared.current
+            nextRelease += 1
+            let name = "v0.\(nextRelease - 9000)"
+            let tag = ReleasePR(number: 0, title: name, base: cfg.trunkBranch, head: name, state: "MERGED",
+                                url: "https://example.invalid/\(repo)/releases/tag/\(name)", labels: [], mergedAt: station.now,
+                                production: true, staging: false, tag: true)
+            releases[repo, default: []].append(tag)
+            launches.append((repo, tag))
             pushGitHub()
         case "Repo: No staging":
             noStaging.insert(repo)

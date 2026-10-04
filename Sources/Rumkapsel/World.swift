@@ -103,7 +103,9 @@ final class World {
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
             case .shipped where t.from != nil:
-                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }) else { continue }
+                guard let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
+                // Shipped by a tag: the tag is the launch, and the work it took simply goes.
+                if github.pipeline(repoRoot: root).shipsOnTag { continue }
                 let key = info.station + "|" + info.repo
                 if !t.wasQuiet || padSlotOf[key] != nil { launches.insert(key) }   // a rocket that stands goes up
             default: break
@@ -733,11 +735,11 @@ final class World {
     }
 
     /// Pads that should hold a rocket, as "station|repo": a release open, a merge going up, or work waiting
-    /// for a release in a repository that has a way to ship.
+    /// for a release in a repository that has a release to wait for.
     func padRockets() -> Set<String> {
         var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
         for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
-            && !github.pipeline(repoRoot: root).shipsOnMerge && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
+            && !github.pipeline(repoRoot: root).shipsAtOnce && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
         return pads
     }
 
@@ -842,10 +844,11 @@ final class World {
             guard padSlotOf[key] != nil || padRelease(root: root) == nil else { continue }   // no slot on the pad
             guard let pr = padRelease(root: root) else {
                 // No release opened: the work still has a rocket standing, loaded once every piece of it is
-                // cleared, or at once where nothing clears here.
+                // cleared, or at once where nothing clears here. Where a merge or a tag is the release, the
+                // work waits in storage instead, and its rocket comes with the release.
                 let w = waiting(repo: info.repo, station: station.name)
                 guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !mergeLaunches.contains(key),
-                      !github.pipeline(repoRoot: root).shipsOnMerge, padSlotOf[key] != nil else { continue }   // a merge's rocket is its own, one per merge
+                      !github.pipeline(repoRoot: root).shipsAtOnce, padSlotOf[key] != nil else { continue }
                 let cleared = clearedToLoad(repo: info.repo, station: station.name)
                 events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                    station: station, repo: info.repo, waiting: w.count, cleared: cleared))

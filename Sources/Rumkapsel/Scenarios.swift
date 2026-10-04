@@ -183,9 +183,11 @@ struct Scenario {
         sim.model.records.compactMap { if case .command(let c, let who) = $0 { return (c, who) }; return nil }
     }
 
-    /// How many times the run recorded something.
-    @MainActor static func count(_ sim: SimulatorController, _ e: Expect) -> Int {
-        sim.model.records.filter(e.matches).count
+    /// How many times the run recorded something; from a press on, when one is named.
+    @MainActor static func count(_ sim: SimulatorController, _ e: Expect, after press: String? = nil) -> Int {
+        let records = sim.model.records
+        let from = press.flatMap { p in records.firstIndex { if case .press(let n) = $0 { return n == p }; return false } } ?? 0
+        return records[from...].filter(e.matches).count
     }
 }
 
@@ -300,6 +302,46 @@ enum Scenarios {
         ], floor: { sim in
             let stored = Scenario.crates(sim, "storage", "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
+        }),
+
+        Scenario("a repository that ships on tags: merged work waits in storage with no rocket, and the tag sends it up", [
+            ("Target: ios#298", 4.8),
+            ("Repo: Ships on tags", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 128),                   // the package is carried to storage, and waits there
+            ("Release: Tag", 4.8),               // the release: the rocket comes out, loads and goes
+        ], tail: 224, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            // Whatever stood for the seed's work before the switch, nothing stands for ios's work after it.
+            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
+                - Scenario.count(sim, .rocket(.load(0), "ios"), after: "Release: Tag")
+            if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times before any tag" }
+            let stored = Scenario.crates(sim, "storage", "ios")
+            return stored == 0 ? nil : "\(stored) ios crates left in storage after the tag"
+        }),
+
+        Scenario("a repository that ships on tags, said shipped with no tag seen: nothing goes up, the crate just goes", [
+            ("Target: ios#298", 4.8),
+            ("Repo: Ships on tags", 4.8),
+            ("Open PR", 32),
+            ("Stage: stored", 128),
+            ("Stage: shipped", 4.8),
+        ], tail: 64, expects: [
+            .carry(298, to: .storage),
+        ], forbids: [
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
+            if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times" }
+            let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
+            return row?.stands(in: .storage) == true ? "#298 still stands in storage after it shipped" : nil
         }),
 
         // The station half alone: no merge on GitHub, no board item moved. A repository without a staging
