@@ -105,6 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         // What each look promises to draw, since a look conforms by shape and can be unhooked in silence.
         if args.contains("--look-tests") { LookTests.run() }
         if args.contains("--dump-colors") { ColorDump.run() }
+        if args.contains("--bake-plating") { Plating.bake(FlightCraft.Materials.families) }
+        // One still of the flight rocket, for working on its look.
+        if let i = args.firstIndex(of: "--look-dev"), args.count > i + 1 { LookDev.run(out: args[i + 1], shot: args.count > i + 2 ? args[i + 2] : "hull") }
         if let i = args.firstIndex(of: "--dump-floor") { FloorDump.run(theme: args.count > i + 1 ? args[i + 1] : "classic") }
         // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
         if args.contains("--idle-tests") { IdleTests.run() }
@@ -152,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
         controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)   // the playbook plays its own stations; the app's stays quiet
         window.contentView = controller.view
+        if !Scripted.run { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.controller.prepareFlight() } }
         controller.viewSize = controller.view.bounds.size
         NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: controller.view, queue: .main) { [weak self] _ in
             guard let self else { return }

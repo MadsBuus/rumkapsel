@@ -77,6 +77,8 @@ enum Pick {
     /// A rocket lifting off the pad while its flight is on: drawn by the station's camera only, since the
     /// mission camera is riding it.
     static let launching = 128
+    /// A planet's shell of air: drawn by the station's camera, not by the flight's, which goes down inside it.
+    static let air = 256
 }
 
 /// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
@@ -483,6 +485,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onClick = { [weak self] node in
+            // A click on the station outside the flight's window puts the window back small in its corner.
+            if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
             // A click on a minion follows it; a click anywhere else lets go.
             let n = node?.name ?? ""
             if n.hasPrefix("minion:") { self?.enqueue { self?.follow(minionId: String(n.dropFirst(7))) }; return }
@@ -594,13 +598,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         sun.light!.type = .directional
         sun.light!.intensity = 700
         sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
-        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
+        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
         scene.rootNode.addChildNode(sun)
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light!.type = .ambient
         ambient.light!.intensity = 550
-        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
+        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
         scene.rootNode.addChildNode(ambient)
         buildBackdrop()
         rebuildStatic()
