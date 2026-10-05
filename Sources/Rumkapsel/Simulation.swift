@@ -155,26 +155,15 @@ final class Simulation<B: Body> {
         begin(m, c, announce: announce)
     }
 
-    /// The one way to give a body an order. It takes over at the next interruptible phase; mid-lift or
-    /// setting down it waits its turn, and only one waits at a time.
-    func start(_ m: B, _ c: Command, announce: Bool = false) {
-        guard m.current == nil || canInterrupt(m, with: c) else { m.pending = c; return }
+    /// Gives a body an order it can take now: nothing in hand, or rest or a visit at a point where it can
+    /// be cut into, and out of the shuttle. False, and nothing changes, when it cannot. Work that has to wait
+    /// for a body waits on the board (`Board.swift`), never on the body; a job in hand is only ever left by
+    /// the board taking the body off it, or handed over to the job that follows it.
+    @discardableResult
+    func start(_ m: B, _ c: Command, announce: Bool = false) -> Bool {
+        guard m.current == nil || (m.wakeUntil == 0 && !m.onJob && m.phaseKind.interruptible) else { return false }
         begin(m, c, announce: announce)
-    }
-
-    /// Walking and standing about can be cut into; a crouch cannot, and a carry only to send the
-    /// crate on the arms somewhere else.
-    private func canInterrupt(_ m: B, with c: Command) -> Bool {
-        guard m.wakeUntil == 0 else { return false }   // still stepping out of the shuttle
-        // A job holds something and is not simply dropped: only another job may cut in on it. A rest
-        // or a message waits its turn, and begins the moment the job is done.
-        if m.onJob, !c.isJob { return false }
-        let phase = m.phaseKind
-        if phase.takesNewDestination {
-            guard let held = m.current?.crate, let want = c.crate else { return false }
-            return held == want
-        }
-        return phase.interruptible
+        return true
     }
 
     /// Every command issued, whoever runs it, goes past the taps: the log line and the panel.
@@ -185,36 +174,30 @@ final class Simulation<B: Body> {
     }
 
     private func begin(_ m: B, _ c: Command, announce: Bool = false) {
-        // A carry is one body's from the moment it begins, however it began: from the scheduler or
-        // from the pending slot after a pack. Somebody else already on it means this one stands down.
+        // A carry is one body's from the moment it begins. Somebody else already on it means this one stands down.
         if case .carry = c.kind, let job = cargo[c.id] {
-            if let who = job.carrier, who != m.id { m.pending = nil; if m.current == nil { send(m, to: restPlace(m)) }; return }
+            if let who = job.carrier, who != m.id { if m.current == nil { send(m, to: restPlace(m)) }; return }
             if job.carrier == nil { cargo[c.id]?.carrier = m.id }
         }
         issue(c, by: m.home.name)
-        // Redirected mid-carry: keep the crate and walk on to the new spot.
-        let redirected = m.hasLoad && m.current?.crate != nil && m.current?.crate == c.crate
         // A change of orders is visible: a beat standing, head up, then off. A message from you is urgent.
-        if let old = m.current, !redirected, old.kindName != c.kindName, m.state == .settled {
+        if let old = m.current, old.kindName != c.kindName, m.state == .settled {
             if case .work = c.kind { m.wonderUntil = clock + 0.15 } else { m.wonderUntil = clock + 0.5 }
         }
         // The order in hand owns the body's posture. A new order of another kind drops the old one's
         // leftovers, so nobody carries a fixture, a seat, a towel or a spot to shuffle to into the next thing.
         rouse(m)   // an order of any kind gets a sleeper up before it is acted on
-        if let old = m.current, !redirected, old.kindName != c.kindName { dropLeftovers(m, of: old) }
+        if let old = m.current, old.kindName != c.kindName { dropLeftovers(m, of: old) }
         m.current = c
-        m.phase = redirected ? (c.phases.firstIndex(of: .haul) ?? 0) : 0
+        m.phase = 0
         m.phaseUntil = 0
         m.actFor = c.visitSeconds ?? 0; m.actStartedAt = 0   // the order carries its visit's length; the clock starts on arrival
-        // A job waiting its turn is not wiped by a rest re-planned over it: it begins when the rest ends.
-        if !(c.isRest && m.pending?.isJob == true) || m.pending?.id == c.id { m.pending = nil }
         if announce { onLog(c.words) }
-        if redirected, let aim = cargo[c.id]?.aim { walk(m, to: aim.cell) }
     }
 
     /// What an order leaves on the body when another cuts in: the spot it was shuffling to, the seat, the
     /// bench, the fixture it held, the towel; and a visit's place, which goes back to where the visit began.
-    private func dropLeftovers(_ m: B, of old: Command) {
+    func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
         m.seatedOnBowl = false
         m.napping = false
@@ -233,20 +216,34 @@ final class Simulation<B: Body> {
         if m.phase + 1 < c.phases.count { m.phase += 1 }
     }
 
-    /// Done, or given up: whatever was queued starts now, else the board's next order for it, else the
-    /// body goes back to resting: to the destination when given, one walk rather than a rest and another.
+    /// Done, or given up: the board's next order for it; else, when the order said where to go back to,
+    /// there; else whatever the empty board leaves it to (`idle(_:after:)`).
     func finish(_ m: B, to place: Place? = nil) {
+        let last = m.current.map { rank(of: $0) }
         m.current = nil
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
-        if let next = m.pending {
-            m.pending = nil
-            // A reaction that waited behind a visit has its walk still to plan: nothing but rest moved the
-            // body while the visit lasted, so it is planned now, with nothing in hand for a moment.
-            if case .react(_, let where_, _) = next.kind, m.place != where_ { send(m, to: where_) }
-            begin(m, next, announce: next.isJob)
-        } else if !takeNext(m) { send(m, to: place ?? restPlace(m)) }
+        if takeNext(m) { return }
+        if let place { send(m, to: place) } else { idle(m, after: last) }
+    }
+
+    /// Nothing on the board for a body that has just finished an order: by the time of day, what it was
+    /// doing, and chance (`IdleAfter`). A session's body goes back to its desk, a teammate to wherever its
+    /// reaction leaves it; any order on the board takes it again from whatever it chose.
+    func idle(_ m: B, after last: Rank?) {
+        guard let station = fleet.stations[m.station], !m.busy, !m.isSubagent, !m.isCrew, !m.isPeer, m.state == .settled else {
+            send(m, to: restPlace(m)); return
+        }
+        switch IdleAfter.after(last, roll: Double.random(in: 0..<1), night: isNight(station), bath: station.rooms["kind:bath"] != nil) {
+        case .rest:
+            send(m, to: restPlace(m))
+        case .bath(let shower):
+            m.showering = shower
+            if !visitBath(m, station: station) { send(m, to: restPlace(m)) }
+        case .roam:
+            if !startRoam(m, station: station) { send(m, to: restPlace(m)) }
+        }
     }
 
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
@@ -259,10 +256,15 @@ final class Simulation<B: Body> {
 
     // MARK: rest and walks
 
-    /// Off the station: through the airlock when there is one, and gone once inside.
+    /// Off the station: leaving is the top order on the board, kept for this body. It goes as soon as it is at
+    /// a safe point, setting down anything in its hands first.
     func dismiss(_ m: B) {
         m.state = .leaving
-        start(m, .leave)
+        post(.leave, for: m, rank: .leaving, at: m.cell, place: .airlock)
+    }
+
+    /// Through the airlock when there is one, and gone once inside.
+    func walkOut(_ m: B) {
         m.couch = nil; m.bed = nil
         guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement(),
               let inner = station.airlockInner.first(where: { $0.x == hatch.inside.x }) else { return }
@@ -711,8 +713,6 @@ final class Simulation<B: Body> {
         if m.wakeUntil > 0 {
             if clock < m.wakeUntil { return .waking }
             m.wakeUntil = 0
-            // Out of the shuttle: a job handed over while still stepping out begins now.
-            if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
         }
         if clock < m.checkUntil { m.waitingOn = "the security check"; return .wondering }
         if !m.path.isEmpty, atSecurityFence(m, station: station) {
@@ -839,7 +839,7 @@ final class Simulation<B: Body> {
                         cue(.fidget(m.id))
                     }
                 }
-                if clock >= m.phaseUntil && settled {   // done; work waits its turn
+                if clock >= m.phaseUntil && settled {   // done
                     if m.showering, !m.drying, let bath = station.rooms["kind:bath"] {
                         // Out from under the water and over to the rail: a few seconds with the towel before going.
                         m.drying = true

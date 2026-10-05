@@ -213,6 +213,10 @@ since real stations mandate both.
 - The gym is one room off the living cluster with four fixtures, a treadmill, a bench with a barbell,
   a bag and a mat, one minion to each, a turn lasting its whole time. Loungers who stand near each
   other talk; the rest stretch, look round, shuffle and yawn now and then.
+- Idle is not an order: it is what a minion does while the board has nothing for it, and any order takes it
+  from there, out of the shower or off the bench if need be, the towel back on its rail. The moment an
+  order ends with nothing next, the time of day, the work it did and chance decide: rest by night; after
+  hard work now and then the bath first; after the desk, a message or QA now and then a look round; else rest.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
   the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
   Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts

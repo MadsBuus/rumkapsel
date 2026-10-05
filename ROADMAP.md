@@ -24,22 +24,17 @@ couple of seconds; judge looks against references and Mads' eyes, not alone.
 
 ### The order board (`Board.swift`)
 Agreed design: every piece of work is an order with a rank, taken at safe points, put back when preempted; idle
-is the empty board. Slices 1–4c are done.
+is the empty board. Slices 1–6 are done.
 
-- **Slice 5: idle from the empty board.** What a body does with nothing on the board follows the time of day,
-  its last order, or chance.
-- **Slice 6: remove `pending`, `canInterrupt` and `adopt`.** The board replaces them.
 - **Minimum headcount.** The station always keeps enough bodies free to take orders, so nothing deadlocks or
   starves.
 - **The playbook posts orders.** An entry lays its floor, starts with an empty board and posts its one order,
   replacing the "Hands: one free" teleport.
 
-### Release
-- **PR #69** (`claude/gate-wip`) needs the order-board and flight commits from `claude/order-board`, an updated
-  description, and the 0.55 notes. Mads merges.
-- **0.55 is held** until Mads says. A real staging release as a soak first is recommended.
-
 ## Bugs and loose ends
+- **0.55 is not notarised.** `release.sh` found no `rumkapsel` keychain profile when run from a Claude session,
+  so a fresh download may meet Gatekeeper's warning. Release from Mads' own terminal, or store the profile where
+  the session can reach it.
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.
 - **A ghost crate on the conveyor**, seen once in the real station. Waiting to see it again; a playbook entry with

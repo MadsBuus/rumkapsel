@@ -113,11 +113,13 @@ extension Simulation {
     func cancelCarry(_ id: Int, backTo from: Spot) {
         guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
         if let who = job.carrier, let m = bodies[who], m.load == .crate(crate) {
+            // The same carry, aimed back: the crate on the arms goes where it came from.
             let back = job.command.aimed(at: yard)
             cargo[id]?.command = back
             cargo[id]?.aim = from
             world.unorder(crate)
-            start(m, back)
+            if m.current?.id == back.id { m.current = back }
+            if m.phaseKind == .haul { walk(m, to: standCell(fleet.stations[m.station]!, near: from.cell)) }
             onEvent(.log("\(crate.words): back where it was, the board changed its mind"))
             return
         }

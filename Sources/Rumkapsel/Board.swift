@@ -9,6 +9,9 @@
 // again, by it or by someone else. Work of the same rank never takes a body off another, so nobody
 // flips between two. A body taken off its work stands a beat, head up, before it goes.
 //
+// Idle is not an order: it is what a body does while the board has nothing for it (`Simulation.idle`),
+// and any order takes it from there, mid-visit if need be.
+//
 // Some orders are one body's own: a message for a session's body, packing and stowing at its office, a
 // teammate's reaction. They wait on the board like any other until that body may take them, and a body
 // keeps one of each kind waiting: a newer one replaces it. The desk is no order: it is where a session's
@@ -201,6 +204,8 @@ extension Simulation {
         case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
         case .pushPallet(let s, _): return pallets[s]?.pushing == false
         case .weld, .qa, .work, .react: return true
+        // Idle is what a body does while the board has nothing for it: any order takes it from there.
+        case .bath, .exercise, .chore, .goTo, .sleep: return true
         case .deliverOffice: return !m.hasLoad
         default: return false
         }
@@ -232,7 +237,7 @@ extension Simulation {
     /// Nothing in hand that ties it down: no job, nothing on the arms, and whatever it is doing may be cut
     /// into. The board's own word for free, which a teammate can be too, for an order of their own.
     private func free(_ m: B) -> Bool {
-        !m.onJob && !m.hasLoad && m.state != .leaving && m.wakeUntil == 0 && (m.current == nil || m.phaseKind.interruptible)
+        !m.onJob && !m.hasLoad && m.wakeUntil == 0 && (m.current == nil || m.phaseKind.interruptible)
     }
 
     /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
@@ -273,7 +278,8 @@ extension Simulation {
     /// Orders whose body has gone or is leaving, and orders in hand that the body is no longer on.
     private func dropLostOrders() {
         for (id, o) in ownOrders {
-            guard let m = bodies[o.body], m.state != .leaving else { drop(id); continue }
+            let leaving: Bool = { if case .leave = o.command.kind { return true }; return false }()
+            guard let m = bodies[o.body], m.state != .leaving || leaving else { drop(id); continue }
             if o.held, m.current?.id != id { drop(id) }
         }
     }
@@ -293,6 +299,7 @@ extension Simulation {
     private func takeOff(_ m: B, for o: Opening) {
         guard let c = m.current else { return }
         ownOrders[c.id]?.held = false
+        dropLeftovers(m, of: c)   // off the fixture, out of the seat, the towel back on its rail
         switch c.kind {
         case .carry: cargo[c.id]?.carrier = nil
         case .qa: m.busy = false; m.activity = .waiting
@@ -313,13 +320,13 @@ extension Simulation {
             // A reaction plans its own walk, as rest does, before it is in hand.
             if case .react = own.command.kind { if m.place != own.place || m.path.isEmpty { send(m, to: own.place) } }
             else { m.place = own.place }
-            start(m, own.command, announce: own.announce)
-            guard m.current?.id == own.command.id else {
-                if m.pending?.id == own.command.id { m.pending = nil }
-                return false
-            }
+            guard start(m, own.command, announce: own.announce) else { return false }
             ownOrders[id]?.held = true
-            if case .react = own.command.kind {} else { walk(m, to: own.at) }
+            switch own.command.kind {
+            case .react: break
+            case .leave: walkOut(m)
+            default: walk(m, to: own.at)
+            }
             cue(.ownTaken(m.id, own.command))
         case .carry(let id):
             guard let job = cargo[id], case .carry(_, let from, _) = job.command.kind else { return false }

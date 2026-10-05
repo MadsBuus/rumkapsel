@@ -21,8 +21,6 @@ class Body {
     /// one of these: a carry, a delivery, somewhere to be, the bath, a chore, QA, leaving.
     var current: Command?
     var phase = 0
-    /// At most one waits for the next interruptible phase.
-    var pending: Command?
     /// When the phase in hand runs out: a crouch, a shower, a chore.
     var phaseUntil = 0.0
     /// What is on the arms, if anything: a crate by its number, or a new office's crate by its key.
