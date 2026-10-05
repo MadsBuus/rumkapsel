@@ -19,6 +19,14 @@ struct Cargo {
     var hurry = false
     /// Who gave this carry up: passed over for it while anyone else is free.
     var gaveUp: Set<String> = []
+    /// On the X-ray's belt: the carrier waits at its far end for the verdict.
+    var onBelt = false
+    /// Through the X-ray and passed: bound for its stack by the rocket, not the belt again.
+    var pastGate = false
+    /// When it went up on the board.
+    var postedAt = 0.0
+    /// The hands it goes to first when they are free: whoever set the crate on the belt collects it.
+    var prefer: String?
 }
 
 /// Something the simulation decided this tick that the scene shows once.
@@ -41,6 +49,9 @@ enum Cue {
     case foldCrate(String)
     /// The cube on a body's head goes down onto its place on the floor.
     case stow(String)
+    /// A body took one of its own orders; one of its own orders went off the board unfinished.
+    case ownTaken(String, Command)
+    case ownDropped(String, Command)
     /// An office's package is packed and strapped, by key.
     case packed(String)
     /// The rows are drawn again.
@@ -48,6 +59,10 @@ enum Cue {
     /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
     case palletLift(station: String, crate: CrateRef)
     case palletLanded(station: String, crate: CrateRef, aboard: Bool)
+    /// The X-ray's verdict: passed or not.
+    case gateScan(station: String, passed: Bool)
+    /// A crate off the belt at one of its ends; `collect` is the carry already waiting for it, if any.
+    case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, collect: Int?)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
@@ -102,6 +117,10 @@ final class Simulation<B: Body> {
     /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
     /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
     var pallets: [String: PalletJob] = [:]
+    /// Each station's X-ray.
+    var gates: [String: GateJob] = [:]
+    /// Orders kept for one body, by command id: a message, packing or stowing at its office, a reaction.
+    var ownOrders: [Int: OwnOrder] = [:]
     var palletWishes: [String: Bool] = [:]
     /// Every shuttle in the air, and one rocket per repository with a release on the pad, by "station|repo".
     var flights: [Flight] = []
@@ -214,8 +233,8 @@ final class Simulation<B: Body> {
         if m.phase + 1 < c.phases.count { m.phase += 1 }
     }
 
-    /// Done, or given up: whatever was queued starts now, else the body goes back to resting.
-    /// The destination, when given, is where the body goes back to: one order, not a rest and then another.
+    /// Done, or given up: whatever was queued starts now, else the board's next order for it, else the
+    /// body goes back to resting: to the destination when given, one walk rather than a rest and another.
     func finish(_ m: B, to place: Place? = nil) {
         m.current = nil
         m.phase = 0
@@ -227,14 +246,14 @@ final class Simulation<B: Body> {
             // body while the visit lasted, so it is planned now, with nothing in hand for a moment.
             if case .react(_, let where_, _) = next.kind, m.place != where_ { send(m, to: where_) }
             begin(m, next, announce: next.isJob)
-        } else { send(m, to: place ?? restPlace(m)) }
+        } else if !takeNext(m) { send(m, to: place ?? restPlace(m)) }
     }
 
     /// With the crate on the arms, the slot is asked for again: the stack as it is now, not as it
     /// was when the order went out. The order keeps its id; only its destination moves.
     func reaim(_ id: Int) {
         guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
+              let fresh = world.slotNow(for: crate, toward: yard, pastGate: job.pastGate), fresh.pos != job.aim.pos else { return }
         cargo[id]?.aim = fresh
     }
 
@@ -370,8 +389,8 @@ final class Simulation<B: Body> {
         }
         // The hover pallet where it stands this instant. It is read here rather than from the obstacle
         // grid because it slides while it is pushed, and that grid is only rebuilt when the markers are.
-        // Its own pusher walks round to its edge and must not be kept off it.
-        if let p = pallets[m.station], p.dispatcher != m.id { out.formUnion(palletFootprint(p)) }
+        // Its pusher, hands on it while it moves, stands at its edge and is not kept off it.
+        if let p = pallets[m.station], !(p.pushing && p.hand == m.id) { out.formUnion(palletFootprint(p)) }
         return out
     }
 
@@ -419,7 +438,7 @@ final class Simulation<B: Body> {
             // A pallet is met between waypoints as often as on one, and it moves: the line itself is
             // walked, a step at a time, rather than only the corners of it.
             var inside = false
-            if let p = pallets[m.station], p.dispatcher != m.id {
+            if let p = pallets[m.station], !(p.pushing && p.hand == m.id) {
                 inside = insidePallet(p, m.pos)
                 blocked = blocked || inside || crosses(p, from: m.pos, along: m.path)
             }
@@ -447,17 +466,22 @@ final class Simulation<B: Body> {
     // MARK: hands
 
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
-    func atArmsLength(_ m: B, of spot: SIMD2<Double>, dt: Double) -> Bool {
+    func atArmsLength(_ m: B, of spot: SIMD2<Double>, from side: SIMD2<Double>? = nil, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
         if dist > 0.05 { m.facing = atan2(to.x, to.y) }
-        // Far off: walked to the cell beside it, round whatever stands in the way. From there the last
-        // bit is a shuffle, and a cell it already stands on is never walked to again.
+        // Far off: walked to the cell beside it, round whatever stands in the way — on the side asked for,
+        // a tile out, when it matters which side (a crate on the belt is taken from beside the belt). From
+        // there the last bit is a shuffle, and the shuffle never sends it walking again: a body already
+        // nearer than the cell it walked to is stepping up, not lost.
         if dist > 0.9, let st = fleet.stations[m.station] {
-            let stand = standCell(st, near: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded())))
+            let near = side.map { spot + $0 } ?? spot
+            let stand = standCell(st, near: Cell(x: Int(near.x.rounded()), y: Int(near.y.rounded())))
+            let fromStand = SIMD2(Double(stand.x), Double(stand.y)) - spot
+            let stepping = dist < (fromStand.x * fromStand.x + fromStand.y * fromStand.y).squareRoot() + 0.1
             // A walk that can get no closer, a cell short (someone standing on the one way through a small
             // office), leaves the rest to the shuffle rather than a body waiting there for good.
-            if m.path.isEmpty, m.cell != stand {
+            if m.path.isEmpty, m.cell != stand, !stepping {
                 let path = route(m, to: stand)
                 let end = path.last.map { Cell(x: Int($0.x.rounded()), y: Int($0.y.rounded())) } ?? m.cell
                 if end != m.cell || dist > 1.6 { m.path = path; return false }
@@ -601,14 +625,14 @@ final class Simulation<B: Body> {
 
     // MARK: crew
 
-    /// Hands a teammate a reaction: where to be, what to do there, and until when.
+    /// Hands a teammate a reaction: where to be, what to do there, and until when. A new reaction ends
+    /// the one in hand.
     func react(_ m: B, _ activity: Activity, place: Place, minutes: Double, words: String) {
         m.activity = activity
         m.busy = true
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // a new reaction ends the one in hand
+        if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
         if m.lying { m.napping = false; m.bed = nil; m.beddedDown = false }
-        if m.place != place || m.path.isEmpty { send(m, to: place) }
-        start(m, .react(activity, place: place, for: minutes * 60, words: words))
+        post(.react(activity, place: place, for: minutes * 60, words: words), for: m, rank: .crew, at: m.cell, place: place)
     }
 
     /// A teammate's reaction has run its course: back to the quarters.
@@ -617,7 +641,7 @@ final class Simulation<B: Body> {
         m.activity = .sleeping
         m.pyramidCell = nil
         cue(.clearCones(m.id))
-        if case .react = m.current?.kind { m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
+        if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }   // the reaction is over: only then may rest move the body
         send(m, to: .quarters)
     }
 
@@ -647,6 +671,21 @@ final class Simulation<B: Body> {
 
     /// One frame of one body's walk: the wake from a bed or a shuttle, then a step along the path,
     /// passing whoever is in the way (`Walk`).
+    /// A body about to step across the fence between the deck and the pad, not yet checked for this
+    /// crossing: near the line on one side, its way going on to the other.
+    private func atSecurityFence(_ m: B, station: Station) -> Bool {
+        guard let g = station.gate, !m.path.isEmpty else { return false }
+        func side(_ p: SIMD2<Double>) -> Double { (p.x - g.center.x) * g.inward.x + (p.y - g.center.y) * g.inward.y }
+        let here = side(m.pos)
+        if abs(here) > SecurityCheck.clearAt { m.checkedCrossing = false }
+        guard !m.checkedCrossing, abs(here) < SecurityCheck.stopAt else { return false }
+        let along = SIMD2(-g.inward.y, g.inward.x)
+        let across = (m.pos.x - g.center.x) * along.x + (m.pos.y - g.center.y) * along.y
+        guard abs(across) <= g.width / 2 + 0.3 else { return false }   // beside the doorway, not in it
+        // Crossing: the way ahead ends up on the other side of the line.
+        return m.path.contains { side($0) * here < 0 && abs(side($0)) > 0.05 } && abs(here) > 0.05
+    }
+
     func stepWalk(_ m: B, station: Station, dt: Double) -> Stride {
         m.waitingOn = nil
         // Pace by the task, not by who: a loaded body is the slowest thing on the station, below
@@ -675,6 +714,12 @@ final class Simulation<B: Body> {
             // Out of the shuttle: a job handed over while still stepping out begins now.
             if let next = m.pending, next.isJob { m.pending = nil; handOver(m, next, announce: true) }
         }
+        if clock < m.checkUntil { m.waitingOn = "the security check"; return .wondering }
+        if !m.path.isEmpty, atSecurityFence(m, station: station) {
+            m.checkUntil = clock + SecurityCheck.seconds
+            m.checkedCrossing = true
+            return .wondering
+        }
         if !m.path.isEmpty, clock >= m.wonderUntil {
             // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
             // the line. The other does the same, so two head-on pass without either stopping or
@@ -695,6 +740,7 @@ final class Simulation<B: Body> {
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
         if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
+        if let weld = stepWeld(m, station: station, dt: dt) { return weld }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.
@@ -706,6 +752,8 @@ final class Simulation<B: Body> {
             switch c.kind {
             case .goTo, .bath, .exercise, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
+                // At the cone: the message is being worked, and from here on it is the desk.
+                if case .work = c.kind { ownOrders[c.id] = nil }
                 // A visit's time starts here, on arrival, not when the walk began.
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
             default: break

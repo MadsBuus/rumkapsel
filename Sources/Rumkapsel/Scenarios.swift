@@ -14,6 +14,7 @@
 // Exits non-zero if anything failed. Every wait is in station seconds: "press, wait 40, judge".
 
 import AppKit
+import simd
 
 /// One thing the run must, or must not, have recorded. `matches` is the judge; `words` only names
 /// the expectation in a failure line.
@@ -121,9 +122,6 @@ struct Expect {
     static func loadPallet(_ repo: String) -> Expect {
         command("loadPallet \(repo)") { if case .loadPallet(_, let r) = $0 { return r == repo }; return false }
     }
-    static func waitPallet(_ repo: String) -> Expect {
-        command("waitPallet \(repo)") { if case .waitPallet(_, let r) = $0 { return r == repo }; return false }
-    }
     static func pushPallet(_ repo: String) -> Expect {
         command("pushPallet \(repo)") { if case .pushPallet(_, let r) = $0 { return r == repo }; return false }
     }
@@ -185,9 +183,11 @@ struct Scenario {
         sim.model.records.compactMap { if case .command(let c, let who) = $0 { return (c, who) }; return nil }
     }
 
-    /// How many times the run recorded something.
-    @MainActor static func count(_ sim: SimulatorController, _ e: Expect) -> Int {
-        sim.model.records.filter(e.matches).count
+    /// How many times the run recorded something; from a press on, when one is named.
+    @MainActor static func count(_ sim: SimulatorController, _ e: Expect, after press: String? = nil) -> Int {
+        let records = sim.model.records
+        let from = press.flatMap { p in records.firstIndex { if case .press(let n) = $0 { return n == p }; return false } } ?? 0
+        return records[from...].filter(e.matches).count
     }
 }
 
@@ -244,7 +244,6 @@ enum Scenarios {
             .stagingOpened("web"),
             .dispatch("web"),
             .loadPallet("web"),
-            .waitPallet("web"),
             .stagingMerged("web"),
             .pushPallet("web"),
             .unloadPallet("web", back: false),
@@ -262,9 +261,10 @@ enum Scenarios {
             .stagingClosed("web"),
             .unloadPallet("web", back: true),
         ], floor: { sim in
-            // One web crate stood on the deck from the start; nothing new may have joined it.
+            // Two web crates stood on the deck from the start, one untested and one approved; nothing new
+            // may have joined them.
             let deck = Scenario.crates(sim, "deck", "web")
-            if deck > 1 { return "\(deck) web crates on the deck after a release that never merged" }
+            if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
             let storage = Scenario.crates(sim, "storage", "web")
             return storage >= 2 ? nil : "only \(storage) web crates back in storage"
         }),
@@ -302,6 +302,46 @@ enum Scenarios {
         ], floor: { sim in
             let stored = Scenario.crates(sim, "storage", "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
+        }),
+
+        Scenario("a repository that ships on tags: merged work waits in storage with no rocket, and the tag sends it up", [
+            ("Target: ios#298", 4.8),
+            ("Repo: Ships on tags", 4.8),
+            ("Open PR", 32),
+            ("Merge PR", 128),                   // the package is carried to storage, and waits there
+            ("Release: Tag", 4.8),               // the release: the rocket comes out, loads and goes
+        ], tail: 224, expects: [
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            // Whatever stood for the seed's work before the switch, nothing stands for ios's work after it.
+            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
+                - Scenario.count(sim, .rocket(.load(0), "ios"), after: "Release: Tag")
+            if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times before any tag" }
+            let stored = Scenario.crates(sim, "storage", "ios")
+            return stored == 0 ? nil : "\(stored) ios crates left in storage after the tag"
+        }),
+
+        Scenario("a repository that ships on tags, said shipped with no tag seen: nothing goes up, the crate just goes", [
+            ("Target: ios#298", 4.8),
+            ("Repo: Ships on tags", 4.8),
+            ("Open PR", 32),
+            ("Stage: stored", 128),
+            ("Stage: shipped", 4.8),
+        ], tail: 64, expects: [
+            .carry(298, to: .storage),
+        ], forbids: [
+            .rocket(.launch, "ios"),
+            .carry(298, to: .pad),
+        ], floor: { sim in
+            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
+            if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times" }
+            let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
+            return row?.stands(in: .storage) == true ? "#298 still stands in storage after it shipped" : nil
         }),
 
         // The station half alone: no merge on GitHub, no board item moved. A repository without a staging
@@ -359,12 +399,33 @@ enum Scenarios {
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),
         ], floor: { sim in
-            // One crate of web was on the deck; it goes aboard once. A board still saying "ready to ship"
-            // after the crate is in the hold must not put it back on the deck to be carried again.
+            // Two crates of web were on the deck, one untested and one approved; each goes aboard once. A
+            // board still saying "ready to ship" after a crate is in the hold must not put it back on the
+            // deck to be carried again.
             let loads = Scenario.count(sim, .carry(to: .pad))
-            if loads != 1 { return "\(loads) carries into the rocket for one crate" }
+            if loads != 2 { return "\(loads) carries into the rocket for two crates" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
+        }),
+
+        Scenario("ready to ship moved back to QA: nothing carried, the crate stands untested", [
+            ("Target: web#455", 4.8),
+            ("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)", 32),
+        ], tail: 16, expects: [
+            .press("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)"),
+        ], floor: { sim in
+            let carried = Scenario.commands(sim).contains {
+                if case .carry(let crate, let from, _) = $0.command.kind { return crate.number == 431 && from.area == .tested }; return false
+            }
+            if carried { return "#431 was carried off its stack" }
+            guard let station = sim.station.fleet.stations.values.first,
+                  let slot = sim.station.world.yardLayout(station: station, area: "deck").first(where: { $0.repo == "web" && $0.number == 431 }) else {
+                return "#431 is not on the deck"
+            }
+            if slot.cleared { return "#431 still stands with the tested" }
+            guard let node = sim.station.crateNode(CrateRef(station: station.name, repo: "web", number: 431)) else { return "#431 is not drawn" }
+            let off = simd_distance(SIMD2(Double(node.position.x), Double(node.position.z)), SIMD2(slot.pos.x, slot.pos.z))
+            return off < 0.05 ? nil : "#431 is drawn \(off) from its place in the untested row"
         }),
 
         Scenario("PR closed unmerged: red, nothing carried", [

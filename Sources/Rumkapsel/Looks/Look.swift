@@ -125,6 +125,13 @@ protocol Look {
     /// The float that carries crates between the store and the deck, or nil for the classic pallet. The
     /// scene sets crates into it by `Props.palletSlot`, so its bed must stay where the classic one's is.
     func pallet(color: NSColor) -> SCNNode?
+    /// The security fence in the doorway from the deck onto the pad, or nil for the classic laser fence.
+    /// It spans `width` along its x, standing on the origin, and leaves `gap` open for the X-ray's tunnel.
+    /// The scene switches off the children named "beam" on the side a checked body passes.
+    func gate(width: Double, gap: ClosedRange<Double>) -> SCNNode?
+    /// The security unit that keeps the gate, or nil for the classic one: facing +z, standing on the
+    /// origin at its hover height; a child named "eye" is lit with each scan.
+    func securityUnit() -> SCNNode?
     /// Whether the station's names are written on its floor. A look that says no carries them itself: the
     /// Kingdom writes an office's on its banner instead.
     var writesOnFloor: Bool { get }
@@ -189,6 +196,8 @@ extension Look {
     func crate(color: NSColor) -> SCNNode? { nil }
     func hold(tall: Bool) -> SCNNode? { nil }
     func pallet(color: NSColor) -> SCNNode? { nil }
+    func gate(width: Double, gap: ClosedRange<Double>) -> SCNNode? { nil }
+    func securityUnit() -> SCNNode? { nil }
     var writesOnFloor: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
     var workSparks: Bool { true }

@@ -4,6 +4,7 @@
 // slab, the shadow, the light, the pusher's lean and the flying crate from these facts.
 
 import Foundation
+import simd
 
 /// The hover pallet's shape, as numbers: the slab's size, how high it hovers, and where its crate
 /// slots are on the top plate.
@@ -31,8 +32,10 @@ final class PalletJob {
     let station: String
     let repo: String
     let number: Int
-    /// Which body is running the errand.
-    var dispatcher: String
+    /// Whoever holds the step it is at: ordering, loading, pushing or unloading. Nil while it waits on
+    /// its own, loaded for the merge or on the deck for the staging deploy, and while the board has the
+    /// step up for someone to take.
+    var hand: String?
     /// Where it hovers, in the station's own coordinates.
     var spot: SIMD2<Double>
     /// The way to the deck, leg by leg: each one an axis-aligned target for the pallet's centre.
@@ -62,6 +65,14 @@ final class PalletJob {
     /// while there is a way it can take.
     var blockedAt = 0.0
     var askedAt = 0.0
+    /// The staging deploy of the release it carries, as heard since the release merged, and how long
+    /// the repository's staging deploys usually take.
+    var deploy = StagingDeploy.unheard
+    var deployUsual = Deployments.fallback
+    /// When it came to stand on the deck, for how long a deploy that never shows is waited for.
+    var stagedAt = 0.0
+
+    enum StagingDeploy { case unheard, running, live, failed }
 
     /// A crate on its way through the air, in world coordinates, on the station clock: onto the
     /// pallet, or off it onto a slot in a yard.
@@ -85,8 +96,8 @@ final class PalletJob {
         }
     }
 
-    init(station: String, repo: String, number: Int, dispatcher: String, spot: SIMD2<Double>) {
-        self.station = station; self.repo = repo; self.number = number; self.dispatcher = dispatcher; self.spot = spot
+    init(station: String, repo: String, number: Int, hand: String?, spot: SIMD2<Double>) {
+        self.station = station; self.repo = repo; self.number = number; self.hand = hand; self.spot = spot
     }
 
     var isEmpty: Bool { aboard.isEmpty && toLoad.isEmpty && flight == nil }
@@ -100,7 +111,7 @@ extension Simulation {
     func palletErrand(of m: B?) -> (station: String, repo: String)? {
         switch m?.current?.kind {
         case .dispatch(let s, let r, _): return (s, r)
-        case .loadPallet(let s, let r), .waitPallet(let s, let r), .pushPallet(let s, let r): return (s, r)
+        case .loadPallet(let s, let r), .pushPallet(let s, let r): return (s, r)
         case .unloadPallet(let s, let r, _): return (s, r)
         default: return nil
         }
@@ -112,28 +123,7 @@ extension Simulation {
     func orderPallet(station: Station, repo: String, number: Int) {
         world.truth.queuePallet(station: station.name, repo: repo, number: number)
         onLog("\(repo): staging release #\(number) open, a pallet is ordered")
-        servicePallets()
-    }
-
-    /// Sends a free body to the storage console for anything still queued. One at a time per station.
-    func servicePallets() {
-        for station in fleet.stations.values where station.hasPad && !station.storageCells.isEmpty {
-            for want in world.truth.palletQueue[station.name] ?? [] {
-                // Someone is already on this errand: leave them to it.
-                if bodies.values.contains(where: { palletErrand(of: $0)?.station == station.name && palletErrand(of: $0)?.repo == want.repo }) { continue }
-                let console = station.storageConsole.cell
-                // Free: no job, nothing on the arms, and not in the middle of a visit that lasts its whole time.
-                let free = bodies.values.filter { $0.station == station.name && $0.isFree }
-                guard let m = free.min(by: { abs($0.cell.x - console.x) + abs($0.cell.y - console.y) < abs($1.cell.x - console.x) + abs($1.cell.y - console.y) }) else { break }
-                m.couch = nil
-                m.bed = nil
-                start(m, .dispatch(station: station.name, repo: want.repo, number: want.number), announce: true)
-                // Only a body whose order began walks: one that kept something else in hand is left to it.
-                guard case .dispatch = m.current?.kind else { continue }
-                m.place = .room("kind:storage")
-                walk(m, to: console)
-            }
-        }
+        assignOrders()
     }
 
     /// A crate reached storage while its repository's pallet was already out there. Rather than leave
@@ -153,9 +143,7 @@ extension Simulation {
         if state == .loaded {
             world.truth.setPallet(station: station.name, state: .loading)
             p.nextAt = clock + 0.8
-            if let m = bodies[p.dispatcher], case .waitPallet = m.current?.kind {
-                handOver(m, .loadPallet(station: station.name, repo: repo), announce: true)
-            }
+            assignOrders()   // loading again wants hands
         }
         onLog("\(repo): #\(number) lands in time, it goes on the pallet too")
         return true
@@ -172,12 +160,13 @@ extension Simulation {
         if let p = pallets[station.name], p.repo == repo {
             p.wantsPush = push
             p.wantsBack = !push
+            assignOrders()
             return
         }
         palletWishes[station.name + "|" + repo] = push
     }
 
-    // MARK: the dispatcher's phases
+    // MARK: the steps
 
     /// One frame of a pallet command, once the body has stopped walking. Nil when the command in hand
     /// is not a pallet errand.
@@ -186,35 +175,16 @@ extension Simulation {
         switch c.kind {
         case .dispatch(_, let repo, let number):
             guard m.phaseKind != .walk else { advance(m); return .spent }
+            // The board posts this only when the station may put a pallet out.
             faceConsole(m, station)
-            if world.truth.nextPallet(station: station.name)?.repo == repo {
-                beginPallet(m, station: station, repo: repo, number: number)
-            } else {
-                // A pallet already out, or someone ahead in the queue: wait here and fidget.
-                handOver(m, .waitPallet(station: station.name, repo: repo, words: "waiting for a pallet"))
-            }
-        case .waitPallet(_, let repo):
-            guard m.phaseKind != .walk else { advance(m); return .spent }
-            m.waitingOn = m.current?.words   // standing by is the errand: the release, or a pallet, is what it waits on
-            if let p = pallets[station.name], p.repo == repo {
-                // Beside a loaded pallet, waiting for the release to go one way or the other.
-                if p.wantsBack { beginUnload(m, station: station, p, back: true) }
-                else if p.wantsPush { beginPush(m, station: station, p) }
-                return .spent
-            }
-            faceConsole(m, station)
-            impatient(m, station: station)
-            if let want = world.truth.nextPallet(station: station.name), want.repo == repo {
-                beginPallet(m, station: station, repo: want.repo, number: want.number)
-            }
+            beginPallet(m, station: station, repo: repo, number: number)
         case .loadPallet(_, let repo):
-            guard m.phaseKind != .walk else { advance(m); return .spent }
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return .spent }
-            guard p.isSettled else { m.waitingOn = "the pallet to settle"; return .spent }
+            guard m.phaseKind != .walk else { if atPallet(m, p, dt: dt) { advance(m) }; return .spent }
+            facePallet(m, p)
+            guard p.isSettled else { m.waitingOn = "the pallet to settle"; return .posed }
             world.truth.setPallet(station: station.name, state: .loaded)
-            if p.wantsBack { beginUnload(m, station: station, p, back: true) }
-            else if p.wantsPush { beginPush(m, station: station, p) }
-            else { handOver(m, .waitPallet(station: station.name, repo: repo, words: "waiting for the release to merge")) }
+            nextStep(m, station: station, p)
         case .pushPallet(_, let repo):
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return .spent }
             switch m.phaseKind {
@@ -258,9 +228,10 @@ extension Simulation {
                 walk(m, to: Cell(x: Int(want.x.rounded()), y: Int(want.y.rounded())))
             }
         case .unloadPallet(_, let repo, let back):
-            guard m.phaseKind != .walk else { advance(m); return .spent }
             guard let p = pallets[station.name], p.repo == repo else { finish(m); return .spent }
-            guard p.isEmpty else { return .spent }
+            guard m.phaseKind != .walk else { if atPallet(m, p, dt: dt) { advance(m) }; return .spent }
+            facePallet(m, p)
+            guard p.isEmpty else { return .posed }
             endPallet(p, station: station)
             finish(m)
             send(m, to: .lounge)
@@ -269,6 +240,36 @@ extension Simulation {
             return nil
         }
         return .spent
+    }
+
+    /// Beside the pallet to work it with the wand: stepped up from outside to an arm's length off the
+    /// edge nearest where the body came from, facing it, like anyone at a crate. The edge is chosen once,
+    /// on the way, so the walk does not change its mind as it goes round.
+    private func atPallet(_ m: B, _ p: PalletJob, dt: Double) -> Bool {
+        let edge = m.fetchSpot ?? palletEdge(p, from: m.pos)
+        m.fetchSpot = edge
+        let d = edge - p.spot
+        let out = abs(d.x) / (PalletGeometry.width / 2) >= abs(d.y) / (PalletGeometry.depth / 2)
+            ? SIMD2(d.x < 0 ? -1.0 : 1.0, 0) : SIMD2(0, d.y < 0 ? -1.0 : 1.0)
+        guard atArmsLength(m, of: edge, from: out, dt: dt) else { return false }
+        m.fetchSpot = nil
+        return true
+    }
+
+    /// The point on the pallet's edge nearest a place, kept off the corners.
+    private func palletEdge(_ p: PalletJob, from at: SIMD2<Double>) -> SIMD2<Double> {
+        let d = at - p.spot
+        let hx = PalletGeometry.width / 2, hy = PalletGeometry.depth / 2
+        if abs(d.x) / hx >= abs(d.y) / hy {
+            return SIMD2(p.spot.x + (d.x < 0 ? -hx : hx), p.spot.y + min(max(d.y, -hy + 0.15), hy - 0.15))
+        }
+        return SIMD2(p.spot.x + min(max(d.x, -hx + 0.3), hx - 0.3), p.spot.y + (d.y < 0 ? -hy : hy))
+    }
+
+    /// Turned to the pallet while working it.
+    private func facePallet(_ m: B, _ p: PalletJob) {
+        let d = p.spot - m.pos
+        if d.x * d.x + d.y * d.y > 0.01 { m.facing = atan2(d.x, d.y) }
     }
 
     // MARK: the pallet itself
@@ -289,14 +290,14 @@ extension Simulation {
         let pos = SIMD3(station.offset.x + spot.x, PalletGeometry.lift, station.offset.y + spot.y)
         world.truth.startPallet(station: station.name, repo: repo, number: number, cell: cell, pos: pos)
         world.truth.setPallet(station: station.name, state: .loading)
-        let p = PalletJob(station: station.name, repo: repo, number: number, dispatcher: m.id, spot: spot)
+        let p = PalletJob(station: station.name, repo: repo, number: number, hand: m.id, spot: spot)
         p.bornAt = clock
         for (i, item) in cargo.enumerated() {
             let s = PalletGeometry.slot(i)
             p.toLoad.append((item.crate, item.from, StationTruth.PalletSlot(row: s.row, column: s.column, level: s.level)))
         }
         p.nextAt = clock + 1.4
-        // The release may already have gone one way or the other while the dispatcher walked.
+        // The release may already have gone one way or the other while the order went in.
         if let push = palletWishes.removeValue(forKey: station.name + "|" + repo) { p.wantsPush = push; p.wantsBack = !push }
         pallets[station.name] = p
         // The spot was picked to be clear, but a body may have wandered onto it while the order went in:
@@ -312,8 +313,18 @@ extension Simulation {
         onLog("\(repo): a pallet floats out in storage")
     }
 
+    /// Loaded: the same hands take the next step if the release has gone one way or the other, else the
+    /// pallet waits on its own and the hands are free.
+    private func nextStep(_ m: B, station: Station, _ p: PalletJob) {
+        if p.wantsBack { beginUnload(m, station: station, p, back: true) }
+        else if p.wantsPush { beginPush(m, station: station, p) }
+        else { p.hand = nil; finish(m) }
+    }
+
     /// Behind it, hands on the edge, and out through the doorway one leg at a time.
-    private func beginPush(_ m: B, station: Station, _ p: PalletJob) {
+    func beginPush(_ m: B, station: Station, _ p: PalletJob) {
+        p.hand = m.id
+        m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
         world.truth.setPallet(station: station.name, state: .moving)
         p.route = palletRoute(station: station, repo: p.repo, from: p.spot)
         p.pushing = false
@@ -338,7 +349,95 @@ extension Simulation {
         p.askedAt = 0
         world.truth.movePallet(station: station.name, cell: p.cellUnder,
                                pos: SIMD3(station.offset.x + p.spot.x, PalletGeometry.lift, station.offset.y + p.spot.y))
-        beginUnload(m, station: station, p, back: false)
+        // What it carries goes onto the deck once it is live on staging: it waits for a deploy under way,
+        // or one the repository runs on a merge to staging. Anything else is unloaded now.
+        guard p.deploy != .live, p.deploy != .unheard || world.deploysStaging(station: station.name, repo: p.repo) else {
+            beginUnload(m, station: station, p, back: false)
+            return
+        }
+        world.truth.setPallet(station: station.name, state: .staged)
+        p.stagedAt = clock
+        p.hand = nil
+        finish(m)
+    }
+
+    /// Where a repository's rocket stands on the pad, in the station's own coordinates.
+    func rocketSpot(station: Station, repo: String) -> SIMD2<Double>? {
+        guard let slot = world.padSlotOf[station.name + "|" + repo], !station.padSlots.isEmpty else { return nil }
+        return station.padSlots[slot % station.padSlots.count]
+    }
+
+    /// The side of a rocket's hull a welder works at: the one facing the gate, where it comes from and
+    /// where anyone watching is, turned away from the tower.
+    func weldSide(station: Station, repo: String) -> Int? {
+        guard rocketSpot(station: station, repo: repo) != nil, let g = station.gate else { return nil }
+        return RocketGeometry.side(facing: -g.inward + SIMD2(-0.5, 0))   // the tower stands on the rocket's +x
+    }
+
+    /// The middle of that side of the hull, on the floor plan: what the welder stands an arm's length from.
+    func weldPoint(station: Station, repo: String, side: Int) -> SIMD2<Double>? {
+        rocketSpot(station: station, repo: repo).map { $0 + RocketGeometry.facing(side: side) * RocketGeometry.apothem }
+    }
+
+    /// Welding, torch to the hull: stepped up and at it.
+    func isWelding(_ m: B) -> Bool {
+        if case .weld = m.current?.kind { return m.phaseKind == .act }
+        return false
+    }
+
+    /// One frame of a weld: walked round to its side of the hull, stepped up to an arm's length, and at it
+    /// until the tip needs no more welding. Nil when the command in hand is not a weld.
+    func stepWeld(_ m: B, station: Station, dt: Double) -> Outcome? {
+        guard case .weld(_, let repo, let side)? = m.current?.kind else { return nil }
+        guard rockets[station.name + "|" + repo]?.welding == true, let point = weldPoint(station: station, repo: repo, side: side) else {
+            finish(m)
+            return .spent
+        }
+        switch m.phaseKind {
+        case .walk:
+            advance(m)
+            return .spent
+        case .approach:
+            guard atArmsLength(m, of: point, from: RocketGeometry.facing(side: side), dt: dt) else { return .spent }
+            advance(m)
+            return .spent
+        default:
+            return .posed   // at it: the scene draws the welding
+        }
+    }
+
+    /// Every tip wanting welding while its staging deploy runs: a new one gains its panels at the pace the
+    /// repository's deploys usually take, the last one held back until the deploy is live; a whole one has
+    /// its seams gone over. A tip whose pallet has gone is whole. The torch is on a seam of the welder's side.
+    private func stepTips(dt: Double) {
+        let full = Double(RocketGeometry.panels)
+        for r in rockets.values {
+            let p = pallets[r.station].flatMap { $0.repo == r.repo ? $0 : nil }
+            let state = world.truth.pallets[r.station]?.state
+            let running = p?.deploy == .running && (state == .moving || state == .staged)
+            let live = p?.deploy == .live
+            if p == nil || state == .unloading { r.built = full }
+            else if running, r.built < full - 1 { r.built = min(full - 1, r.built + dt * (full - 1) / max(20, p!.deployUsual * 0.85)) }
+            else if live { r.built = min(full, r.built + dt * 6) }
+            r.panels = Int(r.built)
+            r.welding = p != nil && (running || (live && r.panels < RocketGeometry.panels))
+            guard r.welding, clock >= r.seamAt, let station = fleet.stations[r.station], let side = weldSide(station: station, repo: r.repo) else { continue }
+            r.seam = Int.random(in: 0..<(RocketGeometry.panels / 6)) * 6 + side
+            r.seamAt = clock + 0.9
+        }
+    }
+
+    /// A staging deploy started or ended for a repository: the pallet carrying its release hears of it.
+    func stagingDeploy(station name: String, repo: String, outcome: DeployOutcome?, usual: TimeInterval = Deployments.fallback) {
+        // Heard while it is out, merge or no merge yet: the deploy watcher and the release poll answer in
+        // either order.
+        guard let p = pallets[name], p.repo == repo, world.truth.pallets[name]?.state != .unloading else { return }
+        switch outcome {
+        case nil: p.deploy = .running; p.deployUsual = usual
+        case .live?: p.deploy = .live
+        default: p.deploy = .failed
+        }
+        if let outcome { onLog("\(repo): staging deploy \(outcome == .live ? "is live" : "\(outcome)")") }
     }
 
     /// What a hover pallet must not pass through: the crates on either yard's rows, and the bodies on
@@ -350,7 +449,7 @@ extension Simulation {
         let crates = ["storage", "deck"].flatMap { world.yardLayout(station: station, area: $0) }
             .filter { !$0.carried && !($0.repo == flying?.repo && $0.number == flying?.number) }
             .map { (at: SIMD2($0.pos.x - station.offset.x, $0.pos.z - station.offset.y), half: 0.27) }
-        let crowd = bodies.values.filter { $0.station == station.name && $0.id != p?.dispatcher }
+        let crowd = bodies.values.filter { $0.station == station.name && $0.id != p?.hand }
             .map { (at: $0.pos, half: 0.3) }
         return (crates, crowd)
     }
@@ -501,7 +600,8 @@ extension Simulation {
     }
 
     /// The wand out again: the crates float off, onto the deck or back into storage.
-    private func beginUnload(_ m: B, station: Station, _ p: PalletJob, back: Bool) {
+    func beginUnload(_ m: B, station: Station, _ p: PalletJob, back: Bool) {
+        p.hand = m.id
         p.wantsBack = back
         world.truth.setPallet(station: station.name, state: .unloading)
         p.nextAt = clock + 0.8
@@ -512,17 +612,16 @@ extension Simulation {
     private func endPallet(_ p: PalletJob, station: Station) {
         pallets[station.name] = nil
         world.truth.endPallet(station: station.name)
-        servicePallets()
     }
 
     // MARK: the frame
 
     /// One frame of every pallet out: the push, and one crate at a time through the air.
     func stepPallets(dt: Double) {
+        stepTips(dt: dt)
         for (name, p) in pallets {
             guard let station = fleet.stations[name] else { continue }
-            if palletErrand(of: bodies[p.dispatcher]).map({ $0.repo != p.repo }) ?? true { adopt(p, station: station) }
-            let m = bodies[p.dispatcher]
+            let m = p.hand.flatMap { bodies[$0] }
             // Being pushed: one axis at a time, slowly, easing in, with the pusher behind it.
             if let m, p.pushing, case .pushPallet = m.current?.kind, let leg = p.route.first {
                 let full = leg - p.legFrom
@@ -572,31 +671,14 @@ extension Simulation {
                 land(f, p, station: station)
                 continue
             }
-            guard clock >= p.nextAt else { continue }
-            switch world.truth.pallets[p.station]?.state ?? .arriving {
-            case .loading: loadOne(p, station: station)
-            case .unloading: unloadOne(p, station: station)
+            // The wand only works with a hand beside the pallet holding it.
+            guard clock >= p.nextAt, let m, m.phaseKind == .act else { continue }
+            switch (world.truth.pallets[p.station]?.state ?? .arriving, m.current?.kind) {
+            case (.loading, .loadPallet(let s, _)?) where s == name: loadOne(p, station: station)
+            case (.unloading, .unloadPallet(let s, _, _)?) where s == name: unloadOne(p, station: station)
             default: break
             }
         }
-    }
-
-    /// The dispatcher went away mid-errand: whoever is free takes the pallet over where it stands.
-    private func adopt(_ p: PalletJob, station: Station) {
-        let free = bodies.values.filter { $0.station == station.name && $0.isFree }
-        guard let m = free.min(by: { abs($0.cell.x - p.cellUnder.x) + abs($0.cell.y - p.cellUnder.y) < abs($1.cell.x - p.cellUnder.x) + abs($1.cell.y - p.cellUnder.y) }) else { return }
-        p.dispatcher = m.id
-        m.couch = nil; m.bed = nil
-        m.place = .room(station.storageCells.contains(p.cellUnder) ? "kind:storage" : "kind:deck")
-        switch world.truth.pallets[p.station]?.state ?? .arriving {
-        case .loading: handOver(m, .loadPallet(station: station.name, repo: p.repo), announce: true)
-        case .loaded, .arriving: handOver(m, .waitPallet(station: station.name, repo: p.repo, words: "taking over the pallet, waiting for the release to merge"), announce: true)
-        default:
-            // Half way across: it goes no further, the crates come off where it stands.
-            world.truth.setPallet(station: station.name, state: .unloading)
-            handOver(m, .unloadPallet(station: station.name, repo: p.repo, back: p.wantsBack), announce: true)
-        }
-        walk(m, to: standCell(station, near: p.cellUnder))   // beside it, never onto it
     }
 
     /// Where the pallet's plate is, in world coordinates, and a slot on it.
@@ -636,7 +718,10 @@ extension Simulation {
 
     /// A crate landed: on the pallet, or down in a yard by hand, the station's word on where it stands.
     private func land(_ f: PalletJob.Flight, _ p: PalletJob, station: Station) {
-        if let slot = f.slot, let yard = f.yard {
+        if let slot = f.slot, slot.area == .gate {
+            world.setDown(f.crate, at: slot)
+            gateReceived(f.crate, at: slot)   // cleared already: it waits by the gate for the unit
+        } else if let slot = f.slot, let yard = f.yard {
             world.setDown(f.crate, at: slot)
             world.landed(station: station, repo: f.crate.repo, number: f.crate.number, in: yard, at: now)
         } else {
@@ -650,16 +735,5 @@ extension Simulation {
     private func faceConsole(_ m: B, _ station: Station) {
         let f = station.storageConsole.facing
         m.facing = atan2(f.x, f.y)
-    }
-
-    /// Waiting on you: a hop now and then, and a step or two along the wall.
-    private func impatient(_ m: B, station: Station) {
-        guard clock >= m.nextImpatience else { return }
-        m.nextImpatience = clock + Double.random(in: 5...9)
-        if Bool.random(), let spot = station.storageCells.filter({ $0.y == station.storageNearRow && $0 != m.cell }).randomElement() {
-            walk(m, to: spot)
-            return
-        }
-        cue(.hop(m.id))
     }
 }

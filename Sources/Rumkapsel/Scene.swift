@@ -74,6 +74,11 @@ enum Pick {
     static let onboard = 32
     /// A planet's colony: drawn by the mission camera only, lit by the planets' sun and its own light.
     static let colony = 64
+    /// A rocket lifting off the pad while its flight is on: drawn by the station's camera only, since the
+    /// mission camera is riding it.
+    static let launching = 128
+    /// A planet's shell of air: drawn by the station's camera, not by the flight's, which goes down inside it.
+    static let air = 256
 }
 
 /// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
@@ -259,6 +264,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var undelivered: Set<String> { world.truth.pendingOffices }
     /// Offices whose pull request crate is being packed right now: drawn only once the worker is done.
     var packing: Set<String> = []
+    /// Offices whose newest cube is off the floor, waiting for its worker or on its head: drawn once it is
+    /// stowed. And each office's newest cube as last drawn.
+    var stowHeld: Set<String> = []
+    var newestCube: [String: SCNNode] = [:]
     var boxes: [String: SCNNode] = [:]
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
@@ -312,9 +321,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
-    /// Carries whose crate has passed QA: the tested tag goes on as the crate comes off the row, by the
-    /// hands that carry it, not when it is set down again across the aisle.
-    var tagOnLift: Set<Int> = []
+    /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
+    var gates: [String: GateView] = [:]
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -477,6 +485,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onClick = { [weak self] node in
+            // A click on the station outside the flight's window puts the window back small in its corner.
+            if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
             // A click on a minion follows it; a click anywhere else lets go.
             let n = node?.name ?? ""
             if n.hasPrefix("minion:") { self?.enqueue { self?.follow(minionId: String(n.dropFirst(7))) }; return }
@@ -588,13 +598,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         sun.light!.type = .directional
         sun.light!.intensity = 700
         sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
-        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
+        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
         scene.rootNode.addChildNode(sun)
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light!.type = .ambient
         ambient.light!.intensity = 550
-        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony)
+        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
         scene.rootNode.addChildNode(ambient)
         buildBackdrop()
         rebuildStatic()
@@ -772,9 +782,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.state = .leaving; m.path = []
         }
         for station in fleet.stations.values {
-            // A standing crew of two, always present, so the station is never empty.
+            // A standing crew of two, always present, so the station is never empty: standing by in the
+            // lounge, so only where there is one.
             let workers = minions.values.filter { $0.station == station.name && !$0.isSubagent && !$0.isCrew && $0.state != .leaving }
-            if workers.count < 2, !station.rooms.isEmpty {
+            if workers.count < 2, !station.cells(of: .lounge).isEmpty {
                 for k in workers.count..<2 {
                     let home = Home(key: "kind:lounge", name: "standby", repo: station.rooms.values.first { $0.repo != nil }?.repo ?? "crew", issue: nil)
                     let start = station.cells(of: .lounge).randomElement() ?? station.coreCenter
@@ -801,7 +812,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     send(m, to: restPlace)
                 }
             }
-            assignTester(station: station, free: free)
         }
         // Offices that appeared without a shuttle ever ordered for them just show up. One with an order
         // out, in the air or on the floor, is the delivery queue's: it is walked in, never conjured.
@@ -1026,7 +1036,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             layoutDirty = false; markersDirty = false
             timed("floor") { rebuildStatic() }
-            if firstRun, !viewPinned { restoreView() }
+            if firstRun, !viewPinned, !world.simulated { restoreView() }   // a playbook's station is framed by its entry, never by your view
             // Not while offices are still arriving: settling the bodies and reframing on a floor that
             // is about to grow again is the jitter.
             if !floorSettling { timed("settle") { for st in fleet.stations.values { resettle(st) } } }
@@ -1167,17 +1177,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         case .pullRequestOpened(let repo, let number, let author, let roomKey):
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
-            // My own office with a worker in it: the crate does not appear by itself. The worker
-            // clears the cones and packs it at the office's package slot.
-            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && $0.home.key == roomKey && !$0.hasLoad && !$0.onJob }),
+            // My own office with a worker: the crate does not appear by itself. The worker clears the
+            // cones and packs it at the office's package slot, once it is free to.
+            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.isPeer && $0.home.key == roomKey }),
                let st = fleet.stations[m.station], let room = st.rooms[roomKey] {
-                let cell = packageCell(st, room)
                 let key = m.station + "|" + roomKey
                 packing.insert(key)
                 markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 0 }
-                clearPyramids(m)
-                start(m, .pack(office: roomKey), announce: true)
-                walk(m, to: standCell(st, near: cell))
+                simulation.post(.pack(office: roomKey), for: m, rank: .yard, at: standCell(st, near: packageCell(st, room)), place: .room(roomKey), announce: true)
             }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
@@ -1185,8 +1192,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted, .deployEnded:
-            break
+        case .deployStarted(let stationName, let repo, false, let expected, _, _):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected)
+        case .deployEnded(let stationName, let repo, false, let outcome):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
@@ -1231,9 +1240,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         stepMission()
         if clock - lastHaulSchedule > 0.5 {
             lastHaulSchedule = clock
-            simulation.scheduleCarries()
+            simulation.assignOrders()
             simulation.stepRockets()
-            simulation.servicePallets()
             simulation.reconcileBodies()
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             timed("obstacles") { refreshObstacles() }
@@ -1241,12 +1249,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         simulation.stepShuttles()
         simulation.stepPallets(dt: dt)
+        simulation.stepGates(dt: dt)
         drawShuttles(dt: dt)
         updateBerths()
         tickHullLamps()
         drawRockets()
         drawPallets()
         turnPlanets(dt: dt)
+        tickGates(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: 20) { dropPeer(name) }
@@ -1285,8 +1295,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
 
         if let id = following {
-            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours.
-            if let m = minions[id], m.opacity > 0.05 {
+            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours. One
+            // still stepping out of its shuttle is kept; one gone out through the airlock is let go.
+            if let m = minions[id], m.state != .leaving || m.opacity > 0.05 {
                 userPan = SIMD2(Double(m.node.position.x), Double(m.node.position.z)) - targetFocus
             } else { following = nil }
         }

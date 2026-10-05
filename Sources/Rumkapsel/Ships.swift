@@ -186,6 +186,32 @@ final class Flight {
 
 /// One repository's rocket. It runs one command at a time — standing by, loading, steaming, lifting
 /// off — and a stage only ever moves forward.
+/// A rocket's measurements, shared by the prop that draws it and the simulation that works on it.
+enum RocketGeometry {
+    static let height = 1.5, radius = 0.17
+    /// The tip's hull: six flat sides of panels, in rings of six, standing on the lifter.
+    static let panels = 30
+    static var hullRadius: Double { radius * 0.9 }
+    /// From the middle of the hull out to the middle of a side.
+    static var apothem: Double { hullRadius * cos(.pi / 6) }
+    static var hullBase: Double { 0.12 + height * 0.49 }
+    static var hullHeight: Double { height * 0.4 }
+    /// How high the cradle holds a tip with no lifter under it.
+    static let cradleTop = 0.3
+    /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
+    static func facing(side k: Int) -> SIMD2<Double> {
+        let a = .pi / 2 + Double(k) * .pi / 3
+        return SIMD2(sin(a), cos(a))
+    }
+    /// The side facing most nearly the way asked.
+    static func side(facing way: SIMD2<Double>) -> Int {
+        (0..<6).max { a, b in
+            let fa = facing(side: a), fb = facing(side: b)
+            return fa.x * way.x + fa.y * way.y < fb.x * way.x + fb.y * way.y
+        } ?? 0
+    }
+}
+
 final class RocketJob {
     let station: String
     let repo: String
@@ -199,6 +225,16 @@ final class RocketJob {
     var tall = true
     /// How much cargo waits for it, for the size the scene draws it at while standing by.
     var cargo = 0
+    /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
+    /// deploy runs; `built` is the same count as it creeps up.
+    var panels = RocketGeometry.panels
+    var built = Double(RocketGeometry.panels)
+    /// The tip wants welding: its staging deploy is under way, and it is built panel by panel or, whole
+    /// already, gone over seam by seam by whoever takes the weld off the board. `seam` is the panel the
+    /// torch is on.
+    var welding = false
+    var seam = 0
+    var seamAt = 0.0
     /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
     /// them have been set down on the pad and not one moment before: a rocket never launches empty.
     var assigned: Set<String> = []
@@ -324,20 +360,29 @@ extension Simulation {
 
     /// A shuttle descends slowly onto a free hangar slot, sets down a crate, and lifts away. The crate is
     /// the scene's to draw: ordered, it lies unseen on its slot; dropped, it comes down onto the floor.
+    /// Fetching it is an order on the board, for the body it was ordered for first.
     func startDelivery(_ m: B, roomKey: String) {
         guard let station = fleet.stations[m.station], station.hasHangar, !station.hangarSlots.isEmpty,
-              let room = station.rooms[roomKey] else { return }
+              station.rooms[roomKey] != nil else { return }
+        orderDelivery(station: station, roomKey: roomKey, for: m)
+        assignOrders()
+    }
+
+    /// The shuttle for a new office, ordered for a body or for whoever is free.
+    func orderDelivery(station: Station, roomKey: String, for m: B?) {
+        guard station.hasHangar, !station.hangarSlots.isEmpty, let room = station.rooms[roomKey] else { return }
+        let repo = room.repo ?? m?.home.repo ?? ""
         let key = "\(station.name)|\(roomKey)"
         // A slot with nothing on it and no ship bound for it; every slot taken, the least recently ordered.
         let slotIndex = world.truth.freeSlots(station: station.name, of: station.hangarSlots.count).first
-            ?? shipsInFlight(m.station) % station.hangarSlots.count
-        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m.id)
-        cue(.crateOrdered(key: key, station: station.name, slot: slotIndex, repo: room.repo ?? m.home.repo))
+            ?? shipsInFlight(station.name) % station.hangarSlots.count
+        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m?.id)
+        cue(.crateOrdered(key: key, station: station.name, slot: slotIndex, repo: repo))
         let spot = station.hangarSlots[slotIndex]
-        let command = Command.flight(.dropCrate(order: order), station: m.station, slot: slotIndex,
+        let command = Command.flight(.dropCrate(order: order), station: station.name, slot: slotIndex,
                                      what: "the office for \(room.name)")
         let style = flightStyle()
-        let flight = Flight(station: m.station, repo: room.repo ?? m.home.repo, command: command,
+        let flight = Flight(station: station.name, repo: repo, command: command,
                             arrival: style.arrival, departure: style.departure,
                             at: SIMD3(spot.x, 0, spot.y), rest: Station.restOverCrate, side: style.side,
                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
@@ -346,7 +391,7 @@ extension Simulation {
         }
         // A hard sequence: the crate comes out only once its carrier stands at the slot. With no carrier
         // left for it, the ship unloads anyway and the crate waits on the floor.
-        let stationName = m.station
+        let stationName = station.name
         flight.ready = { [weak self] in
             guard let self, let carrier = self.bodies.values.first(where: { o in
                 guard o.station == stationName, case .deliverOffice(let k) = o.current?.kind else { return false }
@@ -355,10 +400,6 @@ extension Simulation {
             return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
         }
         launch(flight)
-        start(m, .deliverOffice(order: order, name: room.name), announce: false)
-        m.place = .hangar
-        m.fetchSpot = spot
-        walk(m, to: station.bayStand(slot: slotIndex))
     }
 
     // MARK: rockets
@@ -374,13 +415,18 @@ extension Simulation {
             // on untested work while it waits is a rocket carrying untested work, and the tape saying
             // otherwise would be the floor telling you something the release will not honour. Once it is
             // climbing nothing changes what went up.
-            if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested }
+            if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested; r.tall = tall }
             guard stage.rank > r.stage.rank else { return }
             take(r, command)
             return
         }
         let r = RocketJob(station: station, repo: repo, command: command)
         r.label = label; r.untested = untested; r.tall = tall; r.cargo = cargo
+        // New while its release is on its way to staging: the tip is built as the deploy runs.
+        if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
+            r.panels = 0
+            r.built = 0
+        }
         rockets[key] = r
         take(r, command)
     }
@@ -390,7 +436,7 @@ extension Simulation {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }   // one going up already: the next goes when it has climbed
         world.mergeLaunches.insert(key)
-        rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: false, cargo: 1,
+        rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: true, cargo: 1,
                command: .rocket(.launch, station: station.name, repo: repo))
     }
 

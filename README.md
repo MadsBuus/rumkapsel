@@ -97,13 +97,17 @@ current look, so a tile cannot show what the app does not. `--gallery --tiles` l
 `--gallery --tile rockets --snapshot out.png` frames the tile whose name has those words for a
 picture of one thing, and in the window `]` and `[` step between tiles with `0` for the whole sheet.
 
-`--simulator` opens the simulator window on its own: a real station with the scanner, GitHub and the
-network switched off, driven by a panel that writes made-up facts through the same entry points
-production uses. The panel is a board and the moves on it. The board is the position — the session
+`--playbook` opens the playbook: the moments the station plays, one entry each, each laying the floor it
+needs and pressing the one thing, so an animation that otherwise comes round once a release can be
+watched, slowed down and replayed. `--playbook --entries` lists them and `--playbook --entry "QA approves"`
+plays the first whose name has those words.
+
+`--simulator` opens a simulated station on its own: a real station with the scanner, GitHub and the
+network switched off, driven by presses that write made-up facts through the same entry points
+production uses. The presses are a board and the moves on it: the board is the position — the session
 in the target office, its commits, its pull request, its column, the repository's pipeline and
-releases, the peer, the night — one knob each. The moves are what happens, one press each, and a
-move whose ground is not laid lays it before it plays, so `Merge PR` on an office with no pull
-request opens one first rather than greying out.
+releases, the peer, the night — one knob each; the moves are what happens, one press each, and a move
+whose ground is not laid lays it before it plays.
 
 `--simulate "Target: web#455,Set: commits ahead = 8,Merge PR"` presses those in order, two seconds
 apart: `Target:` picks the office, `Set: <knob> = <value>` turns a knob, and anything else is a move.

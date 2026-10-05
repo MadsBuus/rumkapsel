@@ -38,7 +38,7 @@ enum WorldEvent {
     case officeMerged(station: String, key: String, repo: String, number: Int)
     /// Crates the board says reached staging: one carry command each, storage across to the deck.
     case carryToDeck(station: String, repo: String, commands: [Command])
-    /// One crate passed QA: it crosses the aisle to the tested row.
+    /// One crate passed QA: it goes through the gate to stand beside its rocket.
     case crateCleared(station: String, repo: String, number: Int)
     /// A release pull request appeared: a rocket belongs on the pad.
     case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)

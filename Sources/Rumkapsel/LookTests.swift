@@ -26,12 +26,12 @@ enum LookTests {
 
     private static let claims: [Theme: Claim] = [
         .classic: Claim(classic: ["input", "output", "console", "crate", "hold", "pallet", "tool", "message",
-                                  "office", "station", "figure"]),
+                                  "office", "station", "figure", "gate", "security unit"]),
         .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold", "pallet"],
-                       classic: ["tool", "message"]),
+                       classic: ["tool", "message", "gate", "security unit"]),
         .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold",
                                 "pallet", "tool", "message"],
-                        letters: false),
+                        classic: ["gate", "security unit"], letters: false),
     ]
 
     static func run() -> Never {
@@ -80,6 +80,8 @@ enum LookTests {
             "crate": look.crate(color: .white) != nil,
             "hold": look.hold(tall: true) != nil,
             "pallet": look.pallet(color: .white) != nil,
+            "gate": look.gate(width: 4, gap: -0.33...0.33) != nil,
+            "security unit": look.securityUnit() != nil,
             "tool": look.tool(.hammer, height: 0.5, depth: 0.3) != nil,
             "message": look.message(color: .white, floor: .white) != nil,
             "office": office.flatMap { look.dress(office: $0, in: station, sign: sign) } != nil,

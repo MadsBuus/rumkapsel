@@ -226,7 +226,6 @@ extension StationController {
             node.removeFromParentNode()
             cargoNodes[id] = nil
         }
-        tagOnLift = tagOnLift.filter { simulation.cargo[$0] != nil }   // a carry called off owes no tag
     }
 
     /// The node on the arms follows the body's word: lifted when a load appears, sent down its arc when
@@ -236,14 +235,6 @@ extension StationController {
             if m.carried == nil, let node = nodeFor(load, m) {
                 lift(m, node)
                 m.arcStarted = false
-                // The tested tag is slapped on as it comes off the row: that is the moment QA passed it.
-                if let id = m.current?.id, tagOnLift.remove(id) != nil, node.childNode(withName: "tag", recursively: false) == nil {
-                    let tag = Props.tag(size: 0.38)
-                    tag.name = "tag"
-                    tag.scale = SCNVector3(0.01, 1, 0.01)
-                    tag.runAction(.scale(to: 1, duration: 0.25))
-                    node.addChildNode(tag)
-                }
             }
             if let node = m.carried, m.phaseKind == .setDown, m.phaseUntil > 0, !m.arcStarted, let on = m.settingDownOn {
                 m.arcStarted = true
@@ -300,6 +291,7 @@ extension StationController {
             // The cube comes off the head and goes down onto its place on the floor, and the box drawn
             // there takes over as it lands.
             guard let m = minions[id], let (cube, box) = m.stowing else { return }
+            let key: String? = { if case .stow(let office)? = m.current?.kind { return m.station + "|" + office }; return nil }()
             let world = cube.worldPosition
             stopCrate(cube)
             cube.removeFromParentNode()
@@ -309,8 +301,40 @@ extension StationController {
             moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box, weak m] in
                 self?.drone.thud()
                 box?.opacity = 1
+                if let self, let key {
+                    self.stowHeld.remove(key)
+                    self.newestCube[key]?.opacity = 1
+                }
                 cube.removeFromParentNode()
                 m?.stowing = nil
+            }
+        case .ownTaken(let id, let c):
+            guard let m = minions[id] else { return }
+            switch c.kind {
+            case .pack: clearPyramids(m)
+            case .stow(let office):
+                // The newest cube comes up onto the head, to be carried to its place.
+                guard m.stowing == nil, let box = newestCube[m.station + "|" + office] else { return }
+                let cube = SCNNode(geometry: box.geometry?.copy() as? SCNGeometry)
+                cube.position = v3(0, m.headHeight + 0.14, 0)
+                m.node.addChildNode(cube)
+                m.stowing = (cube, box)
+            default: break
+            }
+        case .ownDropped(let id, let c):
+            // Never done: what was held back for it is drawn where it is.
+            switch c.kind {
+            case .pack(let office):
+                guard let m = minions[id] else { return }
+                packing.remove(m.station + "|" + office)
+                markersDirty = true
+            case .stow(let office):
+                guard let m = minions[id] else { return }
+                let key = m.station + "|" + office
+                stowHeld.remove(key)
+                newestCube[key]?.opacity = 1
+                if let (cube, _) = m.stowing { cube.removeFromParentNode(); m.stowing = nil }
+            default: break
             }
         case .packed(let key):
             // The crate is there, strapped, as the worker straightens up.
@@ -324,6 +348,8 @@ extension StationController {
         case .redraw: markersDirty = true
         case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
         case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
+        case .gateScan(let station, let passed): gateScanned(station: station, passed: passed)
+        case .gateHandoff(let station, let crate, let from, let passed, let collect): gateHandoff(station: station, crate: crate, from: from, passed: passed, collect: collect)
         case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
@@ -366,8 +392,15 @@ extension StationController {
             let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
-                : (m.path.isEmpty && !onFixture ? Double(rig.eulerAngles.y) : m.facing)
-            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
+                : (m.path.isEmpty && !onFixture && !m.onJob ? Double(rig.eulerAngles.y) : m.facing)   // idle faces you; at work, its work
+            // At a rocket with the torch: the tip it is welding, and the seam the torch is on.
+            let welding: (rocket: RocketJob, point: SIMD2<Double>)? = {
+                guard simulation.isWelding(m), case .weld(_, let repo, let side)? = m.current?.kind,
+                      let r = simulation.rockets[station.name + "|" + repo],
+                      let point = simulation.weldPoint(station: station, repo: repo, side: side) else { return nil }
+                return (r, point)
+            }()
+            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) && welding == nil {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
                 m.smoothFacing += delta * min(1, dt * 12)
@@ -389,8 +422,14 @@ extension StationController {
                 let toCone = conePos - m.pos
                 m.smoothFacing = atan2(toCone.x, toCone.y)
             }
-            if atCone {
-                let slot = m.toolSlot(at: clock)
+            if let w = welding {
+                // Facing the hull, where the simulation stood it: the body is not moved here.
+                let toHull = w.point - m.pos
+                m.smoothFacing = atan2(toHull.x, toHull.y)
+            }
+            if atCone || welding != nil {
+                // Welding at a rocket is the cone's welding, torch on the seam.
+                let slot = welding != nil ? 0 : m.toolSlot(at: clock)
                 let cone = m.pyramids.last
                 let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
@@ -403,7 +442,11 @@ extension StationController {
                         propRoot.addChildNode(l)
                         m.weldLight = l
                     }
-                    if let l = m.weldLight, let cone {
+                    if let l = m.weldLight, let seam = welding.flatMap({ seamPoint($0.rocket) }) {
+                        l.position = seam
+                        l.light?.intensity = intensity
+                        l.opacity = on ? 1 : 0
+                    } else if let l = m.weldLight, let cone {
                         l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
                         l.light?.intensity = intensity
                         l.opacity = on ? 1 : 0
@@ -414,7 +457,7 @@ extension StationController {
                 default: break
                 }
             }
-            if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if welding == nil, !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

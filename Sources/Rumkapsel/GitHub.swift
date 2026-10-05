@@ -74,6 +74,8 @@ struct Pipeline: Equatable {
     var shipsOnMerge: Bool { ship == "merge" }
     /// Shipped by tagging the trunk: no release branch, no release pull request, a tag and that is that.
     var shipsOnTag: Bool { ship == "tag" }
+    /// The release is the moment it ships, a merge or a tag: no rocket stands waiting for one.
+    var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
     var hasStaging: Bool { !staging.isEmpty }
     func isReleaseHead(_ head: String) -> Bool {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }

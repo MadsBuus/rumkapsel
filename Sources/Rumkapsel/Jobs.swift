@@ -250,9 +250,14 @@ extension StationController {
         m.pyramids.append(n)
         m.pyramidCell = cell
         refreshObstacles()
+        // A session's own body is sent to it: an order for that body, above anything but leaving.
+        if !m.isCrew && !m.isPeer && !m.isSubagent {
+            simulation.post(Command(kind: .work(office: key), words: "working your message in \(m.home.name)"), for: m, rank: .message, at: cell, place: .room(key))
+            return
+        }
+        // A teammate's cone stands where they are working.
         guard !m.onJob else { return }
         m.place = .room(key)
-        // Working the message is a job like any other: it shows in the log and on hover.
         if m.isResting { start(m, Command(kind: .work(office: key), words: "working your message in \(m.home.name)")) }
         walk(m, to: cell)
     }
@@ -278,8 +283,8 @@ extension StationController {
 
     /// Takes a carry command and the crate it moves. The simulation speaks for the crate from here on;
     /// the node is what the scene lifts when the carrier's body says the crate is on its arms.
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, onDone: onDone) else { return }
+    func carry(_ command: Command, node: SCNNode, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) {
+        guard simulation.carry(command, roomKey: roomKey, pastGate: pastGate, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
     }
@@ -417,44 +422,17 @@ extension StationController {
         }
     }
 
-    /// A tested crate crosses the aisle to the tested row on someone's arms, wearing its tested tag from
-    /// the moment it is lifted. Anything stacked on top of it is moved aside first, one carry each, and
-    /// those go first.
+    /// A tested crate goes through the gate on someone's arms, to stand small beside its rocket. Anything
+    /// stacked on top of it is moved aside first, one carry each, and those go first.
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
         for command in world.carryToTested(station: station, repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
-            if crate.number == number { tagOnLift.insert(command.id) }
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
                 node.removeFromParentNode()
                 if crate.number == number { drone.ping(seed: number) }
                 rebuildMarkers()
             }
-        }
-    }
-
-    /// When the deck holds cargo and nothing is cleared to launch, one free worker walks the rows, impatient.
-    func assignTester(station: Station, free: [Minion]) {
-        // QA is done once every crate on the deck is cleared, by the record's word. What came through
-        // decon is never QA's: on the deck it counts as tested from the start.
-        let cargoOnDeck = station.staged.values.reduce(0, +) > 0 && world.repoRoots.contains { _, info in
-            guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
-            let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
-            return world.works.records(repo: info.repo).contains { r in r.stage == .qa && !(r.number.map(alien.contains) ?? false) }
-        }
-        let cleared = simulation.rockets.values.contains { $0.station == station.name && $0.isSteaming }
-        let wanted = cargoOnDeck && !cleared && !station.deckCells.isEmpty
-        let current = minions.values.first { $0.station == station.name && $0.isQA }
-        if wanted, current == nil, let m = free.first(where: { !$0.onJob }) {
-            m.activity = .qa
-            m.busy = true
-            send(m, to: .room("kind:deck"))
-            start(m, .qa(deck: station.name))
-            logEvent("staging ready for QA · \(m.home.name) walks the rows")
-        } else if !wanted, let m = current {
-            m.busy = false
-            m.activity = .waiting
-            send(m, to: .lounge)   // the outfit drops the scanner: nothing here has to remember to
         }
     }
 }

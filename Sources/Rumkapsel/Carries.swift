@@ -73,12 +73,12 @@ extension Simulation {
     /// Takes a carry command. The crate is spoken for from here on, so nothing else is told to move it
     /// and the yard layout leaves its spot alone. False when the yard has no place for it.
     @discardableResult
-    func carry(_ command: Command, roomKey: String = "", onDone: @escaping () -> Void) -> Bool {
+    func carry(_ command: Command, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) -> Bool {
         guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim)
+        guard let aim = world.slotNow(for: crate, toward: yard, pastGate: pastGate) else { return false }
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, pastGate: pastGate, postedAt: clock)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
@@ -95,24 +95,8 @@ extension Simulation {
         }
     }
 
-    /// Gives waiting carries to free bodies on the same station.
-    func scheduleCarries() {
-        for (id, job) in cargo where job.carrier == nil {
-            guard case .carry(let crate, let from, _) = job.command.kind, let station = fleet.stations[crate.station] else { continue }
-            // Crates stacked above this one are still on their way: wait, deadline and all.
-            guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
-            let all = bodies.values.filter { $0.station == crate.station && $0.isFree }
-            let fresh = all.filter { !job.gaveUp.contains($0.id) }
-            let free = fresh.isEmpty ? all : fresh
-            guard let m = free.min(by: { abs($0.cell.x - from.cell.x) + abs($0.cell.y - from.cell.y) < abs($1.cell.x - from.cell.x) + abs($1.cell.y - from.cell.y) }) else { continue }
-            start(m, job.command, announce: true)
-            guard m.current?.id == job.command.id else { continue }
-            cargo[id]?.carrier = m.id
-            m.bed = nil
-            m.couch = nil   // off the couch: the seat is free for someone else
-            m.path = route(m, to: standCell(station, near: from.cell))
-        }
-        // A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
+    /// A carrier with carries of the same repository queued behind it picks up the pace, and says so once.
+    func hurryCarriers() {
         for (id, job) in cargo where job.carrier != nil && !job.hurry {
             guard let crate = job.command.crate, case .carry(_, _, let to) = job.command.kind, let m = job.carrier.flatMap({ bodies[$0] }) else { continue }
             let queued = cargo.values.filter { $0.carrier == nil && $0.command.crate?.station == crate.station && $0.command.crate?.repo == crate.repo }.count
@@ -188,6 +172,7 @@ extension Simulation {
                 return .spent
             }
             if clock < m.phaseUntil { return .spent }
+            if let id = m.current?.id { ownOrders[id] = nil }
             finish(m)
             send(m, to: m.place)
             return .spent
@@ -269,6 +254,7 @@ extension Simulation {
             }
             if clock < m.phaseUntil { return .spent }
             cue(.packed("\(m.station)|\(office)"))
+            if let id = m.current?.id { ownOrders[id] = nil }
             finish(m)
             send(m, to: m.place)
             return .spent
@@ -284,8 +270,17 @@ extension Simulation {
             case .walk:
                 advance(m); return .spent
             case .approach:
-                // Stand an arm's length from the crate, facing it, before taking hold.
-                guard atArmsLength(m, of: boxAt, dt: dt) else { return .spent }
+                // At the X-ray's far end, facing the tunnel, until the belt brings the crate out.
+                if job.onBelt {
+                    m.waitingOn = "the crate through the X-ray"
+                    if let belt = station.belt {
+                        let d = SIMD2(belt.tunnel.x - station.offset.x, belt.tunnel.z - station.offset.y) - m.pos
+                        m.facing = atan2(d.x, d.y)
+                    }
+                    return .spent
+                }
+                // Stand an arm's length from the crate, facing it, before taking hold: off the belt from beside it.
+                guard atArmsLength(m, of: boxAt, from: from.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
                 advance(m)
                 startLift(m, height: from.pos.y)
                 return .spent
@@ -312,7 +307,7 @@ extension Simulation {
                 let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
                     // A step back from the spot so the crate goes down in front, not underfoot.
-                    guard atArmsLength(m, of: spot, dt: dt) else { return .spent }
+                    guard atArmsLength(m, of: spot, from: to.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
                     startSetDown(m, on: to)
                     return .spent
                 }
@@ -320,8 +315,22 @@ extension Simulation {
                 if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
-                cargo[id] = nil
                 world.setDown(crate, at: to)
+                if to.area == .gate, let belt = station.belt, case .carry(_, _, let yard) = job.command.kind {
+                    // On the belt: this carry is done. Taking the crate off once it has been looked at is a
+                    // carry of its own, on the board for the same hands first. It waits at the deck end, on
+                    // this side of the fence, until the verdict says which end the crate comes out of.
+                    gateReceived(crate, at: to)
+                    cargo[id] = nil
+                    let collect = Command.carry(crate, from: beltEnd(station, belt, passed: false, crate: crate), to: yard)
+                    if carry(collect, onDone: job.onDone) {
+                        cargo[collect.id]?.onBelt = true
+                        cargo[collect.id]?.prefer = m.id
+                    }
+                    finish(m)
+                    return .spent
+                }
+                cargo[id] = nil
                 cue(.landed(job))
                 finish(m)
                 return .spent

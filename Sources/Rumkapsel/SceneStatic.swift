@@ -359,6 +359,7 @@ extension StationController {
                 staticRoot.addChildNode(console)
                 consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
             }
+            buildGate(station)
             for prop in Looks.current.dress(station: station) {
                 prop.position.x += station.offset.x; prop.position.z += station.offset.y
                 prop.name = "station:" + station.name

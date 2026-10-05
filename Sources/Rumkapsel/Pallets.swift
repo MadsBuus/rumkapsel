@@ -45,12 +45,14 @@ extension StationController {
             v.shadow.scale = SCNVector3(1.06 - high * 0.12, 1.06 - high * 0.12, 1)
             v.shadow.opacity = v.node.opacity * CGFloat(1.06 - high * 0.26)
             // The corner light: half a second on, half off, off the station's own clock.
+            // Red while the staging deploy of what it carries has failed.
             if let beacon = v.beacon {
                 let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
-                beacon.geometry?.firstMaterial?.diffuse.contents = on ? Props.palletAmber : Props.palletAmberOff
-                beacon.geometry?.firstMaterial?.emission.contents = on ? Props.palletAmber : NSColor.black
+                let lit = p.deploy == .failed ? Props.scanRed : Props.palletAmber
+                beacon.geometry?.firstMaterial?.diffuse.contents = on ? lit : p.deploy == .failed ? lit.darker(0.6) : Props.palletAmberOff
+                beacon.geometry?.firstMaterial?.emission.contents = on ? lit : NSColor.black
             }
-            let m = minions[p.dispatcher]
+            let m = p.hand.flatMap { minions[$0] }
             if m?.tool == .telekinesis { m?.setWand(lifting: p.flight != nil) }
             // The crate in the air: an arc on the station's own clock, so it lands whatever is drawing.
             if let f = p.flight, let node = v.flying {
@@ -130,7 +132,7 @@ extension StationController {
     /// while shoving, upright between legs. The tick's minion loop leaves a pallet errand's body
     /// alone, so this is where the pusher is drawn.
     func drawPusher(_ m: Minion, station: Station) {
-        let pushing = simulation.pallets[station.name].map { $0.pushing && $0.dispatcher == m.id } ?? false
+        let pushing = simulation.pallets[station.name].map { $0.pushing && $0.hand == m.id } ?? false
         let tilt = pushing ? 0.35 : 0.0
         let shove = pushing ? sin(clock * 3.6 + m.bobPhase) * 0.02 : 0.0
         m.smoothFacing = m.facing
@@ -138,18 +140,6 @@ extension StationController {
                              station.offset.y + m.pos.y + cos(m.facing) * shove)
         m.node.eulerAngles = SCNVector3(0, m.smoothFacing, 0)
         m.tilt.eulerAngles = SCNVector3(tilt, 0, 0)
-    }
-
-    /// What is in the hands on a pallet errand: the tablet to the console, the wand while crates
-    /// fly, both hands on the pallet while it is shoved.
-    func errandTool(_ m: Minion) -> Minion.Tool? {
-        switch m.current?.kind {
-        case .dispatch: return .tablet
-        case .waitPallet(_, let repo): return simulation.pallets[m.station]?.repo == repo ? .telekinesis : .tablet
-        case .loadPallet, .unloadPallet: return .telekinesis
-        case .pushPallet: return simulation.pallets[m.station]?.pushing == true ? .hands : nil
-        default: return nil
-        }
     }
 
     // MARK: the console

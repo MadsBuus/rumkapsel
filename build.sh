@@ -27,6 +27,7 @@ cp -R .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sp
 # Kenney's models for the Space Center theme (CC0).
 [ -d Resources/Kenney ] && cp -R Resources/Kenney "$APP/Contents/Resources/"
 [ -d Resources/Planets ] && cp -R Resources/Planets "$APP/Contents/Resources/"
+[ -d Resources/Plating ] && cp -R Resources/Plating "$APP/Contents/Resources/"
 # The commit this build came from, so the running app can say which one it is.
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 [ -n "$(git status --porcelain 2>/dev/null)" ] && SHA="$SHA+"

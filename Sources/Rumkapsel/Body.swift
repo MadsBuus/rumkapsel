@@ -99,6 +99,10 @@ class Body {
     static let riseSit = 0.55
     /// A change of orders is visible: standing a beat, head up, before going.
     var wonderUntil = 0.0
+    /// At the security fence between the deck and the pad: held while it is checked, until then, and
+    /// checked once for each crossing.
+    var checkUntil = 0.0
+    var checkedCrossing = false
     /// Who stood in the way on the last step, for the log.
     var blockedBy: String?
     /// A stall watch: since when the minion has stood still in the same phase of the same command,

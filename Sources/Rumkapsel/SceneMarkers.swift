@@ -16,7 +16,7 @@ extension StationController {
         func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>, into: inout [String: Set<Cell>]) {
             let (lo, hi) = node.boundingBox
             let p = SIMD2(Double(node.position.x) - offset.x, Double(node.position.z) - offset.y)
-            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8
+            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8 * Double(node.scale.x)
             let f = Double(Station.fine)
             for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
                 for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { into[station, default: []].insert(Cell(x: sx, y: sy)) }
@@ -42,6 +42,20 @@ extension StationController {
             for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
+        }
+        // The X-ray is walked round: the belt and its tunnel the length of their half of the arch, and the
+        // operator with its monitor.
+        for name in gates.keys {
+            guard let st = fleet.stations[name], let belt = st.belt else { continue }
+            let f = Double(Station.fine)
+            func block(_ p: SIMD2<Double>, _ r: Double) {
+                for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
+                    for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
+                }
+            }
+            let a = SIMD2(belt.start.x - st.offset.x, belt.start.z - st.offset.y), b = SIMD2(belt.exit.x - st.offset.x, belt.exit.z - st.offset.y)
+            for k in 0...8 { block(a + (b - a) * Double(k) / 8, 0.3) }
+            for p in [st.operatorSpot, st.monitorSpot].compactMap({ $0 }) { block(p, 0.3) }
         }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
         // static redraw and read from there: nothing on the static root moves between redraws.
@@ -199,7 +213,7 @@ extension StationController {
                 // same boxes: they stay as they are, cubes, package, shells and all.
                 let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + [
                     "\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
-                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(world.isDusty(room))",
+                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(stowHeld.contains(key))", "\(world.isDusty(room))",
                 ]).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
                 if packaged {
@@ -278,19 +292,16 @@ extension StationController {
                     markerRoot.addChildNode(n)
                     keep.insert(ObjectIdentifier(n))
                 }
-                // More commits than last time while the owner is in: the newest cube is not on the floor
-                // yet. The worker carries it over on its head and stows it where it goes: a command.
+                newestCube[key] = newest
+                if stowHeld.contains(key) { newest?.opacity = 0 }
+                // More commits than last time: the newest cube is not on the floor yet. The office's worker
+                // carries it over on its head and stows it where it goes, once it is free to.
                 if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.place == .room(room.key) && !$0.onJob && !$0.hasLoad && $0.stowing == nil }) {
+                   let m = minions.values.first(where: { $0.station == station.name && $0.home.key == room.key && !$0.isPeer && !$0.isSubagent }) {
+                    stowHeld.insert(key)
                     box.opacity = 0
-                    let cube = SCNNode(geometry: SCNBox(width: 0.24, height: 0.24, length: 0.24, chamferRadius: 0))
-                    cube.geometry!.firstMaterial = lit(color)
-                    cube.position = v3(0, m.headHeight + 0.14, 0)
-                    m.node.addChildNode(cube)
-                    m.stowing = (cube, box)
-                    start(m, .stow(office: room.key), announce: true)
                     let at = Cell(x: Int((Double(box.position.x) - station.offset.x).rounded()), y: Int((Double(box.position.z) - station.offset.y).rounded()))
-                    walk(m, to: standCell(station, near: at))
+                    simulation.post(.stow(office: room.key), for: m, rank: .yard, at: standCell(station, near: at), place: .room(room.key), announce: true)
                 }
                 lastBoxCount[key] = count + ghosts
             }
@@ -315,7 +326,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "")
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "") + (slot.small ? " small" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -340,12 +351,13 @@ extension StationController {
                     // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
                     // tint of the repository it came for, so a bump for ios still reads as ios.
                     let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    // In the yard the light is off, except green with a sticker on a tested crate, and
-                    // the unscreened green of decon on what still waits there.
-                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? NSColor(rgb: (0.45, 0.95, 0.5)) : NSColor(rgb: (0.3, 0.32, 0.38))
+                    // In the yard the light is off, except green on a crate through the gate, and the
+                    // unscreened green of decon on what still waits there.
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight : NSColor(rgb: (0.3, 0.32, 0.38))
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, approved: slot.cleared && !slot.alien, mine: slot.mine)
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine)
+                    if slot.small { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name
