@@ -31,12 +31,10 @@ is the empty board. Slices 1–6 are done.
 - **The playbook posts orders.** An entry lays its floor, starts with an empty board and posts its one order,
   replacing the "Hands: one free" teleport.
 
-### Release
-- **PR #69** (`claude/gate-wip`) needs the order-board and flight commits from `claude/order-board`, an updated
-  description, and the 0.55 notes. Mads merges.
-- **0.55 is held** until Mads says. A real staging release as a soak first is recommended.
-
 ## Bugs and loose ends
+- **0.55 is not notarised.** `release.sh` found no `rumkapsel` keychain profile when run from a Claude session,
+  so a fresh download may meet Gatekeeper's warning. Release from Mads' own terminal, or store the profile where
+  the session can reach it.
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.
 - **A ghost crate on the conveyor**, seen once in the real station. Waiting to see it again; a playbook entry with
