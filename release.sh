@@ -9,6 +9,11 @@ cd "$(dirname "$0")"
 VERSION="${1:?usage: ./release.sh <version>}"
 RELEASES_REPO="MadsBuus/rumkapsel-releases"
 IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+# A signed release is notarised, or it does not go out; Apple's own answer says why not.
+if [ -n "$IDENTITY" ] && ! NOTARY=$(xcrun notarytool history --keychain-profile rumkapsel 2>&1); then
+  echo "can't notarise: $(print -r -- "$NOTARY" | grep -m1 -i error || print -r -- "$NOTARY" | head -1)" >&2
+  exit 1
+fi
 
 sed -i '' "s|<key>CFBundleShortVersionString</key><string>[^<]*</string>|<key>CFBundleShortVersionString</key><string>$VERSION</string>|" build.sh
 sed -i '' "s|<key>CFBundleVersion</key><string>[^<]*</string>|<key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M)</string>|" build.sh
@@ -45,13 +50,13 @@ ZIP="build/release/rumkapsel-$VERSION.zip"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
-if [ -n "$IDENTITY" ] && xcrun notarytool history --keychain-profile rumkapsel >/dev/null 2>&1; then
+if [ -n "$IDENTITY" ]; then
   echo "notarising"
   xcrun notarytool submit "$ZIP" --keychain-profile rumkapsel --wait
   xcrun stapler staple "$APP"
   rm -f "$ZIP"; ditto -c -k --keepParent "$APP" "$ZIP"
 else
-  echo "notarisation skipped (no credentials stored under profile rumkapsel)"
+  echo "notarisation skipped (no Developer ID certificate)"
 fi
 
 # Appcast for Sparkle, hosted in the public releases repo.
