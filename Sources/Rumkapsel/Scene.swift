@@ -305,6 +305,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var lastBusy: [String: Double] = [:]
     var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
     var knownSpine: [String: Int] = [:]
+    /// Each station's dug hallway as last drawn, so hallway given back can be taken up tile by tile.
+    var knownHall: [String: [Cell]] = [:]
     // Peers on the local network: their snapshots, the stations built from them, and their minions.
     let peers = PeerHub()
     var fadeIn: Set<String> = []
@@ -1243,6 +1245,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             simulation.assignOrders()
             simulation.stepRockets()
             simulation.reconcileBodies()
+            if simulation.contractHallways() { layoutDirty = true }
             flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
             timed("obstacles") { refreshObstacles() }
             simulation.replanBlockedWalks()

@@ -519,6 +519,8 @@ final class Station {
     /// In what order a hallway cell was dug, 0 for the plaza and the fixed arms: for the fade-in of new floor.
     func digOrder(of c: Cell) -> Int { (dug.firstIndex(of: c) ?? -1) + 1 }
     var dugCount: Int { dug.count }
+    /// The dug hallway in the order it was dug.
+    var dugCells: [Cell] { dug }
 
     func room(at cell: Cell) -> Room? {
         guard let key = occupied[cell] else { return nil }
@@ -703,8 +705,7 @@ final class Station {
     func removeRoom(key: String) {
         guard let r = rooms.removeValue(forKey: key) else { return }
         for c in r.cells { occupied[c] = nil }
-        // The slot goes back into the pool. Its hallway stays lit: it was lit because somebody walked
-        // there, and a station that unbuilt its corridors every time an office closed would flicker.
+        // The slot goes back into the pool. Its hallway stays lit until the station gives it back.
         if let i = r.cells.first.flatMap({ floor.slotOf[$0] }), floor.slots[i].cells == r.cells { usedSlots.remove(i) }
         forgetFloorPlan()
     }
@@ -717,7 +718,7 @@ final class Station {
         guard !cells.isEmpty else { return false }
         if let i = cells.first.flatMap({ floor.slotOf[$0] }), floor.slots[i].cells == cells.sorted(by: { ($0.x, $0.y) < ($1.x, $1.y) }),
            !usedSlots.contains(i), cells.allSatisfy({ occupied[$0] == nil }) {
-            usedSlots.insert(i); light(floor.slots[i].hall); return true
+            usedSlots.insert(i); lightWay(to: floor.slots[i]); return true
         }
         let mine = dugSet
         guard cells.allSatisfy({ occupied[$0] == nil && (!isReserved($0) || mine.contains($0)) }) else { return false }
@@ -788,7 +789,7 @@ final class Station {
             // and a slot retired for good is one the station never gets back.
             guard slot.cells.allSatisfy({ occupied[$0] == nil }) else { continue }
             usedSlots.insert(i)
-            light(slot.hall)
+            lightWay(to: slot)
             return slot.cells
         }
         // More offices at once than the plan holds. Park the extra clear of the station rather than on
@@ -803,6 +804,66 @@ final class Station {
         let fresh = cells.filter { !known.contains($0) }
         guard !fresh.isEmpty else { return }
         dug.append(contentsOf: fresh)
+    }
+
+    /// Lights the hallway that reaches a slot. A slot's own run assumes every slot before it is lit;
+    /// when hallway has been given back since, the run may hang in the void, and the way to the slot is
+    /// found instead along the plan's hallway, from what is lit, in the order it is walked.
+    private func lightWay(to slot: Floorplan.Slot) {
+        let lit = blocks.hallway.subtracting([plan.monolith])
+        let run = Set(slot.hall)
+        var reached = Set<Cell>(), queue = slot.hall.filter { $0.neighbours.contains(where: lit.contains) }, head = 0
+        reached.formUnion(queue)
+        while head < queue.count {
+            let c = queue[head]; head += 1
+            for n in c.neighbours where run.contains(n) && !reached.contains(n) { reached.insert(n); queue.append(n) }
+        }
+        let floorAfter = lit.union(run)
+        if reached.count == run.count, slot.cells.contains(where: { $0.neighbours.contains(where: floorAfter.contains) }) {
+            light(slot.hall); return
+        }
+        let room = Set(slot.cells)
+        if slot.cells.contains(where: { $0.neighbours.contains(where: lit.contains) }) { return }
+        var prev: [Cell: Cell] = [:], seen = lit
+        var walk = lit.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        head = 0
+        while head < walk.count {
+            let c = walk[head]; head += 1
+            if !lit.contains(c), c.neighbours.contains(where: room.contains) {
+                var path = [c], q = c
+                while let p = prev[q], !lit.contains(p) { path.append(p); q = p }
+                light(Array(path.reversed())); return
+            }
+            for n in c.neighbours where floor.allHall.contains(n) && !seen.contains(n) { seen.insert(n); prev[n] = c; walk.append(n) }
+        }
+        light(slot.hall)
+    }
+
+    /// Hallway dug for rooms that have gone: everything dug that is off the shortest way from the fixed
+    /// hallway to some room's door. Empty when a room's door cannot be reached at all, since then
+    /// nothing here can say which hallway it stands on.
+    func spareHallway() -> [Cell] {
+        let mine = dugSet
+        guard !mine.isEmpty else { return [] }
+        var queue = blocks.hallway.filter { !mine.contains($0) && $0 != plan.monolith }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        var prev: [Cell: Cell] = [:], seen = Set(queue), head = 0
+        while head < queue.count {
+            let c = queue[head]; head += 1
+            for n in c.neighbours where mine.contains(n) && !seen.contains(n) { seen.insert(n); prev[n] = c; queue.append(n) }
+        }
+        var needed = Set<Cell>()
+        for key in rooms.keys.sorted() {
+            guard var c = doorOutside(of: key), mine.contains(c) else { continue }
+            guard seen.contains(c) else { return [] }
+            while mine.contains(c), needed.insert(c).inserted, let p = prev[c] { c = p }
+        }
+        return dug.filter { !needed.contains($0) }
+    }
+
+    /// Takes hallway off the floor that no room needs any more: see `spareHallway`.
+    func giveBack(_ cells: [Cell]) {
+        let gone = Set(cells)
+        dug.removeAll { gone.contains($0) }
     }
 
 

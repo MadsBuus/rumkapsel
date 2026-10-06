@@ -122,6 +122,10 @@ final class Simulation<B: Body> {
     /// Orders kept for one body, by command id: a message, packing or stowing at its office, a reaction.
     var ownOrders: [Int: OwnOrder] = [:]
     var palletWishes: [String: Bool] = [:]
+    /// The chance behind what a body does when its order ends and the board is empty.
+    var idleRoll: () -> Double = { Double.random(in: 0..<1) }
+    /// Hallway no room needs any more, by station, and since when it has been spare.
+    var spareHallway: [String: (cells: [Cell], since: Double)] = [:]
     /// Every shuttle in the air, and one rocket per repository with a release on the pad, by "station|repo".
     var flights: [Flight] = []
     var rockets: [String: RocketJob] = [:]
@@ -235,7 +239,7 @@ final class Simulation<B: Body> {
         guard let station = fleet.stations[m.station], !m.busy, !m.isSubagent, !m.isCrew, !m.isPeer, m.state == .settled else {
             send(m, to: restPlace(m)); return
         }
-        switch IdleAfter.after(last, roll: Double.random(in: 0..<1), night: isNight(station), bath: station.rooms["kind:bath"] != nil) {
+        switch IdleAfter.after(last, roll: idleRoll(), night: isNight(station), bath: station.rooms["kind:bath"] != nil) {
         case .rest:
             send(m, to: restPlace(m))
         case .bath(let shower):
@@ -449,6 +453,41 @@ final class Simulation<B: Body> {
             m.lastReplanAt = clock
             m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
         }
+    }
+
+    /// Gives back hallway dug for offices that have gone, once it has been spare a while and nobody
+    /// stands on it, walks across it or left anything on it. Returns true when a floor changed.
+    func contractHallways() -> Bool {
+        guard !world.settling else { return false }   // offices are still arriving: what is spare is not known yet
+        var changed = false
+        for station in fleet.stations.values {
+            let spare = station.spareHallway()
+            guard !spare.isEmpty else { spareHallway[station.name] = nil; continue }
+            if spareHallway[station.name]?.cells != spare { spareHallway[station.name] = (spare, clock) }
+            guard clock - spareHallway[station.name]!.since >= Patience.hallwayKept else { continue }
+            let cells = Set(spare)
+            let used = bodies.values.contains { m in m.station == station.name && walks(m, across: cells) }
+                || station.obstacles.contains { cells.contains(Station.cell(ofSub: $0)) }
+            guard !used else { continue }
+            station.giveBack(spare)
+            spareHallway[station.name] = nil
+            changed = true
+        }
+        return changed
+    }
+
+    /// Whether a body stands on any of these cells or its walk crosses one, leg by leg a fifth of a tile at a time.
+    private func walks(_ m: B, across cells: Set<Cell>) -> Bool {
+        func on(_ p: SIMD2<Double>) -> Bool { cells.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) }
+        if on(m.pos) { return true }
+        var at = m.pos
+        for leg in m.path {
+            let d = leg - at
+            let steps = max(1, Int(((d.x * d.x + d.y * d.y).squareRoot() * 5).rounded(.up)))
+            for i in 1...steps where on(at + d * (Double(i) / Double(steps))) { return true }
+            at = leg
+        }
+        return false
     }
 
     /// Whether a walk's line runs through a pallet, walked leg by leg a fifth of a tile at a time.

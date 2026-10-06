@@ -192,6 +192,15 @@ extension StationController {
             anchor.position = v3(station.offset.x, 0, station.offset.y)
             let oldDug = knownSpine[station.name] ?? station.dugCount
             knownSpine[station.name] = station.dugCount
+            // Hallway given back is taken up from its far end inward, the reverse of how it was laid.
+            let gone = (knownHall[station.name] ?? []).filter { !station.isCorridor($0) }
+            knownHall[station.name] = station.dugCells
+            for (i, c) in gone.reversed().enumerated() {
+                let tile = SCNNode()
+                propRoot.addChildNode(tile)
+                _ = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "", into: tile)
+                tile.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(i))), .fadeOut(duration: 0.5), .removeFromParentNode()]))
+            }
             for c in station.corridorCells + station.coreCells {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
                 // Hallway dug since the last redraw is built tile by tile, in the order it was dug.

@@ -680,6 +680,7 @@ enum SimulationTests {
         let world = World(demo: true)
         let station = world.fleet.station("work")
         let sim = Simulation<Body>(world: world)
+        sim.idleRoll = { 0.99 }   // what follows an order is the rest, every time: the choice has its own table test
         let m = Body(id: "a", station: "work", home: Home(key: "kind:lounge", name: "a", repo: "r", issue: nil), cwd: "",
                      toolCount: 0, isSubagent: false, start: station.coreCenter)
         m.state = .settled
