@@ -141,6 +141,7 @@ extension StationController {
         } else {
             Props.attachTower(to: n, tall: r.tall, held: r.untested)
         }
+        if r.hotfix { Props.hazardStripes(n) }
         n.position = padPosition(station: station, slot: slot)
         n.name = r.label
         n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
@@ -290,7 +291,7 @@ extension StationController {
                     rocketRoot.addChildNode(hold)
                     hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
                 }
-                liftOff(node, repo: String(key.split(separator: "|", maxSplits: 1).last ?? ""))
+                liftOff(node, repo: World.repo(ofRocketKey: key))
             }
         case .steam(let key):
             if let node = rocketViews[key]?.node {

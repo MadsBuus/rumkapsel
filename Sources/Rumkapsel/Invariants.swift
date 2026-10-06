@@ -381,9 +381,9 @@ final class Invariants {
     }
 
     /// A rocket leaves only with its cargo aboard: nothing of its repository left on the deck or
-    /// on anyone's arms when the climb starts.
+    /// on anyone's arms when the climb starts. A hotfix's express rocket carries nothing of the yard's.
     private func rockets(_ c: StationController) {
-        for r in c.simulation.rockets.values {
+        for r in c.simulation.rockets.values where !r.hotfix {
             // The launch command loads first; the rule is about the moment the climb begins.
             guard case .launch = r.stage, r.phaseKind == .climb else { continue }
             guard launched.insert(r.key).inserted else { continue }

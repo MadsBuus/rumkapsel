@@ -53,6 +53,9 @@ struct ReleasePR: Equatable {
     /// Not a pull request at all: a tag on the trunk, which in a repository that ships by tagging is the
     /// whole release. It has no number and nothing to review; it has already happened when it is seen.
     var tag = false
+    /// Straight into production from anywhere but staging, the trunk or a release branch: it ships its own
+    /// work alone, past whatever the release is waiting with.
+    var hotfix = false
 }
 
 /// A repository's own way to production: the branch work merges into, an optional staging branch
@@ -1131,12 +1134,15 @@ final class GitHubResolver {
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
                 for o in arr {
                     let head = o["headRefName"] as? String ?? ""
-                    guard isReleaseHead(head) else { continue }
+                    let hotfix = base == productionBranch && head != trunk && !(pipe.hasStaging && head == stagingBranch)
+                        && !PipelineDetection.matches(head, "release*")
+                    guard isReleaseHead(head) || hotfix else { continue }
                     let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
                     found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
                                            head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
                                            mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
-                                           production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch))
+                                           production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch,
+                                           hotfix: hotfix))
                 }
             }
             // A repository that ships by tagging: its newest tag is the release, and it has already
@@ -1151,7 +1157,7 @@ final class GitHubResolver {
             // Cargo: PRs merged into trunk, split by the last staging and production releases.
             let iso = ISO8601DateFormatter()
             let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
-            let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+            let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" && !$0.hotfix }.compactMap(\.mergedAt).max()
             var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
             // No release pipeline in this repository: nothing waits for a launch here. A tag is a pipeline
             // of its own: everything merged since it is waiting for the next one.

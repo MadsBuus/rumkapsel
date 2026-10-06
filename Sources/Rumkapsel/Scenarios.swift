@@ -408,6 +408,24 @@ enum Scenarios {
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
 
+        Scenario("a hotfix goes up in its own rocket and leaves the release standing with its cargo", [
+            ("Target: web#455", 4.8),
+            ("Release: Production opens", 48),
+            ("Release: Hotfix opens", 24),
+            ("Release: Hotfix merges", 4.8),
+        ], tail: 40, expects: [
+            .releaseOpened("web", untested: true),
+            .releaseMerged("web", production: true),
+            .rocket(.launch, "web"),
+        ], floor: { sim in
+            let rockets = sim.station.simulation.rockets
+            guard let release = rockets["work|web"] else { return "the release rocket left the pad" }
+            if release.stage.rank >= 3 { return "the release rocket went up with the hotfix" }
+            if rockets[World.hotfixKey("work", "web")] != nil { return "the hotfix rocket is still on the pad" }
+            let deck = Scenario.crates(sim, "deck", "web")
+            return deck > 0 ? nil : "the deck was emptied by a hotfix"
+        }),
+
         Scenario("ready to ship moved back to QA: nothing carried, the crate stands untested", [
             ("Target: web#455", 4.8),
             ("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)", 32),

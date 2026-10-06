@@ -1157,8 +1157,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // A staging release without a board and without a pallet: nothing else would move the crates.
             if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName],
                world.truth.pallets[stationName]?.repo != repo { stageCargo(station: st, repo: repo) }
-        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
-            simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
+        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let hotfix, let command):
+            simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, hotfix: hotfix, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
             promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:

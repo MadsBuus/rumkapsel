@@ -131,7 +131,8 @@ enum SpaceLog {
                 guard let at = pr.mergedAt, at > since else { continue }
                 let by = r.feed.first { $0.kind == "pr_merge" && $0.prNumber == pr.number && pr.number > 0 }.map { who($0.actor) }
                 if pr.isProduction {
-                    out.append(Entry(key: "launch:\(r.name):\(pr.number):\(pr.title)", at: at, kind: .launch, repo: r.name, what: "\(Words.current.launchedTo) production", items: [pr.title], who: by))
+                    out.append(Entry(key: "launch:\(r.name):\(pr.number):\(pr.title)", at: at, kind: .launch, repo: r.name,
+                                     what: "\(Words.current.launchedTo) production" + (pr.hotfix ? " as a hotfix" : ""), items: [pr.title], who: by))
                 } else if pr.isStaging {
                     out.append(Entry(key: "staging:\(r.name):\(pr.number)", at: at, kind: .staging, repo: r.name, what: "deployed to staging", items: ["release #\(pr.number)"], who: by))
                 }

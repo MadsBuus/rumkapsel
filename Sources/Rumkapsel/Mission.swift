@@ -43,6 +43,8 @@ struct Mission {
     var lastThrust = 0.0
     /// Which rehearsal this is; nil for a real deploy.
     var rehearsal: Int?
+    /// Where it lifted off.
+    var pad: SIMD3<Double>?
 
     /// How far along the flight is: most of the way by the usual length, creeping on past it, and after
     /// the end, docking, falling back to the pad, or stopped where the signal was lost.
@@ -189,7 +191,8 @@ extension StationController {
         placePlanets()
         // The pad's own rocket is the one that flies: seen from the station it lifts off the pad and climbs
         // out of sight, and the pad stands empty while the flight is on. The camera riding it never sees it.
-        rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
+        mission?.pad = missionPad(m)
+        [flightRocket(repo)].compactMap { $0 }.filter { !$0.isHidden }.forEach {
             // The tower is let go of first and stays on the pad, as it does when a rocket lifts off on its own.
             if let hold = $0.childNode(withName: "hold", recursively: false) {
                 hold.removeFromParentNode()
@@ -662,8 +665,18 @@ extension StationController {
     }
 
     /// The foot of the flight: the repository's rocket where it stands, else the middle of its pad.
+    /// The rocket on the pad a repository's flight is: the one of its rockets going up, the express one for a
+    /// hotfix, else its release rocket.
+    private func flightRocket(_ repo: String) -> SCNNode? {
+        let mine = simulation.rockets.values.filter { $0.repo == repo }
+        guard let r = mine.first(where: { $0.stage.rank >= 3 }) ?? mine.first(where: { !$0.hotfix }) else { return nil }
+        return rocketViews[r.key]?.node
+    }
+
+    /// Where the flight lifts off: fixed when it begins, so the rocket leaving the pad never moves it.
     private func missionPad(_ m: Mission) -> SIMD3<Double> {
-        if let rocket = rocketRoot.childNodes.first(where: { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true }) {
+        if let pad = m.pad { return pad }
+        if let rocket = flightRocket(m.repo) {
             let p = rocket.worldPosition
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }

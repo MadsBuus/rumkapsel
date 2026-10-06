@@ -694,6 +694,17 @@ final class World {
     }
     /// Rockets going up for a merge rather than a release, as "station|repo": they stand on the pad too.
     var mergeLaunches: Set<String> = []
+    /// Hotfix rockets going up, by key: they keep their spot on the pad until they have gone.
+    var hotfixLaunches: Set<String> = []
+    /// A repository's express rocket, beside its release rocket on the pad.
+    static func hotfixKey(_ station: String, _ repo: String) -> String { station + "|" + repo + "#hotfix" }
+    /// The repository whose rocket a key is, express or not.
+    static func repo(ofRocketKey key: String) -> String {
+        let rest = key.split(separator: "|", maxSplits: 1).last.map(String.init) ?? key
+        return rest.hasSuffix("#hotfix") ? String(rest.dropLast("#hotfix".count)) : rest
+    }
+    /// A hotfix open against a repository's production branch.
+    private func openHotfix(root: String) -> ReleasePR? { github.openReleases(repoRoot: root)?.first(where: \.hotfix) }
     /// Whether a station's deck is in use: some repository on it has a staging branch.
     func deckInUse(station: String) -> Bool {
         let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
@@ -712,12 +723,12 @@ final class World {
     /// loaded for it is not finished loading.
     func productionOpen(station: String, repo: String) -> Bool {
         repoRoots.contains { $0.value.station == station && $0.value.repo == repo
-            && (github.openReleases(repoRoot: $0.key)?.contains(where: \.isProduction) ?? false) }
+            && (github.openReleases(repoRoot: $0.key)?.contains(where: { $0.isProduction && !$0.hotfix }) ?? false) }
     }
 
     /// The release pull request whose rocket a repository's pad should hold, if any.
     private func padRelease(root: String) -> ReleasePR? {
-        guard let open = github.openReleases(repoRoot: root) else { return nil }
+        guard let open = github.openReleases(repoRoot: root)?.filter({ !$0.hotfix }) else { return nil }
         let hasProduction = open.contains(where: \.isProduction)
         return open.first { $0.isProduction || (!hasProduction && !github.pipeline(repoRoot: root).hasStaging) }
     }
@@ -742,6 +753,10 @@ final class World {
     /// for a release in a repository that has a release to wait for.
     func padRockets() -> Set<String> {
         var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
+        pads.formUnion(hotfixLaunches)
+        for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && openHotfix(root: root) != nil {
+            pads.insert(World.hotfixKey(info.station, info.repo))
+        }
         for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
             && !github.pipeline(repoRoot: root).shipsAtOnce && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
         return pads
@@ -817,6 +832,7 @@ final class World {
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
             let pr = launch.pr
+            if pr.hotfix { events += launchHotfix(root: launch.repoRoot, station: station, repo: info.repo, pr: pr); continue }
             events.append(.releaseMerged(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
                                          title: pr.title, isProduction: pr.isProduction))
             events.append(.chime(pr.number))
@@ -886,7 +902,39 @@ final class World {
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr, cleared: cleared))
         }
+        for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
+            guard let station = fleet.stations[info.station], let pr = openHotfix(root: root) else { continue }
+            let key = World.hotfixKey(info.station, info.repo)
+            guard padSlotOf[key] != nil, !hotfixLaunches.contains(key) else { continue }
+            let mark = "\(key)|\(pr.number)"
+            if !announcedReleases.contains(mark) {
+                announcedReleases.insert(mark)
+                events.append(.log("\(info.repo): hotfix #\(pr.number) \(Words.current.onThePad)"))
+            }
+            events.append(hotfixWish(.standBy, station: station, repo: info.repo, pr: pr))
+        }
         return events + applyStaging()
+    }
+
+    /// A hotfix merged: its express rocket goes up at once with its flight, and only its own work has
+    /// shipped. The release rocket, the deck and storage are left as they were.
+    private func launchHotfix(root: String, station: Station, repo: String, pr: ReleasePR) -> [WorldEvent] {
+        let key = World.hotfixKey(station.name, repo)
+        hotfixLaunches.insert(key)
+        assignPads()
+        if let r = works.find(repo: repo, pull: pr.number) { works.report(r, .shipped, by: .pulls, at: pr.mergedAt ?? Date()) }
+        announcedReleases = announcedReleases.filter { !$0.hasPrefix(key + "|") }
+        // The rocket is told first, so the flight that follows knows which rocket on the pad it is.
+        var events: [WorldEvent] = [.releaseMerged(station: station.name, repo: repo, number: pr.number, base: pr.base, title: pr.title, isProduction: true),
+                                    .chime(pr.number), hotfixWish(.launch, station: station, repo: repo, pr: pr)]
+        events += flyAtMerge(repoRoot: root, station: station.name, repo: repo, pr: pr)
+        events.append(.log("\(repo) hotfix \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
+        return events
+    }
+
+    private func hotfixWish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
+        .rocketCommand(station: station.name, repo: repo, label: "rocket:\(pr.url)|\(repo) · hotfix #\(pr.number) \(pr.title)",
+                       untested: false, tall: stage.rank >= 3, cargo: 1, hotfix: true, command: .rocket(stage, station: station.name, repo: repo))
     }
 
     /// A rocket standing by holds nothing: what it took aboard while it was cleared goes back to the
@@ -1455,7 +1503,7 @@ final class World {
         guard !open.isEmpty else { return .snapped }
         // The drain carries a crate the source wants on the deck; what still disagrees here is snapped.
         if open.contains(where: { $0.placed == .storage && $0.wanted == .deck && $0.heading == .deck }) { return .waiting }
-        let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
+        let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: { $0.isProduction && !$0.hotfix }) ?? false)
         for crate in open {
             if launching, crate.placed == .deck { continue }   // the rocket takes these; the source's word comes after
             station.ledger.snap(repo: repo, number: crate.number)

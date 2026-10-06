@@ -440,7 +440,7 @@ extension StationController {
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
         for station in fleet.stations.values where station.hasPad {
             let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
-                world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
+                world.padSlotOf[key].map { ($0, World.repo(ofRocketKey: key)) }
             })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.padRadius - 0.06, outerRadius: Station.padRadius, height: 0.008)))

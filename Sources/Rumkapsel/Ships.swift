@@ -241,11 +241,15 @@ final class RocketJob {
     /// The carries ordered aboard that have not set their crate down yet, by command id.
     var pending: Set<Int> = []
 
-    init(station: String, repo: String, command: Command) {
-        self.station = station; self.repo = repo; self.command = command
+    /// An express rocket for a hotfix: it stands beside the release's own, carries nothing of the yard's,
+    /// and goes up the moment its pull request merges.
+    let hotfix: Bool
+
+    init(station: String, repo: String, command: Command, hotfix: Bool = false) {
+        self.station = station; self.repo = repo; self.command = command; self.hotfix = hotfix
     }
 
-    var key: String { station + "|" + repo }
+    var key: String { hotfix ? World.hotfixKey(station, repo) : station + "|" + repo }
 
     var stage: Command.RocketStage {
         if case .rocket(let s, _, _) = command.kind { return s }
@@ -406,9 +410,9 @@ extension Simulation {
 
     /// The reconciler says what a repository's rocket should be doing. An empty pad gets a new rocket;
     /// one already there only takes a stage it has not reached yet, so a repeated wish changes nothing.
-    func rocket(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command) {
+    func rocket(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, hotfix: Bool = false, command: Command) {
         guard fleet.stations[station] != nil, case .rocket(let stage, _, _) = command.kind else { return }
-        let key = station + "|" + repo
+        let key = hotfix ? World.hotfixKey(station, repo) : station + "|" + repo
         if let r = rockets[key] {
             r.label = label
             // Whatever it is carrying, it says so, right up to the moment it lights: a rocket that takes
@@ -420,10 +424,10 @@ extension Simulation {
             take(r, command)
             return
         }
-        let r = RocketJob(station: station, repo: repo, command: command)
+        let r = RocketJob(station: station, repo: repo, command: command, hotfix: hotfix)
         r.label = label; r.untested = untested; r.tall = tall; r.cargo = cargo
         // New while its release is on its way to staging: the tip is built as the deploy runs.
-        if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
+        if !hotfix, let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
             r.panels = 0
             r.built = 0
         }
@@ -459,7 +463,7 @@ extension Simulation {
             cue(.rocketLoading(key: r.key))   // cleared: the tape comes down
             loadCrates(r)
         case .climb:
-            world.clearPad(station: r.station, repo: r.repo)
+            if !r.hotfix { world.clearPad(station: r.station, repo: r.repo) }
             if world.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
             cue(.liftOff(key: r.key))
             r.until = clock + 15
@@ -492,6 +496,7 @@ extension Simulation {
             case .climb:
                 if clock >= r.until {
                     rockets[r.key] = nil
+                    world.hotfixLaunches.remove(r.key)
                     cue(.rocketGone(key: r.key))
                     // A merge that landed while this one climbed goes up next.
                     if world.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
@@ -518,6 +523,7 @@ extension Simulation {
     private func loadSource(_ r: RocketJob) -> String { world.stagingIsDeck(station: r.station, repo: r.repo) ? "deck" : "storage" }
 
     private func padClear(_ r: RocketJob) -> Bool {
+        if r.hotfix { return true }   // nothing of the yard's goes up in it
         let yard: Yard = loadSource(r) == "deck" ? .deck : .storage
         let left = fleet.stations[r.station]?.ledger.crates(of: r.repo).contains { $0.placed == yard } ?? false
         return !left && world.carriedCount(station: r.station, repo: r.repo) == 0
@@ -526,7 +532,7 @@ extension Simulation {
     /// Hands out a carry for every crate of the repository still standing on its row. A crate already
     /// spoken for is off the floor, so this can run every pass without doubling up.
     private func loadCrates(_ r: RocketJob) {
-        guard let station = fleet.stations[r.station] else { return }
+        guard !r.hotfix, let station = fleet.stations[r.station] else { return }
         let source = loadSource(r)
         let repo = r.repo
         let yard: Yard = source == "deck" ? .deck : .storage

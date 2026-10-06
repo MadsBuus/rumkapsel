@@ -437,7 +437,7 @@ final class SimulatorModel: ObservableObject {
     }
 
     private func openRelease(_ repo: String, production: Bool) -> Int? {
-        releases[repo]?.lastIndex { $0.state == "OPEN" && (production ? $0.isProduction : $0.isStaging) }
+        releases[repo]?.lastIndex { $0.state == "OPEN" && !$0.hotfix && (production ? $0.isProduction : $0.isStaging) }
     }
 
     private func onDeck(_ repo: String) -> [ProjectItem] {
@@ -882,6 +882,10 @@ final class SimulatorModel: ObservableObject {
                                : .missing("an untested release on \(repo)", { [weak self] in self?.layProduction() }))
                            : (onDeck(repo).isEmpty ? .missing("something on \(repo)'s deck", { [weak self] in self?.layOnDeck() }) : nil)),
                 button("Release: Production merges", "Production merges: it ships", productionOpen),
+                button("Release: Hotfix opens", "A hotfix opens straight into production",
+                       releases[repo]?.contains(where: { $0.state == "OPEN" && $0.hotfix }) == true ? .already("a hotfix is already open") : nil),
+                button("Release: Hotfix merges", "The hotfix merges: it ships alone",
+                       releases[repo]?.contains(where: { $0.state == "OPEN" && $0.hotfix }) == true ? nil : .already("no hotfix is open")),
                 button("Deploy: Production starts", "A production deploy starts (usually a minute)",
                        station.mission == nil ? nil : .already("a deploy is in flight")),
                 button("Deploy: Goes live", "…it goes live", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
@@ -1241,6 +1245,21 @@ final class SimulatorModel: ObservableObject {
                                                          url: "https://example.invalid/\(repo)/\(nextRelease)", labels: ["untested"], mergedAt: nil,
                                                          production: true, staging: false))
             pushGitHub()
+        case "Release: Hotfix opens":
+            nextRelease += 1
+            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "HOT-FIX: \(repo)", base: ConfigStore.shared.current.productionBranch,
+                                                         head: "gh-\(nextRelease)/fix-prod", state: "OPEN",
+                                                         url: "https://example.invalid/\(repo)/\(nextRelease)", labels: [], mergedAt: nil,
+                                                         production: true, staging: false, hotfix: true))
+            pushGitHub()
+        case "Release: Hotfix merges":
+            guard let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.hotfix }) else { return }
+            let pr = releases[repo]![i]
+            let merged = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED", url: pr.url,
+                                   labels: pr.labels, mergedAt: station.now, production: true, staging: false, hotfix: true)
+            releases[repo]![i] = merged
+            launches.append((repo, merged))
+            pushGitHub()
         case "Release: Mark tested":
             // QA passing takes the untested label off an open production release as well as
             // moving the column: that is what clears the rocket to load.
@@ -1352,7 +1371,7 @@ final class SimulatorModel: ObservableObject {
             return "releaseOpened \(repo)#\(n) -> \(base)\(untested ? " untested" : "")"
         case .releaseMerged(_, let repo, let n, let base, _, let production):
             return "releaseMerged \(repo)#\(n) -> \(base)\(production ? " production" : "")"
-        case .rocketCommand(_, let repo, _, _, _, _, let c): return "rocketCommand \(repo): \(c.words)"
+        case .rocketCommand(_, let repo, _, _, _, _, let hotfix, let c): return "rocketCommand \(repo)\(hotfix ? " hotfix" : ""): \(c.words)"
         case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
         case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
         case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"
