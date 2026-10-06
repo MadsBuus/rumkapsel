@@ -548,3 +548,44 @@ enum Props {
     }
 
 }
+
+extension Props {
+    /// Soot round where a rocket stood: a dark burnt core, rays blown out from it along the floor, and blotches
+    /// at their ends, all fading to nothing before the edge so the mark has no outline.
+    static func scorchImage(seed: UInt64) -> CGImage? {
+        let n = 256
+        var state = seed | 1
+        func rnd() -> Double { state ^= state << 13; state ^= state >> 7; state ^= state << 17; return Double(state % 10_000) / 10_000 }
+        guard let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let c = CGPoint(x: n / 2, y: n / 2), r = Double(n) / 2
+        func soot(_ a: Double) -> CGColor { CGColor(red: 0.05, green: 0.045, blue: 0.04, alpha: a) }
+        // The core: burnt almost black under the engine, softening outward.
+        let core = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                              colors: [soot(0.85), soot(0.6), soot(0.22), soot(0)] as CFArray, locations: [0, 0.28, 0.6, 1])!
+        ctx.drawRadialGradient(core, startCenter: c, startRadius: 0, endCenter: c, endRadius: r * 0.78, options: [])
+        // Rays where the exhaust hit the floor and rolled off it.
+        for _ in 0..<38 {
+            let a = rnd() * 2 * .pi, len = r * (0.45 + 0.45 * rnd()), w = 0.025 + 0.06 * rnd()
+            let tip = CGPoint(x: c.x + cos(a) * len, y: c.y + sin(a) * len)
+            ctx.saveGState()
+            ctx.move(to: c)
+            ctx.addLine(to: CGPoint(x: c.x + cos(a - w) * len * 0.8, y: c.y + sin(a - w) * len * 0.8))
+            ctx.addLine(to: tip)
+            ctx.addLine(to: CGPoint(x: c.x + cos(a + w) * len * 0.8, y: c.y + sin(a + w) * len * 0.8))
+            ctx.closePath()
+            ctx.clip()
+            let ray = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [soot(0.35 + 0.25 * rnd()), soot(0)] as CFArray, locations: [0, 1])!
+            ctx.drawRadialGradient(ray, startCenter: c, startRadius: r * 0.15, endCenter: c, endRadius: len, options: [])
+            ctx.restoreGState()
+        }
+        // Blotches of soot thrown out along the rays.
+        for _ in 0..<60 {
+            let a = rnd() * 2 * .pi, d = r * (0.2 + 0.6 * rnd()), s = r * (0.03 + 0.07 * rnd())
+            let p = CGPoint(x: c.x + cos(a) * d, y: c.y + sin(a) * d)
+            let blot = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [soot(0.3 * (1 - d / r) + 0.1), soot(0)] as CFArray, locations: [0, 1])!
+            ctx.drawRadialGradient(blot, startCenter: p, startRadius: 0, endCenter: p, endRadius: s, options: [])
+        }
+        return ctx.makeImage()
+    }
+}

@@ -274,6 +274,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let rocketRoot = SCNNode()
     /// The rockets and the ships as drawn: a node per rocket by "station|repo", a node per flight.
     var rocketViews: [String: RocketView] = [:]
+    /// The soot a rocket left on its pad slot, by where it stood: the next launch there burns over it.
+    var scorches: [String: SCNNode] = [:]
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
     /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
     var palletViews: [String: PalletView] = [:]
@@ -359,6 +361,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
     var mission: Mission?
+    /// Rehearsals started, so a rehearsal's own ending never ends the one that replaced it.
+    var rehearsals = 0
     let missionCamera = SCNNode()
     let missionCraft = SCNNode()
     /// Pad rockets hidden while their flight is on, shown again when it ends.

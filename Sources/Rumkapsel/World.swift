@@ -1503,7 +1503,8 @@ final class World {
 
     /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
     func assignPads() {
-        let wanted = padRockets()
+        // A rocket on its way up keeps its slot until it has gone: nothing else stands where it lifts off.
+        let wanted = padRockets().union(padSlotOf.keys.filter(rocketBusy))
         for key in padSlotOf.keys where !wanted.contains(key) { padSlotOf[key] = nil }
         for station in fleet.stations.values {
             let prefix = station.name + "|"
