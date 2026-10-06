@@ -11,6 +11,9 @@ enum Patience {
     static let giveUpAfter = 10.0
     /// Waiting on a fact the command named: a fact that has not come by then is one that is not coming.
     static let waitLimit = 90.0
+    /// Hallway no room needs stays this long before it is given back, so an office closing and another
+    /// opening in its place does not take the floor away and lay it again.
+    static let hallwayKept = 6.0
 }
 
 extension Simulation {

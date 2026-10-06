@@ -60,6 +60,34 @@ enum LayoutTests {
             expect(a.rooms["task:repo0#999"]?.cells == cells, "the new office took the freed slot back")
         }
 
+        test("hallway dug for offices that have gone is given back, and the rest stays whole") {
+            let a = fresh()
+            for i in 0..<16 { place("task:repo\(i % 3)#\(300 + i)", on: a) }
+            let full = a.dugCount
+            expect(full > 0 && a.spareHallway().isEmpty, "with every office standing nothing is spare, of \(full) cells dug")
+            // The inner offices close and the outermost stays: only the way to it is kept.
+            let plan = a.floor
+            let offices = a.rooms.values.filter { $0.key.hasPrefix("task:") }
+            let outer = offices.max { ($0.cells.first.flatMap { plan.slotOf[$0] } ?? 0) < ($1.cells.first.flatMap { plan.slotOf[$0] } ?? 0) }!
+            let door = a.doorCell(of: outer.key)
+            for r in offices where r.key != outer.key { a.removeRoom(key: r.key) }
+            a.giveBack(a.spareHallway())
+            expect(a.dugCount < full, "hallway was given back: \(a.dugCount) of \(full) cells kept")
+            expect(a.doorCell(of: outer.key) == door, "the office left keeps its door")
+            expect(whole(a), "and the hallway is one piece with every room's door on it")
+            // Offices opening in the freed slots find their way back along the plan's hallway.
+            for i in 0..<5 { place("task:between\(i)#\(500 + i)", on: a) }
+            expect(whole(a), "offices opening between are reached: \(a.dugCount) cells dug")
+            for i in 0..<5 { a.removeRoom(key: "task:between\(i)#\(500 + i)") }
+            a.giveBack(a.spareHallway())
+            // The last one goes: nothing dug is needed, and offices opening again find their way.
+            a.removeRoom(key: outer.key)
+            a.giveBack(a.spareHallway())
+            expect(a.dugCount == 0, "with no offices no dug hallway is left: \(a.dugCount)")
+            for i in 0..<16 { place("task:again\(i % 3)#\(400 + i)", on: a) }
+            expect(whole(a), "offices opening again are reached: \(a.dugCount) cells dug")
+        }
+
         test("every baked plan is whole: the essentials are joined before any office, and lighting the slots in order never breaks the floor") {
             expect(!Floorplan.all().isEmpty, "there are baked plans: \(Floorplan.all().count)")
             for plan in Theme.allCases.flatMap({ Floorplan.all($0) }) {
@@ -262,6 +290,15 @@ enum LayoutTests {
             out += line + "\n"
         }
         FileHandle.standardError.write(out.data(using: .utf8)!)
+    }
+
+    /// The hallway is one piece from the plaza, and every room has its door on it.
+    private static func whole(_ s: Station) -> Bool {
+        var hall = Set(s.corridorCells + s.coreCells); hall.remove(s.plan.monolith)
+        guard let start = s.coreCells.first(where: { $0 != s.plan.monolith }) else { return false }
+        var seen: Set<Cell> = [start], queue = [start], head = 0
+        while head < queue.count { let c = queue[head]; head += 1; for n in c.neighbours where hall.contains(n) && !seen.contains(n) { seen.insert(n); queue.append(n) } }
+        return seen == hall && s.rooms.values.allSatisfy { r in r.cells.contains { c in c.neighbours.contains(where: s.isCorridor) } }
     }
 
     private static func fresh() -> Station {

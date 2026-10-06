@@ -10,7 +10,8 @@ three round the **monolith**, four arms out of it, the two long ones wandering i
 short alleys off them, every other alley looping back into its arm so there is a way round as well as a
 way out, and rooms on both sides of every stretch. The hallway is drawn whole from the
 station's name and built outward as rooms need it, so it never re-plans and two machines that share a
-station draw the same one. The monolith is the ancient artefact the game's minions researched for new
+station draw the same one. Hallway that no office needs any more is taken up again, from its far end
+inward, once nobody is on it, so a quiet station shrinks back to its plaza, arms and quarters. The monolith is the ancient artefact the game's minions researched for new
 skills. Here it stands for the outside world: sessions that search the web or talk to other systems send
 their subagents to it, and it answers with cones of light, never lightning. The **bay** at the south
 arm's end is outside: shuttles land there and nowhere else, on a honeycomb of berths, and the berth a ship is
