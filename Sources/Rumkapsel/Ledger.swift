@@ -280,6 +280,19 @@ struct Ledger: Codable {
     mutating func dropped(by minion: String) {
         for c in crates.values where c.carrier == minion { place(c.repo, c.number, nil) }
     }
+    /// Everything of a repository aboard the rocket, and not on its way there, stands in a yard again.
+    /// Returns the numbers that came back.
+    mutating func unload(repo: String, to yard: Yard) -> [Int] {
+        var back: [Int] = []
+        for var c in crates.values where c.repo == repo && c.placed == .pad && c.heading == nil && !c.inTransit {
+            c.placed = yard; c.wanted = yard; c.movedAt = nil
+            c.at = nil; c.slot = nil; c.bound = nil
+            crates[c.key] = c
+            back.append(c.number)
+        }
+        return back.sorted()
+    }
+
     /// The rocket left: what it carried is off the station's floor. The row stays, placed on the pad,
     /// until the source stops counting the crate; only then is it gone from the ledger too.
     mutating func clearPad(repo: String) {
