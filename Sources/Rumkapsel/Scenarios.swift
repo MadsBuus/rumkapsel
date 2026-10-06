@@ -392,8 +392,8 @@ enum Scenarios {
         ], tail: 192, expects: [
             .rocket(.standBy, "web"),           // a crate on the deck: a rocket stands before the release opens
             .releaseOpened("web", untested: true),
-            .rocket(.load(1), "web"),
-            .crateCleared("web"),
+            .crateCleared("web"),               // the board's card clears the last of it, and only then does it load
+            .rocket(.load(2), "web"),
             .carry(to: .pad),
             .rocket(.steam, "web"),
             .releaseMerged("web", production: true),
