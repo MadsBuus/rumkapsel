@@ -850,6 +850,7 @@ final class World {
                 guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !mergeLaunches.contains(key),
                       !github.pipeline(repoRoot: root).shipsAtOnce, padSlotOf[key] != nil else { continue }
                 let cleared = clearedToLoad(repo: info.repo, station: station.name)
+                if !cleared { events += standDown(station: station, repo: info.repo) }
                 events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                    station: station, repo: info.repo, waiting: w.count, cleared: cleared))
                 continue
@@ -862,14 +863,27 @@ final class World {
                                              untested: pr.untested, isProduction: pr.isProduction))
                 events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
-            // Not for production: the rocket only stands. Cleared, by the record's word or the release's
-            // (an untested label holds it): it takes the cargo aboard.
-            if !pr.untested { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
-            let cleared = pr.isProduction && (!pr.untested || clearedToLoad(repo: info.repo, station: station.name))
+            // Not for production: the rocket only stands. Cleared, by the record's word or, where the
+            // release's label is a word on it, the release's (an untested label holds it): it takes the
+            // cargo aboard.
+            let labelClears = !pr.untested && workflow(repo: info.repo).cleared?.contains(.pulls) == true
+            if labelClears { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
+            let cleared = pr.isProduction && (labelClears || clearedToLoad(repo: info.repo, station: station.name))
+            if !cleared { events += standDown(station: station, repo: info.repo) }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr, cleared: cleared))
         }
         return events + applyStaging()
+    }
+
+    /// A rocket standing by holds nothing: what it took aboard while it was cleared goes back to the
+    /// rows it was loaded from, tested in front of the rocket and untested where it can be looked at.
+    /// Snapped back, not carried: the release was never cleared for it.
+    private func standDown(station: Station, repo: String) -> [WorldEvent] {
+        let yard: Yard = stagingIsDeck(station: station.name, repo: repo) ? .deck : .storage
+        let back = station.ledger.unload(repo: repo, to: yard)
+        guard !back.isEmpty else { return [] }
+        return [.log("\(repo): not cleared to ship, \(back.count) back off the rocket"), .layoutChanged]
     }
 
     /// The staging release of each repository, diffed against the last answer: opened, merged, or
@@ -1489,7 +1503,8 @@ final class World {
 
     /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
     func assignPads() {
-        let wanted = padRockets()
+        // A rocket on its way up keeps its slot until it has gone: nothing else stands where it lifts off.
+        let wanted = padRockets().union(padSlotOf.keys.filter(rocketBusy))
         for key in padSlotOf.keys where !wanted.contains(key) { padSlotOf[key] = nil }
         for station in fleet.stations.values {
             let prefix = station.name + "|"

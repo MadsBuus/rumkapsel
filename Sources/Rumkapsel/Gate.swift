@@ -392,9 +392,9 @@ extension StationController {
     /// and the tunnel through half of it, the monitor and its operator on the deck side. Nothing where the
     /// station has no deck beside its pad.
     func buildGate(_ station: Station) {
-        if let old = gates[station.name] { for n in [old.belt, old.tunnel, old.monitor, old.operatorNode] { n.removeFromParentNode() } }
-        gates[station.name] = nil
-        guard world.deckInUse(station: station.name), let g = station.gate, let belt = station.belt else { return }
+        if let old = gates.removeValue(forKey: station.name) { tearDown(old) }
+        guard world.deckInUse(station: station.name), let g = station.gate, let belt = station.belt,
+              let stand = station.operatorSpot, let screen = station.monitorSpot else { return }
         // The fence spans along its x, turned so that x runs along the gate's line, open where the tunnel
         // stands on it.
         let fenceX = SIMD2(g.inward.y, -g.inward.x)
@@ -421,7 +421,6 @@ extension StationController {
         propRoot.addChildNode(tunnel)
         // The operator on the deck across from its post, the monitor beside it toward the belt, both facing
         // back over the deck, where the crates come from and where anyone watching is.
-        guard let stand = station.operatorSpot, let screen = station.monitorSpot else { return }
         let facingDeck = atan2(-g.inward.x, -g.inward.y)
         let monitor = Props.xrayMonitor()
         let screenAt = screen + station.offset
@@ -441,6 +440,16 @@ extension StationController {
 
     /// One frame of every gate: the X-ray's belt, crates, lights, screen and operator are drawn where the
     /// simulation has them, and the fence where its bodies are.
+    /// Everything a gate put on the floor, off it again: its props, the rings sweeping bodies at the fence
+    /// and the crates it drew on the belt. A crate a carry holds is the carry's, and stays.
+    private func tearDown(_ gv: GateView) {
+        for n in [gv.belt, gv.tunnel, gv.monitor, gv.operatorNode] { n.removeFromParentNode() }
+        for ring in gv.rings.values { ring.removeFromParentNode() }
+        for node in Array(gv.waiting.values) + [gv.moving?.node].compactMap({ $0 }) where !cargoNodes.values.contains(where: { $0 === node }) {
+            node.removeFromParentNode()
+        }
+    }
+
     func tickGates(dt: Double) {
         for (name, gv) in gates {
             guard let station = fleet.stations[name] else { continue }

@@ -191,8 +191,9 @@ extension StationController {
                 v.node.name = r.label
                 v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
             }
-            // Standing by, a rocket stands where the pad is now: the floor may have grown under it.
-            v.node.position = padPosition(station: st, slot: slot)
+            // Standing by, a rocket stands where the pad is now: the floor may have grown under it. One that has
+            // lost its slot stays where it stands rather than on somebody else's.
+            if world.padSlotOf[key] != nil { v.node.position = padPosition(station: st, slot: slot) }
         }
     }
 
@@ -335,6 +336,7 @@ extension StationController {
     /// Flame on, a slow climb that carries the rocket out of the frame, then gone. A rocket whose flight is
     /// already on screen is that flight: it leaves the pad quietly rather than lifting off a second time.
     func liftOff(_ node: SCNNode, repo: String) {
+        scorch(at: node.position)
         let flying = (mission.map { $0.repo == repo && $0.ended == nil } ?? false) || queuedMissions.contains { $0.repo == repo && $0.ended == nil }
         if flying {
             node.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
@@ -344,6 +346,31 @@ extension StationController {
         node.opacity = 1
         node.childNode(withName: "flame", recursively: false)?.opacity = 1
         node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
+    }
+
+    /// The blast's soot on the pad where a rocket stood: dark for a good while, then fading out.
+    func scorch(at p: SCNVector3) {
+        let key = "\(Int((p.x * 10).rounded())),\(Int((p.z * 10).rounded()))"
+        if let fresh = scorches[key], fresh.value(forKey: "at") as? Double ?? 0 > clock - 30 { return }   // this launch's, already down
+        scorches.removeValue(forKey: key)?.removeFromParentNode()
+        let size = Station.hexRadius * 2.6
+        let mark = SCNNode(geometry: SCNPlane(width: size, height: size))
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = Props.scorchImage(seed: UInt64(clock * 1000))
+        m.writesToDepthBuffer = false
+        m.isDoubleSided = false
+        mark.geometry!.firstMaterial = m
+        mark.eulerAngles.x = -.pi / 2
+        mark.eulerAngles.y = CGFloat(Double.random(in: 0..<(2 * .pi)))
+        mark.position = SCNVector3(p.x, 0.007, p.z)
+        mark.renderingOrder = 2
+        mark.opacity = 0
+        mark.setValue(clock, forKey: "at")
+        propRoot.addChildNode(mark)
+        scorches[key] = mark
+        mark.runAction(.sequence([.wait(duration: 0.6), .fadeIn(duration: 1.2), .wait(duration: 600), .fadeOut(duration: 600),
+                                  .run { [weak self] n in if self?.scorches[key] === n { self?.scorches[key] = nil } }, .removeFromParentNode()]))
     }
 
     /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the pad's hexagons redrawn.

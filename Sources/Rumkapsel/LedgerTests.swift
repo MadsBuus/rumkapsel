@@ -26,6 +26,19 @@ enum LedgerTests {
             expect(l.counts(in: .storage)["web"] == 2 && l.counts(in: .deck)["web"] == 1, "counts read off placed")
         }
 
+        test("a rocket standing by gives back what it loaded: the crates stand on the deck again, the source's word theirs") {
+            var l = Ledger()
+            l.adopt(word(deck: [1, 2], cleared: [1], updated: [1: at(0), 2: at(0)]), repo: "web")
+            for n in [1, 2] { l.order(repo: "web", number: n, to: .pad); l.landed(repo: "web", number: n, in: .pad, at: at(10)) }
+            l.order(repo: "web", number: 3, to: .pad)
+            expect(l["web", 1]?.placed == .pad && l["web", 2]?.placed == .pad, "both aboard")
+            expect(l.unload(repo: "web", to: .deck) == [1, 2], "both come back, the one still on its way does not")
+            expect(l["web", 1]?.placed == .deck && l["web", 2]?.placed == .deck && l["web", 1]?.cleared == true && l["web", 2]?.cleared == false,
+                   "on the deck, tested and untested as the source said")
+            l.adopt(word(deck: [1, 2], cleared: [1], updated: [1: at(0), 2: at(0)]), repo: "web")
+            expect(l.disagreements(repo: "web").isEmpty, "and the source agrees")
+        }
+
         test("board before release: the board moves a crate, the station carries it, the board agrees") {
             var l = Ledger()
             l.adopt(word(storage: [1], updated: [1: at(0)]), repo: "web")

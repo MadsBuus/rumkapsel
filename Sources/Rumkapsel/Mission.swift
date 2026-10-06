@@ -41,6 +41,8 @@ struct Mission {
     var lastStep = 0.0
     /// When the side thrusters last fired.
     var lastThrust = 0.0
+    /// Which rehearsal this is; nil for a real deploy.
+    var rehearsal: Int?
 
     /// How far along the flight is: most of the way by the usual length, creeping on past it, and after
     /// the end, docking, falling back to the pad, or stopped where the signal was lost.
@@ -53,11 +55,25 @@ struct Mission {
             case .failed, .lost: return end.progress
             }
         }
-        // Quick off the pad and up past the station in the first minute or so, then a long coast and approach
-        // that still moves at a third of the pace at the end; past the usual length it creeps.
-        let f = max(0, clock - started) / max(1, expected)
-        return f < 1 ? 0.92 * (0.35 * f + 0.65 * (1 - pow(1 - f, 4))) : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
+        // Off the pad and through separation at the rocket's own pace, however long the deploy usually takes;
+        // then a long coast and approach over the rest of it, still moving at a third of the pace at the end;
+        // past the usual length it creeps.
+        let e = max(0, clock - started), launch = launchSeconds, share = Mission.separationShare
+        let f = e < launch ? share * e / launch : share + (1 - share) * (e - launch) / max(1, expected - launch)
+        return f < 1 ? Mission.curve(f) : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
     }
+
+    /// How long from liftoff to separation: the rocket's own pace, or less for a deploy shorter than that.
+    var launchSeconds: Double { min(Mission.liftoff, max(1, expected) * Mission.separationShare) }
+
+    /// The flight's shape, by share of the usual length.
+    static func curve(_ f: Double) -> Double { 0.92 * (0.35 * f + 0.65 * (1 - pow(1 - f, 4))) }
+    /// Where on that shape separation falls.
+    static let separationShare: Double = {
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<40 { let mid = (lo + hi) / 2; if curve(mid) < separation { lo = mid } else { hi = mid } }
+        return lo
+    }()
 
     /// The words under the clock.
     func phase(at clock: Double) -> String {
@@ -87,10 +103,12 @@ struct Mission {
     /// seconds after that.
     static let separation = 0.5
     static let correction = 1.2..<2.7
-    /// When the picture leaves the camera on the rocket for the long lens on the station, as a share of how long
-    /// the flight usually takes, so a short flight and a long one cut at the same point; well before separation,
-    /// so the lens sees it. And how far into the landing (seconds after the deploy went live) it cuts to the colony's.
-    static let toTheMast = 0.1
+    /// Seconds from liftoff to separation.
+    static let liftoff = 12.0
+    /// When the picture leaves the camera on the rocket for the long lens on the station, as a share of the way to
+    /// separation, so the lens sees it. And how far into the landing (seconds after the deploy went live) it cuts
+    /// to the colony's.
+    static let toTheMast = 0.38
     static let colonyCut = 4.5
     /// Out of the atmosphere: past here nothing shakes.
     static let space = 0.3
@@ -172,6 +190,13 @@ extension StationController {
         // The pad's own rocket is the one that flies: seen from the station it lifts off the pad and climbs
         // out of sight, and the pad stands empty while the flight is on. The camera riding it never sees it.
         rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
+            // The tower is let go of first and stays on the pad, as it does when a rocket lifts off on its own.
+            if let hold = $0.childNode(withName: "hold", recursively: false) {
+                hold.removeFromParentNode()
+                hold.position = $0.position
+                rocketRoot.addChildNode(hold)
+                hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
+            }
             let leaving = $0.clone()
             leaving.name = nil
             leaving.opacity = 1
@@ -201,20 +226,40 @@ extension StationController {
             scene.rootNode.addChildNode(missionCamera)
         }
         let pad = missionPad(mission!)
+        scorch(at: v3(pad.x, 0, pad.z))
         puff(at: pad, up: SIMD3(0, 1, 0), color: NSColor(rgb: (0.78, 0.8, 0.84)), count: 900, spread: 88, speed: 0.9, life: 4.5, size: 0.22)
         stepMission()
         DispatchQueue.main.async { [self] in openMissionScreen() }
     }
 
-    /// A 45-second pretend deploy of the first repository with a planet, ending the given way.
+    /// The flight off the screen and the station as it was: its rockets back, the planets' air.
+    private func clearMission() {
+        mission = nil
+        hiddenRockets.forEach { $0.isHidden = false }
+        hiddenRockets = []
+        planets.values.forEach { $0.childNode(withName: "air", recursively: false)?.opacity = 1 }
+        DispatchQueue.main.async { [self] in closeMissionScreen() }
+    }
+
+    /// A 45-second pretend deploy of the first repository with a planet, ending the given way. A rehearsal
+    /// already on screen gives way to the new one; a real deploy's flight never does.
     func rehearseLaunch(_ outcome: DeployOutcome) {
         enqueue { [self] in
-            guard mission == nil else { return }
+            if let m = mission {
+                guard m.rehearsal != nil else { return }
+                clearMission()
+            }
             placePlanets()
             guard let repo = planets.keys.sorted().first ?? world.repoRoots.values.map(\.repo).sorted().first else { return }
             let station = world.repoRoots.values.first { $0.repo == repo }?.station ?? fleet.ordered.first?.name ?? "work"
+            rehearsals += 1
+            let id = rehearsals
             beginMission(station: station, repo: repo, expected: 45, release: latestRelease(repo) ?? "rehearsal")
-            after(outcome == .live ? 45 : 25) { [weak self] in self?.endMission(repo: repo, outcome: outcome) }
+            mission?.rehearsal = id
+            after(outcome == .live ? 45 : 25) { [weak self] in
+                guard let self, self.mission?.rehearsal == id else { return }
+                self.endMission(repo: repo, outcome: outcome)
+            }
         }
     }
 
@@ -281,11 +326,7 @@ extension StationController {
     func stepMission() {
         guard let m = mission else { return }
         if let end = m.ended, clock - end.at > (end.outcome.signalLost ? 5 : end.outcome == .live ? 24 : 8) {
-            mission = nil
-            hiddenRockets.forEach { $0.isHidden = false }
-            hiddenRockets = []
-            planets.values.forEach { $0.childNode(withName: "air", recursively: false)?.opacity = 1 }
-            DispatchQueue.main.async { [self] in closeMissionScreen() }
+            clearMission()
             if !queuedMissions.isEmpty {
                 var next = queuedMissions.removeFirst()
                 // One that ended while it waited plays its ending now.
@@ -397,7 +438,7 @@ extension StationController {
         let dt = max(0, min(0.1, clock - m.lastStep))
         mission?.lastStep = clock
         let centreOfCraft = craft + heading * 0.6 * 0.55 * scale
-        let onboard = landing == nil && (clock - m.started) / max(1, m.expected) < Mission.toTheMast && m.ended?.outcome.signalLost != true
+        let onboard = landing == nil && clock - m.started < m.launchSeconds * Mission.toTheMast && m.ended?.outcome.signalLost != true
         let atColony = (landing ?? 0) >= Mission.colonyCut
         var at: SIMD3<Double>, look: SIMD3<Double>, up: SIMD3<Double>, fov: Double
         if onboard, let mount = (missionCraft.value(forKey: "lifter") as? SCNNode)?.childNode(withName: "down cam", recursively: false)?.simdWorldTransform {
@@ -626,9 +667,15 @@ extension StationController {
             let p = rocket.worldPosition
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }
+        // No rocket of its own standing (a rehearsal, say): the first spot on the pad nobody stands on, never
+        // the middle of the pad, where someone else's rocket may be.
         let st = fleet.stations[m.station] ?? fleet.ordered.first
         guard let st else { return .zero }
-        return SIMD3(st.padCenter.x + st.offset.x, 0, st.padCenter.y + st.offset.y)
+        let taken = Set(world.padOrder(station: st).compactMap { world.padSlotOf[$0] })
+        let slots = world.padSlots(station: st)
+        let free = (0..<slots.count).first { !taken.contains($0) } ?? 0
+        let p = padPosition(station: st, slot: free)
+        return SIMD3(Double(p.x), Double(p.y), Double(p.z))
     }
 
     /// The camera's window, bottom left, over the station. Main thread.
