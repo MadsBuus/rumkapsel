@@ -159,7 +159,6 @@ enum WorkTests {
             expect(tags.qa == nil && tags.shipped == [.git, .board], "ships on tags: no QA, git says shipped")
             let ours = Workflow.detected(pipeline: Pipeline(trunk: "develop", staging: "staging", production: "production"), board: true)
             expect(ours.qa?.first == .board && ours.cleared?.first == .board, "with a board and staging, the board is first in line")
-            expect(ours.cleared?.contains(.pulls) == false, "and the release's missing label clears nothing: the board clears crate by crate")
             let merges = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: "merge"), board: false)
             expect(merges.qa == nil && merges.cleared == nil && merges.shipped == [.git], "every merge ships: nothing to clear")
         }

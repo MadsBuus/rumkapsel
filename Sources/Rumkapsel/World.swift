@@ -76,6 +76,7 @@ final class World {
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
         var launches: Set<String> = []
         var toDeck: [String: [Int]] = [:]
+        var clearedThisPass = false
         for (record, t) in transitions {
             switch t.to {
             case .ready:
@@ -102,6 +103,7 @@ final class World {
             case .cleared where t.from != nil:
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
+                clearedThisPass = true
             case .shipped where t.from != nil:
                 guard let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
                 // Shipped by a tag: the tag is the launch, and the work it took simply goes.
@@ -126,6 +128,8 @@ final class World {
             if mergeLaunches.contains(key) || launchedThisPass.contains(key) { continue }
             events.append(wish(.launch, station: station, repo: repo, waiting: cargoWaiting(station: station, repo: repo), cleared: true))
         }
+        // Work just cleared may be the last a rocket waits on: it hears so now, not at GitHub's next answer.
+        if clearedThisPass { events += applyReleases() }
         return events
     }
     /// Rockets a release or tag sent up this pass, as "station|repo".
@@ -866,9 +870,18 @@ final class World {
             // Not for production: the rocket only stands. Cleared, by the record's word or, where the
             // release's label is a word on it, the release's (an untested label holds it): it takes the
             // cargo aboard.
-            let labelClears = !pr.untested && workflow(repo: info.repo).cleared?.contains(.pulls) == true
-            if labelClears { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
-            let cleared = pr.isProduction && (labelClears || clearedToLoad(repo: info.repo, station: station.name))
+            // Where the board tests on the deck, its card is the word on the work it tracks, and the label
+            // clears only what the board has no card for: a release opened before its label arrives clears
+            // nothing the board is still testing. With no QA there is nothing to test on, and the label is it.
+            let flow = workflow(repo: info.repo)
+            let boardClears = flow.cleared?.first == .board && flow.has(.qa)
+            let labelClears = !pr.untested && flow.cleared?.contains(.pulls) == true
+            if labelClears {
+                for r in waiting(repo: info.repo, station: station.name) where !boardClears || r.words[.board] == nil {
+                    works.report(r, .cleared, by: .pulls)
+                }
+            }
+            let cleared = pr.isProduction && ((labelClears && !boardClears) || clearedToLoad(repo: info.repo, station: station.name))
             if !cleared { events += standDown(station: station, repo: info.repo) }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr, cleared: cleared))
