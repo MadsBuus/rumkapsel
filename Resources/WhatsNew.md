@@ -1,4 +1,3 @@
-## What's new in 0.59
+## What's new in 0.60
 
-- Space flies a jetpack while walking the station, under one hull over everything but the pad and the bay
-- A staging deploy is welded from a jetpack: the hull goes white ring by ring under sparks and an amber beacon
+- Walking no longer stutters when the floor changes: the hull is rebuilt in a fraction of the time
