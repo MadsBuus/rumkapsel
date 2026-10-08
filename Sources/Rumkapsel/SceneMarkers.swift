@@ -495,12 +495,13 @@ extension StationController {
         return now.timeIntervalSince(room.lastActive) < StationController.powerWindow ? .empty : .dark
     }
 
-    /// The floor's colour at a light.
+    /// The floor's colour at a light. A look that rims its offices keeps an empty one at full colour, so
+    /// the rim stands out only round an office with its lights off.
     func officeTone(_ base: NSColor, _ light: OfficeLight) -> NSColor {
         let floor = NSColor(rgb: (0.27, 0.28, 0.33))
         switch light {
         case .occupied: return base
-        case .empty: return base.mixed(with: floor, 0.35).darker(0.1)
+        case .empty: return Looks.current.rimsOffices ? base : base.mixed(with: floor, 0.35).darker(0.1)
         case .dark: return base.mixed(with: floor, 0.6).darker(0.3)
         }
     }

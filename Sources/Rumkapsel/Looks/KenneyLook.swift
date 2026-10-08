@@ -12,6 +12,7 @@ struct KenneyLook: Look {
     var floorTop: Double { Kit.plateTop }
     /// The kit's plates have marks of their own.
     var dotsHallway: Bool { false }
+    var rimsOffices: Bool { false }
 
     /// On the ground there is nothing to drift.
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)] { [] }

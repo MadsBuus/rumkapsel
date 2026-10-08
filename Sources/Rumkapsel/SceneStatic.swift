@@ -96,9 +96,15 @@ extension StationController {
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
         n.name = name
         root.addChildNode(n)
-        // Dark border toward any neighbouring floor of another owner, extended past the corners. Edges
-        // with no floor beyond are open, numbered round the tile (z-, x-, z+, x+) for the look's kerbs.
+        // Dark border toward any neighbouring floor of another owner, run on past a corner where another
+        // border meets it there, and stopped at the corner where none does, so it never pokes into an
+        // open doorway. Edges with no floor beyond are open, numbered round the tile (z-, x-, z+, x+) for
+        // the look's kerbs.
         let g = 0.075
+        func parted(_ a: Cell, _ b: Cell) -> Bool {
+            guard let oa = owner(station, a), let ob = owner(station, b), oa != ob else { return false }
+            return !joined(station, a, b, oa)
+        }
         let sides: [(Cell, SIMD2<Double>, Bool, Int)] = [
             (Cell(x: cell.x - 1, y: cell.y), SIMD2(-0.5, 0), true, 1), (Cell(x: cell.x + 1, y: cell.y), SIMD2(0.5, 0), true, 3),
             (Cell(x: cell.x, y: cell.y - 1), SIMD2(0, -0.5), false, 0), (Cell(x: cell.x, y: cell.y + 1), SIMD2(0, 0.5), false, 2),
@@ -109,12 +115,20 @@ extension StationController {
             guard other != key, !joined(station, cell, nb, key) else { continue }
             walled[edge] = floorKind(other)
             guard look.drawsBorders else { continue }
-            // Every border is the void, in one of two sizes: two geometries for the whole fleet.
-            let strip = shared("border:\(vertical)", width: vertical ? g * 2 : 1 + g * 2,
-                               height: vertical ? 1 + g * 2 : g * 2) { flat(Palette.void) }
+            let along = vertical ? Cell(x: 0, y: 1) : Cell(x: 1, y: 0)
+            func meets(_ s: Int) -> Bool {
+                let a = Cell(x: cell.x + s * along.x, y: cell.y + s * along.y), b = Cell(x: nb.x + s * along.x, y: nb.y + s * along.y)
+                return parted(cell, a) || parted(nb, b) || parted(a, b)
+            }
+            let lo = meets(-1) ? g : 0, hi = meets(1) ? g : 0
+            let length = 1 + lo + hi, shift = (hi - lo) / 2
+            // Every border is the void, in a few sizes: a handful of geometries for the whole fleet.
+            let strip = shared("border:\(vertical):\(length)", width: vertical ? g * 2 : length,
+                               height: vertical ? length : g * 2) { flat(Palette.void) }
             let b = SCNNode(geometry: strip)
             b.eulerAngles.x = -.pi / 2
-            b.position = v3(station.offset.x + Double(cell.x) + off.x, look.floorTop + 0.002, station.offset.y + Double(cell.y) + off.y)
+            b.position = v3(station.offset.x + Double(cell.x) + off.x + (vertical ? 0 : shift), look.floorTop + 0.002,
+                            station.offset.y + Double(cell.y) + off.y + (vertical ? shift : 0))
             b.name = name
             b.opacity = n.opacity
             root.addChildNode(b)
@@ -128,6 +142,48 @@ extension StationController {
             n.addChildNode(detail)
         }
         return n
+    }
+
+    /// The office's own colour along the tile's edges that face out of the office, just inside the dark
+    /// border and just under it; none across the doorway, where the rim beside it runs on to the edge. Where only the void lies beyond, the border is drawn here, so the rim
+    /// keeps one line all round. A strip runs on to the tile's end where the office goes on that way and
+    /// stops at the border where it turns a corner; a corner turning inward gets a square of its own.
+    /// Hung on the tile, so it fades, folds and unfolds with it; the tile's tint leaves it alone.
+    private func rim(_ tile: SCNNode, cell: Cell, of room: Room, in station: Station, color: NSColor) {
+        let inside = Set(room.cells)
+        func outside(_ dx: Int, _ dz: Int) -> Bool { !inside.contains(Cell(x: cell.x + dx, y: cell.y + dz)) }
+        func door(_ dx: Int, _ dz: Int) -> Bool { joined(station, cell, Cell(x: cell.x + dx, y: cell.y + dz), room.key) && outside(dx, dz) }
+        func void(_ dx: Int, _ dz: Int) -> Bool { owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == nil }
+        let border = 0.075, wide = 0.13
+        // The border out to the void reaches a little past the tile, so no sliver of floor shows at its edge.
+        let over = 0.03
+        let at = 0.5 - border - wide / 2, edge = 0.5 - border / 2 + over / 2
+        func add(_ w: Double, _ h: Double, _ x: Double, _ z: Double, _ c: NSColor, _ y: Double) {
+            let piece = shared("rim:\(w):\(h):\(c.description)", width: w, height: h) { flat(c) }
+            let r = SCNNode(geometry: piece)
+            // The plane lies face up: its x is the floor's x, its y the floor's -z.
+            r.position = SCNVector3(x, -z, y)
+            r.name = tile.name
+            tile.addChildNode(r)
+        }
+        for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] where outside(dx, dz) && !door(dx, dz) {
+            let (ax, az) = dx != 0 ? (0, 1) : (1, 0)   // along the edge
+            func stops(_ x: Int, _ z: Int) -> Bool { outside(x, z) && !door(x, z) }
+            let lo = stops(-ax, -az) ? -0.5 + border : -0.5, hi = stops(ax, az) ? 0.5 - border : 0.5
+            let length = hi - lo, mid = (lo + hi) / 2
+            if dx != 0 { add(wide, length, Double(dx) * at, mid, color, 0.001) } else { add(length, wide, mid, Double(dz) * at, color, 0.001) }
+            guard void(dx, dz) else { continue }
+            // Past an end only where the void or the office itself goes on, never into a doorway.
+            let before = void(-ax, -az) || !outside(-ax, -az) ? over : 0, after = void(ax, az) || !outside(ax, az) ? over : 0
+            let run = 1 + before + after, on = (after - before) / 2
+            if dx != 0 { add(border + over, run, Double(dx) * edge, on, Palette.void, 0.0015) }
+            else { add(run, border + over, on, Double(dz) * edge, Palette.void, 0.0015) }
+        }
+        for (dx, dz) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] where outside(dx, dz) && !outside(dx, 0) && !outside(0, dz) {
+            let side = border + wide, c = 0.5 - side / 2
+            add(side, side, Double(dx) * c, Double(dz) * c, color, 0.001)
+            if void(dx, dz) { add(border + over, border + over, Double(dx) * edge, Double(dz) * edge, Palette.void, 0.0015) }
+        }
     }
 
     /// A look's set piece into the scene, each part named for its area so the pointer and the clicks find it.
@@ -440,6 +496,7 @@ extension StationController {
                     return da != db ? da < db : (a.y, a.x) < (b.y, b.x)
                 }
                 let tiled = Int((Double(ordered.count) * progress).rounded())
+                let rimmed = Looks.current.rimsOffices && !room.key.hasPrefix("kind:") && !unchecked && !provisional
                 let pending = undelivered.contains(key)
                 for (i, c) in ordered.enumerated() {
                     // Nothing on the plot before the office unfolds from its crate: no grey placeholder.
@@ -447,6 +504,7 @@ extension StationController {
                     // third off every channel, which took the palette with it.
                     let color = i < tiled || progress == 0 ? officeTone(officeBase(station, room), light) : subfloor
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
+                    if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: officeBase(station, room)) }
                     if pending { t.opacity = 0; t.position.y = 0.003 }
                     else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }
                     else if provisional { t.opacity = 0.38 }
@@ -455,7 +513,8 @@ extension StationController {
                         let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
                         overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
                         overlay.eulerAngles.x = -.pi / 2
-                        overlay.position = v3(t.position.x, Looks.current.floorTop + 0.004, t.position.z)
+                        // Under the borders and the rim: dust and failing tint the floor, not its edges.
+                        overlay.position = v3(t.position.x, Looks.current.floorTop + 0.0005, t.position.z)
                         overlay.name = "room:" + key
                         if failing {
                             overlay.opacity = 0.15
@@ -584,10 +643,6 @@ extension StationController {
         guard Looks.current.writesOnFloor else { return }
         for station in fleet.stations.values {
             let ox = station.offset.x, oz = station.offset.y
-            let name = floorText(station.name, color: Palette.text, size: 1.0, maxWidth: 10, lines: 1)
-            let b = station.bounds
-            add(name.node, yaw: 0, center: SIMD2(ox + Double(b.min.x) - 0.5 + name.width / 2, oz + Double(b.max.y) + 1.2 + name.height / 2))
-
             if station.hasPad {
                 if world.deckInUse(station: station.name) {
                     let deckLabel = floorSign(Words.current.deck, color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)

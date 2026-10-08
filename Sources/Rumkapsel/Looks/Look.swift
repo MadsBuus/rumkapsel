@@ -93,6 +93,9 @@ protocol Look {
     var dotsHallway: Bool { get }
     /// Whether floors of different owners are parted by a dark line.
     var drawsBorders: Bool { get }
+    /// Whether an office keeps a rim of its repository's full colour round its edge while its floor
+    /// dims with the lights, so an idle office still reads as its repository's.
+    var rimsOffices: Bool { get }
     /// Whether a floor's square plane is drawn. Hidden, the tile still names, dims and unfolds its detail.
     func drawsPlane(_ floor: Floor) -> Bool
     /// The colour a tile's plane is drawn in, from the colour the scene gives that floor.
@@ -182,6 +185,7 @@ extension Look {
     var floorTop: Double { 0 }
     var dotsHallway: Bool { true }
     var drawsBorders: Bool { true }
+    var rimsOffices: Bool { true }
     func drawsPlane(_ floor: Floor) -> Bool { true }
     func floorColor(_ color: NSColor, floor: Floor) -> NSColor { color }
     func tileDetail(_ tile: Tile) -> SCNNode? { nil }
