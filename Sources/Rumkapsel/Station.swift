@@ -601,7 +601,7 @@ final class Station {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { adopt($0) ? $0 : nil } ?? takeSlot()
+        let cells = preferredCells.flatMap { adopt($0) ? $0 : nil } ?? takeSlot(repo: repo)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive, openedAt: openedAt)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
@@ -805,21 +805,44 @@ final class Station {
     /// hallway that first reaches the slot, so placing a room is a lookup and lighting the run that
     /// comes with it. Nothing is searched for, and two machines with the same station and the same
     /// rooms take the same slots in the same order.
-    private func takeSlot() -> [Cell] {
-        for (i, slot) in floor.slots.enumerated() where !usedSlots.contains(i) {
-            // A slot whose floor is spoken for — a room read back off disk that sat elsewhere — is
-            // passed over, but not struck off: the room standing on it will not stand there for ever,
-            // and a slot retired for good is one the station never gets back.
-            guard slot.cells.allSatisfy({ occupied[$0] == nil }) else { continue }
+    private func takeSlot(repo: String?) -> [Cell] {
+        // A slot whose floor is spoken for — a room read back off disk that sat elsewhere — is
+        // passed over, but not struck off: the room standing on it will not stand there for ever,
+        // and a slot retired for good is one the station never gets back.
+        let free = floor.slots.indices.filter { i in !usedSlots.contains(i) && floor.slots[i].cells.allSatisfy { occupied[$0] == nil } }
+        let byRepo = OfficePlacement.current == .byRepo ? repo.flatMap { slot(forRepo: $0, among: free) } : nil
+        if let i = byRepo ?? free.first {
             usedSlots.insert(i)
-            lightWay(to: slot)
-            return slot.cells
+            lightWay(to: floor.slots[i])
+            return floor.slots[i].cells
         }
         // More offices at once than the plan holds. Park the extra clear of the station rather than on
         // top of it; it takes a slot as soon as one falls empty.
         let far = (floor.allHall.map(\.x).max() ?? 0) + 4 + 4 * (rooms.count % 8)
         return (0..<2).flatMap { dx in (0..<2).map { dy in Cell(x: far + dx, y: -20 + dy) } }
     }
+
+    /// The free slot for an office of `repo` when offices keep together by repository: the one nearest
+    /// its other offices, or for a repository new to the station, an inner one clear of everyone else's.
+    /// Ties go to the earlier slot, so two machines with the same rooms choose alike.
+    private func slot(forRepo repo: String, among free: [Int]) -> Int? {
+        let offices = rooms.values.filter { $0.repo != nil && !$0.key.hasPrefix("kind:") }
+        let own = offices.filter { $0.repo == repo }.flatMap(\.cells)
+        let others = offices.filter { $0.repo != repo }.flatMap(\.cells)
+        func gap(_ i: Int, _ to: [Cell]) -> Int {
+            floor.slots[i].cells.flatMap { c in to.map { abs($0.x - c.x) + abs($0.y - c.y) } }.min() ?? .max
+        }
+        if !own.isEmpty {
+            return free.min { (gap($0, own), floor.slots[$0].ring, $0) < (gap($1, own), floor.slots[$1].ring, $1) }
+        }
+        func cost(_ i: Int) -> Int { floor.slots[i].ring * Station.newRepoRingCost - min(gap(i, others), Station.newRepoClearance) }
+        return free.min { (cost($0), $0) < (cost($1), $1) }
+    }
+
+    /// What a ring further out costs a repository's first office, against a tile clear of the others.
+    static let newRepoRingCost = 2
+    /// How far clear of other repositories' offices a first office is worth going.
+    static let newRepoClearance = 6
 
     /// Hallway the station lights because a slot needed it. Kept in the order it was lit, and saved.
     private func light(_ cells: [Cell]) {
@@ -1030,6 +1053,8 @@ final class Station {
         var rooms: [String: SavedRoom]
         var stored: Int?
         var ledger: Ledger?
+        /// The `OfficePlacement` the offices were placed by; rings when missing.
+        var placement: String?
     }
     struct SavedRoom: Codable {
         var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date
@@ -1041,21 +1066,38 @@ final class Station {
         Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree,
                       branch: $0.branch, repoRoot: $0.repoRoot, openedAt: $0.openedAt)
-        }, stored: storedBoxes, ledger: ledger)
+        }, stored: storedBoxes, ledger: ledger, placement: OfficePlacement.current.rawValue)
     }
 
-    func restore(_ s: Saved) {
-        dug = (s.hallway ?? []).filter { !plan.plaza.contains($0) }
+    /// The station as saved. With `relayout` the offices are placed afresh, the oldest first, and only
+    /// the quarters keep the cells they were saved with.
+    func restore(_ s: Saved, relayout: Bool = false) {
+        dug = relayout ? [] : (s.hallway ?? []).filter { !plan.plaza.contains($0) }
         ledger = s.ledger ?? Ledger()
         ledger.forgetTransit()   // nobody was carrying anything when this launched
-        for (key, r) in s.rooms where key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") {
+        let kept = s.rooms.filter { key, _ in key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") }
+        if relayout {
+            let offices = kept.filter { !$0.key.hasPrefix("kind:") }
+                .sorted { ($0.value.openedAt ?? $0.value.lastActive, $0.key) < ($1.value.openedAt ?? $1.value.lastActive, $1.key) }
+            restoreRooms(kept.filter { $0.key.hasPrefix("kind:") })
+            for (key, r) in offices {
+                ensureRoom(key: key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, openedAt: r.openedAt ?? r.lastActive)
+                if let room = rooms[key] { room.worktree = r.worktree; room.branch = r.branch; room.repoRoot = r.repoRoot }
+            }
+        } else {
+            restoreRooms(kept)
+        }
+        forgetFloorPlan()
+    }
+
+    private func restoreRooms(_ saved: [String: SavedRoom]) {
+        for (key, r) in saved {
             guard r.cells.allSatisfy({ !isReserved($0) && occupied[$0] == nil }) else { continue }
             let room = Room(key: key, name: r.name, repo: r.repo, color: r.color, cells: r.cells, lastActive: r.lastActive, openedAt: r.openedAt ?? r.lastActive)
             room.worktree = r.worktree; room.branch = r.branch; room.repoRoot = r.repoRoot
             rooms[key] = room
             for c in r.cells { occupied[c] = key }
         }
-        forgetFloorPlan()
     }
 }
 
@@ -1177,7 +1219,10 @@ final class Fleet {
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
 
-    func load() {
+    /// Reads the saved layout. A station with nobody else on it lays its offices out afresh, since no one
+    /// is looking at where they stood; with peers about they keep their places unless the placement
+    /// setting changed under them.
+    func load(alone: Bool) {
         loaded = true
         guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL),
@@ -1187,7 +1232,7 @@ final class Fleet {
         // station with their next scan.
         for (name, s) in saved.stations where name != "crew" && name != "private" {
             let station = Station(name: name)
-            station.restore(s)
+            station.restore(s, relayout: alone || (s.placement ?? OfficePlacement.rings.rawValue) != OfficePlacement.current.rawValue)
             station.ensureFixedRoom(.quarters)
             station.ensureFixedRoom(.lounge)
             station.ensureFixedRoom(.bath)

@@ -45,6 +45,9 @@ struct AppConfig: Codable, Equatable {
     /// The look the station is drawn in, by `Theme` name; classic when unset or unknown.
     var themeName: String?
     var theme: Theme { Theme(rawValue: themeName ?? "") ?? .classic }
+    /// How a new office picks its place, by `OfficePlacement` name; rings when unset or unknown.
+    var placementName: String?
+    var officePlacement: OfficePlacement { OfficePlacement(rawValue: placementName ?? "") ?? .rings }
     var trunkBranch: String = "develop"        // where feature branches merge
     var stagingBranch: String = "staging"      // optional: a test deck between trunk and production
     var productionBranch: String = "production"

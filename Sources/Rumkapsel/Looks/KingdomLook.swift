@@ -984,6 +984,7 @@ struct KingdomLook: Look {
 
     var dotsHallway: Bool { false }
     var drawsBorders: Bool { false }
+    var rimsOffices: Bool { false }
     func drawsPlane(_ floor: Floor) -> Bool { !(floor == .hallway || floor == .room || floor == .fixed) }
 
     func tileDetail(_ tile: Tile) -> SCNNode? {

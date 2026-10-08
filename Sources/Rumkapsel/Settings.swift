@@ -63,6 +63,9 @@ struct SettingsView: View {
                 if let credit = model.config.theme.credit {
                     Text(credit).font(.caption).foregroundStyle(.secondary)
                 }
+                Picker("New offices open", selection: Binding(get: { model.config.officePlacement }, set: { model.config.placementName = $0.rawValue })) {
+                    ForEach(OfficePlacement.allCases) { Text($0.title).tag($0) }
+                }
                 Toggle("Show repository titles across the top", isOn: Binding(get: { model.config.showTitles }, set: { model.config.showRepoTitles = $0 }))
                 Toggle("Show teammates' branches and pull requests", isOn: $model.config.showCrew)
                 Stepper("A minion sleeps after \(model.config.sleepMinutes) quiet min", value: $model.config.sleepMinutes, in: 1...60)
