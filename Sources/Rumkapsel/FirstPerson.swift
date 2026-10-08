@@ -594,17 +594,28 @@ extension StationController {
             flatDeck.categoryBitMask = Pick.scenery
             w.dome.addChildNode(flatDeck)
             var plate = (v: [SCNVector3](), i: [Int32]()), glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
+            // Heights on the grid's corners, each measured once for the squares that share it.
+            let n = Int((1 / step).rounded())
+            var heights: [SIMD2<Int>: Double] = [:]
+            func height(_ k: SIMD2<Int>) -> Double {
+                if let h = heights[k] { return h }
+                let h = StationHull.height(atDistance: hull.reach(SIMD2(Double(k.x), Double(k.y)) * step - 0.5).distance)
+                heights[k] = h
+                return h
+            }
             for c in hull.inside {
-                let n = Int((1 / step).rounded())
+                let door = hull.nearDoor(c)
                 for i in 0..<n {
                     for j in 0..<n {
+                        let gx = c.x * n + i, gy = c.y * n + j
                         let x0 = Double(c.x) - 0.5 + Double(i) * step, y0 = Double(c.y) - 0.5 + Double(j) * step
                         let corners = [SIMD2(x0, y0), SIMD2(x0 + step, y0), SIMD2(x0 + step, y0 + step), SIMD2(x0, y0 + step)]
-                        let hs = corners.map { StationHull.height(atDistance: hull.reach($0).distance) }
-                        let middle = SIMD2(x0 + step / 2, y0 + step / 2)
+                        let hs = [SIMD2(gx, gy), SIMD2(gx + 1, gy), SIMD2(gx + 1, gy + 1), SIMD2(gx, gy + 1)].map(height)
                         // A doorway: the hull's foot left open across it, as high as a door.
-                        let near = hull.reach(middle)
-                        if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
+                        if door {
+                            let near = hull.reach(SIMD2(x0 + step / 2, y0 + step / 2))
+                            if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
+                        }
                         let world = zip(corners, hs).map { v3(st.offset.x + $0.0.x, $0.1, st.offset.y + $0.0.y) }
                         if hs.reduce(0, +) / 4 < 0.6 {
                             let base = Int32(plate.v.count)
