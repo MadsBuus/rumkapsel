@@ -43,9 +43,13 @@ final class Minion: Body {
     private let visor: SCNNode
     /// The look's own figure in the box's place, when it has one; the box and its visor are then not drawn.
     private let figure: SCNNode?
+    /// The suit last put on, so it is drawn once.
+    private var suitKey = ""
     /// The look the figure came from, which poses it on a seat.
     private let look: Look
     private var staticNode: SCNNode?
+    /// Whether the bath's pixels are in sight: they are drawn over everything, so a wall in the way hides them.
+    var staticSeen = true
     private var towelNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
@@ -77,6 +81,7 @@ final class Minion: Body {
             staticNode = p
         }
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
+        staticNode?.isHidden = !staticSeen
     }
     /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
     private var staticSpot: SCNVector3 {
@@ -524,4 +529,18 @@ final class Minion: Body {
         body.runAction(.sequence([over, .wait(duration: 0.3), back]))
     }
 
+}
+
+extension Minion {
+    /// The suit on the box: seams, a belt, a badge in its repository's colour, a lit visor. A look with its
+    /// own figure wears its own clothes. A face per material wants square edges: a chamfered box has fewer.
+    func wearSuit(badge: NSColor) {
+        guard figure == nil, let box = body.geometry as? SCNBox else { return }
+        let key = Suit.key(badge, crew: isCrew)
+        guard suitKey != key else { return }
+        suitKey = key
+        box.chamferRadius = 0
+        box.materials = Suit.materials(badge: badge, crew: isCrew, subagent: isSubagent)
+        visor.geometry?.firstMaterial = Suit.visor
+    }
 }

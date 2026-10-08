@@ -157,7 +157,7 @@ extension StationController {
             let walker = minions.values.contains { m in
                 m.station == stationName && !m.path.isEmpty && clock >= m.wonderUntil
                     && abs(m.pos.x - dx) < half && abs(m.pos.y - dz) < 0.5
-            }
+            } || walkerAt(door: door, in: st, half: half)
             let want = walker ? 0.03 : 1.0
             let s = Double(pane.scale.y)
             pane.scale.y = CGFloat(s + (want - s) * min(1, dt * 8))
@@ -194,6 +194,7 @@ extension StationController {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
+            if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }
             // Hovered: this one holds still while you read what it is up to. The rest carry on.
             if !headless, hovered == "minion:" + m.id { continue }   // a cursor left over a headless run's window freezes nobody
             var posed = true
@@ -392,7 +393,7 @@ extension StationController {
             let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
-                : (m.path.isEmpty && !onFixture && !m.onJob ? Double(rig.eulerAngles.y) : m.facing)   // idle faces you; at work, its work
+                : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)   // idle faces you; at work, its work
             // At a rocket with the torch: the tip it is welding, and the seam the torch is on.
             let welding: (rocket: RocketJob, point: SIMD2<Double>)? = {
                 guard simulation.isWelding(m), case .weld(_, let repo, let side)? = m.current?.kind,

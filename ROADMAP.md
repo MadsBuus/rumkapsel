@@ -31,6 +31,14 @@ is the empty board. Slices 1–6 are done.
 - **The playbook posts orders.** An entry lays its floor, starts with an empty board and posts its one order,
   replacing the "Hands: one free" teleport.
 
+### Walking the station (`FirstPerson.swift`)
+F walks the hallways at eye height; a click on a minion rides along behind it on a crane. Both stay.
+
+- **Small things around the station**: a lot more props and clutter along the hallways and in the rooms, for
+  the walk to find. Agreed for later.
+- **An invisible block in new hallway**, seen once after offices arrived. A station shifting sideways under the
+  walker is fixed; if it comes back, `station.log` has a `walk` line saying what stopped it.
+
 ## Bugs and loose ends
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.

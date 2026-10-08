@@ -57,15 +57,22 @@ extension StationController {
             for k in 0...8 { block(a + (b - a) * Double(k) / 8, 0.3) }
             for p in [st.operatorSpot, st.monitorSpot].compactMap({ $0 }) { block(p, 0.3) }
         }
-        // Furniture and fixtures: anything standing on a room's floor that is not a tile. Built once per
-        // static redraw and read from there: nothing on the static root moves between redraws.
+        // Furniture and fixtures: anything standing on a room's floor that is not a tile, and only on that
+        // room's own floor. A mark lying flat on it, like the frame round an office not yet built, is walked
+        // over. Built once per static redraw and read from there: nothing on the static root moves between redraws.
         if furnitureObstaclesAt != staticRoot.childNodes.count {
             furnitureObstaclesAt = staticRoot.childNodes.count
             var furniture: [String: Set<Cell>] = [:]
             for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
+                let (lo, hi) = n.boundingBox
+                guard Double(hi.y - lo.y) * Double(n.scale.y) > 0.03 else { continue }
                 let key = String(n.name!.dropFirst(5))
                 guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
-                mark(st.name, n, offset: st.offset, into: &furniture)
+                var spots: [String: Set<Cell>] = [:]
+                mark(st.name, n, offset: st.offset, into: &spots)
+                let floor = st.rooms[String(key[key.index(after: bar)...])].map { Set($0.cells) }
+                let inside = (spots[st.name] ?? []).filter { floor?.contains(Station.cell(ofSub: $0)) ?? true }
+                furniture[st.name, default: []].formUnion(inside)
             }
             furnitureObstacles = furniture
         }

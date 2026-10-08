@@ -703,7 +703,7 @@ final class Station {
     }
 
     /// Walking between a room and the hallway is only allowed through the doorway.
-    private func canStep(from a: Cell, to b: Cell) -> Bool {
+    func canStep(from a: Cell, to b: Cell) -> Bool {
         if let ya = yardArea(a), let yb = yardArea(b), ya != yb {
             return yardDoorways.contains { ($0.0 == a && $0.1 == b) || ($0.0 == b && $0.1 == a) }
         }
