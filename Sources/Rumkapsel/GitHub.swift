@@ -331,7 +331,7 @@ final class GitHubResolver {
 
     // MARK: project board
 
-    private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard()
+    private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard() { didSet { BoardNumbers.note(project?.0 ?? []) } }
     /// "owner/name" per checkout, learned once from `gh repo view` and kept with the board: the yard
     /// cannot tell which board items are a repository's until it knows the repository's name.
     private var owners: [String: String] = GitHubResolver.loadBoardFile()?.owners ?? [:]
@@ -350,7 +350,11 @@ final class GitHubResolver {
         guard let data = try? Data(contentsOf: boardURL) else { return nil }
         return try? JSONDecoder().decode(SavedBoard.self, from: data)
     }
-    private static func loadBoard() -> ([ProjectItem], Date)? { loadBoardFile().map { ($0.items, $0.at) } }
+    private static func loadBoard() -> ([ProjectItem], Date)? {
+        let board = loadBoardFile().map { ($0.items, $0.at) }
+        BoardNumbers.note(board?.0 ?? [])
+        return board
+    }
     private func saveBoard(_ items: [ProjectItem], at: Date) {
         if frozen { return }
         let saved = SavedBoard(items: items, at: at, owners: owners,

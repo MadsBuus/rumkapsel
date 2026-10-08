@@ -583,7 +583,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // The scene's ears on the simulation.
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
-        peers.snapshotProvider = { [weak self] g in self?.makeSnapshot(withGitHub: g) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog() }
@@ -885,7 +884,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                                                pull: pr?.number, pullState: pr?.state, review: pr?.reviewDecision, checks: pr?.checks))
         }
         let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
-            PeerSnapshot.Minion(id: $0.id.hashValue.description, office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy,
+            PeerSnapshot.Minion(id: String(stableHash($0.id)), office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy,
                                 activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.pyramids.count + $0.queuedCones.count)
         }
         var knowledge: [GitHubResolver.Knowledge]?
@@ -1254,6 +1253,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             stepStation(dt: step)
         }
         if !headless { tickView(dt: dt) }
+        offerSnapshot(now: now)
+    }
+
+    private var lastOffer: TimeInterval = 0
+    private var offers = 0
+    /// What the peers hear, built here where the floor is changed, every few seconds; the GitHub answers every tenth time.
+    private func offerSnapshot(now: TimeInterval) {
+        guard peers.isRunning, now - lastOffer >= 3 else { return }
+        lastOffer = now
+        offers += 1
+        if let snap = makeSnapshot(withGitHub: offers % 10 == 1) { peers.offer(snap) }
     }
 
     /// Everything that happens on the station, by its clock.
@@ -1289,7 +1299,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tickGates(dt: dt)
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
-            for name in world.stalePeers(olderThan: 20) { dropPeer(name) }
+            for name in world.stalePeers(olderThan: World.peerQuiet) { dropPeer(name) }
         }
         if Int(clock) % 2 == 0 && Int(clock - dt) % 2 != 0 {
             var load: [Int: Int] = [:]

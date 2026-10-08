@@ -1,5 +1,25 @@
 import Foundation
 
+/// Which repositories the project board holds each issue number in, from the board as last read.
+enum BoardNumbers {
+    private static let lock = NSLock()
+    private static var repos: [Int: Set<String>] = [:]
+    private static var onBoard: Set<String> = []
+
+    static func note(_ items: [ProjectItem]) {
+        var r: [Int: Set<String>] = [:]
+        for it in items { r[it.number, default: []].insert(it.repo) }
+        lock.lock(); repos = r; onBoard = Set(items.map(\.repo)); lock.unlock()
+    }
+
+    /// The board has issue `n` in other repositories and not in `repo`, whose issues it does hold.
+    static func elsewhere(_ n: Int, than repo: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard onBoard.contains(repo), let held = repos[n] else { return false }
+        return !held.contains(repo)
+    }
+}
+
 /// One piece of work: a branch, and the pull request and issue it comes to have. The one place that says
 /// what work is called, so the same work is one office and one crate whichever source named it. The office
 /// is keyed by the issue where there is one, else the pull request, else the branch.
@@ -12,7 +32,7 @@ struct Work: Hashable {
     init(repo: String, branch: String? = nil, issue: Int? = nil, pull: Int? = nil) {
         self.repo = repo
         self.branch = branch
-        self.issue = issue ?? branch.flatMap(Work.issue(inBranch:))
+        self.issue = issue ?? branch.flatMap { Work.issue(inBranch: $0, repo: repo) }
         self.pull = pull
     }
 
@@ -21,9 +41,12 @@ struct Work: Hashable {
     /// The long-lived branches a pipeline is made of: a pull request from one of these is a release, not work.
     static let longLived: Set<String> = ["develop", "staging", "main", "master", "production"]
 
-    /// A branch named for its issue: `gh-128/anything` is issue 128.
-    static func issue(inBranch branch: String) -> Int? {
-        branch.firstMatch(of: #/^gh-(\d+)\//#).flatMap { Int($0.1) }
+    /// A branch named for its issue: `gh-128/anything` is issue 128 of its own repository. Not when the
+    /// board holds that repository's issues and has 128 only in another one: the branch was named for
+    /// the other repository's issue, and is no issue's here.
+    static func issue(inBranch branch: String, repo: String) -> Int? {
+        guard let n = branch.firstMatch(of: #/^gh-(\d+)\//#).flatMap({ Int($0.1) }) else { return nil }
+        return BoardNumbers.elsewhere(n, than: repo) ? nil : n
     }
 
     /// A branch name to stand in for one not known yet, from the issue the board says the work is for.
@@ -50,7 +73,7 @@ struct Work: Hashable {
 
     /// The office's name on the floor: the issue and the branch's words, or the branch's last part.
     var name: String {
-        if let branch, let n = Work.issue(inBranch: branch), let slash = branch.firstIndex(of: "/") {
+        if let branch, let n = Work.issue(inBranch: branch, repo: repo), let slash = branch.firstIndex(of: "/") {
             let words = branch[branch.index(after: slash)...].split(separator: "-").joined(separator: " ")
             return "#\(n) " + Work.shorten(words, to: 22)
         }
@@ -112,7 +135,7 @@ final class WorkBook {
         init(id: Int, repo: String) { self.id = id; self.repo = repo }
 
         /// The issue a branch is named for, `gh-N/…`: the one name that is on the office from the start.
-        var branchIssue: Int? { branches.lazy.compactMap(Work.issue(inBranch:)).min() }
+        var branchIssue: Int? { branches.lazy.compactMap { Work.issue(inBranch: $0, repo: self.repo) }.min() }
         /// The work as the floor names it: the branch's issue, else the open pull request, else the branch.
         /// Only an open pull request names an office, so a session on a merged branch stays where it is.
         /// `preferred` picks among a record's branches, so a session is named by the one it is on.
@@ -185,7 +208,7 @@ final class WorkBook {
         var found: [Record] = []
         if let branch, !Work.notWork.contains(branch) {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
-            if let n = Work.issue(inBranch: branch), let r = find(repo: repo, issue: n) { found.append(r) }
+            if let n = Work.issue(inBranch: branch, repo: repo), let r = find(repo: repo, issue: n) { found.append(r) }
         }
         // One checkout hosts one branch after another: a folder is not enough to claim another branch's record.
         if let folder, let r = find(folder: folder) {
