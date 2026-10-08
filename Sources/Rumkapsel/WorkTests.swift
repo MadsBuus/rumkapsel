@@ -35,6 +35,20 @@ enum WorkTests {
             expect(Work(repo: "web", branch: "gh-128/x", pull: 460).number == 128, "a branch's issue too")
         }
 
+        test("a branch named for another repository's issue on the board is no issue here") {
+            func item(_ repo: String, _ n: Int) -> ProjectItem {
+                ProjectItem(repo: repo, number: n, title: "", status: "", assignees: [], prURLs: [], url: "", updatedAt: nil)
+            }
+            BoardNumbers.note([item("api", 5655), item("web", 13006)])
+            defer { BoardNumbers.note([]) }
+            let w = Work(repo: "web", branch: "gh-5655/let-studios-update")
+            expect(w.issue == nil && w.officeKey == "task:web/gh-5655/let-studios-update", "keyed by branch, got \(w.officeKey)")
+            expect(w.name == "let studios update", "named by the branch's words, got \(w.name)")
+            expect(Work(repo: "api", branch: "gh-5655/let-studios-update").officeKey == "task:api#5655", "the issue's own repository keeps it")
+            expect(Work(repo: "web", branch: "gh-14050/new-thing").issue == 14050, "a number the board does not have stands")
+            expect(Work(repo: "tools", branch: "gh-5655/x").issue == 5655, "a repository off the board keeps its numbers")
+        }
+
         test("the trunk is not work") {
             for b in ["main", "master", "develop", "HEAD", ""] {
                 let w = Work(repo: "web", branch: b)

@@ -14,6 +14,7 @@ struct PullRequests {
     /// which; else it is asked by number, since a board office's branch is only a guess, else by branch.
     /// Nil until GitHub answers: a crate that was never merged work must not be carried to storage. With no
     /// checkout of the repository here there is nothing to ask and nothing to carry: merged.
+    /// "NONE" when the branch never had a pull request: nothing was closed, and nothing is carried.
     func state(crewOffice room: Room, known: WorkBook.Record?, repoRoot root: String?,
                feed: [(repo: String, e: FeedEvent)]) -> String? {
         let branch = known?.work().branch ?? known?.branches.sorted().first ?? ""
@@ -25,7 +26,7 @@ struct PullRequests {
             return github.pullAnswered(number: number, repoRoot: root) ? github.pull(number: number, repoRoot: root)?.state : nil
         }
         github.refresh(branch: branch, repoRoot: root)
-        return github.pullAnswered(branch: branch, repoRoot: root) ? (github.pull(branch: branch, repoRoot: root)?.state ?? "CLOSED") : nil
+        return github.pullAnswered(branch: branch, repoRoot: root) ? (github.pull(branch: branch, repoRoot: root)?.state ?? "NONE") : nil
     }
 
     /// The word for the record: open is ready, merged is stored, closed unmerged is back to working.

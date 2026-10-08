@@ -58,23 +58,35 @@ final class PeerHub {
     private(set) var since = Date()
     var isRunning: Bool { listener != nil }
     var peerCount: Int { queue.sync { outgoing.count } }
-    var snapshotProvider: ((_ withGitHub: Bool) -> PeerSnapshot?)?
-    private var broadcasts = 0
+    /// The newest snapshot the scene handed over, sent every beat whether or not the scene is drawing.
+    private var latest: PeerSnapshot?
+    /// Who is at the far end of each incoming connection, once a snapshot has said.
+    private var heard: [ObjectIdentifier: String] = [:]
     var onSnapshot: ((PeerSnapshot) -> Void)?
+
+    /// TCP that notices a station gone without a word: a link that stops answering fails within seconds.
+    private static var tcp: NWParameters {
+        let t = NWProtocolTCP.Options()
+        t.enableKeepalive = true
+        t.keepaliveIdle = 5
+        t.keepaliveInterval = 2
+        t.keepaliveCount = 3
+        return NWParameters(tls: nil, tcp: t)
+    }
 
     func start(name: String) {
         stop()
         self.name = name
         since = Date()
         do {
-            let l = try NWListener(using: .tcp)
+            let l = try NWListener(using: PeerHub.tcp)
             l.service = NWListener.Service(name: name, type: type)
             l.newConnectionHandler = { [weak self] c in self?.accept(c) }
             l.stateUpdateHandler = { _ in }
             l.start(queue: queue)
             listener = l
         } catch { return }
-        let b = NWBrowser(for: .bonjour(type: type, domain: nil), using: .tcp)
+        let b = NWBrowser(for: .bonjour(type: type, domain: nil), using: PeerHub.tcp)
         b.browseResultsChangedHandler = { [weak self] results, _ in self?.browsed(results) }
         b.stateUpdateHandler = { [weak self] state in
             var denied = false
@@ -103,6 +115,8 @@ final class PeerHub {
         outgoing.values.forEach { $0.cancel() }; outgoing = [:]
         incoming.forEach { $0.cancel() }; incoming = []
         answered = []
+        heard = [:]
+        latest = nil
         found = [:]
         nearby = []; blocked = false
     }
@@ -113,7 +127,9 @@ final class PeerHub {
             guard case .service(let n, _, _, _) = r.endpoint, n != name else { continue }
             found[n] = r.endpoint
         }
-        for (n, c) in outgoing where found[n] == nil { c.cancel(); outgoing[n] = nil }
+        // Bonjour on wifi drops a listing for seconds at a time while the station behind it answers on.
+        // A connection that is up stays up until TCP itself gives out; only one still dialling is let go.
+        for (n, c) in outgoing where found[n] == nil && c.state != .ready { c.cancel(); outgoing[n] = nil }
         dial()
         let names = found.keys.sorted()
         DispatchQueue.main.async { [weak self] in self?.nearby = names }
@@ -123,12 +139,22 @@ final class PeerHub {
     /// or no route) is dropped, so the next beat tries again from scratch.
     private func dial() {
         for (n, endpoint) in found where outgoing[n] == nil {
-            let c = NWConnection(to: endpoint, using: .tcp)
+            let c = NWConnection(to: endpoint, using: PeerHub.tcp)
+            var wasUp = false
             c.stateUpdateHandler = { [weak self, weak c] state in
                 guard let self, let c else { return }
                 switch state {
-                case .waiting: c.cancel()
-                case .failed, .cancelled: if outgoing[n] === c { outgoing[n] = nil }
+                case .ready:
+                    wasUp = true
+                    StationLog.write("peer", "link to \(n) up")
+                case .waiting(let e):
+                    if wasUp { StationLog.write("peer", "link to \(n) down: \(e)") }
+                    c.cancel()
+                case .failed(let e):
+                    if wasUp { StationLog.write("peer", "link to \(n) down: \(e)") }
+                    if outgoing[n] === c { outgoing[n] = nil }
+                case .cancelled:
+                    if outgoing[n] === c { outgoing[n] = nil }
                 default: break
                 }
             }
@@ -153,20 +179,30 @@ final class PeerHub {
                 let line = buf[buf.startIndex..<nl]
                 buf.removeSubrange(buf.startIndex...nl)
                 if let snap = try? JSONDecoder().decode(PeerSnapshot.self, from: line), snap.version == PeerSnapshot.current, snap.name != name {
-                    if snap.twoWay == true, incoming.contains(where: { $0 === c }) { answered.insert(ObjectIdentifier(c)) }
+                    if incoming.contains(where: { $0 === c }) {
+                        if snap.twoWay == true { answered.insert(ObjectIdentifier(c)) }
+                        if heard.updateValue(snap.name, forKey: ObjectIdentifier(c)) == nil { StationLog.write("peer", "link from \(snap.name) up") }
+                    }
                     DispatchQueue.main.async { self.onSnapshot?(snap) }
                 }
             }
-            if done || error != nil { incoming.removeAll { $0 === c }; answered.remove(ObjectIdentifier(c)); c.cancel(); return }
+            if done || error != nil {
+                if let who = heard.removeValue(forKey: ObjectIdentifier(c)) { StationLog.write("peer", "link from \(who) down: \(error.map { "\($0)" } ?? "closed")") }
+                incoming.removeAll { $0 === c }; answered.remove(ObjectIdentifier(c)); c.cancel(); return
+            }
             receive(on: c, buffer: buf)
         }
     }
 
+    /// The scene's newest word, built on its own thread from its own state.
+    func offer(_ snap: PeerSnapshot) {
+        queue.async { self.latest = snap }
+    }
+
     private func broadcast() {
-        broadcasts += 1
         dial()
         let open = (Array(outgoing.values) + incoming.filter { answered.contains(ObjectIdentifier($0)) }).filter { $0.state == .ready }
-        guard !open.isEmpty, let snap = snapshotProvider?(broadcasts % 10 == 1), var data = try? JSONEncoder().encode(snap) else { return }
+        guard !open.isEmpty, let snap = latest, var data = try? JSONEncoder().encode(snap) else { return }
         data.append(UInt8(ascii: "\n"))
         for c in open { c.send(content: data, completion: .contentProcessed { _ in }) }
     }

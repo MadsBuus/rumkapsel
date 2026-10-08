@@ -369,6 +369,10 @@ final class World {
     }
 
     /// Peers that have gone quiet.
+    /// How long a peer may say nothing before its figures leave. It speaks every three seconds; a wifi
+    /// network drops a station for twenty or thirty at a time, and its figures stay through that.
+    static let peerQuiet: TimeInterval = 60
+
     func stalePeers(olderThan seconds: TimeInterval) -> [String] {
         peerSnapshots.filter { Date().timeIntervalSince($0.value.at) > seconds }.map(\.key)
     }
@@ -970,7 +974,7 @@ final class World {
             var branched: Set<String> = []
             let recent = now.addingTimeInterval(-14 * 24 * 3600)
             for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > recent {
-                guard let b = e.branch, let n = Work.issue(inBranch: b) else { continue }
+                guard let b = e.branch, let n = Work.issue(inBranch: b, repo: repo) else { continue }
                 switch e.kind {
                 case "push", "branch_create", "pr_open": branched.insert("\(repo)#\(n)")
                 case "branch_delete", "pr_close", "pr_merge": branched.remove("\(repo)#\(n)")
@@ -1004,6 +1008,8 @@ final class World {
         func work(_ repo: String, _ pr: OpenPR) -> Work { pr.author == me ? Work(repo: repo, branch: pr.branch, pull: pr.number) : Work(repo: repo, branch: pr.branch) }
         var liveKeys = Set(open.filter { !$0.pr.isBot }.map { work($0.repo, $0.pr).officeKey })
         liveKeys.formUnion(boardOffices.map { Work(repo: $0.repo, issue: $0.item.number).officeKey })
+        // Back on the open list: whatever closed before is not closed now.
+        for k in liveKeys where crewRoomInfo[sk + k] != nil { closedAt[sk + k] = nil }
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
             let key = sk + room.key
             let known = room.repo.flatMap { works.find(officeKey: room.key, repo: $0) }
@@ -1016,6 +1022,15 @@ final class World {
             var hauling = false
             let root = repoRoots.first { $0.value.repo == room.repo }?.key
             guard let state = pulls.state(crewOffice: room, known: known, repoRoot: root, feed: feed) else { continue }
+            if state == "NONE" {
+                // Never a pull request: off the board's list, it goes quietly. A teammate's station still at work in it keeps it.
+                if peerOffices[key] != nil { continue }
+                closedAt[key] = nil
+                crewRoomInfo[key] = nil; crewBoxes[key] = nil
+                events.append(drop(station: station, room: room, announce: false, reason: "no longer in development"))
+                changed = true
+                continue
+            }
             if let repo = room.repo { report(pullState: state, record: known?.pulls.keys.min().map { works.note(repo: repo, pull: $0, pullState: state) } ?? known) }
             crewRoomInfo[key]?.state = state
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
