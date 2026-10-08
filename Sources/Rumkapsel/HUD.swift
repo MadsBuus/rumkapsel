@@ -378,7 +378,10 @@ extension StationController {
         statusLabel.position = CGPoint(x: hud.size.width / 2, y: 12)
         infoLabel.position = CGPoint(x: 14, y: 12)
         // Following: who, and their order in their own words, live. Esc lets go.
-        if let id = following, let m = minions[id] {
+        if let hint = walkHint {
+            followLabel.text = hint
+            followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)
+        } else if let id = following, let m = minions[id] {
             followLabel.text = "following \(m.home.name) · \(m.words) · esc to let go"
             followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)   // above the legend's line
         } else { followLabel.text = "" }

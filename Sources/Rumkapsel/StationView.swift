@@ -11,6 +11,8 @@ final class StationView: SCNView {
     var onRotate: ((Double, NSPoint?) -> Void)?
     var onPan: ((Double, Double) -> Void)?
     var onTilt: ((Double) -> Void)?
+    /// A drag while walking: turns and tilts the head instead. True when it was taken.
+    var onLook: ((Double, Double) -> Bool)?
     var onKey: ((String) -> Bool)?
     /// Space held down, and let go: the station runs faster while it is held.
     var onHold: ((Bool) -> Void)?
@@ -93,6 +95,7 @@ final class StationView: SCNView {
     }
     override func mouseDragged(with event: NSEvent) {
         guard dragAllowed else { return }
+        if onLook?(Double(event.deltaX), Double(event.deltaY)) == true { return }
         onTilt?(Double(event.deltaY))
     }
 

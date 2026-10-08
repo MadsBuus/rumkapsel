@@ -67,8 +67,13 @@ THEMES.md is the guide to designing one: the layers of a place, designing for ch
 | 0 | focus the whole fleet |
 | R | reset view |
 | M | music (off by default) |
-| F | float on top |
+| ⌘F | float on top |
+| F | walk the station: down into the hallway at a minion's eye height; F or Esc goes back up |
 | click a minion | follow it: the camera goes with it, its order written along the bottom; Esc, a pan or a click on the floor lets go |
+| F while following | ride along behind that minion on a crane |
+
+Walking: W / A / S / D to move, drag to look, Q / E to turn, shift to run. Click a minion to ride along behind it;
+W / A / S / D steps off where it stands, Esc lets go.
 | double-click a minion | ask GitHub again about its repo |
 | click a box | open the pull request or issue |
 | right-click an office | kick it off the station (offices put there by peers or GitHub) |

@@ -255,6 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 }
             }
         }
+        // `--walk 6`: down into the station on foot that many seconds in, where the view or `--follow` points.
+        if let at = num("--walk") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleWalk() }
+        }
         // A scripted run: presses the named buttons in order, two seconds apart.
         if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
             if !simulatorOnly { openSimulator() }
@@ -363,6 +367,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         viewMenu = view
         view.delegate = self   // the stations it can point at are only known once there is a fleet
         view.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
+        let walk = view.addItem(withTitle: "Walk the Station", action: #selector(walk), keyEquivalent: "f")
+        walk.keyEquivalentModifierMask = [.command, .shift]
         floatItem = view.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
         floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
         musicItem = view.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
@@ -435,6 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func resetView() { controller.resetView() }
+    @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
 
     @objc func openGallery() {

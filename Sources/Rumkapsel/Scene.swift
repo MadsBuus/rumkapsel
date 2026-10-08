@@ -361,6 +361,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
     var mission: Mission?
+    /// Someone walking the station at eye height, while they do.
+    var walker: Walker?
     /// Rehearsals started, so a rehearsal's own ending never ends the one that replaced it.
     var rehearsals = 0
     let missionCamera = SCNNode()
@@ -495,7 +497,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
             // A click on a minion follows it; a click anywhere else lets go.
             let n = node?.name ?? ""
-            if n.hasPrefix("minion:") { self?.enqueue { self?.follow(minionId: String(n.dropFirst(7))) }; return }
+            if n.hasPrefix("minion:") {
+                let id = String(n.dropFirst(7))
+                self?.enqueue { if self?.walker != nil { self?.ride(minionId: id) } else { self?.follow(minionId: id) } }
+                return
+            }
             self?.enqueue { self?.following = nil }
             guard !n.isEmpty else { return }
             if (n.hasPrefix("storage:") || n.hasPrefix("deck:") || n.hasPrefix("decon:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
@@ -507,7 +513,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // Zoom about the ground point under the cursor: it stays put on screen while the view scales.
             let ground = point.flatMap { self?.groundPoint(at: $0) }
             self?.enqueue {
-                guard let self else { return }
+                guard let self, self.walker == nil else { return }
                 let before = self.userZoom
                 self.userZoom = min(6, max(0.4, self.userZoom * f))
                 self.userZoomChanged = true
@@ -522,7 +528,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             // Pivot on the ground point under the cursor: rotate the camera focus around it.
             let ground = point.flatMap { self?.groundPoint(at: $0) }
             self?.enqueue {
-                guard let self else { return }
+                guard let self, self.walker == nil else { return }
                 let before = self.userYaw
                 self.userYaw -= r
                 self.userDriving = 0.5
@@ -539,7 +545,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onTilt = { [weak self] dy in
             self?.enqueue { guard let self else { return }; self.userTookView = true; self.userPitch = min(-0.15, max(-Double.pi / 2 + 0.05, self.userPitch - dy * 0.004)) }
         }
-        view.onPan = { [weak self] dx, dy in self?.enqueue { self?.pan(byPixels: dx, dy) } }
+        view.onPan = { [weak self] dx, dy in
+            self?.enqueue {
+                guard let self else { return }
+                if self.walker != nil { self.walkLook(SIMD2(dx, dy) * 0.004) } else { self.pan(byPixels: dx, dy) }
+            }
+        }
+        view.onLook = { [weak self] dx, dy in
+            guard let self, self.walker != nil else { return false }
+            self.enqueue { self.walkLook(SIMD2(-dx, -dy) * 0.005) }
+            return true
+        }
         view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom; if dir != .zero || zoom != 0 { self?.userTookView = true } } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
         view.onHold = { [weak self] held in self?.liveTimeScale = held ? 4 : 1 }
@@ -549,8 +565,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "0": following = nil; focus(on: nil)
             case "1", "2", "3", "4": following = nil; focus(onIndex: Int(key)! - 1)
             case "r": following = nil; resetView()
+            case "f": toggleWalk()
             case "\u{1b}":
                 following = nil
+                enqueue { self.walkEscape() }
                 if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
             case "l": toggleSpaceLog()
             case "g": refreshGitHub()
@@ -569,6 +587,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog() }
+        if !simulated { WallPanel.prepare() }
         if demo {
             seedDemo()
         } else if !simulated {
@@ -1288,12 +1307,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         // A desk toy's frame rate: 60 while the camera is being driven, 30 whenever the window can be seen,
         // focused or not, since it sits beside the work; 8 only when it is covered or hidden.
         let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
-        let want = !seen ? 8 : (userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
+        let want = !seen ? 8 : (walker != nil || userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
         if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
         if ProcessInfo.processInfo.environment["RK_FPS"] != nil {
             fpsFrames += 1
             if clock - fpsMark >= 5 { FileHandle.standardError.write("fps \(Int(Double(fpsFrames) / max(0.1, clock - fpsMark))) want \(want) seen \(seen) active \(NSApp.isActive)\n".data(using: .utf8)!); fpsFrames = 0; fpsMark = clock }
         }
+        if !tickWalk(dt: dt, move: keyMove, turn: keyZoom) {
         if keyMove != .zero {
             // Held WASD: a steady slide, a bit under the view's height per second.
             let speed = Double(viewSize.height) * 0.7 * dt
@@ -1336,6 +1356,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             cameraNode.camera!.orthographicScale += (wantScale - cameraNode.camera!.orthographicScale) * scaleK
         }
         userZoomChanged = false
+        }
 
         for (n, vel) in debris {
             var p = SIMD2(Double(n.position.x), Double(n.position.z)) + vel * dt
@@ -1360,6 +1381,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             label.opacity += (want - Double(label.opacity)) * min(1, dt * 6)
         }
         updateInfo()
+        fadeOverlay()
         updateBubble()
         if sim == nil, clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
