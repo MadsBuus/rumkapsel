@@ -838,10 +838,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: peers
 
+    /// Sharing started, stopped or renamed. Already sharing under the same name, it carries on: a restart
+    /// drops every peer's connection.
     func applySharing() {
         let cfg = ConfigStore.shared.current
+        let name = cfg.shareName.isEmpty ? NSUserName() : cfg.shareName
         if cfg.shareOnLAN {
-            peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName)
+            if peers.isRunning, peers.name == name { return }
+            peers.start(name: name)
         } else { peers.stop() }
     }
 
@@ -1360,9 +1364,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if sim == nil, clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 
-    /// Settings changed: rebuild the fleet from scratch on the next scan.
-    func applyConfigChange() {
+    /// Settings changed: rebuild the fleet from scratch on the next scan. A new share name changes nothing
+    /// on the floor, so it leaves the station standing.
+    func applyConfigChange(from old: AppConfig, to new: AppConfig) {
         applySharing()
+        var renamed = old
+        renamed.shareName = new.shareName
+        guard renamed != new else { return }
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
             if Looks.theme != cfg.theme {
