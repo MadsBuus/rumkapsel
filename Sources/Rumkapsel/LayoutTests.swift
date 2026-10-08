@@ -209,6 +209,34 @@ enum LayoutTests {
             expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
         }
 
+        test("the hull is over everything but the pad and the bay, meets the floor where its pieces stand, and lets you through its doorways") {
+            let a = fresh()
+            for i in 0..<20 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+            let hull = StationHull(a)
+            let out = (a.padCells + a.hangarCells).filter { hull.inside.contains($0) }
+            expect(out.isEmpty, "the pad and the bay are under open space: \(cells(out))")
+            let indoors = a.storageCells + a.deckCells + a.deconCells + a.airlockCells + a.coreCells
+            let missed = indoors.filter { !hull.inside.contains($0) }
+            expect(missed.isEmpty, "storage, the deck, decon, the airlock and the hallway are indoors: \(cells(missed))")
+            // Where the station's view draws its pieces: across the airlock's outer door, and along the pad's east side.
+            if let door = a.airlockCells.max(by: { $0.y < $1.y }) {
+                let foot = SIMD2(Double(door.x), Double(door.y) + 0.5)
+                expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the airlock's outer door is a doorway in the hull's foot")
+            }
+            if let east = a.padCells.map(\.x).max(), let y = a.padCells.map(\.y).min() {
+                let foot = SIMD2(Double(east) + 0.5, Double(y) + 0.5)
+                expect(hull.reach(foot).distance < 0.01, "the hull meets the floor along the pad's east side")
+            }
+            for (deck, pad) in a.gateDoorway {
+                let through = (SIMD2(Double(deck.x), Double(deck.y)) + SIMD2(Double(pad.x), Double(pad.y))) / 2
+                let roof = hull.roof(over: through + SIMD2(0, Double(deck.y - pad.y)) * 0.01, top: 0.5) ?? .infinity
+                expect(roof > 0.5, "a body walks through the gate under the hull: roof \(roof)")
+            }
+            let crown = StationHull.height(atDistance: 99)
+            expect(abs(crown - StationHull.section.rise) < 1e-9 && StationHull.height(atDistance: 0) == 0,
+                   "upright from the floor to a crown \(StationHull.section.rise) up, got \(crown)")
+        }
+
         test("the yard has room for a pallet: a lane through its doorway, and a body's width of aisle past each end") {
             let a = fresh()
             let rows = Set(a.storageCells.map(\.y)).sorted()

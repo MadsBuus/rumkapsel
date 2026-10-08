@@ -211,7 +211,7 @@ enum Classic {
     static let hatchTop = 0.76
 
     /// The wall's section: how far it may lean and how high it stands, both off the run it is given.
-    private static func hullSection(depth: Double) -> (lean: Double, rise: Double) {
+    static func hullSection(depth: Double) -> (lean: Double, rise: Double) {
         (depth * 0.72, min(3.3, depth * 0.58))
     }
 

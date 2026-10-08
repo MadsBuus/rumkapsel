@@ -29,6 +29,11 @@ final class Walker {
     static let diveSeconds = 1.8, riseSeconds = 1.3
     /// The crane: how far behind the minion it hangs, and how steeply it looks down by default.
     static let craneReach = 1.5, craneTilt = -0.8
+    /// The jetpack on space: its push up, the station's low gravity pulling back down, the fastest climb or
+    /// fall, and the highest it takes you out under open space. Indoors the hull is the ceiling.
+    static let thrust = 3.4, gravity = 1.6, climbLimit = 1.3, ceiling = 6.0
+    /// The top of your head over your eyes, which the hull stops.
+    static let crown = 0.1
 
     var station: String
     /// Where you stand, in world x/z; while riding, where the minion stands.
@@ -36,6 +41,12 @@ final class Walker {
     var yaw: Double
     var pitch = -0.08
     var velocity = SIMD2<Double>(0, 0)
+    /// The jetpack: firing while space is held, how high your feet are off the floor, and how fast that changes.
+    var thrusting = false
+    var altitude = 0.0
+    var climb = 0.0
+    /// The hull over each station, by name, as built with the walls.
+    var hulls: [String: StationHull] = [:]
     /// The minion the crane rides behind, while it does.
     var riding: String?
     /// The crane swung round the minion and tilted, by drags.
@@ -147,6 +158,7 @@ extension StationController {
         w.riding = m.id
         w.station = m.station
         w.orbit = 0; w.craneTilt = Walker.craneTilt
+        w.altitude = 0; w.climb = 0; w.thrusting = false
         w.settling = 1.2
     }
 
@@ -161,6 +173,7 @@ extension StationController {
 
     private func stepOff(_ w: Walker) {
         for n in [w.sky, w.dome, w.walls] { n.removeFromParentNode() }
+        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = false }
         w.title.removeFromParent(); w.subtitle.removeFromParent()
         walker = nil
         for n in legendNodes + jobNodes { n.alpha = 1 }
@@ -224,7 +237,7 @@ extension StationController {
         }
         if w.phase >= 1, !w.leaving {
             if w.riding != nil, move != .zero { dismount(w) }
-            if w.riding == nil { stride(w, dt: dt, move: move, turn: turn) }
+            if w.riding == nil { fly(w, dt: dt); stride(w, dt: dt, move: move, turn: turn) }
         }
         ease(w, toward: wantedView(w), dt: dt)
         let floor = floorSignature
@@ -253,7 +266,7 @@ extension StationController {
         if let id = w.riding, let m = minions[id] {
             return "riding along with \(m.home.name) · \(m.words) · wasd to walk from here · esc to let go"
         }
-        return "walking · wasd to move, drag to look, shift to run · click a minion to ride along · esc to step out"
+        return "walking · wasd to move, drag to look, shift to run, space to fly · click a minion to ride along · esc to step out"
     }
 
     private func wantedView(_ w: Walker) -> WalkView {
@@ -261,9 +274,41 @@ extension StationController {
             return WalkView(focus: w.pos, height: m.headHeight * 0.85, yaw: m.smoothFacing + .pi + w.orbit,
                             pitch: w.craneTilt, distance: Walker.craneReach)
         }
-        let moving = min(1, simd_length(w.velocity) / Walker.pace)
-        return WalkView(focus: w.pos, height: Walker.eye + abs(sin(w.stride * .pi)) * 0.012 * moving,
+        let moving = w.altitude > 0 ? 0 : min(1, simd_length(w.velocity) / Walker.pace)
+        // Under thrust the pack shudders a little.
+        let shudder = w.thrusting ? sin(w.stride * 9 + Double(w.altitude) * 40) * 0.004 : 0
+        return WalkView(focus: w.pos, height: Walker.eye + w.altitude + abs(sin(w.stride * .pi)) * 0.012 * moving + shudder,
                         yaw: w.yaw, pitch: w.pitch, distance: 0)
+    }
+
+    /// The highest your feet may go where you are: under the hull indoors, open space outside.
+    private func ceiling(_ w: Walker) -> Double {
+        guard let st = fleet.stations[w.station], let hull = w.hulls[w.station],
+              let roof = hull.roof(over: w.pos - st.offset, top: w.altitude + Walker.eye + Walker.crown) else { return Walker.ceiling }
+        return roof - Walker.eye - Walker.crown
+    }
+
+    /// Up on the jetpack while space is held, and back down under the station's low gravity once it is let
+    /// go, landing on whatever floor is under you.
+    private func fly(_ w: Walker, dt: Double) {
+        w.climb += ((w.thrusting ? Walker.thrust : 0) - Walker.gravity) * dt
+        w.climb = min(Walker.climbLimit, max(-Walker.climbLimit, w.climb))
+        let was = w.altitude
+        w.altitude += w.climb * dt
+        // Coming down past the tops of the walls where a body cannot stand: held there, and eased over the
+        // middle of the tile below until it can.
+        if was > Walker.wallHeight, w.altitude <= Walker.wallHeight, let st = fleet.stations[w.station] {
+            let q = w.pos - st.offset
+            if !fits(q, from: q, in: st, high: false) {
+                w.altitude = Walker.wallHeight + 0.001
+                w.climb = 0
+                let middle = SIMD2(q.x.rounded(), q.y.rounded())
+                w.pos += (middle - q) * min(1, dt * 4)
+            }
+        }
+        if w.altitude <= 0 { w.altitude = 0; w.climb = max(0, w.climb) }
+        if w.altitude >= ceiling(w) { w.altitude = max(0, ceiling(w)); w.climb = min(0, w.climb) }
+        if w.thrusting { w.stride += dt * 3 }   // what the shudder runs on while hovering still
     }
 
     /// Your own eyes follow you exactly; a crane lags and swings, and a change between the two is eased.
@@ -320,10 +365,24 @@ extension StationController {
 
     /// Whether a body as wide as a minion can stand at `q` (station cells) having come from `from`: every
     /// corner on floor reached through a doorway the minions may use, and no deeper into a prop than before.
-    private func fits(_ q: SIMD2<Double>, from: SIMD2<Double>, in st: Station) -> Bool {
+    /// Flown higher than the walls, only the hull and the station's edge stop you: walls, props, minions and the
+    /// bare deck pass underneath.
+    private func fits(_ q: SIMD2<Double>, from: SIMD2<Double>, in st: Station, high: Bool? = nil) -> Bool {
         let r = Walker.radius
         let here = Cell(x: Int(from.x.rounded()), y: Int(from.y.rounded()))
         let corners = [SIMD2(0, 0), SIMD2(r, r), SIMD2(r, -r), SIMD2(-r, r), SIMD2(-r, -r)]
+        // Nobody goes through the hull: indoors your head stays under it, and in from open space is only through a doorway.
+        if let w = walker, let hull = w.hulls[st.name] {
+            let top = w.altitude + Walker.eye + Walker.crown
+            for k in corners { if let roof = hull.roof(over: q + k, top: top), roof < top { return false } }
+        }
+        if high ?? ((walker?.altitude ?? 0) > Walker.wallHeight) {
+            let under = walker?.hulls[st.name]?.inside ?? []
+            return corners.allSatisfy { k in
+                let c = Cell(x: Int((k + q).x.rounded()), y: Int((k + q).y.rounded()))
+                return st.walkable.contains(c) || under.contains(c)
+            }
+        }
         for k in corners {
             let p = q + k
             if !open(from: here, to: Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded())), in: st) { return false }
@@ -512,43 +571,71 @@ extension StationController {
         }.joined(separator: " ") + "|\(lastRebuildAt)"
     }
 
-    /// A glass dome over each station, cut in flat panels on a frame, rising from just under the floor's
-    /// edge: the sky is still there, seen from inside.
+    /// The hull over each station: its own vault, plated where it meets the floor and glass above, with
+    /// doorways cut where the gate and the airlock go through it. The pieces of it the station's view draws
+    /// stand in the same place, so they step aside while you walk.
     private func buildDome(_ w: Walker) {
         w.dome.childNodes.forEach { $0.removeFromParentNode() }
+        w.hulls = [:]
+        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = true }
+        let step = 0.25
         for st in fleet.stations.values {
-            let b = st.bounds
-            let lo = st.offset + SIMD2(Double(b.min.x) - 0.5, Double(b.min.y) - 0.5)
-            let hi = st.offset + SIMD2(Double(b.max.x) + 0.5, Double(b.max.y) + 0.5)
-            let centre = (lo + hi) / 2, half = (hi - lo) / 2
-            // Wide enough that the footprint's corners are inside the ellipse it stands on.
-            let radius = half * 1.45 + SIMD2(1, 1)
-            let rise = max(3.5, min(radius.x, radius.y) * 0.55), foot = -0.35
-            let around = 28, up = 8
-            var vertices: [SCNVector3] = [], normals: [SCNVector3] = [], uvs: [CGPoint] = [], indices: [Int32] = []
-            func point(_ i: Int, _ j: Int) -> SIMD3<Double> {
-                let a = Double(j) / Double(up) * .pi / 2, l = Double(i) / Double(around) * 2 * .pi
-                return SIMD3(centre.x + radius.x * cos(a) * cos(l), foot + rise * sin(a), centre.y + radius.y * cos(a) * sin(l))
+            let hull = StationHull(st)
+            w.hulls[st.name] = hull
+            // Indoors, every tile is floored: where the station has none of its own, a bare deck plate.
+            let bare = SCNNode()
+            for c in hull.inside where !st.walkable.contains(c) && c != st.plan.monolith {
+                let tile = SCNNode(geometry: WallPanel.bareDeck)
+                tile.eulerAngles.x = -.pi / 2
+                tile.position = v3(st.offset.x + Double(c.x), -0.002, st.offset.y + Double(c.y))
+                bare.addChildNode(tile)
             }
-            for j in 0..<up {
-                for i in 0..<around {
-                    let q = [point(i, j), point(i + 1, j), point(i + 1, j + 1), point(i, j + 1)]
-                    let n = simd_normalize(simd_cross(q[2] - q[0], q[1] - q[0]))
-                    let base = Int32(vertices.count)
-                    for (p, uv) in zip(q, [CGPoint(x: 0, y: 1), CGPoint(x: 1, y: 1), CGPoint(x: 1, y: 0), CGPoint(x: 0, y: 0)]) {
-                        vertices.append(v3(p.x, p.y, p.z)); normals.append(v3(n.x, n.y, n.z)); uvs.append(uv)
+            let flatDeck = bare.flattenedClone()
+            flatDeck.categoryBitMask = Pick.scenery
+            w.dome.addChildNode(flatDeck)
+            var plate = (v: [SCNVector3](), i: [Int32]()), glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
+            for c in hull.inside {
+                let n = Int((1 / step).rounded())
+                for i in 0..<n {
+                    for j in 0..<n {
+                        let x0 = Double(c.x) - 0.5 + Double(i) * step, y0 = Double(c.y) - 0.5 + Double(j) * step
+                        let corners = [SIMD2(x0, y0), SIMD2(x0 + step, y0), SIMD2(x0 + step, y0 + step), SIMD2(x0, y0 + step)]
+                        let hs = corners.map { StationHull.height(atDistance: hull.reach($0).distance) }
+                        let middle = SIMD2(x0 + step / 2, y0 + step / 2)
+                        // A doorway: the hull's foot left open across it, as high as a door.
+                        let near = hull.reach(middle)
+                        if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
+                        let world = zip(corners, hs).map { v3(st.offset.x + $0.0.x, $0.1, st.offset.y + $0.0.y) }
+                        if hs.reduce(0, +) / 4 < 0.6 {
+                            let base = Int32(plate.v.count)
+                            plate.v += world
+                            plate.i += [base, base + 1, base + 2, base, base + 2, base + 3]
+                        } else {
+                            let base = Int32(glass.v.count)
+                            glass.v += world
+                            glass.uv += corners.map { CGPoint(x: $0.x + 0.5, y: $0.y + 0.5) }
+                            glass.i += [base, base + 1, base + 2, base, base + 2, base + 3]
+                        }
                     }
-                    indices += [base, base + 1, base + 2, base, base + 2, base + 3]
                 }
             }
-            let g = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices), SCNGeometrySource(normals: normals),
-                                          SCNGeometrySource(textureCoordinates: uvs)],
-                                elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
-            g.firstMaterial = WallPanel.glass
-            let n = SCNNode(geometry: g)
-            n.categoryBitMask = Pick.scenery
-            n.renderingOrder = 90
-            w.dome.addChildNode(n)
+            if !plate.v.isEmpty {
+                let g = SCNGeometry(sources: [SCNGeometrySource(vertices: plate.v)],
+                                    elements: [SCNGeometryElement(indices: plate.i, primitiveType: .triangles)])
+                g.firstMaterial = WallPanel.hullPlate
+                let n = SCNNode(geometry: g)
+                n.categoryBitMask = Pick.scenery
+                w.dome.addChildNode(n)
+            }
+            if !glass.v.isEmpty {
+                let g = SCNGeometry(sources: [SCNGeometrySource(vertices: glass.v), SCNGeometrySource(textureCoordinates: glass.uv)],
+                                    elements: [SCNGeometryElement(indices: glass.i, primitiveType: .triangles)])
+                g.firstMaterial = WallPanel.hullGlass
+                let n = SCNNode(geometry: g)
+                n.categoryBitMask = Pick.scenery
+                n.renderingOrder = 90
+                w.dome.addChildNode(n)
+            }
         }
     }
 
@@ -688,6 +775,29 @@ enum WallPanel {
         let m = lit(NSColor(rgb: (0.62, 0.64, 0.69)))
         m.lightingModel = .blinn
         m.specular.contents = NSColor(white: 0.3, alpha: 1)
+        return m
+    }()
+
+    /// The bare deck under the hull where the station has no floor of its own: a tile of the hull's plate, darker.
+    static let bareDeck: SCNGeometry = {
+        let g = SCNPlane(width: 1, height: 1)
+        let m = lit(NSColor(rgb: Props.hullPlate).darker(0.35))
+        g.firstMaterial = m
+        return g
+    }()
+
+    /// The hull's foot: the deck plate of the pieces of it the station's view draws.
+    static let hullPlate: SCNMaterial = {
+        let m = flat(NSColor(rgb: Props.hullPlate))
+        m.isDoubleSided = true
+        return m
+    }()
+
+    /// The hull's glass: the dome's panes, one to a tile, laid on by where they are.
+    static let hullGlass: SCNMaterial = {
+        let m = glass.copy() as! SCNMaterial
+        m.diffuse.wrapS = .repeat
+        m.diffuse.wrapT = .repeat
         return m
     }()
 

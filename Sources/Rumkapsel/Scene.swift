@@ -560,7 +560,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom; if dir != .zero || zoom != 0 { self?.userTookView = true } } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
-        view.onHold = { [weak self] held in self?.liveTimeScale = held ? 4 : 1 }
+        // Space: the station runs faster while it is held; walking, it fires the jetpack instead.
+        view.onHold = { [weak self] held in
+            guard let self else { return }
+            if let w = self.walker { w.thrusting = held; self.liveTimeScale = 1 } else { self.liveTimeScale = held ? 4 : 1 }
+        }
         view.onKey = { [weak self] key in
             guard let self else { return false }
             switch key {
