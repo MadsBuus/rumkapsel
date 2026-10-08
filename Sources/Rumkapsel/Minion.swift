@@ -51,6 +51,7 @@ final class Minion: Body {
     /// Whether the bath's pixels are in sight: they are drawn over everything, so a wall in the way hides them.
     var staticSeen = true
     private var towelNode: SCNNode?
+    private var jetpackNode: SCNNode?
     /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
         let n = 5   // five fat pixels a side: coarse on purpose
@@ -377,15 +378,18 @@ final class Minion: Body {
     /// This is not work the body does — it is the picture catching up to the facts — so it runs for
     /// every body every frame, whatever else that frame skips. It lives here rather than in the scene,
     /// so the gallery and the station draw a minion the one way.
-    func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit) {
+    /// `hover` is how high off the floor it flies, its shadow left on the floor under it.
+    func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit, hover: Double = 0) {
         setPose(currentPose(at: clock))
         wear(outfit, clock: clock, dt: dt)
         let resting = path.isEmpty && state == .settled
         let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0   // nobody hops in the shower
         // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
-        node.position = v3(station.offset.x + pos.x + drawnLean.x, hop, station.offset.y + pos.y + drawnLean.y)
-        shadow.position.y = CGFloat(0.003 - hop)   // the shadow stays on the floor while the body hops
+        node.position = v3(station.offset.x + pos.x + drawnLean.x, hover + hop, station.offset.y + pos.y + drawnLean.y)
+        shadow.position.y = CGFloat(0.003 - hop - hover)   // the shadow stays on the floor while the body hops or flies
+        let up = CGFloat(max(0.4, 1 - hover * 0.9))
+        shadow.scale = SCNVector3(up, up, up)
         node.opacity = opacity
     }
 
@@ -395,6 +399,7 @@ final class Minion: Body {
         setTool(o.tool)
         setStatic(o.pixels, frame: Int(clock * 12))
         setTowel(o.towel)
+        setJetpack(o.jetpack, clock: clock)
         stepFades(dt)
     }
 
@@ -519,6 +524,72 @@ final class Minion: Body {
         body.addChildNode(t)
         arrive(t)
         towelNode = t
+    }
+
+    /// A jetpack on the back, or none; with thrust, its flames stretch out under it and flicker, and the
+    /// pad under it glows.
+    func setJetpack(_ thrust: Double?, clock: Double) {
+        guard let thrust else { retire(jetpackNode); jetpackNode = nil; return }
+        let pack = jetpackNode ?? {
+            let p = Looks.current.jetpack(height: bodyHeight, depth: bodyDepth) ?? Minion.jetpack(height: bodyHeight)
+            p.position = v3(0, 0, -bodyDepth / 2)
+            body.addChildNode(p)
+            arrive(p)
+            jetpackNode = p
+            return p
+        }()
+        var k = 0
+        pack.enumerateChildNodes { c, _ in
+            guard c.name == "flame" else { return }
+            let flicker = 0.75 + 0.25 * sin(clock * 47 + Double(k) * 2.1) * sin(clock * 31 + Double(k))
+            let s = CGFloat(thrust * flicker)
+            c.scale = SCNVector3(max(0.01, s * 0.8 + 0.2), max(0.01, s), max(0.01, s * 0.8 + 0.2))
+            c.isHidden = thrust <= 0
+            k += 1
+        }
+        pack.childNode(withName: "exhaust", recursively: true)?.light?.intensity = CGFloat(thrust * (250 + 120 * sin(clock * 40)))
+    }
+
+    /// The classic jetpack: a steel pack with two thrusters, a flame under each, and the glow they throw.
+    /// Facing -z from the middle of the body's back.
+    static func jetpack(height h: Double) -> SCNNode {
+        let n = SCNNode()
+        let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.25, 0.26, 0.3)))
+        let pack = SCNNode(geometry: SCNBox(width: 0.15, height: h * 0.42, length: 0.06, chamferRadius: 0.008))
+        pack.geometry!.firstMaterial = steel
+        pack.position = v3(0, h * 0.06, -0.03)
+        n.addChildNode(pack)
+        let flameMaterial = flat(NSColor(rgb: (1.0, 0.72, 0.3)))
+        flameMaterial.emission.contents = NSColor(rgb: (1.0, 0.55, 0.15))
+        for x in [-0.045, 0.045] {
+            let thruster = SCNNode(geometry: faceted(SCNCylinder(radius: 0.03, height: h * 0.36)))
+            thruster.geometry!.firstMaterial = dark
+            thruster.position = v3(x, h * 0.02, -0.075)
+            n.addChildNode(thruster)
+            let nozzle = SCNNode(geometry: faceted(SCNCone(topRadius: 0.022, bottomRadius: 0.032, height: 0.03)))
+            nozzle.geometry!.firstMaterial = dark
+            nozzle.position = v3(x, h * 0.02 - h * 0.18 - 0.015, -0.075)
+            n.addChildNode(nozzle)
+            // The flame hangs from the nozzle's mouth, so it stretches downward as it is scaled.
+            let flame = SCNNode()
+            flame.name = "flame"
+            flame.position = v3(x, h * 0.02 - h * 0.18 - 0.03, -0.075)
+            let cone = SCNNode(geometry: faceted(SCNCone(topRadius: 0.032, bottomRadius: 0, height: 0.24)))
+            cone.geometry!.firstMaterial = flameMaterial
+            cone.position = v3(0, -0.12, 0)
+            flame.addChildNode(cone)
+            n.addChildNode(flame)
+        }
+        let glow = SCNNode()
+        glow.name = "exhaust"
+        glow.light = SCNLight()
+        glow.light!.type = .omni
+        glow.light!.color = NSColor(rgb: (1.0, 0.6, 0.25))
+        glow.light!.attenuationEndDistance = 0.9
+        glow.light!.intensity = 0
+        glow.position = v3(0, -h * 0.3, -0.075)
+        n.addChildNode(glow)
+        return n
     }
 
     func fidget() {

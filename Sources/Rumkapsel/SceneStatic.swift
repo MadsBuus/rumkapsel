@@ -361,20 +361,9 @@ extension StationController {
             for c in station.padCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
             }
-            // The pad's east edge, where the yard opens to space: the same wall the airlock's outer door
-            // stands in, given the airlock's own run so the two are one piece of hull, turned a quarter so
-            // it leans west over the pad and the station. Nothing comes through this stretch, so no door.
-            if station.hasPad, output == nil, let east = station.padCells.map(\.x).max(),
-               let y0 = station.padCells.map(\.y).min(), let y1 = station.padCells.map(\.y).max(),
-               let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Double(Station.airlockLength), doorway: 0) {
-                hull.eulerAngles.y = -.pi / 2
-                hull.position = v3(station.offset.x + Double(east) + 0.56, 0, station.offset.y + Double(y0 + y1) / 2)
-                hull.name = "hull:" + station.name
-                staticRoot.addChildNode(hull)
-            }
-            // The pad's east edge, where the yard opens to space: the same wall the airlock's outer door
-            // stands in, given the airlock's own run so the two are one piece of hull, turned a quarter so
-            // it leans west over the pad and the station rather than north. No door in this stretch.
+            // The pad's east edge, where the pad gives onto open space: the same wall the airlock's outer door
+            // stands in, given the airlock's own run so the two are one piece of hull, turned a quarter so it
+            // leans east, away from the pad and over the station. Nothing comes through this stretch, so no door.
             if station.hasPad, output == nil, let east = station.padCells.map(\.x).max(),
                let y0 = station.padCells.map(\.y).min(), let y1 = station.padCells.map(\.y).max(),
                let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Double(Station.airlockLength), doorway: 0) {

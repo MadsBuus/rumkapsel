@@ -127,6 +127,8 @@ enum Routines {
         var pixels = false
         /// The towel off the rail, for as long as the drying lasts.
         var towel = false
+        /// The jetpack on the back while welding a rocket, and its thrust: nought standing, one in the air.
+        var jetpack: Double?
     }
 
     /// The kit for what this body is doing now. `pallet` is what the station's hover pallet is up

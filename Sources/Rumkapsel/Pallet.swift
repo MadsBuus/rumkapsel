@@ -65,10 +65,11 @@ final class PalletJob {
     /// while there is a way it can take.
     var blockedAt = 0.0
     var askedAt = 0.0
-    /// The staging deploy of the release it carries, as heard since the release merged, and how long
-    /// the repository's staging deploys usually take.
+    /// The staging deploy of the release it carries, as heard since the release merged, how long the
+    /// repository's staging deploys usually take, and when this one began.
     var deploy = StagingDeploy.unheard
     var deployUsual = Deployments.fallback
+    var deploySince = 0.0
     /// When it came to stand on the deck, for how long a deploy that never shows is waited for.
     var stagedAt = 0.0
 
@@ -367,11 +368,21 @@ extension Simulation {
         return station.padSlots[slot % station.padSlots.count]
     }
 
-    /// The side of a rocket's hull a welder works at: the one facing the gate, where it comes from and
-    /// where anyone watching is, turned away from the tower.
+    /// The side of a rocket's hull a welder works at: of the sides with room to hover, the one facing the
+    /// gate, where it comes from and where anyone watching is. Never the hatch's, where the tower stands, nor
+    /// one whose welder would hang over the tested stack or off the pad.
     func weldSide(station: Station, repo: String) -> Int? {
-        guard rocketSpot(station: station, repo: repo) != nil, let g = station.gate else { return nil }
-        return RocketGeometry.side(facing: -g.inward + SIMD2(-0.5, 0))   // the tower stands on the rocket's +x
+        guard let at = rocketSpot(station: station, repo: repo), let g = station.gate else { return nil }
+        let stack = world.testedStack(station: station, repo: repo)
+        let pad = Set(station.padCells)
+        let roomy = (1..<6).filter { k in
+            let spot = at + RocketGeometry.facing(side: k) * (RocketGeometry.apothem + Hands.arm)
+            guard pad.contains(Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded()))) else { return false }
+            guard let stack else { return true }
+            let d = spot - stack
+            return max(abs(d.x), abs(d.y)) > Station.testedStackHalf + Jetpack.half
+        }
+        return RocketGeometry.side(facing: -g.inward + SIMD2(-0.5, 0), among: roomy.isEmpty ? Array(1..<6) : roomy)
     }
 
     /// The middle of that side of the hull, on the floor plan: what the welder stands an arm's length from.
@@ -385,11 +396,27 @@ extension Simulation {
         return false
     }
 
+    /// The rocket a body is welding, torch to the hull, if it is.
+    func weldRocket(of m: B) -> RocketJob? {
+        guard isWelding(m), case .weld(let station, let repo, _)? = m.current?.kind else { return nil }
+        return rockets[station + "|" + repo]
+    }
+
+    /// How high off the floor a body hovers: a welder on its jetpack, else not at all.
+    func hover(_ m: B) -> Double { weldRocket(of: m)?.hover ?? 0 }
+
+    /// A welder up on its jetpack wanted for something that outranks the weld: a message, or leaving.
+    private func calledAway(_ m: B) -> Bool {
+        ownOrders.values.contains { $0.body == m.id && !$0.held && $0.rank > .release }
+    }
+
     /// One frame of a weld: walked round to its side of the hull, stepped up to an arm's length, and at it
-    /// until the tip needs no more welding. Nil when the command in hand is not a weld.
+    /// on the jetpack until the tip needs no more welding or the welder is called away; it lands before it
+    /// goes. Nil when the command in hand is not a weld.
     func stepWeld(_ m: B, station: Station, dt: Double) -> Outcome? {
         guard case .weld(_, let repo, let side)? = m.current?.kind else { return nil }
-        guard rockets[station.name + "|" + repo]?.welding == true, let point = weldPoint(station: station, repo: repo, side: side) else {
+        let r = rockets[station.name + "|" + repo]
+        guard let r, let point = weldPoint(station: station, repo: repo, side: side), r.welding || m.phaseKind == .act else {
             finish(m)
             return .spent
         }
@@ -402,13 +429,16 @@ extension Simulation {
             advance(m)
             return .spent
         default:
+            if (!r.welding || calledAway(m)) && r.hover <= 0 { finish(m); return .spent }
             return .posed   // at it: the scene draws the welding
         }
     }
 
-    /// Every tip wanting welding while its staging deploy runs: a new one gains its panels at the pace the
-    /// repository's deploys usually take, the last one held back until the deploy is live; a whole one has
-    /// its seams gone over. A tip whose pallet has gone is whole. The torch is on a seam of the welder's side.
+    /// Every tip wanting welding while its staging deploy runs. The weld creeps up the hull ring by ring at
+    /// the pace the repository's deploys usually take, the last panel held back until the deploy is live: a
+    /// new tip gains its panels as it goes, a whole one is welded over afresh from the bottom ring. A tip
+    /// whose pallet has gone is whole. The welder flies up with the ring being welded, and lands when the
+    /// weld is over or it is called away.
     private func stepTips(dt: Double) {
         let full = Double(RocketGeometry.panels)
         for r in rockets.values {
@@ -416,24 +446,37 @@ extension Simulation {
             let state = world.truth.pallets[r.station]?.state
             let running = p?.deploy == .running && (state == .moving || state == .staged)
             let live = p?.deploy == .live
-            if p == nil || state == .unloading { r.built = full }
-            else if running, r.built < full - 1 { r.built = min(full - 1, r.built + dt * (full - 1) / max(20, p!.deployUsual * 0.85)) }
-            else if live { r.built = min(full, r.built + dt * 6) }
-            r.panels = Int(r.built)
-            r.welding = p != nil && (running || (live && r.panels < RocketGeometry.panels))
-            guard r.welding, clock >= r.seamAt, let station = fleet.stations[r.station], let side = weldSide(station: station, repo: r.repo) else { continue }
-            r.seam = Int.random(in: 0..<(RocketGeometry.panels / 6)) * 6 + side
+            let pace = (full - 1) / max(20, (p?.deployUsual ?? Deployments.fallback) * 0.85)
+            // A deploy seen starting: the weld starts where it has got to, a whole tip from bare.
+            if running, !r.deployRunning, let p { r.welded = max(r.fresh ? r.welded : 0, min(full - 1, (clock - p.deploySince) * pace)) }
+            r.deployRunning = running
+            if p == nil || state == .unloading { r.welded = full }
+            else if running, r.welded < full - 1 { r.welded = min(full - 1, r.welded + dt * pace) }
+            else if live { r.welded = min(full, r.welded + dt * 6) }
+            if r.welded >= full { r.fresh = false }
+            r.panels = r.fresh ? Int(r.welded) : RocketGeometry.panels
+            r.welding = p != nil && (running || (live && r.welded < full))
+            let welder = bodies.values.first { weldRocket(of: $0) === r }
+            let ring = min(RocketGeometry.rings - 1, Int(r.welded) / 6)
+            let up = r.welding && welder.map { !calledAway($0) } == true
+            let target = up ? max(0, RocketGeometry.ringMiddle(ring, lifter: r.tall) - Hands.reach) : 0
+            r.hover = welder == nil ? 0 : r.hover + max(-Jetpack.speed * dt, min(Jetpack.speed * dt, target - r.hover))
+            let working: Int? = { if case .weld(_, _, let side)? = welder?.current?.kind { return side }; return nil }()
+            guard r.welding, clock >= r.seamAt, let station = fleet.stations[r.station],
+                  let side = working ?? weldSide(station: station, repo: r.repo) else { continue }
+            // The torch on the ring being welded, on the welder's side or one either side of it: within reach.
+            r.seam = ring * 6 + (side + Int.random(in: -1...1) + 6) % 6
             r.seamAt = clock + 0.9
         }
     }
 
     /// A staging deploy started or ended for a repository: the pallet carrying its release hears of it.
-    func stagingDeploy(station name: String, repo: String, outcome: DeployOutcome?, usual: TimeInterval = Deployments.fallback) {
+    func stagingDeploy(station name: String, repo: String, outcome: DeployOutcome?, usual: TimeInterval = Deployments.fallback, elapsed: TimeInterval = 0) {
         // Heard while it is out, merge or no merge yet: the deploy watcher and the release poll answer in
         // either order.
         guard let p = pallets[name], p.repo == repo, world.truth.pallets[name]?.state != .unloading else { return }
         switch outcome {
-        case nil: p.deploy = .running; p.deployUsual = usual
+        case nil: p.deploy = .running; p.deployUsual = usual; p.deploySince = clock - elapsed
         case .live?: p.deploy = .live
         default: p.deploy = .failed
         }

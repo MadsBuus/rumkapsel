@@ -539,6 +539,7 @@ enum Props {
         let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
         beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark
         beacon.name = "beacon"
+        beacon.setValue(true, forKey: "beacon")   // found by this, whatever the rocket names its nodes
         beacon.position = v3(0, h + 0.065, 0)
         tower.addChildNode(beacon)
         tower.position = v3(center.x + 0.44, 0, center.z + 0.02)

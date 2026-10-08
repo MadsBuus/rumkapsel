@@ -99,6 +99,8 @@ enum Hands {
     static let level = 0.34
     /// An arm's length, and the slack either side of it.
     static let arm = 0.34, near = 0.28, far = 0.42
+    /// How high off what it stands on a standing body works with its hands.
+    static let reach = 0.4
     /// How long a crate takes to settle down a level when the one under it is taken away: low gravity
     /// in the yard, so it takes its time coming down.
     static let settleSeconds = 2.0

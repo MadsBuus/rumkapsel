@@ -187,7 +187,15 @@ extension StationController {
     /// out for itself, so it is handed in; everything else follows from the body.
     func kit(_ m: Minion) -> Routines.Outfit {
         let p = simulation.pallets[m.station]
-        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
+        var kit = Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
+        if simulation.weldRocket(of: m) != nil { kit.jetpack = simulation.hover(m) > 0.002 ? 1 : 0 }
+        return kit
+    }
+
+    /// How high a body hovers off the floor this frame: a welder on its jetpack bobs a little in the air.
+    func hover(_ m: Minion) -> Double {
+        let h = simulation.hover(m)
+        return h + sin(clock * 2.6 + m.bobPhase) * 0.015 * min(1, h / 0.05)
     }
 
     func tickMinions(dt: Double) {
@@ -202,7 +210,7 @@ extension StationController {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
                 // draw it anywhere while it rises. The mirror below still runs.
-                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))
+                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: hover(m))
                 continue
             case .walking, .wondering: break
             case .there:
@@ -217,7 +225,7 @@ extension StationController {
                 drawPusher(m, station: station)
             }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
-            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m))   // the picture catches up whatever else this frame skipped
+            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: hover(m))   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
             pose(m, station: station, dt: dt)
         }
@@ -434,6 +442,7 @@ extension StationController {
                 let cone = m.pyramids.last
                 let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
+                if welding != nil { tilt *= 0.35 }   // flown up to the seam, it is at its hands: no bending over to it
                 if let pitch = r.hammerPitch { m.hammerPivot?.eulerAngles.x = CGFloat(pitch) }
                 if let aim = r.aim { m.lightPivot?.eulerAngles = aim }
                 switch r.flash {
@@ -443,10 +452,11 @@ extension StationController {
                         propRoot.addChildNode(l)
                         m.weldLight = l
                     }
-                    if let l = m.weldLight, let seam = welding.flatMap({ seamPoint($0.rocket) }) {
+                    if let l = m.weldLight, let w = welding, let seam = seamPoint(w.rocket) {
                         l.position = seam
                         l.light?.intensity = intensity
                         l.opacity = on ? 1 : 0
+                        if on, let rocket = rocketViews[w.rocket.key]?.node { throwSparks(at: seam, from: rocket, count: Int.random(in: 0...2)) }
                     } else if let l = m.weldLight, let cone {
                         l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
                         l.light?.intensity = intensity
