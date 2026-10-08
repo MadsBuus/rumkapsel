@@ -40,8 +40,6 @@ is the empty board. Slices 1–6 are done.
   tower) should be measured from the things they belong to, like the welder now is.
 - **The security robot** at the gate does not work the right way; a separate thread was started for it.
 - **Frame cost**, from 0.41: the session scan (89 ms in one frame) and `gh.crew` (44 ms worst) on the main thread.
-- **`proj:rumkapsel`**: the main checkout's office never folds. Ask whether a project should hold a desk with
-  nothing running in it.
 
 ## Ideas
 Floated, not asked for. Offer them when they fit; don't start them unasked.
@@ -57,3 +55,5 @@ Floated, not asked for. Offer them when they fit; don't start them unasked.
 - **A common workplace across teams** on the same LAN: neighbours share the building, not their work or names.
   Needs a team key first.
 - **A pillow on the beds**, once it is known which end the head goes.
+- **Abandoned offices.** An office left empty for long could deteriorate rather than only go dark, and read
+  differently from one that still holds a crate or boxes.

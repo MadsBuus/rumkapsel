@@ -1,11 +1,14 @@
 // Which workspaces are still somebody's.
 //
-// A workspace is archived in two different ways depending on what made it. Conductor deletes the
+// A workspace is archived in different ways depending on what made it. Conductor deletes the
 // worktree, so the directory going missing is the whole signal. Claude Code leaves the directory where
 // it is and drops its lease in the desktop app's registry — so a station that only watched the disk kept
-// an office for every workspace ever opened, and the desk filled with rooms nobody had.
+// an office for every workspace ever opened, and the desk filled with rooms nobody had. A Claude Code
+// session run in a checkout itself has no worktree and no lease: only its own session file says it was
+// archived.
 //
-// Read on every scan, off a file that changes rarely, so it is only parsed when it has moved.
+// Read on every scan. The registry changes rarely and is only parsed when it has moved; the session
+// files change with every turn and are read at most every ten seconds.
 
 import Foundation
 
@@ -41,6 +44,31 @@ enum Workspaces {
         return out
     }
 
+    private static let sessionFiles = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Claude/claude-code-sessions")
+    private static var sessionsReadAt: Date?
+    private static var checkouts: [String: Bool] = [:]
+
+    /// The folders the desktop app has run sessions in, each with whether any of those sessions is
+    /// still not archived.
+    private static func sessionFolders() -> [String: Bool] {
+        lock.lock(); defer { lock.unlock() }
+        if let t = sessionsReadAt, Date().timeIntervalSince(t) < 10 { return checkouts }
+        sessionsReadAt = Date()
+        var out: [String: Bool] = [:]
+        let files = FileManager.default.enumerator(at: sessionFiles, includingPropertiesForKeys: nil)
+        while let f = files?.nextObject() as? URL {
+            guard f.lastPathComponent.hasPrefix("local_"), f.pathExtension == "json",
+                  let data = try? Data(contentsOf: f),
+                  let session = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let cwd = session["cwd"] as? String else { continue }
+            let folder = (cwd as NSString).standardizingPath
+            out[folder] = (out[folder] ?? false) || (session["isArchived"] as? Bool) != true
+        }
+        checkouts = out
+        return out
+    }
+
     /// Whether a workspace is still somebody's.
     ///
     /// A worktree the desktop app made is under `.claude/worktrees`, and there the registry is the only
@@ -48,10 +76,11 @@ enum Workspaces {
     /// directory. A subagent's worktree is not a workspace at all and never earns an office.
     ///
     /// Everything else — the checkout itself, a Conductor workspace, a worktree made by hand — is not in
-    /// the registry and never will be, so for those the directory is still the whole signal.
+    /// the registry and never will be. A checkout the desktop app has run sessions in is open while one
+    /// of them is not archived; for any other the directory is still the whole signal.
     static func isOpen(_ path: String) -> Bool {
         guard FileManager.default.fileExists(atPath: path) else { return false }
-        guard path.contains("/.claude/worktrees/") else { return true }
+        guard path.contains("/.claude/worktrees/") else { return sessionFolders()[(path as NSString).standardizingPath] ?? true }
         if (path as NSString).lastPathComponent.hasPrefix("agent-") { return false }
         return held().contains(path)
     }
