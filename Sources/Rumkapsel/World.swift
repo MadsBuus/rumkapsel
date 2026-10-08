@@ -1383,8 +1383,8 @@ final class World {
             let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order
                 && sharing(e.crate.repo, s.group, $0.repo) }.count
             if onPad(e.crate.repo, s.group), let stack = stacks[e.crate.repo] {
-                let c = s.column % 4, k = Station.testedScale
-                let at = stack + SIMD2((Double(c % 2) - 0.5) * 0.42 * k * 1.1, (Double(c / 2) - 0.5) * 0.42 * k * 1.1)
+                let c = s.column % 4, k = Station.testedScale, pitch = Station.testedPitch
+                let at = stack + SIMD2((Double(c % 2) - 0.5) * pitch, (Double(c / 2) - 0.5) * pitch)
                 let pos = SIMD3(station.offset.x + at.x, Double(level) * 0.34 * k, station.offset.y + at.y)
                 out.append(YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,
                                     mine: !e.crate.alien && isMine(repo: e.crate.repo, number: e.crate.number), group: s.group,

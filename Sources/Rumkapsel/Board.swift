@@ -203,7 +203,9 @@ extension Simulation {
         case .dispatch: return m.phaseKind == .walk
         case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
         case .pushPallet(let s, _): return pallets[s]?.pushing == false
-        case .weld, .qa, .work, .react: return true
+        // Never taken off a weld in the air: it lands first.
+        case .weld(let s, let repo, _): return m.phaseKind != .act || (rockets[s + "|" + repo]?.hover ?? 0) <= 0
+        case .qa, .work, .react: return true
         // Idle is what a body does while the board has nothing for it: any order takes it from there.
         case .bath, .exercise, .chore, .goTo, .sleep: return true
         case .deliverOffice: return !m.hasLoad

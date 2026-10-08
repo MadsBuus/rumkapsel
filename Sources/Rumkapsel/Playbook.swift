@@ -67,9 +67,14 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// The pallet out and loaded, and gone again once emptied.
     static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
-    /// A repository's tip all but built: every panel on but the last, which waits for staging to be live.
-    static func tipAlmost(_ repo: String) -> PlaybookWait {
-        .until("\(repo)'s tip nearly built") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.panels >= RocketGeometry.panels - 1 } }
+    /// Somebody in the air at a repository's tip, welding.
+    static func welderUp(_ repo: String) -> PlaybookWait {
+        .until("\(repo)'s welder in the air") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.hover > 0 } }
+    }
+    /// A repository's tip being welded, all but the last panel done, which waits for staging to be live.
+    static func weldAlmost(_ repo: String) -> PlaybookWait {
+        .until("\(repo)'s weld nearly done") { c in c.simulation.rockets.values.contains {
+            $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } }
     }
     /// Across on the deck, still loaded, waiting for staging.
     static let palletStaged = PlaybookWait.until("the pallet on the deck") { c in c.world.truth.pallets.values.contains { $0.state == .staged } }
@@ -173,9 +178,13 @@ enum Playbook {
         PlaybookEntry("release", "Staging PR merged", "the pallet is pushed to the deck and waits there loaded",
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged)],
                       camera: .area("deck", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy running", "the tip is welded together panel by panel on its cradle (api's first release)",
+        PlaybookEntry("release", "Staging deploy running", "web's tip is welded over ring by ring by a welder on a jetpack, beside its tested stack",
+                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
+                       ("Deploy: Staging starts", .welderUp("web")), ("1x", .weldAlmost("web")), ("Deploy: Staging goes live", .palletGone)],
+                      camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging deploy running, new rocket", "the tip is welded together panel by panel by a welder on a jetpack (api's first release)",
                       [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
-                       ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", 0.25), ("1x", .tipAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
+                       ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", .welderUp("api")), ("1x", .weldAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Staging deploy live", "the pallet is unloaded onto the deck",
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),

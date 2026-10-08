@@ -274,6 +274,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let rocketRoot = SCNNode()
     /// The rockets and the ships as drawn: a node per rocket by "station|repo", a node per flight.
     var rocketViews: [String: RocketView] = [:]
+    /// Sparks off a welder's torch, in the air.
+    var sparks: [Spark] = []
     /// The soot a rocket left on its pad slot, by where it stood: the next launch there burns over it.
     var scorches: [String: SCNNode] = [:]
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
@@ -1220,8 +1222,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted(let stationName, let repo, false, let expected, _, _):
-            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected)
+        case .deployStarted(let stationName, let repo, false, let expected, _, let elapsed):
+            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected, elapsed: elapsed)
         case .deployEnded(let stationName, let repo, false, let outcome):
             simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):
@@ -1294,6 +1296,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         updateBerths()
         tickHullLamps()
         drawRockets()
+        tickSparks(dt: dt)
         drawPallets()
         turnPlanets(dt: dt)
         tickGates(dt: dt)

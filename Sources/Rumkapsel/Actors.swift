@@ -31,9 +31,45 @@ final class RocketView {
     var bornAt: Double
     var flying: [Int: Double] = [:]
     var rise: (up: Bool, since: Double)?
+    /// The hull's paint: the node it was put on, how far the weld had come, the panels glowing from the
+    /// torch and since when, and those stripped bare for a weld afresh and when.
+    var paintedNode: SCNNode?
+    var weldedShown = 0
+    var hot: [Int: Double] = [:]
+    var stripping: [Int: Double] = [:]
+    /// The tower's beacon and its light as the rocket's own state has it, put back once the weld is over.
+    var beaconRest: (beacon: SCNNode, material: SCNMaterial?)?
     init(node: SCNNode, untested: Bool, panels: Int, lifter: Bool, at clock: Double) {
         self.node = node; untestedShown = untested; panelsShown = panels; lifterShown = lifter; towerLifter = lifter; bornAt = clock
     }
+}
+
+/// A spark off the torch, in the air.
+struct Spark {
+    let node: SCNNode
+    var vel: SIMD3<Double>
+    let born: Double
+    let life: Double
+}
+
+/// The paint of a tip's hull while it is welded.
+enum Hull {
+    static let white = NSColor(rgb: (0.92, 0.92, 0.95))
+    /// Bare metal, not yet welded.
+    static let bare = NSColor(rgb: (0.48, 0.5, 0.55))
+    /// Just welded: glowing, and cooling to white.
+    static let hot = NSColor(rgb: (1.0, 0.52, 0.14))
+    static let glow = NSColor(rgb: (0.95, 0.38, 0.06))
+    static let cooling = 2.5
+    /// How long a new panel takes to fly from the tower onto its place.
+    static let flight = 0.6
+    static let sparkShape: SCNGeometry = {
+        let g = SCNBox(width: 0.016, height: 0.016, length: 0.016, chamferRadius: 0)
+        let m = flat(NSColor(rgb: (1.0, 0.88, 0.5)))
+        m.emission.contents = NSColor(rgb: (1.0, 0.75, 0.3))
+        g.firstMaterial = m
+        return g
+    }()
 }
 
 extension StationController {
@@ -164,6 +200,8 @@ extension StationController {
             // one going up has its own way of leaving and is left to it.
             if v.node.opacity < 1, !v.node.hasActions { v.node.opacity = CGFloat(min(1, (clock - v.bornAt) / 1.2)) }
             weld(r, v)
+            paintHull(r, v)
+            signal(r, v)
             stepLifter(v)
             // Going up from the cradle, with no time for the lifter to rise: it is simply there.
             if r.stage.rank >= 3, !v.lifterShown { v.lifterShown = true; Props.shape(v.node, lifter: true, panels: RocketGeometry.panels) }
@@ -210,7 +248,7 @@ extension StationController {
         }
         v.panelsShown = r.panels
         // In the air: from the top of the tower, over and down onto its place.
-        let flight = 0.6
+        let flight = Hull.flight
         for (i, at) in v.flying {
             guard let panel = piece("panel\(i)"), let rest = panel.value(forKey: "rest") as? SCNVector3 ?? {
                 let p = panel.position; panel.setValue(p, forKey: "rest"); return p }() else { continue }
@@ -233,6 +271,113 @@ extension StationController {
                     if k >= 1 { c.setValue(nil, forKey: "on") }
                 }
             }
+        }
+    }
+
+    /// The hull as far as the weld has come: panels it has passed are white, each glowing hot as it is done
+    /// and cooling, the rest bare metal. A tip welded over afresh is stripped bare from the top down.
+    private func paintHull(_ r: RocketJob, _ v: RocketView) {
+        guard let tip = Props.part(v.node, "tip") else { return }
+        let done = Int(r.welded)
+        func paint(_ i: Int, _ color: NSColor, glow: NSColor = .black) {
+            guard let panel = tip.childNodes.first(where: { ($0.value(forKey: "part") as? String) == "panel\(i)" }) else { return }
+            if panel.value(forKey: "paint") == nil {
+                panel.geometry?.firstMaterial = lit(Hull.white)   // its own paint, not its neighbours'
+                panel.setValue(true, forKey: "paint")
+            }
+            panel.geometry?.firstMaterial?.diffuse.contents = color
+            panel.geometry?.firstMaterial?.emission.contents = glow
+        }
+        if v.paintedNode !== v.node {
+            v.paintedNode = v.node
+            v.hot = [:]; v.stripping = [:]
+            for i in 0..<RocketGeometry.panels { paint(i, i < done ? Hull.white : Hull.bare) }
+            v.weldedShown = done
+        }
+        if done > v.weldedShown {
+            // Done as it lands, for a panel still in the air.
+            for i in v.weldedShown..<done {
+                let at = v.flying[i].map { $0 + Hull.flight } ?? clock
+                v.hot[i] = at
+                v.stripping[i] = nil
+                if at > clock { paint(i, Hull.bare) }
+            }
+        } else if done < v.weldedShown {
+            for i in done..<v.weldedShown { v.stripping[i] = clock + Double(v.weldedShown - 1 - i) * 0.04; v.hot[i] = nil }
+        }
+        v.weldedShown = done
+        for (i, at) in v.stripping where clock >= at { paint(i, Hull.bare); v.stripping[i] = nil }
+        for (i, at) in v.hot where clock >= at {
+            let k = min(1, (clock - at) / Hull.cooling)
+            paint(i, Hull.hot.blended(withFraction: CGFloat(k), of: Hull.white) ?? Hull.white,
+                  glow: Hull.glow.blended(withFraction: CGFloat(k), of: .black) ?? .black)
+            if k >= 1 { v.hot[i] = nil }
+        }
+    }
+
+    /// The tower's beacon while the tip is welded: a turning amber light, flashing as it comes round. After,
+    /// it is what the rocket's own state makes it.
+    private func signal(_ r: RocketJob, _ v: RocketView) {
+        var found: SCNNode?
+        v.node.childNode(withName: "hold", recursively: false)?.enumerateChildNodes { c, stop in
+            if c.value(forKey: "beacon") != nil { found = c; stop.pointee = true }
+        }
+        guard let beacon = found else { return }
+        let lamp = beacon.childNode(withName: "beaconLight", recursively: false)
+        guard r.welding else {
+            if let rest = v.beaconRest, rest.beacon === beacon { beacon.geometry?.firstMaterial = rest.material }
+            v.beaconRest = nil
+            lamp?.removeFromParentNode()
+            return
+        }
+        if v.beaconRest?.beacon !== beacon {
+            v.beaconRest = (beacon, beacon.geometry?.firstMaterial)
+            beacon.geometry?.firstMaterial = flat(Props.palletAmber)
+        }
+        let turn = (clock / 0.9).truncatingRemainder(dividingBy: 1)
+        let flash = max(0, cos(turn * 2 * .pi))
+        let bright = pow(flash, 6)
+        beacon.geometry?.firstMaterial?.diffuse.contents = Props.palletAmberOff.blended(withFraction: CGFloat(0.4 + 0.6 * flash), of: Props.palletAmber)
+        beacon.geometry?.firstMaterial?.emission.contents = NSColor.black.blended(withFraction: CGFloat(bright), of: Props.palletAmber)
+        let l = lamp ?? {
+            let l = SCNNode()
+            l.name = "beaconLight"
+            l.light = SCNLight()
+            l.light!.type = .omni
+            l.light!.color = Props.palletAmber
+            l.light!.attenuationEndDistance = 1.4
+            beacon.addChildNode(l)
+            return l
+        }()
+        l.light?.intensity = CGFloat(60 + 900 * bright)
+    }
+
+    /// A shower of sparks off the seam the torch is on: thrown out from the hull, falling, bouncing once off
+    /// the pad and dying away, on the station clock.
+    func throwSparks(at seam: SCNVector3, from rocket: SCNNode, count: Int) {
+        let out = SIMD2(Double(seam.x - rocket.position.x), Double(seam.z - rocket.position.z))
+        let len = max(1e-3, (out.x * out.x + out.y * out.y).squareRoot()), dir = out / len
+        for _ in 0..<count where sparks.count < 80 {
+            let node = SCNNode(geometry: Hull.sparkShape)
+            node.position = seam
+            rocketRoot.addChildNode(node)
+            let speed = Double.random(in: 0.25...0.8), across = Double.random(in: -0.35...0.35)
+            let vel = SIMD3(dir.x * speed - dir.y * across, Double.random(in: -0.1...0.7), dir.y * speed + dir.x * across)
+            sparks.append(Spark(node: node, vel: vel, born: clock, life: Double.random(in: 0.5...1.1)))
+        }
+    }
+
+    /// Every spark in the air, one frame on.
+    func tickSparks(dt: Double) {
+        for (i, var s) in sparks.enumerated().reversed() {
+            let age = (clock - s.born) / s.life
+            guard age < 1 else { s.node.removeFromParentNode(); sparks.remove(at: i); continue }
+            s.vel.y -= 2.4 * dt
+            var p = SIMD3(Double(s.node.position.x), Double(s.node.position.y), Double(s.node.position.z)) + s.vel * dt
+            if p.y < 0.01 { p.y = 0.01; s.vel.y = abs(s.vel.y) * 0.3; s.vel.x *= 0.5; s.vel.z *= 0.5 }
+            s.node.position = v3(p.x, p.y, p.z)
+            s.node.opacity = CGFloat(age < 0.6 ? 1 : (1 - age) / 0.4)
+            sparks[i] = s
         }
     }
 

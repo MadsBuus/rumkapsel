@@ -205,11 +205,30 @@ enum RocketGeometry {
     }
     /// The side facing most nearly the way asked.
     static func side(facing way: SIMD2<Double>) -> Int {
-        (0..<6).max { a, b in
+        side(facing: way, among: Array(0..<6)) ?? 0
+    }
+    /// Of the sides given, the one facing most nearly the way asked.
+    static func side(facing way: SIMD2<Double>, among sides: [Int]) -> Int? {
+        sides.max { a, b in
             let fa = facing(side: a), fb = facing(side: b)
             return fa.x * way.x + fa.y * way.y < fb.x * way.x + fb.y * way.y
-        } ?? 0
+        }
     }
+    /// The hull's rings of panels, from the bottom.
+    static var rings: Int { panels / 6 }
+    static var ringHeight: Double { hullHeight / Double(rings) }
+    /// How high off the pad the middle of a ring is: the tip on its cradle, or up on the lifter.
+    static func ringMiddle(_ ring: Int, lifter: Bool) -> Double {
+        (lifter ? hullBase : cradleTop) + ringHeight * (Double(ring) + 0.5)
+    }
+}
+
+/// The jetpack a welder works the tip on: up off the pad, ring by ring up the hull.
+enum Jetpack {
+    /// How quickly it climbs and comes down.
+    static let speed = 0.25
+    /// Room a hovering welder wants round it, from its middle out.
+    static let half = 0.16
 }
 
 final class RocketJob {
@@ -226,15 +245,21 @@ final class RocketJob {
     /// How much cargo waits for it, for the size the scene draws it at while standing by.
     var cargo = 0
     /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
-    /// deploy runs; `built` is the same count as it creeps up.
+    /// deploy runs (`fresh`).
     var panels = RocketGeometry.panels
-    var built = Double(RocketGeometry.panels)
-    /// The tip wants welding: its staging deploy is under way, and it is built panel by panel or, whole
-    /// already, gone over seam by seam by whoever takes the weld off the board. `seam` is the panel the
-    /// torch is on.
+    var fresh = false
+    /// How far the weld has come, in panels, ring by ring from the bottom: a new tip's panels go on as it
+    /// creeps up, and a whole tip's are welded over afresh for each staging deploy. The rest are bare.
+    var welded = Double(RocketGeometry.panels)
+    /// The tip wants welding: its staging deploy is under way, and whoever takes the weld off the board
+    /// works it on a jetpack. `seam` is the panel the torch is on.
     var welding = false
     var seam = 0
     var seamAt = 0.0
+    /// Whether the staging deploy was running last frame, so a new one is seen to start.
+    var deployRunning = false
+    /// How high off the pad the welder hovers on its jetpack.
+    var hover = 0.0
     /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
     /// them have been set down on the pad and not one moment before: a rocket never launches empty.
     var assigned: Set<String> = []
@@ -425,7 +450,8 @@ extension Simulation {
         // New while its release is on its way to staging: the tip is built as the deploy runs.
         if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
             r.panels = 0
-            r.built = 0
+            r.welded = 0
+            r.fresh = true
         }
         rockets[key] = r
         take(r, command)
