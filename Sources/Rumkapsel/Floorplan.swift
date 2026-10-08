@@ -141,3 +141,25 @@ struct Floorplan {
         return want.isSubset(of: seen)
     }
 }
+
+/// How a new office picks its slot. Whoever opens the office places it and peers adopt the cells, so two
+/// machines on different settings still see one floor.
+enum OfficePlacement: String, CaseIterable, Identifiable {
+    /// The next free slot out from the monolith, whatever repository it is.
+    case rings
+    /// The free slot nearest the repository's other offices. A repository with none yet starts where it
+    /// keeps clear of the others, so each grows a patch of its own.
+    case byRepo
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .rings: return "In rings from the middle"
+        case .byRepo: return "Beside their repository"
+        }
+    }
+
+    /// Pinned by the test runs, so a layout test lays out the same whatever the config says.
+    static var pinned: OfficePlacement?
+    static var current: OfficePlacement { pinned ?? ConfigStore.shared.current.officePlacement }
+}

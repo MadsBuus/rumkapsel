@@ -12,6 +12,7 @@ enum LayoutTests {
 
     static func run() -> Never {
         Theme.pinnedForPlan = .classic   // the plan as Classic lays it out, whatever the config says
+        OfficePlacement.pinned = .rings
         let keys = ["task:web#455", "task:api#5158", "task:ios#298", "branch:web/feature-x", "task:web#460", "task:api#5140"]
 
         test("two stations given the same rooms in the same order lay them out cell for cell the same") {
@@ -167,6 +168,42 @@ enum LayoutTests {
             draw(a)
         }
 
+        test("by repository: an office opens beside its repository's others, and a new repository starts clear of them") {
+            OfficePlacement.pinned = .byRepo
+            defer { OfficePlacement.pinned = .rings }
+            let order = (0..<24).map { "task:repo\($0 % 4)#\(300 + $0)" }
+            let a = fresh(), b = fresh()
+            for k in order { place(k, on: a); place(k, on: b) }
+            expect(order.allSatisfy { a.rooms[$0]?.cells == b.rooms[$0]?.cells }, "two stations given the same rooms in the same order still agree")
+            expect(whole(a), "the hallway is one piece and every office has its door on it")
+            let rings = fresh()
+            OfficePlacement.pinned = .rings
+            for k in order { place(k, on: rings) }
+            OfficePlacement.pinned = .byRepo
+            let together = neighbourly(a), apart = neighbourly(rings)
+            expect(together >= 0.8, "most offices' nearest office is their own repository's: \(Int(together * 100))%")
+            expect(together > apart, "and more than in rings: \(Int(together * 100))% against \(Int(apart * 100))%")
+            draw(a, byRepo: true)
+        }
+
+        test("a station laid out afresh on load takes the placement it is set to, and keeps every office") {
+            let order = (0..<24).map { "task:repo\($0 % 4)#\(300 + $0)" }
+            let before = fresh()
+            for k in order { place(k, on: before) }
+            let saved = before.saved
+            OfficePlacement.pinned = .byRepo
+            defer { OfficePlacement.pinned = .rings }
+            let after = Station(name: "work")
+            after.restore(saved, relayout: true)
+            for place in [Place.quarters, .lounge, .bath, .gym] { after.ensureFixedRoom(place) }
+            expect(Set(after.rooms.keys) == Set(before.rooms.keys), "the same rooms stand: \(after.rooms.count) against \(before.rooms.count)")
+            expect(whole(after), "the hallway is one piece and every office has its door on it")
+            expect(neighbourly(after) >= 0.8, "the offices stand by repository: \(Int(neighbourly(after) * 100))%")
+            let kept = Station(name: "work")
+            kept.restore(saved)
+            expect(order.allSatisfy { kept.rooms[$0]?.cells == before.rooms[$0]?.cells }, "and without a relayout every office keeps its cells")
+        }
+
         test("Classic's pad stands right north of the deck, as it always has") {
             let a = fresh()
             expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
@@ -243,7 +280,9 @@ enum LayoutTests {
         Theme.pinnedForPlan = .classic
 
         if ProcessInfo.processInfo.environment["RK_FILL"] != nil {
-            for n in [40, 80] {
+            for placement in OfficePlacement.allCases { for n in [40, 80] {
+                OfficePlacement.pinned = placement
+                FileHandle.standardError.write("=== \(placement.title)\n".data(using: .utf8)!)
                 let a = fresh()
                 for i in 0..<n { place("task:repo\(i % 5)#\(100 + i)", on: a) }
                 let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
@@ -251,9 +290,10 @@ enum LayoutTests {
                 for c in hall { for nb in c.neighbours where hall.contains(nb) && (nb.x, nb.y) > (c.x, c.y) { edges += 1 } }
                 let walks = a.rooms.values.compactMap { r in r.cells.flatMap(\.neighbours).compactMap { a.hallDistance(of: $0) }.min() }
                 let b = a.bounds
-                FileHandle.standardError.write("--- \(n) rooms: mean walk \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0), loops \(edges - hall.count + 1), hallway \(hall.count) cells, footprint \(b.max.x - b.min.x + 1)x\(b.max.y - b.min.y + 1)\n".data(using: .utf8)!)
-                draw(a)
-            }
+                FileHandle.standardError.write("--- \(n) rooms: mean walk \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0), loops \(edges - hall.count + 1), hallway \(hall.count) cells, footprint \(b.max.x - b.min.x + 1)x\(b.max.y - b.min.y + 1), beside their own \(Int(neighbourly(a) * 100))%\n".data(using: .utf8)!)
+                draw(a, byRepo: true)
+            } }
+            OfficePlacement.pinned = .rings
         }
         if failures > 0 { print("layout: \(failures) failed"); exit(1) }
         print("layout: all passed")
@@ -262,7 +302,7 @@ enum LayoutTests {
 
     /// The floor as text, one character a cell, for a look without a window: `#` the monolith, `.` hallway,
     /// letters the rooms, `L D B G` the lounge, dorm, bath and gym, `=` yard, `~` bay, `^` airlock.
-    static func draw(_ s: Station) {
+    static func draw(_ s: Station, byRepo: Bool = false) {
         var chars: [Cell: Character] = [:]
         for c in s.corridorCells + s.coreCells { chars[c] = "." }
         chars[s.monolithCell] = "#"
@@ -271,6 +311,7 @@ enum LayoutTests {
         for c in s.airlockCells { chars[c] = "^" }
         let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
         var next = 0
+        let repos = Array(Set(s.rooms.values.compactMap(\.repo))).sorted()
         for key in s.rooms.keys.sorted() {
             let ch: Character
             switch key {
@@ -278,7 +319,9 @@ enum LayoutTests {
             case "kind:quarters": ch = "D"
             case "kind:bath": ch = "B"
             case "kind:gym": ch = "G"
-            default: ch = letters[next % letters.count]; next += 1
+            default:
+                if byRepo, let i = s.rooms[key]!.repo.flatMap(repos.firstIndex) { ch = letters[i % letters.count] }
+                else { ch = letters[next % letters.count]; next += 1 }
             }
             for c in s.rooms[key]!.cells { chars[c] = ch }
         }
@@ -306,8 +349,20 @@ enum LayoutTests {
         return world.fleet.station("work")
     }
 
+    /// An office of the repository its key names: `task:web#455` is web's.
     private static func place(_ key: String, on s: Station) {
-        _ = s.ensureRoom(key: key, name: key, repo: "r", color: Colors.repos[0], lastActive: Date(timeIntervalSince1970: 0))
+        let repo = key.split(separator: ":").last.map { String($0.prefix { $0 != "#" && $0 != "/" }) } ?? "r"
+        _ = s.ensureRoom(key: key, name: key, repo: repo, color: Colors.repos[0], lastActive: Date(timeIntervalSince1970: 0))
+    }
+
+    /// The share of offices whose nearest other office is of their own repository.
+    private static func neighbourly(_ s: Station) -> Double {
+        let offices = s.rooms.values.filter { !$0.key.hasPrefix("kind:") }
+        func gap(_ a: Room, _ b: Room) -> Int { a.cells.flatMap { c in b.cells.map { abs($0.x - c.x) + abs($0.y - c.y) } }.min() ?? .max }
+        let same = offices.filter { r in
+            offices.filter { $0 !== r }.min { (gap(r, $0), $0.key) < (gap(r, $1), $1.key) }?.repo == r.repo
+        }
+        return Double(same.count) / Double(max(1, offices.count))
     }
 
     private static func cells(_ list: [Cell]) -> String { list.map { "\($0.x),\($0.y)" }.joined(separator: " ") }

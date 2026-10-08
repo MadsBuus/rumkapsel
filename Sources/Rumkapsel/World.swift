@@ -430,7 +430,7 @@ final class World {
                 StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
                 self?.transitions.append((r, t))
             }
-            fleet.load()
+            fleet.load(alone: peerSnapshots.isEmpty)
             // Last run's answers come back with the floor, so the station stands whole from the first
             // frame and the asks going out are corrections rather than the thing it is waiting for.
             if waitsForGitHub { github.loadKnowledge() }

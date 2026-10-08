@@ -9,7 +9,7 @@ enum ColorDump {
     /// are five repositories on it.
     static func run() -> Never {
         let fleet = Fleet()
-        fleet.load()
+        fleet.load(alone: false)
         let repos = fleet.repoColors.keys.sorted()
         print("\(repos.count) repositories over \(Colors.repos.count) palette slots")
         for r in repos {
