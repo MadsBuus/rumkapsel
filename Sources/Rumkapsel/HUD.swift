@@ -8,44 +8,25 @@ import SpriteKit
 enum LoungeOrder: CaseIterable {
     case gym, bed, read, shower, toilet
 
-    /// A flat pixel glyph, nine across and seven down: a barbell, a bed, a book, a nozzle, a bowl.
-    var glyph: [String] {
+    /// The system symbol drawn for it: a dumbbell, a bed, a book, a shower, a toilet.
+    var symbol: String {
         switch self {
-        case .gym: return [".#.....#.",
-                           "##.....##",
-                           "##.....##",
-                           "#########",
-                           "##.....##",
-                           "##.....##",
-                           ".#.....#."]
-        case .bed: return ["#........",
-                           "#........",
-                           "#.##.....",
-                           "#########",
-                           "#.......#",
-                           "#.......#",
-                           "#.......#"]
-        case .read: return ["....#....",
-                            ".###.###.",
-                            "#..#.#..#",
-                            "#..#.#..#",
-                            "#..#.#..#",
-                            "#..#.#..#",
-                            ".####.###"]
-        case .shower: return ["....#....",
-                              "....#....",
-                              "..#####..",
-                              ".#######.",
-                              ".........",
-                              ".#..#..#.",
-                              ".#..#..#."]
-        case .toilet: return ["###......",
-                              "#.#......",
-                              "#.#######",
-                              "#.#.....#",
-                              "#.######.",
-                              "#..#..#..",
-                              "####..###"]
+        case .gym: return "dumbbell.fill"
+        case .bed: return "bed.double.fill"
+        case .read: return "book.fill"
+        case .shower: return "shower.fill"
+        case .toilet: return "toilet.fill"
+        }
+    }
+
+    /// What picking it sends the minion to do, said in the bubble while the cursor is on it.
+    var words: String {
+        switch self {
+        case .gym: return "work out in the gym"
+        case .bed: return "take a nap"
+        case .read: return "read on the couch"
+        case .shower: return "take a shower"
+        case .toilet: return "go to the toilet"
         }
     }
 
@@ -60,15 +41,25 @@ enum LoungeOrder: CaseIterable {
         }
     }
 
+    /// The symbol in white on clear, drawn well above its size on screen so it stays sharp; the sprite tints it.
     var texture: SKTexture {
-        let rows = glyph
-        let w = rows[0].count, h = rows.count
-        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        for (y, row) in rows.enumerated() { for (x, ch) in row.enumerated() where ch == "#" { ctx.fill(CGRect(x: x, y: h - 1 - y, width: 1, height: 1)) } }
-        let t = SKTexture(cgImage: ctx.makeImage()!)
-        t.filteringMode = .nearest
+        let side: CGFloat = 96
+        let config = NSImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: words)?.withSymbolConfiguration(config) else {
+            return SKTexture()
+        }
+        let drawn = NSImage(size: NSSize(width: side, height: side), flipped: false) { r in
+            let s = image.size, k = min(r.width / s.width, r.height / s.height)
+            let fit = NSRect(x: (r.width - s.width * k) / 2, y: (r.height - s.height * k) / 2, width: s.width * k, height: s.height * k)
+            image.draw(in: fit)
+            NSColor.white.set()
+            fit.fill(using: .sourceAtop)
+            return true
+        }
+        var rect = NSRect(x: 0, y: 0, width: side, height: side)
+        guard let cg = drawn.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return SKTexture() }
+        let t = SKTexture(cgImage: cg)
+        t.filteringMode = .linear
         return t
     }
 }
@@ -132,7 +123,7 @@ extension StationController {
         }
     }
 
-    static let iconSize = CGSize(width: 18, height: 14)
+    static let iconSize = CGSize(width: 20, height: 20)
     static let iconGap: CGFloat = 8
 
     /// Whether you may send this one somewhere: nothing but rest in hand and not at work, as with the idle
@@ -200,12 +191,12 @@ extension StationController {
         guard p.z > 0, p.z < 1 else { hide(); return }
         let iw = Self.iconSize.width, ih = Self.iconSize.height, gap = Self.iconGap
         let rowWidth = iw * CGFloat(bubbleIcons.count) + gap * CGFloat(bubbleIcons.count - 1)
-        bubbleLabel.text = m.words
         bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) + ih + 8)
         bubbleLabel.isHidden = false
         let allowed = canOrder(m)
         bubbleLock.lock(); let cursor = bubbleCursor; bubbleLock.unlock()
         var rects: [CGRect] = []
+        var picking: LoungeOrder?
         for (i, icon) in bubbleIcons.enumerated() {
             let x = CGFloat(p.x) - rowWidth / 2 + iw / 2 + CGFloat(i) * (iw + gap)
             icon.position = CGPoint(x: x, y: CGFloat(p.y) + ih / 2)
@@ -215,7 +206,9 @@ extension StationController {
             icon.color = under ? LoungeOrder.allCases[i].color.lighter(0.35) : LoungeOrder.allCases[i].color
             icon.alpha = allowed ? 1 : 0.3
             icon.isHidden = false
+            if under { picking = LoungeOrder.allCases[i] }
         }
+        bubbleLabel.text = picking?.words ?? m.words
         let f = bubbleLabel.frame.union(CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih)).insetBy(dx: -8, dy: -5)
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
@@ -403,7 +396,13 @@ extension StationController {
                 // Grey without a network, amber while looking, green once someone answers.
                 let n = world.peerSnapshots.count
                 let up = peers.networkUp
-                let status = !up ? "no network" : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range" : "nobody in range"
+                let near = peers.nearby
+                let status = !up ? "no network"
+                    : peers.blocked ? "not allowed on the local network"
+                    : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range"
+                    : near.count == 1 ? "\(near[0]) is near but not answering"
+                    : near.count > 1 ? "\(near.count) stations near, none answering"
+                    : "nobody in range"
                 shareLabel.text = "sharing as \(peers.name) · " + status
                 shareDot.color = !up ? NSColor(rgb: (0.45, 0.46, 0.5)) : n > 0 ? NSColor(rgb: (0.35, 0.85, 0.5)) : NSColor(rgb: (0.9, 0.7, 0.3))
                 shareLabel.position = CGPoint(x: hud.size.width - 14 - spaceLogCorner, y: hud.size.height - 14)

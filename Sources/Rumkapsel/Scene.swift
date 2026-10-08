@@ -338,7 +338,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
-    /// The bubble's row of orders, one glyph each, in `LoungeOrder` order.
+    /// The bubble's row of orders, one symbol each, in `LoungeOrder` order.
     var bubbleIcons: [SKSpriteNode] = []
     /// Decon's hatch light per station, for the blink and the puff when something comes through.
     var hatchLights: [String: SCNNode] = [:]
@@ -838,10 +838,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: peers
 
+    /// Sharing started, stopped or renamed. Already sharing under the same name, it carries on: a restart
+    /// drops every peer's connection.
     func applySharing() {
         let cfg = ConfigStore.shared.current
+        let name = cfg.shareName.isEmpty ? NSUserName() : cfg.shareName
         if cfg.shareOnLAN {
-            peers.start(name: cfg.shareName.isEmpty ? NSUserName() : cfg.shareName)
+            if peers.isRunning, peers.name == name { return }
+            peers.start(name: name)
         } else { peers.stop() }
     }
 
@@ -871,7 +875,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             knowledge = world.repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
             if let p = cfg.project { board = github.projectKnowledge(owner: p.owner, number: p.number) }
         }
-        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board)
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board, twoWay: true)
     }
 
     /// A peer's claim lands on our work station. The model merges it; the scene shows the result and
@@ -1360,9 +1364,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if sim == nil, clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 
-    /// Settings changed: rebuild the fleet from scratch on the next scan.
-    func applyConfigChange() {
+    /// Settings changed: rebuild the fleet from scratch on the next scan. A new share name changes nothing
+    /// on the floor, so it leaves the station standing.
+    func applyConfigChange(from old: AppConfig, to new: AppConfig) {
         applySharing()
+        var renamed = old
+        renamed.shareName = new.shareName
+        guard renamed != new else { return }
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
             if Looks.theme != cfg.theme {

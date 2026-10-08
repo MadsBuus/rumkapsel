@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
 
         buildMenu()
-        ConfigStore.shared.onChange = { [weak self] _ in self?.controller.applyConfigChange() }
+        ConfigStore.shared.onChange = { [weak self] old, new in self?.controller.applyConfigChange(from: old, to: new) }
         // `kill -USR1 <pid>` writes everything the station is doing to station.log.
         signal(SIGUSR1, SIG_IGN)
         dumpSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)

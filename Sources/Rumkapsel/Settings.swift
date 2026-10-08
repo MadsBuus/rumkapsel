@@ -85,7 +85,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onChange(of: model.config) { model.commit() }
+        .onChange(of: model.config) { old, new in old.shareName != new.shareName ? model.commitSoon() : model.commit() }
     }
 
     // MARK: Repositories

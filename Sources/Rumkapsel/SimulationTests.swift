@@ -288,7 +288,7 @@ enum SimulationTests {
             m.showering = true
             expect(sim.visitBath(m, station: station), "off to the shower")
             expect(step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil }), "in it")
-            expect(!sim.start(m, .rest(place: .lounge, home: m.home.key, name: m.home.name, asleep: false)) && m.bathing,
+            expect(!sim.start(m, .rest(place: .lounge, home: m.home.key, office: m.home.name, yours: true, asleep: false)) && m.bathing,
                    "a plain start does not cut into the visit, and nothing is left waiting on the body")
             guard let carry = sim.world.carryToDeck(station: station, repo: "web", numbers: [440]).first else { return expect(false, "a carry") }
             sim.carry(carry, onDone: {})

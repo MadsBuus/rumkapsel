@@ -350,7 +350,8 @@ final class Simulation<B: Body> {
             target = t
         }
         m.place = place
-        start(m, .rest(place: place, home: m.home.key, name: m.home.name, asleep: m.activity == .sleeping))
+        start(m, .rest(place: place, home: m.home.key, office: station.rooms[m.home.key]?.name ?? m.home.name,
+                       yours: !m.isCrew && !m.isPeer, asleep: m.activity == .sleeping))
         m.path = route(m, to: target)
         // No way found and far off: walk straight rather than stand still or slide.
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
