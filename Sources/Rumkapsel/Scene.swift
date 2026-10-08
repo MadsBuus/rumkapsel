@@ -338,7 +338,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
-    /// The bubble's row of orders, one glyph each, in `LoungeOrder` order.
+    /// The bubble's row of orders, one symbol each, in `LoungeOrder` order.
     var bubbleIcons: [SKSpriteNode] = []
     /// Decon's hatch light per station, for the blink and the puff when something comes through.
     var hatchLights: [String: SCNNode] = [:]

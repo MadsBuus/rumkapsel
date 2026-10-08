@@ -342,10 +342,11 @@ struct Command {
     }
 
     /// Where a minion should be when it has no job: asleep in the dorm, at work in its office, or just there.
-    static func rest(place: Place, home: String, name: String, asleep: Bool) -> Command {
+    /// `office` is the office's own name; only one of yours waits for you, a teammate's is just at work.
+    static func rest(place: Place, home: String, office: String, yours: Bool, asleep: Bool) -> Command {
         if asleep && place == .quarters { return Command(kind: .sleep, words: Words.current.asleep) }
         if place == .room(home), !home.hasPrefix("kind:") {
-            return Command(kind: .work(office: home), words: "waiting for you in \(name)")
+            return Command(kind: .work(office: home), words: (yours ? "waiting for you in " : "at work in ") + office)
         }
         return Command(kind: .goTo(place: place), words: "heading for \(place.words)")
     }
