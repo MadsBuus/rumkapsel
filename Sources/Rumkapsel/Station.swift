@@ -508,6 +508,29 @@ final class Station {
         (0..<w).flatMap { x in (0..<h).map { y in Cell(x: x, y: y) } }
     }
 
+    /// The biggest rectangle made only of these cells, by its corners: the floor a room's writing may
+    /// cover without running onto its neighbour's. The frontmost wins a tie. Nil when there are no cells.
+    static func largestRect(in cells: Set<Cell>) -> (lo: Cell, hi: Cell)? {
+        guard let x0 = cells.map(\.x).min(), let x1 = cells.map(\.x).max(),
+              let y0 = cells.map(\.y).min(), let y1 = cells.map(\.y).max() else { return nil }
+        // Each column's run of cells reaching back from the row in hand.
+        var up = [Int](repeating: 0, count: x1 - x0 + 1)
+        var best: (area: Int, lo: Cell, hi: Cell)?
+        for y in y0...y1 {
+            for x in x0...x1 { up[x - x0] = cells.contains(Cell(x: x, y: y)) ? up[x - x0] + 1 : 0 }
+            for a in 0..<up.count {
+                var tall = Int.max
+                for b in a..<up.count {
+                    tall = min(tall, up[b])
+                    if tall == 0 { break }
+                    let area = (b - a + 1) * tall
+                    if area >= (best?.area ?? 1) { best = (area, Cell(x: x0 + a, y: y - tall + 1), Cell(x: x0 + b, y: y)) }
+                }
+            }
+        }
+        return best.map { ($0.lo, $0.hi) }
+    }
+
     init(name: String) {
         self.name = name
     }

@@ -120,16 +120,17 @@ final class ConfigStore {
     static let shared = ConfigStore()
     private let lock = NSLock()
     private var value = AppConfig.load()
-    var onChange: ((AppConfig) -> Void)?
+    var onChange: ((_ old: AppConfig, _ new: AppConfig) -> Void)?
 
     var current: AppConfig { lock.lock(); defer { lock.unlock() }; return value }
 
     func update(_ f: (inout AppConfig) -> Void) {
         lock.lock()
+        let old = value
         var c = value; f(&c)
         let changed = c != value
         value = c
         lock.unlock()
-        if changed { c.save(); onChange?(c) }
+        if changed { c.save(); onChange?(old, c) }
     }
 }

@@ -607,7 +607,8 @@ extension StationController {
             node.eulerAngles.y = yaw
             let y = node.position.y > 0 ? Double(node.position.y) : 0.01
             node.position = v3(center.x, y, center.y)
-            node.renderingOrder = 10
+            // After the floor, text included: the order is each node's own, and the text is a child.
+            node.enumerateHierarchy { n, _ in n.renderingOrder = 10 }
             labelRoot.addChildNode(node)
             floorLabels.append((node, yaw))
         }
@@ -719,6 +720,28 @@ extension StationController {
                 let key = roomKey(station, room)
                 var node: SCNNode?
 
+                // Whose office it is, stamped in the front row's right-hand corner, no wider than the floor
+                // that row has there: the whole name if it reads at that size, else its first word.
+                var stamped: Set<Cell> = []
+                if let who = world.occupant(of: key) {
+                    let maxYRow = room.cells.map(\.y).max()!
+                    let cx = room.cells.filter { $0.y == maxYRow }.map(\.x).max()!
+                    var run = 0
+                    while room.cells.contains(Cell(x: cx - run, y: maxYRow)) { run += 1 }
+                    let free = Double(run) - 0.16
+                    let words = [who, who.split(separator: " ").first.map(String.init) ?? who]
+                    let fits = words.map { w in (w, min(0.3, 0.3 * free / floorSign(w, color: .clear, size: 0.3).width)) }
+                    let (word, fit) = fits.first { $0.1 >= 0.17 } ?? fits.last!
+                    let sign = floorSign(word, color: StationController.inkOnTile, size: fit)
+                    sign.node.position.y = 0.012
+                    let corner = SIMD2(Double(cx) + 0.42 - sign.width / 2, Double(maxYRow) + 0.42 - sign.height / 2)
+                    add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
+                    reserve(key, corner, SIMD2(sign.width / 2, sign.height / 2))
+                    sign.node.name = "room:" + key
+                    let from = Int((Double(cx) + 0.42 - sign.width + 0.5).rounded(.down))
+                    stamped = Set((from...cx).map { Cell(x: $0, y: maxYRow) })
+                }
+
                 for side in [Side.south, .north, .east, .west] {
                     let along = (side == .south || side == .north) ? width + 1.5 : depth + 1.5
                     let lines = max(1, min(2, Int((Double(text.count) * charW / along).rounded(.up))))
@@ -740,11 +763,12 @@ extension StationController {
                     node = label.node
                     break
                 }
-                if node == nil {
-                    // Boxed in: cut the name into the tile itself, shrunk until it fits the floor.
-                    let horizontal = width >= depth
-                    let along = (horizontal ? width : depth) - 0.3
-                    let across = (horizontal ? depth : width) - 0.3
+                if node == nil, let r = Station.largestRect(in: Set(room.cells).subtracting(stamped)) {
+                    // Boxed in: cut the name into the room's biggest clear rectangle, shrunk until it fits.
+                    let rw = Double(r.hi.x - r.lo.x + 1), rd = Double(r.hi.y - r.lo.y + 1)
+                    let horizontal = rw >= rd
+                    let along = (horizontal ? rw : rd) - 0.3
+                    let across = (horizontal ? rd : rw) - 0.3
                     var size = size * 0.85
                     var lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
                     let fitWidth = 3 * along / (Double(text.count) * 0.5)          // three lines at most
@@ -752,8 +776,7 @@ extension StationController {
                     size = max(0.16, min(size, fitWidth, fitDepth))
                     lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
                     let label = floorText(text, color: StationController.inkOnTile, size: size, maxWidth: along, lines: lines, bold: true)
-                    let maxYRow = room.cells.map(\.y).max()!
-                    let anchor = room.cells.filter { $0.y == maxYRow }.min { $0.x < $1.x }!
+                    let anchor = Cell(x: r.lo.x, y: r.hi.y)
                     let center = horizontal
                         ? SIMD2(ox + Double(anchor.x) - 0.35 + label.width / 2, oz + Double(anchor.y) + 0.35 - label.height / 2)
                         : SIMD2(ox + Double(anchor.x) - 0.35 + label.height / 2, oz + Double(anchor.y) + 0.35 - label.width / 2)
@@ -762,16 +785,6 @@ extension StationController {
                     let half = horizontal ? SIMD2(label.width / 2, label.height / 2) : SIMD2(label.height / 2, label.width / 2)
                     reserve(key, center - SIMD2(ox, oz), half)
                     node = label.node
-                }
-                if let who = world.occupant(of: key) {
-                    let sign = floorSign(who, color: StationController.inkOnTile, size: 0.3)
-                    sign.node.position.y = 0.012
-                    let maxYRow = room.cells.map(\.y).max()!
-                    let cx = room.cells.filter { $0.y == maxYRow }.map(\.x).max()!
-                    let corner = SIMD2(Double(cx) + 0.42 - sign.width / 2, Double(maxYRow) + 0.42 - sign.height / 2)
-                    add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
-                    reserve(key, corner, SIMD2(sign.width / 2, sign.height / 2))
-                    sign.node.name = "room:" + key
                 }
                 guard let node else { continue }
                 node.name = "room:" + key
