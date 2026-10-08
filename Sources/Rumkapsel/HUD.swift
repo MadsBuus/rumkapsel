@@ -403,7 +403,13 @@ extension StationController {
                 // Grey without a network, amber while looking, green once someone answers.
                 let n = world.peerSnapshots.count
                 let up = peers.networkUp
-                let status = !up ? "no network" : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range" : "nobody in range"
+                let near = peers.nearby
+                let status = !up ? "no network"
+                    : peers.blocked ? "not allowed on the local network"
+                    : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range"
+                    : near.count == 1 ? "\(near[0]) is near but not answering"
+                    : near.count > 1 ? "\(near.count) stations near, none answering"
+                    : "nobody in range"
                 shareLabel.text = "sharing as \(peers.name) · " + status
                 shareDot.color = !up ? NSColor(rgb: (0.45, 0.46, 0.5)) : n > 0 ? NSColor(rgb: (0.35, 0.85, 0.5)) : NSColor(rgb: (0.9, 0.7, 0.3))
                 shareLabel.position = CGPoint(x: hud.size.width - 14 - spaceLogCorner, y: hud.size.height - 14)

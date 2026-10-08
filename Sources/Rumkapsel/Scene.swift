@@ -871,7 +871,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             knowledge = world.repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
             if let p = cfg.project { board = github.projectKnowledge(owner: p.owner, number: p.number) }
         }
-        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board)
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board, twoWay: true)
     }
 
     /// A peer's claim lands on our work station. The model merges it; the scene shows the result and

@@ -55,6 +55,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSBonjourServices</key><array><string>_rumkapsel._tcp</string></array>
 </dict></plist>
 PLIST
+# Signed with the same certificate every time, so macOS knows each build as the same app and the Local
+# Network allowance holds. Without a certificate, every build is a stranger that starts out blocked.
+SIGNER=$(security find-identity -v -p codesigning | grep -E '"(Developer ID Application|Apple Development):' | head -1 | sed 's/.*"\(.*\)"/\1/')
+codesign --force --deep --timestamp=none --sign "${SIGNER:--}" "$APP" 2>/dev/null || echo "signing failed: macOS may keep this build off the local network"
 echo "built $APP"
 # Asked for by hand, so it comes to the front: a build you waited for is one you want to look at. Any
 # rumkapsel already running goes first, whichever checkout it came from: `open` would only bring that one
