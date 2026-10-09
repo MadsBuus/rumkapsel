@@ -490,10 +490,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
         view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
-        view.onDoubleClick = { [weak self] node in
-            let n = node?.name
+        // A double-click pokes a minion and opens an office, its crate or a rocket; anywhere else on the floor it
+        // walks you in there.
+        view.onDoubleClick = { [weak self] node, floor in
+            let n = node?.name ?? ""
             self?.enqueue {
-                if let n, n.hasPrefix("minion:") { self?.poke(minionId: String(n.dropFirst(7))) } else { self?.open(named: n) }
+                if n.hasPrefix("minion:") { self?.poke(minionId: String(n.dropFirst(7))) }
+                else if ["room:", "box:", "rocket:"].contains(where: n.hasPrefix) { self?.open(named: n) }
+                else if let floor, self?.walker == nil { self?.stepIn(at: floor) }
             }
         }
         view.onClick = { [weak self] node in

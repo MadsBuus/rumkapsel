@@ -111,13 +111,19 @@ extension StationController {
     }
 
     /// Down into the station where the view is looking, or onto the crane behind the minion it follows.
-    func stepIn() {
+    /// Down at a point on the floor, given one (a double-click on it), looking the way the view looks.
+    func stepIn(at point: SIMD2<Double>? = nil) {
         guard walker == nil, let station = cameraNode.camera else { return }
         let focus = SIMD2(Double(rig.position.x), Double(rig.position.z))
         let viewYaw = Double(rig.eulerAngles.y)
-        let followed = following.flatMap { minions[$0] }
+        let followed = point == nil ? following.flatMap { minions[$0] } : nil
         var start: (station: Station, pos: SIMD2<Double>, yaw: Double)?
-        if let m = followed, let st = fleet.stations[m.station] {
+        if let point, let st = fleet.stations.values.min(by: { simd_distance(point, $0.offset) < simd_distance(point, $1.offset) }),
+           let cell = st.nearestFloor(to: point - st.offset) {
+            let q = point - st.offset, middle = SIMD2(Double(cell.x), Double(cell.y))
+            let onIt = Cell(x: Int(q.x.rounded()), y: Int(q.y.rounded())) == cell && fits(q, from: middle, in: st)
+            start = (st, (onIt ? q : middle) + st.offset, viewYaw)
+        } else if let m = followed, let st = fleet.stations[m.station] {
             start = (st, SIMD2(Double(m.node.position.x), Double(m.node.position.z)), m.smoothFacing + .pi)
         } else {
             start = hallwayStart(near: focus, facing: viewYaw)

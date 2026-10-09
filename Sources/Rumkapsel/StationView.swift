@@ -6,7 +6,8 @@ import SceneKit
 /// SCNView that reports hovers, double-clicks and trackpad gestures.
 final class StationView: SCNView {
     var onHover: ((SCNNode?) -> Void)?
-    var onDoubleClick: ((SCNNode?) -> Void)?
+    /// A double-click: what is under it, and where on the floor it fell, in the scene.
+    var onDoubleClick: ((SCNNode?, SIMD2<Double>?) -> Void)?
     var onZoom: ((Double, NSPoint?) -> Void)?
     var onRotate: ((Double, NSPoint?) -> Void)?
     var onPan: ((Double, Double) -> Void)?
@@ -121,13 +122,24 @@ final class StationView: SCNView {
     }
 
     override func mouseExited(with event: NSEvent) { onHover?(nil) }
+
+    /// Where the line of sight through a point of the view meets the floor.
+    private func floorPoint(at p: NSPoint) -> SIMD2<Double>? {
+        let near = unprojectPoint(SCNVector3(p.x, p.y, 0)), far = unprojectPoint(SCNVector3(p.x, p.y, 1))
+        let a = SIMD3(Double(near.x), Double(near.y), Double(near.z)), b = SIMD3(Double(far.x), Double(far.y), Double(far.z))
+        guard abs(b.y - a.y) > 1e-9 else { return nil }
+        let t = -a.y / (b.y - a.y)
+        guard t >= 0 else { return nil }
+        let hit = a + (b - a) * t
+        return SIMD2(hit.x, hit.z)
+    }
     override func rightMouseDown(with event: NSEvent) { onContextMenu?(node(at: convert(event.locationInWindow, from: nil)), event) }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         dragAllowed = p.y < bounds.height - 32
         downPoint = p
-        if event.clickCount == 2 { onDoubleClick?(node(at: p)) }
+        if event.clickCount == 2 { onDoubleClick?(node(at: p), floorPoint(at: p)) }
         super.mouseDown(with: event)
     }
 
