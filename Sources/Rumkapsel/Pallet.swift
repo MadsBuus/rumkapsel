@@ -425,7 +425,7 @@ extension Simulation {
             advance(m)
             return .spent
         case .approach:
-            guard atArmsLength(m, of: point, from: RocketGeometry.facing(side: side), dt: dt) else { return .spent }
+            guard atArmsLength(m, of: point, from: RocketGeometry.facing(side: side), square: true, dt: dt) else { return .spent }
             advance(m)
             return .spent
         default:
@@ -464,8 +464,8 @@ extension Simulation {
             let working: Int? = { if case .weld(_, _, let side)? = welder?.current?.kind { return side }; return nil }()
             guard r.welding, clock >= r.seamAt, let station = fleet.stations[r.station],
                   let side = working ?? weldSide(station: station, repo: r.repo) else { continue }
-            // The torch on the ring being welded, on the welder's side or one either side of it: within reach.
-            r.seam = ring * 6 + (side + Int.random(in: -1...1) + 6) % 6
+            // The torch on the ring being welded, on the panel in front of the welder.
+            r.seam = ring * 6 + side
             r.seamAt = clock + 0.9
         }
     }
