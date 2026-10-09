@@ -8,7 +8,8 @@ enum Suit {
     private static var made: [Bool: [SCNMaterial]] = [:]
 
     static func key(_ badge: NSColor, crew: Bool) -> String { WallPanel.key(badge) + (crew ? "|crew" : "") }
-    private static func base(crew: Bool) -> NSColor { crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : Palette.minion }
+    /// A light grey, so the lights leave its sunlit faces white and its others shaded, not one flat white.
+    private static func base(crew: Bool) -> NSColor { crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : NSColor(rgb: (0.8, 0.8, 0.78)) }
 
     /// Where the repository's patch sits on the front face, as fractions across and down from the top of the head.
     static let patch = (x0: 0.64, y0: 0.36, x1: 0.8, y1: 0.4)
