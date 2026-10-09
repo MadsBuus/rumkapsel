@@ -1,5 +1,5 @@
-// Fine detail laid over the station's flat colours: deck plates and their seams on the floors, a crate's frame
-// and corner irons, the rocket's plating. Each is a grey image multiplied over a surface's colour, nearly white
+// Fine detail laid over the station's flat colours: deck plates and their seams on the floors, a crate's case,
+// the rocket's plating. Each is a grey image multiplied over a surface's colour, nearly white
 // on average, so from a distance the colour is what it always was and the detail is there when you are close.
 // Baked into Resources/Detail by `--bake-detail`.
 
@@ -9,11 +9,20 @@ import simd
 
 enum Detail {
     /// The kinds of surface with a detail of their own.
-    enum Kind: String, CaseIterable { case hallway, office, quarters, yard, bay, airlock, crate, hull }
+    enum Kind: String, CaseIterable { case hallway, office, quarters, yard, bay, airlock, hull, pod, hardcase, lid }
 
     static let size = 512
     /// What a detail averages to, so a surface keeps its colour from afar.
     static let mean = 0.96
+
+    /// The crate looks, one picked for each task by its number, so a row of crates is a mix and a crate keeps its own.
+    static let crates: [Kind] = [.pod, .hardcase, .lid, .hull]
+    static func crate(for number: Int?) -> Kind {
+        guard let number else { return .pod }
+        var h = UInt64(truncatingIfNeeded: number) &* 0x9e3779b97f4a7c15
+        h ^= h >> 31
+        return crates[Int(h % UInt64(crates.count))]
+    }
 
     static func kind(of floor: Floor) -> Kind {
         switch floor {
@@ -165,22 +174,41 @@ enum Detail {
             }
             each { i, x, y in if seam(x, y, cells: 1) < 0.004 { v[i] *= 0.72 } }
             wear(0.08)
-        case .crate:
-            // A frame round the face, corner irons, a recessed middle with stencilled marks, edges worn bright.
+        case .pod:
+            // A cargo pod: chamfered edges, two ribs across, recessed handle slots, a vent grid.
             each { i, x, y in
                 let s = seam(x, y, cells: 1)
-                if s < 0.012 { v[i] *= 1.08 }
-                else if s < 0.07 { v[i] *= 1.02 }
-                else if s < 0.078 { v[i] *= 0.82 }
-                let cx = min(x, 1 - x), cy = min(y, 1 - y)
-                if cx < 0.16, cy < 0.16, cx + cy < 0.2 { v[i] *= 0.8 }
+                if s < 0.03 { v[i] *= 1.07 } else if s < 0.037 { v[i] *= 0.8 }
+                for ry in [0.45, 0.53] where y > ry && y < ry + 0.02 { v[i] *= y < ry + 0.01 ? 1.06 : 0.86 }
+                for hx in [0.12, 0.7] where x > hx && x < hx + 0.18 && y > 0.16 && y < 0.24 {
+                    v[i] *= (x - hx) < 0.012 || (hx + 0.18 - x) < 0.012 ? 0.8 : 0.66
+                }
+                let gx = (x - 0.64) / 0.04, gy = (y - 0.68) / 0.05
+                if gx > 0, gx < 5, gy > 0, gy < 3 {
+                    let fx = gx - floor(gx) - 0.5, fy = gy - floor(gy) - 0.5
+                    if fx * fx + fy * fy < 0.07 { v[i] *= 0.62 }
+                }
             }
-            for _ in 0..<5 {
-                let x0 = 0.2 + r.next() * 0.35, y0 = 0.62 + r.next() * 0.16, w = 0.05 + r.next() * 0.2
-                each { i, x, y in if x > x0, x < x0 + w, y > y0, y < y0 + 0.022 { v[i] *= 0.84 } }
+            wear(0.06)
+        case .hardcase:
+            // A hard case: a fine seam frame, two latch slots along the top, a label plate, a chevron strip.
+            each { i, x, y in
+                let s = seam(x, y, cells: 1)
+                if abs(s - 0.05) < 0.004 { v[i] *= 0.8 }
+                for lx in [0.25, 0.65] where x > lx && x < lx + 0.1 && y > 0.08 && y < 0.14 { v[i] *= 0.62 }
+                if x > 0.55, x < 0.86, y > 0.3, y < 0.42 { v[i] *= abs(min(x - 0.55, 0.86 - x, y - 0.3, 0.42 - y)) < 0.006 ? 0.86 : 1.08 }
+                if y > 0.8, y < 0.88, x > 0.08, x < 0.92 { v[i] *= Int((x + y) * 22) % 2 == 0 ? 0.78 : 1.06 }
             }
-            rivets(cells: 1, inset: 0.045, radius: 0.012, depth: 0.3)
-            wear(0.08)
+            wear(0.06)
+        case .lid:
+            // A lid over a body: the seam between them, the lid's lip a shade lighter, two grip recesses below it.
+            each { i, x, y in
+                if y < 0.3 { v[i] *= 1.05 }
+                if abs(y - 0.3) < 0.006 { v[i] *= 0.7 }
+                for gx in [0.18, 0.64] where x > gx && x < gx + 0.18 && y > 0.36 && y < 0.42 { v[i] *= 0.68 }
+                if seam(x, y, cells: 1) < 0.01 { v[i] *= 0.84 }
+            }
+            wear(0.07)
         case .hull:
             // The rocket's own plating, its colour turned to greys.
             let maps = Plating.maps(seed: 21)
@@ -201,6 +229,9 @@ enum Detail {
         let softness = kind == .hull ? 0.45 : 0.75
         return v.map { min(1.15, 1 - (1 - $0 / avg * mean) * softness) }
     }
+
+    /// A kind's detail drawn here and now, not loaded: for trying a new one before it is baked.
+    static func fresh(_ kind: Kind) -> NSImage { picture(make(kind)) }
 
     private static func picture(_ grey: [Double]) -> NSImage {
         let n = size

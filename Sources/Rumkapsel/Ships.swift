@@ -198,6 +198,8 @@ enum RocketGeometry {
     static var hullHeight: Double { height * 0.4 }
     /// How high the cradle holds a tip with no lifter under it.
     static let cradleTop = 0.3
+    /// How much of the hull one copy of its plating covers, along and up.
+    static let platingSpan = 0.7
     /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
     static func facing(side k: Int) -> SIMD2<Double> {
         let a = .pi / 2 + Double(k) * .pi / 3

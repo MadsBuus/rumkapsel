@@ -10,6 +10,12 @@ struct BerthLight: Equatable {
 }
 
 extension StationController {
+    /// What a crate's tag says: the task's title and whose work it is, as GitHub and the board said.
+    func crateWords(repo: String?, number: Int?) -> (title: String?, who: String?) {
+        guard let repo, let number, let work = github.work(repo: repo, number: number) else { return (nil, nil) }
+        return (work.title.isEmpty ? nil : work.title, work.author.map(world.crewName))
+    }
+
     /// Tells each station what is standing on its floor, so walks thread between the props.
     func refreshObstacles() {
         var blocked: [String: Set<Cell>] = [:]
@@ -237,12 +243,15 @@ extension StationController {
                     let blink = checks == "pending" && !closed
                     // What a standing crate cannot be re-lit into, and what it can.
                     let mine = world.isMine(office: key)   // strapped in white from the moment it is packed, like yours in the rows
-                    let built = "\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)"
+                    let task = world.taskNumber(room) ?? pr?.number
+                    let words = crateWords(repo: room.repo, number: task)
+                    let built = "\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)|\(words.title ?? "")|\(words.who ?? "")"
                     signatures[key] = "package"
                     var pkg = packages[key]
                     if let p = pkg, p.parent == nil || packageBuilt[key] != built { p.removeFromParentNode(); packages[key] = nil; pkg = nil }
                     if pkg == nil {
-                        let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink, mine: mine)
+                        let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink, mine: mine,
+                                              number: task, title: words.title, who: words.who)
                         p.name = "box:" + key
                         markerRoot.addChildNode(p)
                         packages[key] = p
@@ -363,7 +372,9 @@ extension StationController {
                     let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight : NSColor(rgb: (0.3, 0.32, 0.38))
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine)
+                    let words = crateWords(repo: slot.repo, number: slot.number)
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine, number: slot.number,
+                                            title: words.title, who: words.who)
                     if slot.small { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
