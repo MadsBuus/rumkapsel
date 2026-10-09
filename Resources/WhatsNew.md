@@ -1,3 +1,5 @@
-## What's new in 0.60
+## What's new in 0.61
 
-- Walking no longer stutters when the floor changes: the hull is rebuilt in a fraction of the time
+- Walking, the walls are ship's panelling, a panel of its own for hallways, offices, living quarters and the yard
+- The welder faces the seam it welds: the torch stays on the panel in front of it
+- A frame counter in the corner: frames a second, the rate it is held to, and the slowest frame
