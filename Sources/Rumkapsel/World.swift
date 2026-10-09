@@ -501,9 +501,12 @@ final class World {
         // One workspace, one office. An office is keyed by its branch until GitHub names a pull request
         // for it and then by the number, and the room under the old key was being left where it stood —
         // so a workspace with a pull request open had two offices on the floor, both of them live.
+        // A merged office waiting for its haul is the workspace's last piece of work, not its office: the
+        // work after it has one of its own beside it.
         for station in fleet.stations.values {
             var byWorkspace: [String: [Room]] = [:]
             for room in station.rooms.values where !room.key.hasPrefix("kind:") {
+                if stage(office: room.key, repo: room.repo).map({ $0 >= .stored }) == true { continue }
                 if let w = room.worktree { byWorkspace[w, default: []].append(room) }
             }
             for (_, rooms) in byWorkspace where rooms.count > 1 {
