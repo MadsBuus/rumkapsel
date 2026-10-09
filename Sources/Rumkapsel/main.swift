@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--bake-plating") { Plating.bake(FlightCraft.Materials.families) }
         if args.contains("--bake-walls") { Bulkhead.bake() }
         if args.contains("--bake-detail") { Detail.bake() }
+        if args.contains("--bake-suits") { Suit.bake() }
         // One still of the flight rocket, for working on its look.
         if let i = args.firstIndex(of: "--look-dev"), args.count > i + 1 { LookDev.run(out: args[i + 1], shot: args.count > i + 2 ? args[i + 2] : "hull") }
         if let i = args.firstIndex(of: "--dump-floor") { FloorDump.run(theme: args.count > i + 1 ? args[i + 1] : "classic") }

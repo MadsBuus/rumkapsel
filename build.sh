@@ -30,6 +30,7 @@ cp -R .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sp
 [ -d Resources/Plating ] && cp -R Resources/Plating "$APP/Contents/Resources/"
 [ -d Resources/Walls ] && cp -R Resources/Walls "$APP/Contents/Resources/"
 [ -d Resources/Detail ] && cp -R Resources/Detail "$APP/Contents/Resources/"
+[ -d Resources/Suits ] && cp -R Resources/Suits "$APP/Contents/Resources/"
 # The commit this build came from, so the running app can say which one it is.
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 [ -n "$(git status --porcelain 2>/dev/null)" ] && SHA="$SHA+"

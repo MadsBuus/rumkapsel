@@ -1,35 +1,62 @@
-// What a minion's box wears: a suit drawn on its faces, in the body's own white or the crew's grey.
+// What a minion's box wears: a suit drawn on its faces, in the body's own white or the crew's grey. The faces are
+// baked into Resources/Suits by `--bake-suits`; the repository's colour is a patch the minion wears over them.
 
 import AppKit
 import SceneKit
 
 enum Suit {
-    private static var made: [String: [SCNMaterial]] = [:]
-    /// The back and side faces, which carry no badge: one pair per base colour.
-    private static var plain: [Bool: (back: SCNMaterial, side: SCNMaterial)] = [:]
+    private static var made: [Bool: [SCNMaterial]] = [:]
 
     static func key(_ badge: NSColor, crew: Bool) -> String { WallPanel.key(badge) + (crew ? "|crew" : "") }
+    private static func base(crew: Bool) -> NSColor { crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : Palette.minion }
+
+    /// Where the repository's patch sits on the front face, as fractions across and down from the top of the head.
+    static let patch = (x0: 0.64, y0: 0.36, x1: 0.8, y1: 0.4)
 
     /// The box's six faces, in SCNBox's order: front, right, back, left, top, bottom.
-    static func materials(badge: NSColor, crew: Bool) -> [SCNMaterial] {
-        let k = key(badge, crew: crew)
-        if let m = made[k] { return m }
-        let base = crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : Palette.minion
-        func face(_ image: NSImage) -> SCNMaterial {
+    static func materials(crew: Bool) -> [SCNMaterial] {
+        if let m = made[crew] { return m }
+        let base = base(crew: crew)
+        func face(_ part: Part) -> SCNMaterial {
             let m = lit(base)
-            m.diffuse.contents = image
+            m.diffuse.contents = load(part, crew: crew) ?? draw(base, width: part == .side ? 96 : 192, part: part)
             m.diffuse.mipFilter = .linear
             return m
         }
-        let pair = plain[crew] ?? {
-            let p = (back: face(draw(base, badge: badge, width: 192, part: .back)), side: face(draw(base, badge: badge, width: 96, part: .side)))
-            plain[crew] = p
-            return p
-        }()
-        let top = lit(base)
-        let out = [face(draw(base, badge: badge, width: 192, part: .front)), pair.side, pair.back, pair.side, top, top]
-        made[k] = out
+        let side = face(.side), top = lit(base)
+        let out = [face(.front), side, face(.back), side, top, top]
+        made[crew] = out
         return out
+    }
+
+    /// The repository's patch, toned into the suit.
+    static func patchColor(_ badge: NSColor, crew: Bool) -> NSColor { base(crew: crew).blended(withFraction: 0.6, of: badge) ?? badge }
+
+    /// Where the baked faces are: in the app's resources, or beside the sources when run from a build.
+    static let root: URL? = {
+        if let r = Bundle.main.resourceURL?.appendingPathComponent("Suits"), FileManager.default.fileExists(atPath: r.path) { return r }
+        return FileManager.default.fileExists(atPath: sourceRoot.path) ? sourceRoot : nil
+    }()
+    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Resources/Suits")
+    private static func file(_ part: Part, crew: Bool) -> String { "suit-\(crew ? "crew" : "white")-\(part).png" }
+    private static func load(_ part: Part, crew: Bool) -> NSImage? { root.flatMap { NSImage(contentsOf: $0.appendingPathComponent(file(part, crew: crew))) } }
+
+    /// `rumkapsel --bake-suits`: draws every face and writes it beside the sources, to be committed. Run it again
+    /// after changing how a suit is drawn.
+    static func bake() -> Never {
+        try? FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        for crew in [false, true] {
+            for part in [Part.front, .back, .side] {
+                let image = draw(base(crew: crew), width: part == .side ? 96 : 192, part: part)
+                guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                      let png = rep.representation(using: .png, properties: [:]) else { continue }
+                let url = sourceRoot.appendingPathComponent(file(part, crew: crew))
+                try? png.write(to: url)
+                print("wrote \(url.path)")
+            }
+        }
+        exit(0)
     }
 
     /// Dark glass with a faint cold light low in it and a soft streak of reflection across.
@@ -54,7 +81,7 @@ enum Suit {
     /// One face, `width` pixels across and as tall as a standing body is to its width; heights below are
     /// fractions down from the top of the head. Every mark is a hairline seam, a shadow over a highlight,
     /// so the face's smaller mip levels come down to the body's own colour.
-    private static func draw(_ base: NSColor, badge: NSColor, width: Int, part: Part) -> NSImage {
+    private static func draw(_ base: NSColor, width: Int, part: Part) -> NSImage {
         Textures.draw(width, 432) { ctx, w, h in
             let b = base.usingColorSpace(.deviceRGB)!
             func shade(_ k: Double) -> CGColor {
@@ -97,11 +124,8 @@ enum Suit {
             case .front:
                 line(0.5, 0.3, 0.5, 0.6, 0.12)
                 line(0.5, 0.645, 0.5, 0.93, 0.1)
-                // The repository's colour: a small patch on the chest, toned into the suit.
-                let patch = rect(0.64, 0.36, 0.8, 0.4)
-                ctx.setFillColor(base.blended(withFraction: 0.6, of: badge)!.cgColor)
-                ctx.fill(patch)
-                panel(patch, 0.12)
+                // The seam round the repository's patch, which the minion wears over it.
+                panel(rect(patch.x0, patch.y0, patch.x1, patch.y1), 0.12)
             case .back:
                 // The life-support pack: a panel with two vents.
                 panel(rect(0.2, 0.33, 0.8, 0.56), 0.2)
