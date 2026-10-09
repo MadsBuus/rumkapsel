@@ -45,8 +45,9 @@ final class Walker {
     var thrusting = false
     var altitude = 0.0
     var climb = 0.0
-    /// The hull over each station, by name, as built with the walls.
+    /// The hull over each station, by name, as built with the walls, and which drawing of the walls' skins they had.
     var hulls: [String: StationHull] = [:]
+    var skins = -1
     /// The minion the crane rides behind, while it does.
     var riding: String?
     /// The crane swung round the minion and tilted, by drags.
@@ -241,7 +242,8 @@ extension StationController {
         }
         ease(w, toward: wantedView(w), dt: dt)
         let floor = floorSignature
-        if w.builtFor != floor { w.builtFor = floor; buildWalls(w); buildDome(w) }
+        if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; buildWalls(w); buildDome(w) }
+        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; buildWalls(w) }   // the walls' skins are done
         poseWalkCamera(w)
         showPlace(w)
         hidePixelsBehindWalls(w)
@@ -504,44 +506,58 @@ extension StationController {
         }
         let rim = flat(NSColor(rgb: (0.42, 0.44, 0.5)))
         let plain = lit(NSColor(rgb: (0.74, 0.75, 0.79)))
-        let post = WallPanel.post
-        let postBox = SCNBox(width: 0.1, height: Walker.wallHeight + 0.03, length: 0.1, chamferRadius: 0)
-        postBox.materials = [post, post, post, post, rim, post]
         let t = 0.07
+        let railPost = SCNBox(width: t + 0.02, height: Walker.railHeight + 0.02, length: t + 0.02, chamferRadius: 0)
+        railPost.firstMaterial = Bulkhead.steel
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let walk = st.walkable
             let outside = Set(st.hangarCells + st.padCells)
+            let styles = Bulkhead.styles(of: st)
             let root = SCNNode()
-            var corners: [Cell: [Bool]] = [:]
+            var corners: [Cell: [Bool]] = [:], railCorners: [Cell: [Bool]] = [:]
             func tint(_ c: Cell) -> NSColor? { tints[Cell(x: Int((st.offset.x + Double(c.x)).rounded()), y: Int((st.offset.y + Double(c.y)).rounded()))] }
+            // Every stretch of wall, by the cell it stands beside and the way out of it.
+            var stretches: [(c: Cell, dx: Int, dy: Int)] = []
             for c in walk.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
                 for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
                     let n = Cell(x: c.x + dx, y: c.y + dy)
                     let floored = walk.contains(n)
                     if floored && (dx < 0 || dy < 0 || st.canStep(from: c, to: n)) { continue }
                     if n == st.plan.monolith { continue }
+                    stretches.append((c, dx, dy))
+                }
+            }
+            for (c, dx, dy) in stretches {
+                do {
+                    let n = Cell(x: c.x + dx, y: c.y + dy)
+                    let floored = walk.contains(n)
                     let low = outside.contains(c) && (!floored || outside.contains(n))
                     let h = low ? Walker.railHeight : Walker.wallHeight
                     let across = dx != 0
-                    let box = SCNBox(width: across ? t : 1 + t, height: h, length: across ? 1 + t : t, chamferRadius: 0)
+                    // Corner point to corner point, no further: an end then lies inside whatever wall it meets, never in
+                    // the plane of one of its faces, where the two would flicker. The posts close the corners.
+                    let box = SCNBox(width: across ? t : 1, height: h, length: across ? 1 : t, chamferRadius: 0)
                     // SCNBox faces: +z, +x, -z, -x, top, bottom.
                     func side(_ x: Int, _ y: Int) -> Int { x > 0 ? 1 : x < 0 ? 3 : y > 0 ? 0 : 2 }
-                    var faces = Array(repeating: plain, count: 6)
+                    var faces = Array(repeating: low ? plain : Bulkhead.steel, count: 6)
                     if !low {
-                        faces[side(-dx, -dy)] = WallPanel.material(accent: tint(c), variant: WallPanel.pick(c, dx, dy, st.name))
-                        faces[side(dx, dy)] = WallPanel.material(accent: floored ? tint(n) : nil, variant: WallPanel.pick(n, -dx, -dy, st.name))
+                        faces[side(-dx, -dy)] = Bulkhead.material(Bulkhead.pick(c, dx, dy, st.name), style: styles[c] ?? .hallway)
+                        faces[side(dx, dy)] = Bulkhead.material(Bulkhead.pick(n, -dx, -dy, st.name), style: styles[n] ?? .hallway)
                     }
-                    faces[4] = rim
+                    faces[4] = low ? rim : Bulkhead.steel
                     box.materials = faces
                     let wall = SCNNode(geometry: box)
                     let mid = st.offset + SIMD2(Double(c.x) + Double(dx) * 0.5, Double(c.y) + Double(dy) * 0.5)
                     wall.position = v3(mid.x, h / 2, mid.y)
                     root.addChildNode(wall)
-                    guard !low else { continue }
-                    // Its two ends, in half-tile steps: a post stands where a wall turns or stops.
                     let (px, py) = (dy, dx)
-                    corners[Cell(x: 2 * c.x + dx + px, y: 2 * c.y + dy + py), default: []].append(across)
-                    corners[Cell(x: 2 * c.x + dx - px, y: 2 * c.y + dy - py), default: []].append(across)
+                    let ends = [Cell(x: 2 * c.x + dx + px, y: 2 * c.y + dy + py), Cell(x: 2 * c.x + dx - px, y: 2 * c.y + dy - py)]
+                    guard !low else { for e in ends { railCorners[e, default: []].append(across) }; continue }
+                    let cap = Bulkhead.cap(length: 1, thickness: t, across: across)
+                    cap.position = v3(wall.position.x, 0, wall.position.z)
+                    root.addChildNode(cap)
+                    // Its two ends, in half-tile steps: a post stands where a wall turns or stops.
+                    for e in ends { corners[e, default: []].append(across) }
                     // A strip of light along the foot of each tall wall, in the colour of the floor it runs along.
                     for (cell, sign) in [(c, -1.0)] + (floored ? [(n, 1.0)] : []) {
                         let strip = SCNBox(width: across ? 0.012 : 1, height: 0.022, length: across ? 1 : 0.012, chamferRadius: 0)
@@ -554,8 +570,14 @@ extension StationController {
                 }
             }
             for (k, ends) in corners where !(ends.count == 2 && ends[0] == ends[1]) {
-                let p = SCNNode(geometry: postBox)
-                p.position = v3(st.offset.x + Double(k.x) / 2, (Walker.wallHeight + 0.03) / 2, st.offset.y + Double(k.y) / 2)
+                let p = Bulkhead.pilaster(seed: abs(k.x &* 31 &+ k.y &* 17))
+                p.position = v3(st.offset.x + Double(k.x) / 2, 0, st.offset.y + Double(k.y) / 2)
+                root.addChildNode(p)
+            }
+            // A rail turns or stops at a short post of its own, unless a wall's post stands there already.
+            for (k, ends) in railCorners where !(ends.count == 2 && ends[0] == ends[1]) && corners[k] == nil {
+                let p = SCNNode(geometry: railPost)
+                p.position = v3(st.offset.x + Double(k.x) / 2, (Walker.railHeight + 0.02) / 2, st.offset.y + Double(k.y) / 2)
                 root.addChildNode(p)
             }
             let flatWalls = root.flattenedClone()
@@ -563,6 +585,7 @@ extension StationController {
             w.walls.addChildNode(flatWalls)
         }
     }
+
 
     /// Everything the walls are built from: each station's place, its walkable floor and its rooms.
     private var floorSignature: String {
@@ -715,79 +738,13 @@ extension StationController {
     }
 }
 
-/// The walls' clean panelling, after the starship corridors. Every face has the same light band at the
-/// same height, so the strips run unbroken down a corridor; above and below it each face is one of a set
-/// of panels — plates, lights, pipes, grilles, screens, lockers, hatches, ribs, button boards — picked by
-/// where it stands, so a station looks the same every time it is walked.
+/// The walk's materials besides the walls' own (`Bulkhead`): the hull's plate and glass, the bare deck under
+/// it, and the key a colour is cached by.
 enum WallPanel {
-    static let size = 192
-    private static var made: [String: SCNMaterial] = [:]
-
-    /// The upper and lower panel of each design, the plain plates more often than the busy ones.
-    private static let designs: [(upper: Int, lower: Int)] = [(0, 0), (1, 1), (2, 2), (0, 5), (4, 3), (3, 4), (1, 0), (2, 5),
-                                                             (0, 1), (4, 2), (3, 0), (0, 4)]
-    static var count: Int { designs.count }
-
-    /// The design for the face of `cell`'s wall toward (dx, dy).
-    static func pick(_ c: Cell, _ dx: Int, _ dy: Int, _ station: String) -> Int {
-        var h = UInt64(bitPattern: Int64(c.x &* 73856093 ^ c.y &* 19349663 ^ (dx + 2) &* 83492791 ^ (dy + 2) &* 2654435761))
-        for u in station.utf8 { h = h &* 31 &+ UInt64(u) }
-        h ^= h >> 29; h = h &* 0xbf58476d1ce4e5b9; h ^= h >> 32
-        return Int(h % UInt64(designs.count))
-    }
-
     static func key(_ c: NSColor) -> String {
         guard let s = c.usingColorSpace(.sRGB) else { return "?" }
         return String(format: "%.2f/%.2f/%.2f", s.redComponent, s.greenComponent, s.blueComponent)
     }
-
-    /// The panel for a wall face, its strip and screens lit in `accent`; unlit for a face onto nothing. The
-    /// designs are drawn once in grey; the room's colour goes onto the strip on the GPU, through a mask.
-    static func material(accent: NSColor?, variant: Int) -> SCNMaterial {
-        let k = (accent.map(key) ?? "none") + "#\(variant)"
-        if let m = made[k] { return m }
-        let skin = skins[variant]
-        let m = SCNMaterial()
-        m.lightingModel = .blinn
-        m.diffuse.contents = skin.diffuse
-        m.emission.contents = skin.lamps
-        m.normal.contents = skin.normal
-        m.normal.intensity = 0.9
-        m.specular.contents = NSColor(white: 0.35, alpha: 1)
-        m.shininess = 0.35
-        for p in [m.diffuse, m.emission, m.normal] { p.mipFilter = .linear }
-        let mask = SCNMaterialProperty(contents: skin.mask)
-        mask.mipFilter = .linear
-        let a = (accent?.blended(withFraction: 0.3, of: .white) ?? NSColor(white: 0.35, alpha: 1)).usingColorSpace(.deviceRGB)!
-        m.setValue(mask, forKey: "accentMask")
-        m.setValue(NSValue(scnVector3: SCNVector3(a.redComponent, a.greenComponent, a.blueComponent)), forKey: "accent")
-        m.setValue(NSNumber(value: accent == nil ? 0 : 1), forKey: "glow")
-        m.shaderModifiers = [.surface: tint]
-        made[k] = m
-        return m
-    }
-
-    private static let tint = """
-    #pragma arguments
-    texture2d<float> accentMask;
-    float3 accent;
-    float glow;
-    #pragma body
-    constexpr sampler maskSampler(filter::linear, mip_filter::linear, address::repeat);
-    float k = accentMask.sample(maskSampler, _surface.diffuseTexcoord).r;
-    _surface.diffuse.rgb = mix(_surface.diffuse.rgb, accent, min(1.0, k * 4.0));
-    _surface.emission.rgb += accent * k * glow;
-    """
-
-    /// Draws every design ahead of the first walk, off the main thread, so stepping in never waits on it.
-    static func prepare() { DispatchQueue.global(qos: .utility).async { _ = skins } }
-
-    static let post: SCNMaterial = {
-        let m = lit(NSColor(rgb: (0.62, 0.64, 0.69)))
-        m.lightingModel = .blinn
-        m.specular.contents = NSColor(white: 0.3, alpha: 1)
-        return m
-    }()
 
     /// The bare deck under the hull where the station has no floor of its own: a tile of the hull's plate, darker.
     static let bareDeck: SCNGeometry = {
@@ -834,169 +791,4 @@ enum WallPanel {
         m.writesToDepthBuffer = false
         return m
     }()
-
-    /// What a texel is: plate, the room's light strip, a lamp of some colour, or a screen and its lines.
-    private enum Kind: UInt8 { case plate, strip, white, red, green, amber, screen, trace }
-
-    private struct Layout {
-        var grey: [Float], height: [Float], kind: [Kind]
-    }
-
-    /// One design laid out, as fractions down and across the face.
-    private static func layout(_ variant: Int) -> Layout {
-        let n = size
-        let (upper, lower) = designs[variant]
-        var r = Textures.Seeded(s: UInt64(variant * 977 + 13))
-        let tone = Float(0.78 + r.next() * 0.08)
-        var l = Layout(grey: [Float](repeating: tone, count: n * n), height: [Float](repeating: 0.6, count: n * n),
-                       kind: [Kind](repeating: .plate, count: n * n))
-        func fill(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, grey g: Float? = nil, height h: Float? = nil, kind k: Kind? = nil) {
-            for y in max(0, Int(y0 * Double(n)))..<min(n, Int(y1 * Double(n))) {
-                for x in max(0, Int(x0 * Double(n)))..<min(n, Int(x1 * Double(n))) {
-                    let i = y * n + x
-                    if let g { l.grey[i] = g }; if let h { l.height[i] = h }; if let k { l.kind[i] = k }
-                }
-            }
-        }
-        /// A pipe along x: rounded in height and shade across its width.
-        func pipe(_ y0: Double, _ y1: Double, grey g: Float) {
-            let rows = max(1, Int((y1 - y0) * Double(n)))
-            for k in 0..<rows {
-                let t = (Double(k) + 0.5) / Double(rows), bulge = Float(sin(t * .pi))
-                let y = y0 + (y1 - y0) * Double(k) / Double(rows)
-                fill(0, y, 1, y + 1 / Double(n) + 0.0001, grey: g * (0.75 + 0.35 * bulge), height: 0.55 + 0.4 * bulge)
-            }
-        }
-        func lamps(_ y0: Double, _ y1: Double, from x0: Double, to x1: Double, count: Int) {
-            let kinds: [Kind] = [.white, .red, .green, .amber, .white, .green]
-            let step = (x1 - x0) / Double(count)
-            for i in 0..<count {
-                let x = x0 + step * Double(i) + step * 0.2
-                fill(x, y0, x + step * 0.6, y1, grey: 0.9, height: 0.7, kind: kinds[Int(r.next() * Double(kinds.count)) % kinds.count])
-            }
-        }
-
-        fill(0, 0, 1, 0.05, grey: tone + 0.08, height: 0.8)
-        switch upper {
-        case 1:
-            fill(0.06, 0.08, 0.94, 0.27, grey: tone - 0.06, height: 0.45)
-            lamps(0.15, 0.2, from: 0.66, to: 0.9, count: 3)
-        case 2:
-            fill(0, 0.07, 1, 0.29, grey: tone - 0.2, height: 0.35)
-            pipe(0.08, 0.15, grey: 0.82); pipe(0.16, 0.21, grey: 0.7); pipe(0.22, 0.28, grey: 0.86)
-            for x in [0.18, 0.55, 0.85] { fill(x, 0.07, x + 0.04, 0.29, grey: 0.5, height: 0.75) }
-        case 3:
-            fill(0.06, 0.08, 0.94, 0.27, grey: tone - 0.04, height: 0.48)
-            for x in [0.22, 0.74] { fill(x, 0.1, x + 0.04, 0.25, grey: 0.95, height: 0.4, kind: .white) }
-        case 4:
-            fill(0.05, 0.08, 0.95, 0.27, grey: tone - 0.1, height: 0.42)
-            var y = 0.1
-            while y < 0.25 { fill(0.07, y, 0.93, y + 0.012, grey: 0.22, height: 0.25); y += 0.026 }
-        default:
-            for (x0, x1) in [(0.06, 0.47), (0.53, 0.94)] { fill(x0, 0.08, x1, 0.27, grey: tone - 0.05, height: 0.45) }
-        }
-        // The band: the same height on every face, so its light strip runs on round the corridor.
-        fill(0, 0.31, 1, 0.43, grey: 0.3, height: 0.2)
-        var x = 0.03
-        while x < 0.95 {
-            let wide = 0.03 + r.next() * 0.08, tall = 0.03 + r.next() * 0.035
-            if r.next() > 0.3 { fill(x, 0.385, min(0.97, x + wide), min(0.425, 0.385 + tall), grey: Float(0.5 + r.next() * 0.25), height: 0.38) }
-            x += wide + 0.02 + r.next() * 0.04
-        }
-        fill(0.0, 0.345, 1.0, 0.365, grey: 0.95, height: 0.3, kind: .strip)
-        switch lower {
-        case 1:
-            fill(0.08, 0.48, 0.92, 0.82, grey: tone - 0.05, height: 0.47)
-            fill(0.14, 0.52, 0.66, 0.77, grey: 0.12, height: 0.3, kind: .screen)
-            var y = 0.55
-            while y < 0.74 {
-                let w = 0.1 + r.next() * 0.38
-                fill(0.17, y, 0.17 + w, y + 0.012, kind: .trace); y += 0.03
-            }
-            lamps(0.55, 0.59, from: 0.72, to: 0.88, count: 2)
-            lamps(0.64, 0.68, from: 0.72, to: 0.88, count: 2)
-        case 2:
-            for (x0, x1) in [(0.06, 0.48), (0.52, 0.94)] {
-                fill(x0, 0.46, x1, 0.84, grey: tone - 0.03, height: 0.5)
-                fill(x1 - 0.08, 0.6, x1 - 0.05, 0.72, grey: 0.35, height: 0.85)
-                fill(x0 + 0.06, 0.5, x0 + 0.2, 0.53, grey: 0.92, height: 0.6)
-                var y = 0.76
-                while y < 0.82 { fill(x0 + 0.05, y, x1 - 0.12, y + 0.008, grey: 0.3, height: 0.35); y += 0.018 }
-            }
-        case 3:
-            fill(0.18, 0.47, 0.82, 0.84, grey: 0.36, height: 0.4)
-            fill(0.21, 0.5, 0.79, 0.81, grey: tone - 0.02, height: 0.5)
-            var k = 0
-            var s = 0.18
-            while s < 0.82 {
-                fill(s, 0.47, min(0.82, s + 0.045), 0.49, grey: k % 2 == 0 ? 0.92 : 0.2, height: 0.42)
-                fill(s, 0.82, min(0.82, s + 0.045), 0.84, grey: k % 2 == 0 ? 0.92 : 0.2, height: 0.42)
-                s += 0.045; k += 1
-            }
-            for (bx, by) in [(0.25, 0.54), (0.75, 0.54), (0.25, 0.77), (0.75, 0.77)] { fill(bx - 0.015, by - 0.01, bx + 0.015, by + 0.01, grey: 0.5, height: 0.8) }
-        case 4:
-            for i in 0..<5 {
-                let x0 = 0.06 + Double(i) * 0.19
-                fill(x0, 0.45, x0 + 0.07, 0.85, grey: tone + 0.05, height: 0.85)
-                fill(x0 + 0.07, 0.45, x0 + 0.19, 0.85, grey: tone - 0.12, height: 0.4)
-            }
-        case 5:
-            fill(0.1, 0.47, 0.9, 0.83, grey: 0.4, height: 0.42)
-            fill(0.13, 0.5, 0.87, 0.8, grey: 0.55, height: 0.5)
-            for row in 0..<4 { lamps(0.54 + Double(row) * 0.065, 0.58 + Double(row) * 0.065, from: 0.16, to: 0.84, count: 7) }
-        default:
-            fill(0.08, 0.48, 0.92, 0.81, grey: tone - 0.04, height: 0.47)
-            var y = 0.53
-            while y < 0.77 { fill(0.6, y, 0.87, y + 0.013, grey: 0.24, height: 0.3); y += 0.034 }
-            fill(0.14, 0.53, 0.3, 0.6, grey: 0.62, height: 0.4)
-        }
-        fill(0, 0.86, 1, 1, grey: 0.28, height: 0.4)
-        fill(0, 0, 0.012, 1, grey: 0.45, height: 0.3)
-        fill(0.988, 0, 1, 1, grey: 0.45, height: 0.3)
-        return l
-    }
-
-    /// Each design drawn: its plates in grey, its lamps lit, where the room's colour goes, and its relief.
-    private static let skins: [(diffuse: NSImage, lamps: NSImage, mask: NSImage, normal: NSImage)] = (0..<designs.count).map { v in
-        let n = size, l = layout(v)
-        var px = [UInt8](repeating: 255, count: n * n * 4), lit = [UInt8](repeating: 0, count: n * n * 4)
-        var mask = [UInt8](repeating: 0, count: n * n * 4)
-        func byte(_ v: Float) -> UInt8 { UInt8(max(0, min(255, v * 255))) }
-        for i in 0..<(n * n) {
-            let g = l.grey[i]
-            var c = (g * 0.98, g, g * 1.05), e: (Float, Float, Float) = (0, 0, 0), k: Float = 0
-            switch l.kind[i] {
-            case .plate: break
-            case .strip: c = (0.9, 0.9, 0.9); k = 1
-            case .white: c = (0.95, 0.96, 1); e = (0.9, 0.92, 1)
-            case .red: c = (0.95, 0.25, 0.2); e = c
-            case .green: c = (0.35, 0.95, 0.5); e = c
-            case .amber: c = (1, 0.72, 0.25); e = c
-            case .screen: c = (0.04, 0.06, 0.09); k = 0.04
-            case .trace: c = (0.3, 0.35, 0.4); k = 0.85
-            }
-            px[i * 4] = byte(c.0); px[i * 4 + 1] = byte(c.1); px[i * 4 + 2] = byte(c.2)
-            lit[i * 4] = byte(e.0); lit[i * 4 + 1] = byte(e.1); lit[i * 4 + 2] = byte(e.2)
-            mask[i * 4] = byte(k); mask[i * 4 + 1] = byte(k); mask[i * 4 + 2] = byte(k)
-        }
-        var h = l.height, out = h
-        for y in 0..<n { for x in 0..<n {
-            var acc: Float = 0
-            for dy in -1...1 { for dx in -1...1 { acc += h[((y + dy + n) % n) * n + (x + dx + n) % n] } }
-            out[y * n + x] = acc / 9
-        } }
-        h = out
-        return (bitmap(px, n), bitmap(lit, n), bitmap(mask, n), Plating.normalMap(h, size: n, strength: 5))
-    }
-
-    private static func bitmap(_ px: [UInt8], _ n: Int) -> NSImage {
-        var data = px
-        let cs = CGColorSpaceCreateDeviceRGB()
-        let made: CGImage? = data.withUnsafeMutableBytes {
-            CGContext(data: $0.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4, space: cs,
-                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)?.makeImage()
-        }
-        guard let image = made else { return NSImage() }
-        return NSImage(cgImage: image, size: NSSize(width: n, height: n))
-    }
 }

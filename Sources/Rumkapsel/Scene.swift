@@ -594,7 +594,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog() }
-        if !simulated { WallPanel.prepare() }
+        if !simulated { Bulkhead.prepare() }
         if demo {
             seedDemo()
         } else if !simulated {

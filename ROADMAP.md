@@ -36,6 +36,10 @@ F walks the hallways at eye height; a click on a minion rides along behind it on
 
 - **Small things around the station**: a lot more props and clutter along the hallways and in the rooms, for
   the walk to find. Agreed for later.
+- **Up close, everything else looks plain beside the walls**: floors, the station's rockets, crates. They need the
+  walls' level of detail, kept soft, so the station still reads the same from the top view: a white wall from a
+  distance, a brown floor from a distance. The two views should not look like two different games.
+- **Windows in outer walls and direction signs at intersections**: agreed, after the wall style is picked.
 - **An invisible block in new hallway**, seen once after offices arrived. A station shifting sideways under the
   walker is fixed; if it comes back, `station.log` has a `walk` line saying what stopped it.
 
