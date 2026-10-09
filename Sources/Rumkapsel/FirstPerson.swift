@@ -47,6 +47,10 @@ final class Walker {
     var climb = 0.0
     /// The hull over each station, by name, as built with the walls, and which drawing of the walls' skins they had.
     var hulls: [String: StationHull] = [:]
+    /// The signs' arrows, rolling.
+    var arrows: [Signs.Arrow] = []
+    /// The pieces of the hull the station's view draws, faded out as the walk's hull comes in.
+    var fragments: [SCNNode] = []
     var skins = -1
     /// The minion the crane rides behind, while it does.
     var riding: String?
@@ -111,13 +115,19 @@ extension StationController {
     }
 
     /// Down into the station where the view is looking, or onto the crane behind the minion it follows.
-    func stepIn() {
+    /// Down at a point on the floor, given one (a double-click on it), looking the way the view looks.
+    func stepIn(at point: SIMD2<Double>? = nil) {
         guard walker == nil, let station = cameraNode.camera else { return }
         let focus = SIMD2(Double(rig.position.x), Double(rig.position.z))
         let viewYaw = Double(rig.eulerAngles.y)
-        let followed = following.flatMap { minions[$0] }
+        let followed = point == nil ? following.flatMap { minions[$0] } : nil
         var start: (station: Station, pos: SIMD2<Double>, yaw: Double)?
-        if let m = followed, let st = fleet.stations[m.station] {
+        if let point, let st = fleet.stations.values.min(by: { simd_distance(point, $0.offset) < simd_distance(point, $1.offset) }),
+           let cell = st.nearestFloor(to: point - st.offset) {
+            let q = point - st.offset, middle = SIMD2(Double(cell.x), Double(cell.y))
+            let onIt = Cell(x: Int(q.x.rounded()), y: Int(q.y.rounded())) == cell && fits(q, from: middle, in: st)
+            start = (st, (onIt ? q : middle) + st.offset, viewYaw)
+        } else if let m = followed, let st = fleet.stations[m.station] {
             start = (st, SIMD2(Double(m.node.position.x), Double(m.node.position.z)), m.smoothFacing + .pi)
         } else {
             start = hallwayStart(near: focus, facing: viewYaw)
@@ -174,7 +184,7 @@ extension StationController {
 
     private func stepOff(_ w: Walker) {
         for n in [w.sky, w.dome, w.walls] { n.removeFromParentNode() }
-        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = false }
+        for n in w.fragments { n.opacity = 1; n.isHidden = false }
         w.title.removeFromParent(); w.subtitle.removeFromParent()
         walker = nil
         for n in legendNodes + jobNodes { n.alpha = 1 }
@@ -245,6 +255,7 @@ extension StationController {
         if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; buildWalls(w); buildDome(w) }
         else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; buildWalls(w) }   // the walls' skins are done
         poseWalkCamera(w)
+        Signs.roll(w.arrows, at: clock)
         showPlace(w)
         hidePixelsBehindWalls(w)
         return true
@@ -436,8 +447,15 @@ extension StationController {
         pitchNode.eulerAngles.x = pitch
         w.sky.position = cameraNode.worldPosition
         w.sky.opacity = ease((t - 0.3) / 0.6)
-        w.walls.scale.y = max(0.001, ease((t - 0.4) / 0.6))
+        // The walls rise out of the floor and fade in as they come, never a flat outline before they start.
+        let rising = ease((t - 0.4) / 0.6)
+        w.walls.isHidden = rising <= 0
+        w.walls.scale.y = max(0.001, rising)
+        w.walls.opacity = ease((t - 0.4) / 0.3)
         w.dome.opacity = ease((t - 0.45) / 0.55)
+        // The station view's pieces of the hull give way to the whole of it as the view comes down.
+        let fragments = 1 - ease(t / 0.5)
+        for n in w.fragments { n.opacity = fragments; n.isHidden = fragments <= 0 }
         let film = ease((t - 0.2) / 0.8)
         camera.vignettingIntensity = 0.6 * film
         camera.colorFringeIntensity = 0.5 * film
@@ -494,6 +512,7 @@ extension StationController {
     /// with a light strip in the colour of the floor it faces; a rail where the floor is outside.
     private func buildWalls(_ w: Walker) {
         w.walls.childNodes.forEach { $0.removeFromParentNode() }
+        w.arrows = []
         let tints = drawnFloor()
         var glows: [String: SCNMaterial] = [:]
         func glow(_ c: NSColor?) -> SCNMaterial {
@@ -583,9 +602,22 @@ extension StationController {
             let flatWalls = root.flattenedClone()
             flatWalls.categoryBitMask = Pick.scenery
             w.walls.addChildNode(flatWalls)
+            for sign in Signs.plan(st) { w.walls.addChildNode(signNode(sign, in: st, thickness: t, arrows: &w.arrows)) }
         }
     }
 
+
+    /// A way-finding sign on its wall: a lit panel at eye height, a line for each way, only drawn close by.
+    private func signNode(_ sign: Signs.Sign, in st: Station, thickness t: Double, arrows: inout [Signs.Arrow]) -> SCNNode {
+        let (n, rolling) = Signs.panel(sign)
+        arrows += rolling
+        let p = SIMD2(Double(sign.wall.x), Double(sign.wall.y))
+        let at = st.offset + SIMD2(Double(sign.cell.x), Double(sign.cell.y)) + p * (0.5 - t / 2 - 0.004)
+        n.position = v3(at.x, 0.47, at.y)
+        n.eulerAngles.y = CGFloat(atan2(-p.x, -p.y))   // facing back into the junction
+        n.categoryBitMask = Pick.scenery
+        return n
+    }
 
     /// Everything the walls are built from: each station's place, its walkable floor and its rooms.
     private var floorSignature: String {
@@ -594,13 +626,13 @@ extension StationController {
         }.joined(separator: " ") + "|\(lastRebuildAt)"
     }
 
-    /// The hull over each station: its own vault, plated where it meets the floor and glass above, with
-    /// doorways cut where the gate and the airlock go through it. The pieces of it the station's view draws
+    /// The hull over each station: its own glass vault on a low steel sill, with doorways cut where the gate and
+    /// the airlock go through it. The pieces of it the station's view draws
     /// stand in the same place, so they step aside while you walk.
     private func buildDome(_ w: Walker) {
         w.dome.childNodes.forEach { $0.removeFromParentNode() }
         w.hulls = [:]
-        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = true }
+        w.fragments = staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }
         let step = 0.25
         for st in fleet.stations.values {
             let hull = StationHull(st)
@@ -616,7 +648,7 @@ extension StationController {
             let flatDeck = bare.flattenedClone()
             flatDeck.categoryBitMask = Pick.scenery
             w.dome.addChildNode(flatDeck)
-            var plate = (v: [SCNVector3](), i: [Int32]()), glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
+            var glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
             // Heights on the grid's corners, each measured once for the squares that share it.
             let n = Int((1 / step).rounded())
             var heights: [SIMD2<Int>: Double] = [:]
@@ -640,27 +672,30 @@ extension StationController {
                             if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
                         }
                         let world = zip(corners, hs).map { v3(st.offset.x + $0.0.x, $0.1, st.offset.y + $0.0.y) }
-                        if hs.reduce(0, +) / 4 < 0.6 {
-                            let base = Int32(plate.v.count)
-                            plate.v += world
-                            plate.i += [base, base + 1, base + 2, base, base + 2, base + 3]
-                        } else {
-                            let base = Int32(glass.v.count)
-                            glass.v += world
-                            glass.uv += corners.map { CGPoint(x: $0.x + 0.5, y: $0.y + 0.5) }
-                            glass.i += [base, base + 1, base + 2, base, base + 2, base + 3]
-                        }
+                        let base = Int32(glass.v.count)
+                        glass.v += world
+                        glass.uv += corners.map { CGPoint(x: $0.x + 0.5, y: $0.y + 0.5) }
+                        glass.i += [base, base + 1, base + 2, base, base + 2, base + 3]
                     }
                 }
             }
-            if !plate.v.isEmpty {
-                let g = SCNGeometry(sources: [SCNGeometrySource(vertices: plate.v)],
-                                    elements: [SCNGeometryElement(indices: plate.i, primitiveType: .triangles)])
-                g.firstMaterial = WallPanel.hullPlate
-                let n = SCNNode(geometry: g)
-                n.categoryBitMask = Pick.scenery
-                w.dome.addChildNode(n)
+            // The sill the glass stands on, along every stretch of its foot but the doorways.
+            let foot = SCNNode()
+            for f in hull.feet where !f.door {
+                let mid = (f.a + f.b) / 2, along = f.b - f.a
+                let across = abs(along.x) < abs(along.y)   // the stretch runs along z
+                var inward = across ? SIMD2(1.0, 0) : SIMD2(0, 1.0)
+                if !hull.covers(mid + inward * 0.25) { inward = -inward }
+                let sill = SCNBox(width: across ? 0.07 : 1, height: 0.06, length: across ? 1 : 0.07, chamferRadius: 0)
+                sill.firstMaterial = Bulkhead.steel
+                let n = SCNNode(geometry: sill)
+                let at = mid + inward * 0.035
+                n.position = v3(st.offset.x + at.x, 0.03, st.offset.y + at.y)
+                foot.addChildNode(n)
             }
+            let flatFoot = foot.flattenedClone()
+            flatFoot.categoryBitMask = Pick.scenery
+            w.dome.addChildNode(flatFoot)
             if !glass.v.isEmpty {
                 let g = SCNGeometry(sources: [SCNGeometrySource(vertices: glass.v), SCNGeometrySource(textureCoordinates: glass.uv)],
                                     elements: [SCNGeometryElement(indices: glass.i, primitiveType: .triangles)])
@@ -738,8 +773,8 @@ extension StationController {
     }
 }
 
-/// The walk's materials besides the walls' own (`Bulkhead`): the hull's plate and glass, the bare deck under
-/// it, and the key a colour is cached by.
+/// The walk's materials besides the walls' own (`Bulkhead`): the hull's glass, the bare deck under it, and the
+/// key a colour is cached by.
 enum WallPanel {
     static func key(_ c: NSColor) -> String {
         guard let s = c.usingColorSpace(.sRGB) else { return "?" }
@@ -752,13 +787,6 @@ enum WallPanel {
         let m = lit(NSColor(rgb: Props.hullPlate).darker(0.35))
         g.firstMaterial = m
         return g
-    }()
-
-    /// The hull's foot: the deck plate of the pieces of it the station's view draws.
-    static let hullPlate: SCNMaterial = {
-        let m = flat(NSColor(rgb: Props.hullPlate))
-        m.isDoubleSided = true
-        return m
     }()
 
     /// The hull's glass: the dome's panes, one to a tile, laid on by where they are.

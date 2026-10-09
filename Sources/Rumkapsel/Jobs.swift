@@ -16,6 +16,7 @@ extension StationController {
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         m.markers = s.eventMarkers
         m.promptCount = s.promptCount
+        if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }
         minionRoot.addChildNode(m.node)
         minions[s.id] = m
         return m

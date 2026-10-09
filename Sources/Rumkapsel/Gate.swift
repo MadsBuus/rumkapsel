@@ -638,8 +638,10 @@ extension StationController {
         let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
         let alien = row?.alien == true
         let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))
+        let words = crateWords(repo: crate.repo, number: crate.number)
         return Props.package(color: color, band: NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38,
-                             mine: !alien && world.isMine(repo: crate.repo, number: crate.number))
+                             mine: !alien && world.isMine(repo: crate.repo, number: crate.number), number: crate.number,
+                             title: words.title, who: words.who)
     }
 
     /// The X-ray's verdict, heard once.

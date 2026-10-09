@@ -198,6 +198,8 @@ enum RocketGeometry {
     static var hullHeight: Double { height * 0.4 }
     /// How high the cradle holds a tip with no lifter under it.
     static let cradleTop = 0.3
+    /// How much of the hull one copy of its plating covers, along and up.
+    static let platingSpan = 0.7
     /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
     static func facing(side k: Int) -> SIMD2<Double> {
         let a = .pi / 2 + Double(k) * .pi / 3
@@ -265,6 +267,8 @@ final class RocketJob {
     var assigned: Set<String> = []
     /// The carries ordered aboard that have not set their crate down yet, by command id.
     var pending: Set<Int> = []
+    /// Carries ordered aboard and called off when the release lost its clearance: they set nothing down here.
+    var calledOff: Set<Int> = []
 
     init(station: String, repo: String, command: Command) {
         self.station = station; self.repo = repo; self.command = command
@@ -441,6 +445,17 @@ extension Simulation {
             // otherwise would be the floor telling you something the release will not honour. Once it is
             // climbing nothing changes what went up.
             if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested; r.tall = tall }
+            // Not cleared any more before it lit: loading or steaming, it stands by again, and the carries it
+            // ordered aboard are called off. The rows already took back what it held.
+            if stage == .standBy, (1...2).contains(r.stage.rank) {
+                for id in r.pending {
+                    guard let job = self.cargo[id], case .carry(_, let from, _) = job.command.kind else { continue }
+                    r.calledOff.insert(id)
+                    cancelCarry(id, backTo: from)
+                }
+                take(r, command)
+                return
+            }
             guard stage.rank > r.stage.rank else { return }
             take(r, command)
             return
@@ -568,7 +583,7 @@ extension Simulation {
             guard let crate = command.crate else { continue }
             let id = command.id
             let carried = carry(command) { [weak self, weak r] in
-                guard let self else { return }
+                guard let self, r?.calledOff.remove(id) == nil else { return }
                 r?.pending.remove(id)
                 // Aboard by hand: the rows may not draw it again until the board says it has shipped.
                 world.landed(station: station, repo: repo, number: crate.number, in: .pad, at: now)

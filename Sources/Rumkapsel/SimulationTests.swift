@@ -206,6 +206,24 @@ enum SimulationTests {
             expect(m.wonderUntil > sim.clock, "a beat, head up, before it goes")
         }
 
+        test("a loading rocket whose release is no longer cleared stands by, calls off its carries and orders no more") {
+            let (sim, station, m) = fixture()
+            let deck = sim.world.stagingIsDeck(station: "work", repo: "web")   // the row a rocket loads from
+            station.ledger.adopt(Ledger.Word(storage: deck ? [] : [440, 441], deck: deck ? [440, 441] : []), repo: "web")
+            func intoRocket() -> [Int] {
+                sim.cargo.compactMap { id, job in if case .carry(_, _, .pad) = job.command.kind { return id }; return nil }
+            }
+            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
+                       command: .rocket(.load(2), station: "work", repo: "web"))
+            sim.assignOrders()
+            expect(!intoRocket().isEmpty && m.current.map { id in intoRocket().contains(id.id) } == true, "loading: \(m.words)")
+            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
+                       command: .rocket(.standBy, station: "work", repo: "web"))
+            expect(sim.rockets["work|web"]?.stage == .standBy, "standing by again")
+            for _ in 0..<20 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
+            expect(intoRocket().isEmpty, "no carry into the rocket while it stands by: \(intoRocket().count)")
+        }
+
         test("the board: a body with a crate on its arms is not taken off its carry") {
             let (sim, station, m) = fixture()
             station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")

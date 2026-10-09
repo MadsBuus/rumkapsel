@@ -185,6 +185,7 @@ struct KingdomLook: Look {
     var drawsBerthHexes: Bool { false }
     var bayOpenToSpace: Bool { false }
     func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode? { nil }
+    var detailsFloors: Bool { false }
     func hullDoorReveal(depth: Double) -> Double { 0 }
 
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? {

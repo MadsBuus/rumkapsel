@@ -28,11 +28,13 @@ enum Props {
     /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
     /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
     /// a square strapped crate is a pull request, a pyramid is a session input.
-    static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false) -> SCNNode {
+    static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false, number: Int? = nil,
+                        title: String? = nil, who: String? = nil) -> SCNNode {
         let n = SCNNode()
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
         box.materials = [flat(color), flat(color.darker(0.13)), flat(color), flat(color.darker(0.13)), flat(color.lighter(0.14)), flat(color)]
+        for m in box.materials { Detail.apply(Detail.crate(for: number), to: m) }
         let body = SCNNode(geometry: box)
         body.position = v3(0, h / 2, 0)
         n.addChildNode(body)
@@ -56,8 +58,85 @@ enum Props {
         plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
         if blink { plate.runAction(Props.blinking()) }
         n.addChildNode(plate)
+        if let number { n.addChildNode(crateNumber(number, size: size, height: h)) }
+        if let title, !title.isEmpty { n.addChildNode(crateTag(title: title, who: who, size: size, height: h)) }
         n.addChildNode(foot(size: size * 1.3))
         return n
+    }
+
+    /// The pull request's number stencilled beside a crate's light: drawn only within a few tiles of the camera,
+    /// so the station's view never shows it and walking up to a crate does.
+    static func crateNumber(_ number: Int, size: Double, height h: Double) -> SCNNode {
+        let plane = SCNPlane(width: size * 0.36, height: h * 0.16)
+        plane.firstMaterial = numberStencil(number)
+        plane.levelsOfDetail = [SCNLevelOfDetail(geometry: nil, worldSpaceDistance: 3.5)]
+        let n = SCNNode(geometry: plane)
+        n.position = v3(-size * 0.16, h * 0.36, size / 2 + 0.002)
+        return n
+    }
+
+    /// The task's tag above the strap: what it is called and whose it is, on a dark tag. Close up only, like the number.
+    static func crateTag(title: String, who: String?, size: Double, height h: Double) -> SCNNode {
+        let plane = SCNPlane(width: size * 0.62, height: h * 0.26)
+        plane.firstMaterial = tagFace(title: title, who: who)
+        plane.levelsOfDetail = [SCNLevelOfDetail(geometry: nil, worldSpaceDistance: 3.5)]
+        let n = SCNNode(geometry: plane)
+        n.position = v3(0, h * 0.76, size / 2 + 0.002)
+        return n
+    }
+
+    private static var tags: [String: SCNMaterial] = [:]
+    private static func tagFace(title: String, who: String?) -> SCNMaterial {
+        let key = title + "|" + (who ?? "")
+        if let m = tags[key] { return m }
+        let image = Textures.draw(448, 160) { ctx, w, h in
+            let card = NSBezierPath(roundedRect: NSRect(x: 2, y: 2, width: w - 4, height: h - 4), xRadius: 10, yRadius: 10)
+            NSColor(rgb: (0.1, 0.11, 0.13), alpha: 0.88).setFill(); card.fill()
+            NSColor(white: 1, alpha: 0.12).setStroke(); card.lineWidth = 2; card.stroke()
+            let titleFont = NSFont.systemFont(ofSize: h * 0.2, weight: .semibold)
+            let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
+            // Two lines at most, broken between words, the second cut short with an ellipsis if it must be.
+            var lines = [""]
+            for word in title.split(separator: " ").map(String.init) {
+                if lines[lines.count - 1].isEmpty { lines[lines.count - 1] = word }
+                else if lines[lines.count - 1].count + 1 + word.count <= 28 { lines[lines.count - 1] += " " + word }
+                else if lines.count < 2 { lines.append(word) }
+                else { lines[1] = Work.shorten(lines[1] + " " + word, to: 26) + "…"; break }
+            }
+            for (k, line) in lines.enumerated() {
+                NSAttributedString(string: line, attributes: [.font: titleFont, .foregroundColor: NSColor(white: 0.94, alpha: 1), .paragraphStyle: style])
+                    .draw(in: NSRect(x: w * 0.06, y: h * (0.12 + Double(k) * 0.24), width: w * 0.88, height: h * 0.3))
+            }
+            if let who {
+                NSAttributedString(string: who, attributes: [.font: NSFont.systemFont(ofSize: h * 0.16, weight: .regular),
+                                                             .foregroundColor: NSColor(white: 0.7, alpha: 1)])
+                    .draw(in: NSRect(x: w * 0.06, y: h * 0.66, width: w * 0.88, height: h * 0.22))
+            }
+        }
+        let m = flat(.white)
+        m.diffuse.contents = image
+        m.transparencyMode = .aOne
+        m.writesToDepthBuffer = false
+        tags[key] = m
+        return m
+    }
+
+    private static var stencils: [Int: SCNMaterial] = [:]
+    private static func numberStencil(_ number: Int) -> SCNMaterial {
+        if let m = stencils[number] { return m }
+        let image = Textures.draw(256, 64) { _, w, h in
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedSystemFont(ofSize: h * 0.7, weight: .bold),
+                                                        .foregroundColor: NSColor(white: 0.96, alpha: 0.82), .kern: h * 0.04]
+            let text = NSAttributedString(string: "#\(number)", attributes: attrs)
+            let size = text.size()
+            text.draw(at: NSPoint(x: (w - size.width) / 2, y: (h - size.height) / 2))
+        }
+        let m = flat(.white)
+        m.diffuse.contents = image
+        m.transparencyMode = .aOne
+        m.writesToDepthBuffer = false
+        stencils[number] = m
+        return m
     }
 
     /// The name on a crate's status plate geometry, and on the shell round a failing one.
@@ -312,6 +391,18 @@ enum Props {
         let h = RocketGeometry.height, r = RocketGeometry.radius, cradleTop = RocketGeometry.cradleTop
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        Detail.apply(.hull, to: white)
+        let paint = lit(color)
+        Detail.apply(.hull, to: paint)
+        /// A part's own copy of a material, its plating laid on at one size everywhere: a part `w` by `h` across
+        /// shows that much of the plating, from `at` in it, so neighbouring panels carry on into each other.
+        func plated(_ m: SCNMaterial, _ w: Double, _ h: Double, at: (Double, Double) = (0, 0)) -> SCNMaterial {
+            let c = m.copy() as! SCNMaterial
+            let unit = RocketGeometry.platingSpan
+            c.multiply.contentsTransform = SCNMatrix4Mult(SCNMatrix4MakeScale(CGFloat(w / unit), CGFloat(h / unit), 1),
+                                                          SCNMatrix4MakeTranslation(CGFloat(at.0 / unit), CGFloat(at.1 / unit), 0))
+            return c
+        }
         let tip = SCNNode(), lifter = SCNNode(), cradle = SCNNode()
         tip.name = "tip"; lifter.name = "lifter"; cradle.name = "cradle"
         let base = RocketGeometry.hullBase
@@ -339,7 +430,7 @@ enum Props {
             for k in 0..<6 {
                 let f = RocketGeometry.facing(side: k)
                 let panel = SCNNode(geometry: SCNBox(width: hullR - 0.006, height: ringH - 0.006, length: 0.014, chamferRadius: 0))
-                panel.geometry!.firstMaterial = white
+                panel.geometry!.firstMaterial = plated(white, hullR, ringH, at: (Double(k) * hullR, Double(ring) * ringH))
                 panel.position = v3(f.x * apothem, base + ringH * (Double(ring) + 0.5), f.y * apothem)
                 panel.eulerAngles.y = CGFloat(atan2(f.x, f.y))
                 panel.name = "panel\(ring * 6 + k)"
@@ -347,7 +438,7 @@ enum Props {
             }
         }
         let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: hullR, height: r * 2.6)))
-        nose.geometry!.firstMaterial = lit(color)
+        nose.geometry!.firstMaterial = plated(paint, 2 * .pi * hullR, r * 2.6)
         nose.position = v3(0, base + hullH + r * 1.3, 0)
         nose.name = "nose"
         tip.addChildNode(nose)
@@ -361,7 +452,7 @@ enum Props {
         frame.position = v3(0, 0, -0.012)
         hatch.addChildNode(frame)
         let door = SCNNode(geometry: SCNBox(width: frameW - 0.02, height: frameH - 0.02, length: 0.02, chamferRadius: 0))
-        door.geometry!.firstMaterial = white
+        door.geometry!.firstMaterial = plated(white, frameW, frameH)
         door.name = "door"
         door.position = v3(0, 0, 0.004)
         hatch.addChildNode(door)
@@ -390,11 +481,11 @@ enum Props {
 
         // The lifter: the wider lower stage with its band, the fins, the engine and the landing legs.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
-        lower.geometry!.firstMaterial = white
+        lower.geometry!.firstMaterial = plated(white, 2 * .pi * r, h * 0.45)
         lower.position = v3(0, 0.12 + h * 0.225, 0)
         lifter.addChildNode(lower)
         let band = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.02, height: h * 0.08)))
-        band.geometry!.firstMaterial = lit(color)
+        band.geometry!.firstMaterial = plated(paint, 2 * .pi * r, h * 0.08)
         band.position = v3(0, 0.12 + h * 0.45, 0)
         lifter.addChildNode(band)
         // Four tail fins: each a plate leaning in, its top edge buried in the lower stage, its bottom outer
@@ -404,7 +495,7 @@ enum Props {
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
             let finH = r * 2.6, finL = r * 1.3, lean = 0.42
             let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
-            fin.geometry!.firstMaterial = lit(color)
+            fin.geometry!.firstMaterial = plated(paint, r * 1.3, r * 2.6)
             fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
             fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)

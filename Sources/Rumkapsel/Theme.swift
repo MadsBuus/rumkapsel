@@ -50,7 +50,7 @@ enum Theme: String, CaseIterable, Identifiable {
         var v = Vocabulary()
         guard self == .kingdom else { return v }
         v.bay = "caravans"; v.airlock = "gate"; v.pad = "harbour"; v.storage = "granary"; v.deck = "market"; v.decon = "customs"
-        v.dorm = "inn"; v.lounge = "tavern"; v.bath = "bathhouse"
+        v.dorm = "inn"; v.lounge = "tavern"; v.bath = "bathhouse"; v.gym = "training yard"; v.monolith = "keep"
         v.theBay = "the caravan gate"; v.theAirlock = "the gate"; v.thePad = "the harbour"; v.theRocket = "the ship"
         v.inStorage = "the granary"; v.theDeck = "the market"; v.testedRow = "the quay, past the harbour gate"; v.theGate = "the harbour gate"; v.testDeck = "market"
         v.inDecon = "customs"; v.theMonolith = "the keep"; v.theDorm = "the inn"; v.theCouch = "the tavern bench"
@@ -84,7 +84,7 @@ enum Theme: String, CaseIterable, Identifiable {
 struct Vocabulary {
     // Floor signs.
     var bay = "bay", airlock = "airlock", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
-    var dorm = "dorm", lounge = "lounge", bath = "bath"
+    var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", monolith = "monolith"
     // Places, as said in a sentence.
     var theBay = "the bay", theAirlock = "the airlock", thePad = "the pad", theRocket = "the rocket"
     var inStorage = "storage", theDeck = "the deck", testedRow = "the pad, through the gate", theGate = "the gate", testDeck = "test deck", inDecon = "decon"

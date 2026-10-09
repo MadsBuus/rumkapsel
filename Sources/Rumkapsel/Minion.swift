@@ -603,7 +603,7 @@ final class Minion: Body {
 }
 
 extension Minion {
-    /// The suit on the box: seams, a belt, a badge in its repository's colour, a lit visor. A look with its
+    /// The suit on the box: soft seams, a waistband, a patch in its repository's colour, a glass visor. A look with its
     /// own figure wears its own clothes. A face per material wants square edges: a chamfered box has fewer.
     func wearSuit(badge: NSColor) {
         guard figure == nil, let box = body.geometry as? SCNBox else { return }
@@ -611,7 +611,19 @@ extension Minion {
         guard suitKey != key else { return }
         suitKey = key
         box.chamferRadius = 0
-        box.materials = Suit.materials(badge: badge, crew: isCrew, subagent: isSubagent)
+        box.materials = Suit.materials(crew: isCrew)
         visor.geometry?.firstMaterial = Suit.visor
+        // The repository's patch on the chest: drawn only within a few tiles, like a crate's number.
+        let p = Suit.patch, w = Double(box.width), h = Double(box.height), d = Double(box.length)
+        let patch = body.childNode(withName: "patch", recursively: false) ?? {
+            let plane = SCNPlane(width: w * (p.x1 - p.x0), height: h * (p.y1 - p.y0))
+            plane.levelsOfDetail = [SCNLevelOfDetail(geometry: nil, worldSpaceDistance: 3.5)]
+            let n = SCNNode(geometry: plane)
+            n.name = "patch"
+            n.position = v3(w * ((p.x0 + p.x1) / 2 - 0.5), h * (0.5 - (p.y0 + p.y1) / 2), d / 2 + 0.001)
+            body.addChildNode(n)
+            return n
+        }()
+        patch.geometry?.firstMaterial = flat(Suit.patchColor(badge, crew: isCrew))
     }
 }
