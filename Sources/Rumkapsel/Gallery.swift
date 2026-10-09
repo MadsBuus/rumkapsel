@@ -288,6 +288,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         m.pos = p
         m.node.position = v3(p.x, 0, p.y)
         m.node.opacity = 1
+        m.wearSuit(badge: NSColor(Colors.repos[1]))
         scene.rootNode.addChildNode(m.node)
         bodies.append(m)
         return m
