@@ -49,6 +49,8 @@ final class Walker {
     var hulls: [String: StationHull] = [:]
     /// The signs' arrows, rolling.
     var arrows: [Signs.Arrow] = []
+    /// The pieces of the hull the station's view draws, faded out as the walk's hull comes in.
+    var fragments: [SCNNode] = []
     var skins = -1
     /// The minion the crane rides behind, while it does.
     var riding: String?
@@ -182,7 +184,7 @@ extension StationController {
 
     private func stepOff(_ w: Walker) {
         for n in [w.sky, w.dome, w.walls] { n.removeFromParentNode() }
-        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = false }
+        for n in w.fragments { n.opacity = 1; n.isHidden = false }
         w.title.removeFromParent(); w.subtitle.removeFromParent()
         walker = nil
         for n in legendNodes + jobNodes { n.alpha = 1 }
@@ -445,8 +447,15 @@ extension StationController {
         pitchNode.eulerAngles.x = pitch
         w.sky.position = cameraNode.worldPosition
         w.sky.opacity = ease((t - 0.3) / 0.6)
-        w.walls.scale.y = max(0.001, ease((t - 0.4) / 0.6))
+        // The walls rise out of the floor and fade in as they come, never a flat outline before they start.
+        let rising = ease((t - 0.4) / 0.6)
+        w.walls.isHidden = rising <= 0
+        w.walls.scale.y = max(0.001, rising)
+        w.walls.opacity = ease((t - 0.4) / 0.3)
         w.dome.opacity = ease((t - 0.45) / 0.55)
+        // The station view's pieces of the hull give way to the whole of it as the view comes down.
+        let fragments = 1 - ease(t / 0.5)
+        for n in w.fragments { n.opacity = fragments; n.isHidden = fragments <= 0 }
         let film = ease((t - 0.2) / 0.8)
         camera.vignettingIntensity = 0.6 * film
         camera.colorFringeIntensity = 0.5 * film
@@ -623,7 +632,7 @@ extension StationController {
     private func buildDome(_ w: Walker) {
         w.dome.childNodes.forEach { $0.removeFromParentNode() }
         w.hulls = [:]
-        staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }.forEach { $0.isHidden = true }
+        w.fragments = staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }
         let step = 0.25
         for st in fleet.stations.values {
             let hull = StationHull(st)
