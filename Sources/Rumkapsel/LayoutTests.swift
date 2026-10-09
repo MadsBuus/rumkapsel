@@ -237,6 +237,42 @@ enum LayoutTests {
                    "upright from the floor to a crown \(StationHull.section.rise) up, got \(crown)")
         }
 
+        test("signs say one thing each, stand apart, hang on real walls and point the way a minion would walk") {
+            let a = fresh()
+            for i in 0..<20 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
+            let signs = Signs.plan(a)
+            expect(!signs.isEmpty, "a station with a hallway has signs")
+            let places = Signs.places(a)
+            let hall = Set(a.corridorCells + a.coreCells)
+            for s in signs {
+                let beyond = Cell(x: s.cell.x + s.wall.x, y: s.cell.y + s.wall.y)
+                expect(hall.contains(s.cell), "a sign stands in the hallway: \(s.cell)")
+                expect(!a.walkable.contains(beyond) || !a.canStep(from: s.cell, to: beyond), "a sign hangs on a wall, not in a doorway: \(s.cell)")
+                let named = s.ways.flatMap(\.places)
+                expect(Set(named).count == named.count, "each place once on a sign: \(named)")
+                for p in places where p.cells.contains(s.cell) { expect(!named.contains(p.name), "no sign points to where it stands: \(p.name)") }
+                // A step the way an arrow points, for whoever faces the sign, is a step nearer each place it names.
+                for way in s.ways {
+                    let d = s.wall
+                    let w = [Signs.Turn.left: SIMD2(d.y, -d.x), .right: SIMD2(-d.y, d.x), .back: SIMD2(-d.x, -d.y)][way.turn]!
+                    let next = Cell(x: s.cell.x + w.x, y: s.cell.y + w.y)
+                    for name in way.places {
+                        guard let p = places.first(where: { $0.name == name }) else { continue }
+                        let far = walked(a, to: p.cells)
+                        expect(a.canStep(from: s.cell, to: next) && far[next].map { $0 + 1 == far[s.cell] } == true,
+                               "the \(way.turn) arrow at \(s.cell) facing \(d) leads toward \(name)")
+                    }
+                }
+            }
+            let core = Set(a.coreCells)
+            let home = Words.current.monolith.prefix(1).uppercased() + Words.current.monolith.dropFirst()
+            for s in signs where s.ways.map(\.places) == [[home]] && !core.contains(s.cell) {
+                for t in signs where t.cell != s.cell {
+                    expect(abs(t.cell.x - s.cell.x) + abs(t.cell.y - s.cell.y) >= Signs.spacing, "signs stand apart: \(s.cell) and \(t.cell)")
+                }
+            }
+        }
+
         test("the yard has room for a pallet: a lane through its doorway, and a body's width of aisle past each end") {
             let a = fresh()
             let rows = Set(a.storageCells.map(\.y)).sorted()
@@ -370,6 +406,23 @@ enum LayoutTests {
         var seen: Set<Cell> = [start], queue = [start], head = 0
         while head < queue.count { let c = queue[head]; head += 1; for n in c.neighbours where hall.contains(n) && !seen.contains(n) { seen.insert(n); queue.append(n) } }
         return seen == hall && s.rooms.values.allSatisfy { r in r.cells.contains { c in c.neighbours.contains(where: s.isCorridor) } }
+    }
+
+    /// Steps from each walkable cell to the nearest of `cells`.
+    private static func walked(_ s: Station, to cells: Set<Cell>) -> [Cell: Int] {
+        var far: [Cell: Int] = [:], frontier = Array(cells)
+        for c in cells { far[c] = 0 }
+        while !frontier.isEmpty {
+            var next: [Cell] = []
+            for c in frontier {
+                for n in [Cell(x: c.x + 1, y: c.y), Cell(x: c.x - 1, y: c.y), Cell(x: c.x, y: c.y + 1), Cell(x: c.x, y: c.y - 1)]
+                where far[n] == nil && s.walkable.contains(n) && s.canStep(from: n, to: c) {
+                    far[n] = far[c]! + 1; next.append(n)
+                }
+            }
+            frontier = next
+        }
+        return far
     }
 
     private static func fresh() -> Station {

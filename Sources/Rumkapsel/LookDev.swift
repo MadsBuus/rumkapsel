@@ -11,6 +11,7 @@ import Metal
 enum LookDev {
     static func run(out: String, shot: String) -> Never {
         if shot == "crates" { crates(out: out) }
+        if shot == "signs" { signs(out: out) }
         if shot.hasPrefix("wall") {
             // "wall" or "wall-close", with ":office", ":quarters" or ":yard" for a place other than a hallway.
             let parts = shot.split(separator: ":")
@@ -62,6 +63,46 @@ enum LookDev {
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { exit(1) }
         try? png.write(to: URL(fileURLWithPath: out))
         exit(0)
+    }
+
+    /// A hallway wall with a sign on it, close, at a minion's eye height.
+    private static func signs(out: String) -> Never {
+        Bulkhead.prepareNow()
+        let scene = SCNScene()
+        scene.background.contents = NSColor(rgb: (0.015, 0.02, 0.035))
+        let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 700
+        sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
+        scene.rootNode.addChildNode(sun)
+        let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light!.type = .ambient; ambient.light!.intensity = 550
+        scene.rootNode.addChildNode(ambient)
+        let floor = SCNNode(geometry: SCNPlane(width: 6, height: 3))
+        floor.geometry!.firstMaterial = flat(NSColor(rgb: (0.42, 0.33, 0.27)))
+        floor.eulerAngles.x = -.pi / 2
+        scene.rootNode.addChildNode(floor)
+        let sign = Signs.Sign(cell: Cell(x: 0, y: 0), wall: SIMD2(0, -1), ways: [(.left, ["Launch", "Storage", "Staging", "Bath"]), (.back, ["Dorm", "Gym"]),
+                                                                               (.right, ["Monolith"])])
+        let box = SCNBox(width: 1, height: Walker.wallHeight, length: 0.07, chamferRadius: 0)
+        var faces = Array(repeating: Bulkhead.steel, count: 6)
+        faces[0] = Bulkhead.material(0, style: .hallway)
+        box.materials = faces
+        let wall = SCNNode(geometry: box)
+        wall.position = v3(0, Walker.wallHeight / 2, -0.5)
+        scene.rootNode.addChildNode(wall)
+        let (panel, arrows) = Signs.panel(sign)
+        Signs.roll(arrows, at: 0.3)
+        panel.position = v3(0, 0.47, -0.5 + 0.039)
+        scene.rootNode.addChildNode(panel)
+        let eye = SCNNode()
+        let cam = SCNCamera()
+        cam.fieldOfView = 68; cam.zNear = 0.02; cam.zFar = 50
+        FlightCraft.film(cam)
+        cam.exposureOffset = -0.45
+        cam.bloomThreshold = 1.4
+        eye.camera = cam
+        eye.position = v3(0, 0.42, 0.55)
+        eye.look(at: v3(0, 0.42, -0.5), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
+        scene.rootNode.addChildNode(eye)
+        render(scene, from: eye, to: out)
     }
 
     /// Crates side by side at a minion's eye height, one in each of the crate details, numbered.

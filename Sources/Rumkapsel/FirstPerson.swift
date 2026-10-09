@@ -47,6 +47,8 @@ final class Walker {
     var climb = 0.0
     /// The hull over each station, by name, as built with the walls, and which drawing of the walls' skins they had.
     var hulls: [String: StationHull] = [:]
+    /// The signs' arrows, rolling.
+    var arrows: [Signs.Arrow] = []
     var skins = -1
     /// The minion the crane rides behind, while it does.
     var riding: String?
@@ -251,6 +253,7 @@ extension StationController {
         if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; buildWalls(w); buildDome(w) }
         else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; buildWalls(w) }   // the walls' skins are done
         poseWalkCamera(w)
+        Signs.roll(w.arrows, at: clock)
         showPlace(w)
         hidePixelsBehindWalls(w)
         return true
@@ -500,6 +503,7 @@ extension StationController {
     /// with a light strip in the colour of the floor it faces; a rail where the floor is outside.
     private func buildWalls(_ w: Walker) {
         w.walls.childNodes.forEach { $0.removeFromParentNode() }
+        w.arrows = []
         let tints = drawnFloor()
         var glows: [String: SCNMaterial] = [:]
         func glow(_ c: NSColor?) -> SCNMaterial {
@@ -589,9 +593,22 @@ extension StationController {
             let flatWalls = root.flattenedClone()
             flatWalls.categoryBitMask = Pick.scenery
             w.walls.addChildNode(flatWalls)
+            for sign in Signs.plan(st) { w.walls.addChildNode(signNode(sign, in: st, thickness: t, arrows: &w.arrows)) }
         }
     }
 
+
+    /// A way-finding sign on its wall: a lit panel at eye height, a line for each way, only drawn close by.
+    private func signNode(_ sign: Signs.Sign, in st: Station, thickness t: Double, arrows: inout [Signs.Arrow]) -> SCNNode {
+        let (n, rolling) = Signs.panel(sign)
+        arrows += rolling
+        let p = SIMD2(Double(sign.wall.x), Double(sign.wall.y))
+        let at = st.offset + SIMD2(Double(sign.cell.x), Double(sign.cell.y)) + p * (0.5 - t / 2 - 0.004)
+        n.position = v3(at.x, 0.47, at.y)
+        n.eulerAngles.y = CGFloat(atan2(-p.x, -p.y))   // facing back into the junction
+        n.categoryBitMask = Pick.scenery
+        return n
+    }
 
     /// Everything the walls are built from: each station's place, its walkable floor and its rooms.
     private var floorSignature: String {
