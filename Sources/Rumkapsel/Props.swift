@@ -33,6 +33,7 @@ enum Props {
         let h = size * 0.8
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
         box.materials = [flat(color), flat(color.darker(0.13)), flat(color), flat(color.darker(0.13)), flat(color.lighter(0.14)), flat(color)]
+        for m in box.materials { Detail.apply(.crate, to: m) }
         let body = SCNNode(geometry: box)
         body.position = v3(0, h / 2, 0)
         n.addChildNode(body)
@@ -312,6 +313,9 @@ enum Props {
         let h = RocketGeometry.height, r = RocketGeometry.radius, cradleTop = RocketGeometry.cradleTop
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
+        Detail.apply(.hull, to: white)
+        let paint = lit(color)
+        Detail.apply(.hull, to: paint)
         let tip = SCNNode(), lifter = SCNNode(), cradle = SCNNode()
         tip.name = "tip"; lifter.name = "lifter"; cradle.name = "cradle"
         let base = RocketGeometry.hullBase
@@ -347,7 +351,7 @@ enum Props {
             }
         }
         let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: hullR, height: r * 2.6)))
-        nose.geometry!.firstMaterial = lit(color)
+        nose.geometry!.firstMaterial = paint
         nose.position = v3(0, base + hullH + r * 1.3, 0)
         nose.name = "nose"
         tip.addChildNode(nose)
@@ -394,7 +398,7 @@ enum Props {
         lower.position = v3(0, 0.12 + h * 0.225, 0)
         lifter.addChildNode(lower)
         let band = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.02, height: h * 0.08)))
-        band.geometry!.firstMaterial = lit(color)
+        band.geometry!.firstMaterial = paint
         band.position = v3(0, 0.12 + h * 0.45, 0)
         lifter.addChildNode(band)
         // Four tail fins: each a plate leaning in, its top edge buried in the lower stage, its bottom outer
@@ -404,7 +408,7 @@ enum Props {
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
             let finH = r * 2.6, finL = r * 1.3, lean = 0.42
             let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
-            fin.geometry!.firstMaterial = lit(color)
+            fin.geometry!.firstMaterial = paint
             fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
             fin.eulerAngles.x = -lean
             pivot.addChildNode(fin)

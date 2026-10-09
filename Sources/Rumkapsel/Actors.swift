@@ -282,7 +282,7 @@ extension StationController {
         func paint(_ i: Int, _ color: NSColor, glow: NSColor = .black) {
             guard let panel = tip.childNodes.first(where: { ($0.value(forKey: "part") as? String) == "panel\(i)" }) else { return }
             if panel.value(forKey: "paint") == nil {
-                panel.geometry?.firstMaterial = lit(Hull.white)   // its own paint, not its neighbours'
+                panel.geometry?.firstMaterial = (panel.geometry?.firstMaterial?.copy() as? SCNMaterial) ?? lit(Hull.white)   // its own paint, not its neighbours'
                 panel.setValue(true, forKey: "paint")
             }
             panel.geometry?.firstMaterial?.diffuse.contents = color

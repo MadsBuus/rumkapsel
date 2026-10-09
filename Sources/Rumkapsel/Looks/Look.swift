@@ -148,6 +148,8 @@ protocol Look {
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode?
     /// Whether working a message throws welding sparks.
     var workSparks: Bool { get }
+    /// Whether the floor tiles carry the classic deck plates' fine detail over their colour.
+    var detailsFloors: Bool { get }
     /// A message waiting to be worked, standing on the origin, or nil for the classic pyramid.
     func message(color: NSColor, floor: NSColor) -> SCNNode?
 }
@@ -210,6 +212,7 @@ extension Look {
     var writesOnFloor: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
     var workSparks: Bool { true }
+    var detailsFloors: Bool { true }
     func message(color: NSColor, floor: NSColor) -> SCNNode? { nil }
 }
 

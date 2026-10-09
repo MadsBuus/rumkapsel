@@ -79,16 +79,17 @@ extension StationController {
         let tint = look.floorColor(color, floor: floor)
         let drawn = look.drawsPlane(floor)
         let plane: SCNGeometry
+        func paint() -> SCNMaterial {
+            let m = flat(tint)
+            if !drawn { m.transparency = 0; m.writesToDepthBuffer = false }
+            else if look.detailsFloors { Detail.apply(Detail.kind(of: floor), to: m) }
+            return m
+        }
         if let id = swatch(tint) {
-            plane = shared("floor:\(id):\(drawn)", width: 1, height: 1) {
-                let m = flat(tint)
-                if !drawn { m.transparency = 0; m.writesToDepthBuffer = false }
-                return m
-            }
+            plane = shared("floor:\(id):\(drawn):\(floor)", width: 1, height: 1, paint)
         } else {
             let p = SCNPlane(width: 1.0, height: 1.0)
-            p.firstMaterial = flat(tint)
-            if !drawn { p.firstMaterial?.transparency = 0; p.firstMaterial?.writesToDepthBuffer = false }
+            p.firstMaterial = paint()
             plane = p
         }
         let n = SCNNode(geometry: plane)
