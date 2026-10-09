@@ -1338,7 +1338,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if wall - fpsMark >= 0.5 {
             let rate = Double(fpsFrames) / max(0.05, wall - fpsMark)
             fpsLabel.text = String(format: "%.0f fps of %d · slowest %.0f ms", rate, want, fpsWorst * 1000)
-            fpsLabel.position = CGPoint(x: 14, y: hud.size.height - 14)
+            fpsLabel.position = CGPoint(x: 84, y: hud.size.height - 9)   // beside the window's buttons, not under them
             fpsFrames = 0; fpsMark = wall; fpsWorst = 0
         }
         if !tickWalk(dt: dt, move: keyMove, turn: keyZoom) {
