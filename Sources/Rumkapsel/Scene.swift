@@ -413,7 +413,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// A hand has been on the camera since launch: the one-time framing when the floor has finished arriving
     /// is for a view nobody has touched.
     var userTookView = false
-    private var fpsFrames = 0, fpsMark = 0.0   // the frame counter behind RK_FPS
+    /// The frame counter in the corner: frames and the slowest of them since it last said, on real time.
+    let fpsLabel = SKLabelNode(fontNamed: "HelveticaNeue-Light")
+    private var fpsFrames = 0, fpsMark = 0.0, fpsWorst = 0.0
     private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up
     private var keyZoom = 0.0                    // E/Q held: +1 zooms in, -1 out
     var userYaw = 0.0
@@ -592,7 +594,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog() }
-        if !simulated { WallPanel.prepare() }
+        if !simulated { Bulkhead.prepare() }
         if demo {
             seedDemo()
         } else if !simulated {
@@ -1326,9 +1328,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
         let want = !seen ? 8 : (walker != nil || userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
         if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
-        if ProcessInfo.processInfo.environment["RK_FPS"] != nil {
-            fpsFrames += 1
-            if clock - fpsMark >= 5 { FileHandle.standardError.write("fps \(Int(Double(fpsFrames) / max(0.1, clock - fpsMark))) want \(want) seen \(seen) active \(NSApp.isActive)\n".data(using: .utf8)!); fpsFrames = 0; fpsMark = clock }
+        fpsFrames += 1
+        fpsWorst = max(fpsWorst, dt)
+        let wall = CACurrentMediaTime()
+        if wall - fpsMark >= 0.5 {
+            let rate = Double(fpsFrames) / max(0.05, wall - fpsMark)
+            fpsLabel.text = String(format: "%.0f fps of %d · slowest %.0f ms", rate, want, fpsWorst * 1000)
+            fpsLabel.position = CGPoint(x: 14, y: hud.size.height - 14)
+            fpsFrames = 0; fpsMark = wall; fpsWorst = 0
         }
         if !tickWalk(dt: dt, move: keyMove, turn: keyZoom) {
         if keyMove != .zero {

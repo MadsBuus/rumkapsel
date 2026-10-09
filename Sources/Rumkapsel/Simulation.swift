@@ -509,8 +509,9 @@ final class Simulation<B: Body> {
 
     // MARK: hands
 
-    /// Stands an arm's length from what it is about to work on, facing it. True once it stands right.
-    func atArmsLength(_ m: B, of spot: SIMD2<Double>, from side: SIMD2<Double>? = nil, dt: Double) -> Bool {
+    /// Stands an arm's length from what it is about to work on, facing it. True once it stands right. `square`
+    /// stands it straight out from the spot on the side asked for, wherever it came from: a face worked head on.
+    func atArmsLength(_ m: B, of spot: SIMD2<Double>, from side: SIMD2<Double>? = nil, square: Bool = false, dt: Double) -> Bool {
         let to = spot - m.pos
         let dist = (to.x * to.x + to.y * to.y).squareRoot()
         if dist > 0.05 { m.facing = atan2(to.x, to.y) }
@@ -532,6 +533,11 @@ final class Simulation<B: Body> {
             }
         }
         guard m.path.isEmpty else { return false }
+        if square, let side, side.x != 0 || side.y != 0 {
+            let want = spot + side / (side.x * side.x + side.y * side.y).squareRoot() * Hands.arm
+            m.pos += (want - m.pos) * min(1, dt * 6)
+            return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
+        }
         guard dist < Hands.near || dist > Hands.far else { return true }
         // Right on top of the slot: a step back the way it is facing, so the crate goes down in front.
         let dir = dist > 0.001 ? to / dist : SIMD2(sin(m.facing), cos(m.facing))

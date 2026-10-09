@@ -97,6 +97,11 @@ extension StationController {
         followLabel.horizontalAlignmentMode = .center
         followLabel.verticalAlignmentMode = .bottom
         hud.addChild(followLabel)
+        fpsLabel.fontSize = 10
+        fpsLabel.fontColor = Palette.dim
+        fpsLabel.horizontalAlignmentMode = .left
+        fpsLabel.verticalAlignmentMode = .top
+        hud.addChild(fpsLabel)
         statusLabel.fontSize = 10
         statusLabel.fontColor = Palette.dim
         statusLabel.horizontalAlignmentMode = .right
