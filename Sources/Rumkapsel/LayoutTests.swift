@@ -237,6 +237,35 @@ enum LayoutTests {
                    "upright from the floor to a crown \(StationHull.section.rise) up, got \(crown)")
         }
 
+        test("a workspace that moved on from its merged office gets an office of its own, once, beside it") {
+            let world = World(demo: true)
+            let a = world.fleet.station("work")
+            let cwd = FileManager.default.temporaryDirectory.appendingPathComponent("rk-workspace-\(getpid())").path
+            try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: cwd) }
+            let now = Date()
+            func scan(_ branch: String) -> [WorldEvent] {
+                let s = SessionInfo(id: "s", cwd: cwd, repo: "web", repoRoot: nil, owner: nil, lastModified: now, activity: .waiting,
+                                    area: nil, title: nil, branch: branch, toolCount: 0, isSubagent: false, cwdExists: true,
+                                    promptCount: 0, queuedCount: 0, eventMarkers: [:])
+                return world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
+            }
+            // Past the first scans, while a floor waits for GitHub before it puts offices up.
+            for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
+            // The office of the pull request the workspace merged, still waiting for its crate to reach storage.
+            let merged = world.works.note(repo: "web", pull: 85, pullState: "MERGED")
+            world.works.report(merged, .stored, by: .pulls)
+            let old = "task:web#85"
+            _ = a.ensureRoom(key: old, name: "#85", repo: "web", color: Colors.repos[0], lastActive: now)
+            a.rooms[old]?.worktree = cwd
+            expect(world.stage(office: old, repo: "web") == .stored, "merged, waiting for its haul")
+            _ = scan("feature/new")
+            let again = scan("feature/new") + scan("feature/new")
+            let flips = again.filter { if case .officeOpened = $0 { return true }; if case .officeArchived = $0 { return true }; return false }
+            expect(flips.isEmpty, "no office opened and dropped scan after scan: \(flips.count)")
+            expect(a.rooms[old] != nil && a.rooms.keys.contains { $0.hasSuffix("feature/new") }, "both stand: \(a.rooms.keys.sorted())")
+        }
+
         test("signs say one thing each, stand apart, hang on real walls and point the way a minion would walk") {
             let a = fresh()
             for i in 0..<20 { place("task:repo\(i % 5)#\(100 + i)", on: a) }

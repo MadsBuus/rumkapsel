@@ -69,7 +69,9 @@ final class Walker {
     var placeAt = -10.0
     /// The floor the walls were built for, and the offset your station had when last looked at: the fleet
     /// moves a station sideways when another one grows, and you move with it.
-    var builtFor = ""
+    var builtFor = 0
+    /// When the station's scene was last rebuilt as the floor was read for `builtFor`.
+    var readAt = -1.0
     var anchor: SIMD2<Double>?
     /// How long you have been pushing against something, for the log.
     var pushedFor = 0.0
@@ -251,9 +253,9 @@ extension StationController {
             if w.riding == nil { fly(w, dt: dt); stride(w, dt: dt, move: move, turn: turn) }
         }
         ease(w, toward: wantedView(w), dt: dt)
-        let floor = floorSignature
-        if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; buildWalls(w); buildDome(w) }
-        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; buildWalls(w) }   // the walls' skins are done
+        let floor = timed("walk floor") { floorSignature(w) }
+        if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) }; timed("dome") { buildDome(w) } }
+        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) } }   // the walls' skins are done
         poseWalkCamera(w)
         Signs.roll(w.arrows, at: clock)
         showPlace(w)
@@ -619,11 +621,23 @@ extension StationController {
         return n
     }
 
-    /// Everything the walls are built from: each station's place, its walkable floor and its rooms.
-    private var floorSignature: String {
-        fleet.stations.values.sorted { $0.name < $1.name }.map { st in
-            "\(st.name)@\(st.offset.x),\(st.offset.y):\(st.walkable.count)/\(st.dugCount)/\(st.rooms.count)"
-        }.joined(separator: " ") + "|\(lastRebuildAt)"
+    /// Everything the walls and the dome are built from: each station's place, its walkable floor, the steps
+    /// between its cells and the room each cell is part of. Read again only once the station's scene was rebuilt,
+    /// which draws the hull pieces anew too: those are picked up again for the walk to fade.
+    private func floorSignature(_ w: Walker) -> Int {
+        guard w.readAt != lastRebuildAt else { return w.builtFor }
+        w.readAt = lastRebuildAt
+        w.fragments = staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }
+        var h = Hasher()
+        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
+            h.combine(st.name); h.combine(st.offset.x); h.combine(st.offset.y)
+            for c in st.walkable.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
+                h.combine(c.x); h.combine(c.y)
+                h.combine(st.canStep(from: c, to: Cell(x: c.x + 1, y: c.y))); h.combine(st.canStep(from: c, to: Cell(x: c.x, y: c.y + 1)))
+                if let room = st.room(at: c) { h.combine(room.key); h.combine(room.repo) }
+            }
+        }
+        return h.finalize()
     }
 
     /// The hull over each station: its own glass vault on a low steel sill, with doorways cut where the gate and
