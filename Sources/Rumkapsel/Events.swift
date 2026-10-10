@@ -51,7 +51,7 @@ enum WorldEvent {
     /// A staging release closed unmerged: the pallet unloads back into storage.
     case stagingClosed(station: String, repo: String, number: Int)
     /// What a repository's rocket should be doing now, as a command for it to run.
-    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command)
+    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, hotfix: Bool = false, command: Command)
     /// A message landed in a session's office: cones on the floor, and its worker goes to them.
     case prompt(station: String, key: String, minionId: String, count: Int)
     /// Who is on the crew right now.

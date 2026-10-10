@@ -642,6 +642,16 @@ enum Props {
 }
 
 extension Props {
+    /// An express rocket's hull: red panels winding round the white ones like hazard tape, one side further
+    /// round each ring up. The nose keeps the repository's colour.
+    static func hazardStripes(_ rocket: SCNNode) {
+        guard let tip = part(rocket, "tip") else { return }
+        let red = lit(NSColor(rgb: (0.86, 0.16, 0.14)))
+        for i in 0..<RocketGeometry.panels where (i / 6 + i % 6) % 3 == 0 {
+            tip.childNodes.first { $0.name == "panel\(i)" }?.geometry?.firstMaterial = red
+        }
+    }
+
     /// Soot round where a rocket stood: a dark burnt core, rays blown out from it along the floor, and blotches
     /// at their ends, all fading to nothing before the edge so the mark has no outline.
     static func scorchImage(seed: UInt64) -> CGImage? {

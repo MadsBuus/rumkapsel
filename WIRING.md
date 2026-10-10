@@ -100,7 +100,9 @@ a release merged into staging or production, or when it ships on tags (`GitHub.s
 |---|---|---|---|
 | Board cleared column | | the crate's `cleared` flag | `GitHub.swift:304`, `Ledger.swift:191` |
 | Board item moves to cleared | | carried to the tested row | `Scene.swift:1054`, `Jobs.swift:423` |
-| Open production release has no `untested` label | no board | the whole release counts as tested: the rocket loads | `GitHub.swift:52`, `World.swift:867` |
+| Open production release has no `untested` label | no board, or no QA | the whole release counts as tested: the rocket loads | `GitHub.swift:52`, `World.swift` |
+| Open production release has no `untested` label | a board testing on the deck | work with no card counts as tested; carded work waits for its card | `World.swift` |
+| Work becomes cleared | | the releases are read again at once, so the rocket loads on the last card | `World.swift` |
 | Bot crate | always | cleared from the start | `Ledger.swift:191` |
 
 Without a board there is no Cleared per crate.
@@ -110,6 +112,8 @@ Without a board there is no Cleared per crate.
 | Trigger | Condition | Effect | Code |
 |---|---|---|---|
 | Open production release PR | or any open release with no staging | a rocket stands by; loads if not `untested` | `World.swift:533`, `:585` |
+| A hotfix PR opens: into production from anything but staging, the trunk or a release branch | | an express rocket, red stripes round its hull, stands beside the release's | `GitHub.swift`, `World.swift` |
+| The hotfix merges | | the express rocket goes up at once with the flight; only the hotfix's own work has shipped, the release rocket and the yard stay as they are | `World.swift`, `Ships.swift` |
 | The rocket stands by | not cleared to load | whatever it took aboard snaps back to its rows, tested in front of it | `World.swift`, `Ledger.swift` |
 | Production release PR merges | | `.releaseMerged`, the launch | `GitHub.swift:1070`, `World.swift:565` |
 | A new tag | ships on tags; not the first answer | the launch, with no rocket standing first | `GitHub.swift:1075` |
