@@ -213,7 +213,8 @@ enum SimulationTests {
             })
             expect(lifted && arms == m.id, "on the arms, and the ledger says whose: \(String(describing: arms))")
             expect(!m.hasLoad && m.landing != nil && !m.landing!.dropped, "set down on its slot")
-            expect(sim.world.crate(crate)?.area == .deck && sim.world.crate(crate)?.heading == .deck, "the ledger has it down on the deck, the landing still to be written by what the scene meant to do: \(String(describing: sim.world.crate(crate)?.at))")
+            expect(sim.world.crate(crate)?.area == .deck && sim.world.crate(crate)?.placed == .deck && sim.world.crate(crate)?.heading == nil,
+                   "the ledger has it landed on the deck: \(String(describing: sim.world.crate(crate)?.at))")
             expect(sim.cargo.isEmpty, "the carry is over")
             let landed = sim.drainCues().contains { if case .landed = $0 { return true }; return false }
             expect(landed && !landedCalled, "the landing is a cue for the scene, which runs what it meant to do")

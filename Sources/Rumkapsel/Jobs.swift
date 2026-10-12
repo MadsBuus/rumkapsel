@@ -318,7 +318,6 @@ extension StationController {
         }
         carry(command, node: node) { [weak self] in
             guard let self else { return }
-            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             node.removeFromParentNode()
             rebuildMarkers()
             // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
@@ -342,7 +341,6 @@ extension StationController {
         let command = world.carryToStorage(station: station, room: room, repo: repo, number: number).from(exact)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
-            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
@@ -357,16 +355,13 @@ extension StationController {
         let list = commands ?? world.carryToDeck(station: station, repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
         var started = 0
         for command in list {
-            guard let crate = command.crate, case .carry(_, _, let to) = command.kind, let node = crateNode(crate) else {
+            guard let crate = command.crate, let node = crateNode(crate) else {
                 if let crate = command.crate { world.unorder(crate) }   // nothing on the floor to carry: the order is off
                 continue
             }
             started += 1
             carry(command, node: node) { [weak self] in
                 guard let self else { return }
-                // Where it actually went down: the order may have been sent back on the way.
-                let landedIn = world.area(of: crate).flatMap(Yard.init(area:)) ?? to
-                world.landed(station: station, repo: repo, number: crate.number, in: landedIn, at: now)
                 node.removeFromParentNode()
                 rebuildMarkers()
                 refreshRockets()
