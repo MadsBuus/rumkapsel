@@ -147,15 +147,22 @@ enum SimulationTests {
             expect(!m.idle.armed, "dropped by work")
         }
 
-        test("dismissed, a body goes out through the airlock and is gone") {
+        test("dismissed, a body walks out to the bay, boards the shuttle that comes in for it, and goes with it") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             sim.dismiss(m)
-            expect(m.state == .leaving && m.place == .airlock && !m.path.isEmpty, "off to the airlock")
-            expect(step(sim, seconds: 60, until: { sim.bodies[m.id] == nil }), "gone within a minute; last at \(m.cell.x),\(m.cell.y) in \(m.phaseKind), \(m.path.count) waypoints left")
-            expect(m.opacity <= 0, "faded out")
-            expect(station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell), "inside the airlock or on the bay: \(m.cell.x),\(m.cell.y)")
+            sim.assignOrders()
+            expect(m.state == .leaving && !m.path.isEmpty, "off to the bay")
+            expect(sim.pickup(for: m) != nil, "a ship is on its way for it")
+            var boarded = false
+            expect(step(sim, seconds: 90, until: {
+                if sim.bodies[m.id] != nil, m.opacity < 1, sim.pickup(for: m)?.phaseKind == .unload { boarded = true }
+                return sim.bodies[m.id] == nil
+            }), "gone within a minute and a half; last at \(m.cell.x),\(m.cell.y) in \(m.phaseKind), waiting on \(m.waitingOn ?? "nothing")")
+            expect(boarded, "it went aboard while its ship stood on the berth")
+            expect(station.hangarCells.contains(m.cell), "on the bay: \(m.cell.x),\(m.cell.y)")
+            expect(step(sim, seconds: 30, until: { sim.flights.isEmpty }), "and the ship leaves with it")
         }
 
         test("a carry: the crate is lifted onto the arms, walked to the deck and set down, the ledger keeping step") {
@@ -355,14 +362,14 @@ enum SimulationTests {
             } else { expect(false, "the carry is still a carry") }
         }
 
-        test("every way in and out of the bay: a ship comes from outside, never touches the floor, and ends on its berth") {
+        test("every way in and out of the bay threads its mouth: from outside, in through the field low and level, onto its berth, and out the same way") {
+            let mouth = BayMouth(z: 11.5, height: Station.mouthHeight)
             for arrival in Arrival.allCases {
                 for side in [1.0, -1.0] {
                     let at = SIMD3(3.0, 0, 9.0), rest = Station.restOverCrate
-                    let legs = arrivalLegs(arrival, at: at, rest: rest, side: side)
+                    let legs = arrivalLegs(arrival, at: at, rest: rest, side: side, mouth: mouth)
                     let path = [legs.start] + legs.approach.points + legs.descend.points
-                    expect(legs.start.y > 3, "\(arrival) starts high: \(legs.start.y)")
-                    expect(legs.start.z > at.z, "\(arrival) comes in from outside the bay, not over the station: \(legs.start.z) against \(at.z)")
+                    expect(legs.start.z > mouth.z + 2, "\(arrival) comes in from outside the bay, not over the station: \(legs.start.z)")
                     let down = legs.descend.last
                     expect(abs(down.x - at.x) < 0.01 && abs(down.z - at.z) < 0.01 && abs(down.y - rest) < 0.01,
                            "\(arrival) ends over its berth: \(down.x),\(down.y),\(down.z)")
@@ -370,7 +377,8 @@ enum SimulationTests {
                     for (a, b) in zip(path, path.dropFirst()) {
                         expect(b.y <= a.y + 0.01, "\(arrival) only ever comes down: \(a.y) then \(b.y)")
                     }
-                    let out = departureLegs(.climb, at: at, rest: rest, side: side)
+                    for p in path where p.z < mouth.z { expect(p.y < Station.fieldTop, "\(arrival) stays under the hangar's roof: \(p.y)") }
+                    let out = departureLegs(.climb, at: at, rest: rest, side: side, mouth: mouth)
                     let away = ([SIMD3(at.x, rest, at.z)] + out.rise.points + out.leave.points)
                     for (a, b) in zip(away, away.dropFirst()) {
                         expect(b.y >= a.y - 0.01, "a climb only ever goes up: \(a.y) then \(b.y)")
@@ -379,11 +387,12 @@ enum SimulationTests {
             }
             for departure in Departure.allCases {
                 let at = SIMD3(3.0, 0, 9.0)
-                let out = departureLegs(departure, at: at, rest: Station.restOnSkids, side: 1)
+                let out = departureLegs(departure, at: at, rest: Station.restOnSkids, side: 1, mouth: mouth)
                 expect(out.leave.last.y > 5, "\(departure) leaves high: \(out.leave.last.y)")
-                expect(out.leave.last.z > at.z, "\(departure) leaves outward, not over the station: \(out.leave.last.z)")
+                expect(out.leave.last.z > mouth.z, "\(departure) leaves outward, not over the station: \(out.leave.last.z)")
                 let away = [SIMD3(at.x, Station.restOnSkids, at.z)] + out.rise.points + out.leave.points
                 for p in away { expect(p.y >= Station.restOnSkids - 0.01, "\(departure) keeps its skids off the floor: \(p.y)") }
+                for p in away where p.z < mouth.z { expect(p.y < Station.fieldTop, "\(departure) stays under the hangar's roof: \(p.y)") }
             }
         }
 
@@ -727,6 +736,9 @@ enum SimulationTests {
             sinceBeat += dt
             if sinceBeat >= 0.5 { sinceBeat = 0; beat() }   // the half-second pass: the reconcilers
             sim.stepPallets(dt: dt)
+            sim.stepShuttles()
+            sim.stepLocks(dt: dt)
+            sim.stepDrones(dt: dt)
             sim.stepBodies(dt: dt)
             left -= dt
             if done() { return true }

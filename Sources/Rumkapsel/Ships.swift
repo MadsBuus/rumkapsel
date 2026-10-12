@@ -42,52 +42,63 @@ struct FlightLeg {
     }
 }
 
-/// How a ship comes in to its berth. The berth is the same under each; the way down to it is not.
-/// `hover` is the high, gentle set-down; `sweep` runs in low across the bay's mouth and turns onto the
-/// berth; `dive` drops out of the sky over it and flares; `run` flies a long shallow final straight in.
+/// How a ship comes in to its berth. The berth is the same under each; the way to it is not. Out in space
+/// `hover` swings round high and comes down onto the bay's line, `sweep` runs in low past the hull from the
+/// side, `dive` drops out of the sky in front of the bay, and `run` flies a long shallow final straight at it.
+/// Every one then threads the bay's mouth, level and low, in through the field and down onto its berth.
 enum Arrival: CaseIterable { case hover, sweep, dive, run }
 
-/// How a ship goes out again: straight up and away, a nose-over that accelerates out low, or a climb
-/// steep enough to lose it in the sky over the bay.
+/// How a ship goes out again, once it is back out through the field: a climb away, a nose-over that runs
+/// out low before it rises, or a boost steep enough to lose it in the sky.
 enum Departure: CaseIterable { case climb, peel, boost }
 
-/// The two legs of an arrival, in the station's own coordinates: `at` is the berth, `rest` how high the
-/// ship holds over it, `side` the shoulder it works from. `hold` is where it waits out a taken berth.
-func arrivalLegs(_ style: Arrival, at: SIMD3<Double>, rest: Double, side: Double) -> (start: SIMD3<Double>, approach: FlightLeg, descend: FlightLeg) {
-    func p(_ x: Double, _ y: Double, _ z: Double) -> SIMD3<Double> { SIMD3(at.x + side * x, y, at.z + z) }
-    switch style {
-    case .hover:
-        return (p(10, 9, 11),
-                FlightLeg([p(3.2, 6.5, 3.4), p(0, 5, 0)], seconds: 3.2, ease: .easeOut),
-                FlightLeg([p(0, rest + 1.4, 0), p(0, rest, 0)], seconds: 3.4))
-    case .sweep:
-        return (p(9, 4.6, 8),
-                FlightLeg([p(5.4, 3.4, 4.6), p(3.2, 2.4, 2.4)], seconds: 3.0, ease: .easeOut),
-                FlightLeg([p(2.0, 1.7, -0.6), p(0.4, rest + 0.7, -0.5), p(-0.2, rest, -0.1), p(0, rest, 0)], seconds: 3.0))
-    case .dive:
-        return (p(5, 13, 7),
-                FlightLeg([p(2.4, 11, 2.6), p(0, 9.5, 0.8)], seconds: 2.6, ease: .easeOut),
-                FlightLeg([p(0, 5.2, 0.5), p(0, 2.0, 0.2), p(0, rest + 0.5, 0.04), p(0, rest, 0)], seconds: 3.2, ease: .linear))
-    case .run:
-        return (p(0, 4.2, 19),
-                FlightLeg([p(0, 3.4, 12.5), p(0, 2.6, 6.4)], seconds: 3.0, ease: .easeOut),
-                FlightLeg([p(0, 1.5, 3.0), p(0, rest + 0.35, 0.9), p(0, rest, 0)], seconds: 3.4))
-    }
+/// The bay's mouth: the line of the field across the bay's far edge, and the height ships cross it at.
+struct BayMouth {
+    let z: Double
+    let height: Double
 }
 
-/// The two legs of a departure, from the berth the ship is standing on.
-func departureLegs(_ style: Departure, at: SIMD3<Double>, rest: Double, side: Double) -> (rise: FlightLeg, leave: FlightLeg) {
-    func p(_ x: Double, _ y: Double, _ z: Double) -> SIMD3<Double> { SIMD3(at.x + side * x, y, at.z + z) }
+/// The two legs of an arrival, in the station's own coordinates: `at` is the berth, `rest` how high the
+/// ship holds over it, `side` the shoulder it swings in from, `mouth` the field it comes in through. The
+/// approach ends lined up in front of the mouth, so a ship waiting out a taken berth waits outside.
+func arrivalLegs(_ style: Arrival, at: SIMD3<Double>, rest: Double, side: Double, mouth: BayMouth) -> (start: SIMD3<Double>, approach: FlightLeg, descend: FlightLeg) {
+    func p(_ x: Double, _ y: Double, _ out: Double) -> SIMD3<Double> { SIMD3(at.x + side * x, y, mouth.z + out) }
+    let h = mouth.height
+    let lined = p(0, h, 1.8)
+    let start: SIMD3<Double>, approach: FlightLeg
+    switch style {
+    case .hover:
+        start = p(10, 9, 12)
+        approach = FlightLeg([p(6, 6.4, 7.5), p(2.2, 3.2, 4.2), lined], seconds: 4.2, ease: .easeOut)
+    case .sweep:
+        start = p(14, 1.4, 3.4)
+        approach = FlightLeg([p(8, 1.25, 3.4), p(3, 1.1, 2.8), lined], seconds: 4.0, ease: .easeOut)
+    case .dive:
+        start = p(2.5, 13, 8)
+        approach = FlightLeg([p(1, 7, 5.5), p(0.2, 2.6, 3.2), lined], seconds: 3.6, ease: .easeOut)
+    case .run:
+        start = p(0, 1.7, 21)
+        approach = FlightLeg([p(0, 1.45, 13), p(0, 1.15, 6), lined], seconds: 3.8, ease: .easeOut)
+    }
+    // In through the field level, then a short float over the berth and down onto it.
+    let descend = FlightLeg([p(0, h, -0.5), SIMD3(at.x, max(rest + 0.3, min(h, rest + 0.45)), at.z + 0.35), SIMD3(at.x, rest, at.z)],
+                            seconds: 3.4)
+    return (start, approach, descend)
+}
+
+/// The two legs of a departure, from the berth the ship is standing on: up off it and out through the
+/// field level, then its own way away.
+func departureLegs(_ style: Departure, at: SIMD3<Double>, rest: Double, side: Double, mouth: BayMouth) -> (rise: FlightLeg, leave: FlightLeg) {
+    func p(_ x: Double, _ y: Double, _ out: Double) -> SIMD3<Double> { SIMD3(at.x + side * x, y, mouth.z + out) }
+    let h = mouth.height
+    let rise = FlightLeg([SIMD3(at.x, max(rest + 0.3, min(h, rest + 0.45)), at.z + 0.2), p(0, h, -0.6)], seconds: 2.6, ease: .easeOut)
     switch style {
     case .climb:
-        return (FlightLeg([p(0, rest + 1.2, 0), p(0, 5, 0)], seconds: 2.4, ease: .easeOut),
-                FlightLeg([p(3, 6.2, 4), p(9, 8.5, 12)], seconds: 3.2, ease: .easeIn))
+        return (rise, FlightLeg([p(0, h, 2.2), p(2.5, 4, 6.5), p(9, 8.5, 13)], seconds: 3.8, ease: .easeIn))
     case .peel:
-        return (FlightLeg([p(0, rest + 0.9, 0.2), p(0, 1.9, 1.2)], seconds: 1.8, ease: .easeOut),
-                FlightLeg([p(1.4, 2.4, 4.2), p(5, 4.6, 9), p(10, 7, 16)], seconds: 3.4, ease: .easeIn))
+        return (rise, FlightLeg([p(0, h, 2.4), p(3, 1.4, 6), p(10, 3.2, 12), p(16, 6.5, 16)], seconds: 4.2, ease: .easeIn))
     case .boost:
-        return (FlightLeg([p(0, rest + 1.0, 0), p(0, 3.4, 0.4)], seconds: 2.0, ease: .easeOut),
-                FlightLeg([p(0, 8, 2.2), p(2.5, 17, 6)], seconds: 3.0, ease: .easeIn))
+        return (rise, FlightLeg([p(0, h, 2.2), p(0, 1.6, 7), p(1.5, 9, 15)], seconds: 3.4, ease: .easeIn))
     }
 }
 
@@ -122,10 +133,10 @@ final class Flight {
     private var startedAt = 0.0
 
     init(station: String, repo: String, command: Command, arrival: Arrival, departure: Departure,
-         at: SIMD3<Double>, rest: Double, side: Double, unloadAt: Double, unloadFor: Double,
+         at: SIMD3<Double>, rest: Double, side: Double, mouth: BayMouth, unloadAt: Double, unloadFor: Double,
          onUnload: @escaping () -> Void) {
-        let into = arrivalLegs(arrival, at: at, rest: rest, side: side)
-        let out = departureLegs(departure, at: at, rest: rest, side: side)
+        let into = arrivalLegs(arrival, at: at, rest: rest, side: side, mouth: mouth)
+        let out = departureLegs(departure, at: at, rest: rest, side: side, mouth: mouth)
         self.station = station; self.repo = repo; self.command = command
         self.pos = into.start
         self.down = into.descend.last
@@ -329,12 +340,46 @@ extension Simulation {
                                      what: "a new worker for \(m.home.name)")
         let style = flightStyle()
         launch(Flight(station: m.station, repo: m.home.repo, command: command, arrival: style.arrival, departure: style.departure,
-                      at: SIMD3(slot.x, 0, slot.y), rest: Station.restOnSkids, side: style.side,
+                      at: SIMD3(slot.x, 0, slot.y), rest: Station.restOnSkids, side: style.side, mouth: station.bayMouth,
                       unloadAt: 0.6, unloadFor: 1.0) { [weak m, weak self] in
             // Out of the ship, and standing by it for the second it takes to lift off: nobody walks out from under a shuttle.
             m?.opacity = 1
             m?.wakeUntil = (self?.clock ?? 0) + 1.0
         })
+    }
+
+    /// A leaver's shuttle: it comes in through the field to a free berth and waits there until its passenger has
+    /// boarded, then takes it away. Nil where the station has no bay to call one to. The berth it is given.
+    @discardableResult
+    func callShip(for m: B) -> Int? {
+        guard let station = fleet.stations[m.station], station.hasHangar, !station.hangarSlots.isEmpty else { return nil }
+        if let ship = pickup(for: m), case .flight(_, _, let slot) = ship.command.kind { return slot }
+        let count = station.hangarSlots.count
+        let busy = Set(flights.compactMap { f -> Int? in
+            guard f.station == m.station, case .flight(_, _, let s) = f.command.kind else { return nil }
+            return s
+        })
+        let taken = busy.union(world.truth.deliveries.values.filter { $0.station == m.station }.map(\.slot))
+        let slotIndex = (0..<count).first { !taken.contains($0) } ?? shipsInFlight(m.station) % count
+        let slot = station.hangarSlots[slotIndex]
+        let command = Command.flight(.takeWorker(m.id), station: m.station, slot: slotIndex, what: "a seat for \(m.home.name)")
+        let style = flightStyle()
+        let leaver = m.id
+        let ship = Flight(station: m.station, repo: m.home.repo, command: command, arrival: style.arrival, departure: style.departure,
+                          at: SIMD3(slot.x, 0, slot.y), rest: Station.restOnSkids, side: style.side, mouth: station.bayMouth,
+                          unloadAt: 0.2, unloadFor: 1.0) {}
+        // It stands on the berth until its passenger is aboard: gone from the floor, or never coming.
+        ship.ready = { [weak self] in
+            guard let self, let b = self.bodies[leaver] else { return true }
+            return b.opacity <= 0 || b.state != .leaving
+        }
+        launch(ship)
+        return slotIndex
+    }
+
+    /// The shuttle on its way for a leaver, if one is.
+    func pickup(for m: B) -> Flight? {
+        flights.first { if case .flight(.takeWorker(let id), _, _) = $0.command.kind { return id == m.id }; return false }
     }
 
     /// Hands a flight to a new shuttle: the log and the panel see the command, the tick flies it.
@@ -361,6 +406,7 @@ extension Simulation {
             for b in self.bodies.values where b.station == stationName && hypot(b.pos.x - at.x, b.pos.y - at.y) < Station.bayKeepOff {
                 switch job {
                 case .bringWorker(let id) where id == b.id: continue
+                case .takeWorker(let id) where id == b.id: continue
                 case .dropCrate(let order): if case .deliverOffice(let k) = b.current?.kind, k == order { continue }
                 default: break
                 }
@@ -408,7 +454,7 @@ extension Simulation {
         let style = flightStyle()
         let flight = Flight(station: station.name, repo: repo, command: command,
                             arrival: style.arrival, departure: style.departure,
-                            at: SIMD3(spot.x, 0, spot.y), rest: Station.restOverCrate, side: style.side,
+                            at: SIMD3(spot.x, 0, spot.y), rest: Station.restOverCrate, side: style.side, mouth: station.bayMouth,
                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
             self?.world.truth.crateLanded(order: order)   // on the floor now: it will be fetched, by whoever is free
             self?.cue(.crateDropped(key: key, station: station.name, slot: slotIndex))

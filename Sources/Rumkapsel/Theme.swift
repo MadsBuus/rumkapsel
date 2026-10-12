@@ -67,7 +67,7 @@ enum Theme: String, CaseIterable, Identifiable {
         v.kicked = "sent"; v.kickedOff = "away from the castle"; v.unidentified = "unmarked goods"; v.ejected = "turned away at customs"
         v.clearedDecon = "cleared customs, into the granary"; v.toStorage = "goods to the granary"; v.toDeck = "off to market"
         v.atMonolith = "in the keep"; v.foldsAway = "its crate folds away on the quay"; v.shipLeaving = "the caravan to pull away"
-        v.shipBeside = "a caravan drawing up beside"; v.lightsOn = "lanterns lit"
+        v.shipBeside = "a caravan drawing up beside"; v.shipComing = "its caravan"; v.lightsOn = "lanterns lit"
         v.monolithHover = "the keep: scholars and messengers"; v.bayHover = "caravan gate · new offices arrive here by road"
         v.padHover = "harbour · release pull requests wait here; merging sends the ship"
         v.deconHover = "customs · dependabot and friends wait here"
@@ -90,7 +90,7 @@ struct Vocabulary {
     var inStorage = "storage", theDeck = "the deck", testedRow = "the pad, through the lock", theLock = "the lock", testDeck = "test deck", inDecon = "decon"
     var theMonolith = "the monolith", theDorm = "the dorm", theCouch = "the couch", theBath = "the bath", theGym = "the gym"
     // What minions are doing.
-    var lookRound = "having a look round the station", leaving = "off the station through the airlock"
+    var lookRound = "having a look round the station", leaving = "off the station on the next shuttle"
     var inbound = "shuttle inbound with", stow = "stowing a cube for the commit", pack = "packing a crate for the pull request"
     var asleep = "asleep in the dorm", console = "off to the storage console with the tablet", pallet = "the pallet"
     var qaWalk = "walking the rows on the deck"
@@ -105,7 +105,7 @@ struct Vocabulary {
     var kicked = "kicked", kickedOff = "off the station", unidentified = "unidentified object", ejected = "ejected from decon"
     var clearedDecon = "cleared decon, into storage", toStorage = "package to storage", toDeck = "moving to the test deck"
     var atMonolith = "at the monolith", foldsAway = "its crate folds away on the bay", shipLeaving = "the ship to lift off"
-    var shipBeside = "a ship coming down beside", lightsOn = "lights on"
+    var shipBeside = "a ship coming down beside", shipComing = "its ship", lightsOn = "lights on"
     // Hover text.
     var monolithHover = "the monolith: web research and subagents", bayHover = "hangar · new offices arrive here by ship"
     var padHover = "launch pad · release pull requests wait here; merging launches"

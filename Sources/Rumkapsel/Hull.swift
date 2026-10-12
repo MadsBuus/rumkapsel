@@ -1,6 +1,6 @@
-// The station's hull: one vault over everything indoors, with the pad and the bay left outside under open
-// space. The pieces of it drawn in the station's view, at the airlock's outer door and along the pad, are
-// where it meets the floor; walking, the whole of it is overhead.
+// The station's hull: one vault over everything indoors, the bay's hangar included, with the pad left outside
+// under open space. The pieces of it drawn in the station's view, round the bay and its mouth and along the
+// pad, are where it meets the floor; walking, the whole of it is overhead.
 
 import Foundation
 import simd
@@ -21,21 +21,21 @@ struct StationHull {
     let feet: [Foot]
     private let near: [Cell: [Int]]
 
-    /// Indoors is the station's whole extent but the pad and the bay: the bay beyond the airlock's outer
-    /// door, the pad where the yard opens to space. The gate onto the pad and the airlock's outer door are
-    /// doorways through it.
+    /// Indoors is the station's whole extent but the pad, and the bay's hangar past the end of the passage.
+    /// The gate onto the pad is a doorway through it, and the bay's mouth one wide open, behind the field.
     init(_ st: Station) {
         let b = st.bounds
-        let pad = Set(st.padCells)
-        let outerDoor = st.airlockCells.max { $0.y < $1.y }
-        let beyond = outerDoor?.y ?? Int.max
-        var inside = Set<Cell>()
+        let pad = Set(st.padCells), bay = Set(st.hangarCells)
+        let beyond = st.airlockCells.map(\.y).max() ?? Int.max
+        var inside = bay
         for x in b.min.x...b.max.x {
             for y in b.min.y...b.max.y where y <= beyond && !pad.contains(Cell(x: x, y: y)) { inside.insert(Cell(x: x, y: y)) }
         }
         var doors = Set<[Int]>()
         for (deck, padCell) in st.gateDoorway { doors.insert([deck.x, deck.y, padCell.x, padCell.y]) }
-        if let o = outerDoor { doors.insert([o.x, o.y, o.x, o.y + 1]) }
+        if let mouth = st.hangarCells.map(\.y).max() {
+            for c in st.hangarCells where c.y == mouth { doors.insert([c.x, c.y, c.x, c.y + 1]) }
+        }
         var feet: [Foot] = []
         var footOf: [Cell: [Int]] = [:]
         for c in inside {

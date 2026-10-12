@@ -272,16 +272,13 @@ final class Simulation<B: Body> {
         post(.leave, for: m, rank: .leaving, at: m.cell, place: .airlock)
     }
 
-    /// Through the airlock when there is one, and gone once inside.
+    /// Out to the bay, where a shuttle comes in for it: the ship is called now, and the walk is to the lane in
+    /// front of its berth. With no bay, it simply fades where it stands.
     func walkOut(_ m: B) {
         m.couch = nil; m.bed = nil
-        guard let station = fleet.stations[m.station], let hatch = station.airlockHatches.randomElement(),
-              let inner = station.airlockInner.first(where: { $0.x == hatch.inside.x }) else { return }
+        guard let station = fleet.stations[m.station], let slot = callShip(for: m) else { return }
         m.place = .airlock
-        m.path = route(m, to: inner)
-        // Then, after the cycle, out through the hatch onto the bay: where the shuttle would pick them up.
-        let wait = SIMD2(Double(inner.x), Double(inner.y))
-        m.path += [wait] + station.path(from: wait, to: hatch.bay)
+        m.path = route(m, to: station.bayStand(slot: slot))
     }
 
     /// Night on a station is the clock's business alone: a quiet afternoon is a lounge afternoon, not bedtime.
@@ -914,17 +911,27 @@ final class Simulation<B: Body> {
                 m.nextWanderAt = clock + (m.isPacing(at: clock) ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
             }
         case .leaving:
-            // Solid all the way to the airlock. Inside, the inner door shuts and the chamber
-            // cycles for a beat; then along the passage and out through the hatch, fading onto the bay.
-            let inChamber = station.airlockCells.contains(m.cell) || station.hangarCells.contains(m.cell)
-            let atHatch = station.hangarCells.contains(m.cell) || station.airlockHatches.contains { $0.inside == m.cell }
-            if station.airlockCells.isEmpty || (atHatch && m.phaseKind != .walk) {
-                m.opacity -= dt * 1.2
-                if m.opacity <= 0 { return .gone }
-            } else if inChamber, m.phaseKind == .walk, station.airlockInner.contains(m.cell) {
-                advance(m)
-                m.wonderUntil = clock + 1.5   // the cycle
+            // Solid all the way to the bay, then waiting in the lane for its ship. Once the ship stands on its
+            // berth it steps up to the door and is gone inside, and the ship takes it away.
+            guard let ship = pickup(for: m), case .flight(_, _, let slot) = ship.command.kind, slot < station.hangarSlots.count else {
+                if station.hangarSlots.isEmpty || station.hangarCells.contains(m.cell) {
+                    m.opacity -= dt * 1.2
+                    if m.opacity <= 0 { return .gone }
+                }
+                return .posed
             }
+            guard m.path.isEmpty else { return .posed }
+            if m.phaseKind == .walk { advance(m) }
+            let berth = station.hangarSlots[slot]
+            guard ship.phaseKind == .unload else {
+                m.waitingOn = Words.current.shipComing
+                let d = berth - m.pos
+                m.facing = atan2(d.x, d.y)
+                return .posed
+            }
+            guard atArmsLength(m, of: berth, dt: dt) else { return .posed }
+            m.opacity -= dt * 1.6
+            if m.opacity <= 0 { return .gone }
         }
         return .posed
     }

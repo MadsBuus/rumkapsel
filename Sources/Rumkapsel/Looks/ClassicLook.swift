@@ -108,7 +108,7 @@ enum Classic {
     /// built from: the fade runs two ways at once, up the curve and out to either side, and a slat can only
     /// carry one opacity. It writes no depth and draws last, so nothing behind it is ever hidden — the wall
     /// says where the station ends, it does not cover what the station holds.
-    static func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode? {
+    static func hullWall(width: Double, depth: Double, doorway: Double, doorTop: Double = hatchTop) -> SCNNode? {
         let (D, H) = hullSection(depth: depth)
         let steps = 48
         /// Where the wall's face is at a given height: t back out of `rise`, then the lean at that t.
@@ -134,7 +134,7 @@ enum Classic {
         // hole buries the frame. It is cut a shade *inside* the frame's outer edge, top and sides, so the
         // frame always laps the plating and no seam of space shows between the two. A wall with no door
         // asks for none, and is a blank stretch of hull.
-        let hole = doorway > 0 ? (halfU: (doorway + 0.04) / 2 / width, topV: asin(min(1, hatchTop / H)) / (.pi / 2))
+        let hole = doorway > 0 ? (halfU: (doorway + 0.04) / 2 / width, topV: asin(min(1, doorTop / H)) / (.pi / 2))
                                : (halfU: 0.0, topV: 0.0)
         let skin = hullSkin(panels: max(1, Int(width.rounded())), door: hole)
         let material = SCNMaterial()
@@ -157,7 +157,8 @@ enum Classic {
             let lamp = SCNNode(geometry: SCNBox(width: 0.1, height: 0.1, length: 0.1, chamferRadius: 0))
             lamp.geometry!.firstMaterial = flat(Props.hullLampOff)
             lamp.name = "beacon"
-            lamp.position = v3(side * 0.72, 0.86, lean(atHeight: 0.86) + 0.07)
+            let y = doorTop + 0.1
+            lamp.position = v3(side * (doorway / 2 + 0.22), y, lean(atHeight: y) + 0.07)
             wall.addChildNode(lamp)
         }
         return wall
@@ -215,13 +216,6 @@ enum Classic {
         (depth * 0.72, min(3.3, depth * 0.58))
     }
 
-    /// How deep the outer door's frame must be to sit in the hull without a gap. The wall's face slips back
-    /// as it climbs, so a frame in one plane meets it at one height and gapes at every other; this is the
-    /// slip across the doorway's own height, with a margin either side.
-    static func hullDoorReveal(depth: Double) -> Double {
-        let (D, H) = hullSection(depth: depth)
-        return D * (1 - cos(asin(min(1, hatchTop / H)))) + 0.12
-    }
     private static var skins: [String: (plating: NSImage?, fade: NSImage?)] = [:]
     private static func byte(_ v: Double) -> UInt8 { UInt8(max(0, min(255, v * 255))) }
     private static func image(_ pixels: [UInt8], _ w: Int, _ h: Int, premultiplied: Bool) -> NSImage? {

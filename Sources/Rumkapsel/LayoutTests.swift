@@ -209,19 +209,19 @@ enum LayoutTests {
             expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
         }
 
-        test("the hull is over everything but the pad and the bay, meets the floor where its pieces stand, and lets you through its doorways") {
+        test("the hull is over everything but the pad, the bay's hangar included, meets the floor where its pieces stand, and lets you through its doorways") {
             let a = fresh()
             for i in 0..<20 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
             let hull = StationHull(a)
-            let out = (a.padCells + a.hangarCells).filter { hull.inside.contains($0) }
-            expect(out.isEmpty, "the pad and the bay are under open space: \(cells(out))")
-            let indoors = a.storageCells + a.deckCells + a.deconCells + a.airlockCells + a.coreCells
+            let out = a.padCells.filter { hull.inside.contains($0) }
+            expect(out.isEmpty, "the pad is under open space: \(cells(out))")
+            let indoors = a.storageCells + a.deckCells + a.deconCells + a.airlockCells + a.coreCells + a.hangarCells
             let missed = indoors.filter { !hull.inside.contains($0) }
-            expect(missed.isEmpty, "storage, the deck, decon, the airlock and the hallway are indoors: \(cells(missed))")
-            // Where the station's view draws its pieces: across the airlock's outer door, and along the pad's east side.
-            if let door = a.airlockCells.max(by: { $0.y < $1.y }) {
-                let foot = SIMD2(Double(door.x), Double(door.y) + 0.5)
-                expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the airlock's outer door is a doorway in the hull's foot")
+            expect(missed.isEmpty, "storage, the deck, decon, the passage, the bay and the hallway are indoors: \(cells(missed))")
+            // Where the station's view draws its pieces: across the bay's mouth, and along the pad's east side.
+            for c in a.hangarCells where c.y == a.hangarCells.map(\.y).max() {
+                let foot = SIMD2(Double(c.x), Double(c.y) + 0.5)
+                expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the bay's mouth is open in the hull's foot at \(c.x)")
             }
             if let east = a.padCells.map(\.x).max(), let y = a.padCells.map(\.y).min() {
                 let foot = SIMD2(Double(east) + 0.5, Double(y) + 0.5)

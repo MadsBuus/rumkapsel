@@ -183,10 +183,9 @@ struct KingdomLook: Look {
 
     /// The moorings are jetties on the quay, not hexagons painted on a floor.
     var drawsBerthHexes: Bool { false }
-    var bayOpenToSpace: Bool { false }
-    func hullWall(width: Double, depth: Double, doorway: Double) -> SCNNode? { nil }
+    var hangarField: Bool { false }
+    func hullWall(width: Double, depth: Double, doorway: Double, doorTop: Double) -> SCNNode? { nil }
     var detailsFloors: Bool { false }
-    func hullDoorReveal(depth: Double) -> Double { 0 }
 
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? {
         let s = leg.slot, t = leg.progress

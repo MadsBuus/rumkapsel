@@ -8,11 +8,9 @@ and deliberately not started.
 
 ### Air and weight
 STATION.md's "Air and weight": the hull is the line between air and none. Minions work inside, drones outside,
-and crossing the hull is the hand-off from people to machines. The cargo lock, the window and the pad's drones stand;
-still to build, in this order:
+and crossing the hull is the hand-off from people to machines. The cargo lock, the window, the pad's drones and the
+bay as a hangar behind its field stand; still to build, in this order:
 
-- **The bay as a hangar.** Under the hull, open to space behind the field; shuttles thread the mouth and ripple
-  the field; the people airlock goes; leavers board a shuttle.
 - **Undocking, and the kick stage.** A production release opening brings a kick stage that drones set under the
   tip, in place of the lifter. The rocket does not lift off: clamps let go, thrusters puff it clear, the burn
   comes well away from the station. The flight's opening shot follows.

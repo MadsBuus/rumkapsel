@@ -108,10 +108,11 @@ struct Command {
         }
     }
 
-    /// What a shuttle is carrying in.
+    /// What a shuttle comes for: a worker to bring in, an office's crate to drop, a leaver to take away.
     enum Flight: Equatable {
         case bringWorker(String)
         case dropCrate(order: Int)
+        case takeWorker(String)
     }
 
     /// A rocket's stages, in the order they can only ever go.

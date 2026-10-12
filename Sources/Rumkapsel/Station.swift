@@ -229,28 +229,34 @@ final class Station {
     var monolithCell: Cell { plan.monolith }
     /// Where a body stands when sent to the monolith: the tile south of it.
     var coreCenter: Cell { Cell(x: plan.monolith.x, y: plan.monolith.y + 1) }
-    /// The airlock: a passage one wide that carries the south arm's line on through the hull, the bay
-    /// hanging outside its far end. The inner door is on its hallway side, the hatch on its bay side.
+    /// The passage to the bay: one wide, carrying the south arm's line on to the hangar under the hull. A door
+    /// at the hallway end, a hatch at the bay end; both open for whoever walks up to them.
     var airlockCells: [Cell] { blocks.airlock }
-    /// How many tiles the airlock runs, so the bay stands off the station rather than against it.
+    /// How many tiles the passage runs, so the bay stands off the station rather than against it.
     static let airlockLength = 5
     private func makeAirlockCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
         return (1...Station.airlockLength).map { Cell(x: end.x, y: end.y + $0) }
     }
-    /// The chamber's inner cell, just past the inner door: where a leaver waits for the cycle.
+    /// The passage's first cell, just past its hallway door.
     var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
-    /// The hatch: where the chamber's outer cell opens onto the bay.
+    /// The hatch: where the passage's last cell opens onto the bay.
     var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
-    /// The bay: seven wide and four deep across the far end of the airlock. The berths are the two rows
-    /// through its middle, a honeycomb of them; the row by the hatch and the row behind are the lanes a
-    /// carrier walks and waits in, one to each row of berths.
+    /// The bay: a hangar seven wide and four deep across the far end of the passage, its mouth on the far
+    /// side. The berths are the two rows through its middle, a honeycomb of them; the row by the hatch and
+    /// the row behind are the lanes a carrier walks and waits in, one to each row of berths.
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
         let y = end.y + Station.airlockLength + 1   // past the airlock's hatch
         return (-3...3).flatMap { dx in (0..<4).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
+    /// The bay's mouth: its far edge, open to space behind the field, and the height ships cross it at.
+    var bayMouth: BayMouth {
+        BayMouth(z: Double(hangarCells.map(\.y).max() ?? (plan.south.last?.y ?? 0)) + 0.5, height: Station.mouthHeight)
+    }
+    /// How high the field stands across the mouth, and how high a ship flies through it.
+    static let fieldTop = 1.6, mouthHeight = 0.85
     var hangarCenter: SIMD2<Double> {
         guard let end = plan.south.last else { return .zero }
         return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2.5)

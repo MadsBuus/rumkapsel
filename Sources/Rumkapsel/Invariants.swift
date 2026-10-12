@@ -347,7 +347,7 @@ final class Invariants {
             var passenger: String?
             var order: Int?
             switch s.command.kind {
-            case .flight(.bringWorker(let id), _, _): passenger = id
+            case .flight(.bringWorker(let id), _, _), .flight(.takeWorker(let id), _, _): passenger = id
             case .flight(.dropCrate(let o), _, _): order = o
             default: break
             }
