@@ -224,7 +224,7 @@ enum SimulationTests {
             expect(m.current?.id == yard.id && sim.rank(of: yard) == .yard, "the yard carry is taken: \(m.words)")
             sim.world.unorder(crate)
             let release = Command.carry(crate, from: spot, to: .deck)
-            sim.carry(release, onDone: {})
+            sim.carry(release, rank: .release, onDone: {})
             expect(sim.rank(of: release) == .release, "a carry into the cleared rows is release work")
             sim.assignOrders()
             expect(m.current?.id == release.id, "taken off the yard carry for the release: \(m.words)")

@@ -83,10 +83,7 @@ extension Simulation {
     func rank(of c: Command) -> Rank {
         if let o = ownOrders[c.id] { return o.rank }
         switch c.kind {
-        case .carry(_, let from, let to):
-            let job = cargo[c.id]
-            if from.area == .tested || job?.aim.area == .tested { return .release }
-            return .yard
+        case .carry: return cargo[c.id]?.rank ?? .yard
         case .deliverOffice, .pack, .stow: return .yard
         case .qa: return .qa
         case .work: return .desk

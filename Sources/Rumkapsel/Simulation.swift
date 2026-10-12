@@ -7,6 +7,7 @@ struct Cargo {
     var gaveUp: Set<String> = []
     var postedAt = 0.0
     var prefer: String?
+    var rank = Rank.yard
 }
 
 enum Cue {

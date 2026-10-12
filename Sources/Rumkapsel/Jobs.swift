@@ -254,8 +254,8 @@ extension StationController {
 
     // MARK: hauling
 
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, onDone: onDone) else { return }
+    func carry(_ command: Command, node: SCNNode, roomKey: String = "", rank: Rank = .yard, onDone: @escaping () -> Void) {
+        guard simulation.carry(command, roomKey: roomKey, rank: rank, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
     }
@@ -373,7 +373,7 @@ extension StationController {
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
         for command in station.carryToTested(repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
-            carry(command, node: node) { [weak self] in
+            carry(command, node: node, rank: .release) { [weak self] in
                 guard let self else { return }
                 node.removeFromParentNode()
                 if crate.number == number { drone.ping(seed: number) }

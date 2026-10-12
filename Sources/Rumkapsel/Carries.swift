@@ -55,12 +55,12 @@ extension Simulation {
     // MARK: carries
 
     @discardableResult
-    func carry(_ command: Command, roomKey: String = "", onDone: @escaping () -> Void) -> Bool {
+    func carry(_ command: Command, roomKey: String = "", rank: Rank = .yard, onDone: @escaping () -> Void) -> Bool {
         guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
         guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, postedAt: clock)
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, postedAt: clock, rank: rank)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
