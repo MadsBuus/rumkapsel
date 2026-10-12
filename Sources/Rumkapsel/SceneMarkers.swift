@@ -1,22 +1,17 @@
-// Everything that comes and goes on top of the floor: crates, cones, rockets, power and beams.
-
 import AppKit
 import SceneKit
 
-/// What one berth's hexagon shows: whose colour it burns in, and whether a ship is still on its way to it.
 struct BerthLight: Equatable {
     let color: RGB
     let beat: Bool
 }
 
 extension StationController {
-    /// What a crate's tag says: the task's title and whose work it is, as GitHub and the board said.
     func crateWords(repo: String?, number: Int?) -> (title: String?, who: String?) {
         guard let repo, let number, let work = github.work(repo: repo, number: number) else { return (nil, nil) }
         return (work.title.isEmpty ? nil : work.title, work.author.map(world.crewName))
     }
 
-    /// Tells each station what is standing on its floor, so walks thread between the props.
     func refreshObstacles() {
         var blocked: [String: Set<Cell>] = [:]
         func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>, into: inout [String: Set<Cell>]) {
@@ -38,8 +33,6 @@ extension StationController {
         for m in minions.values {
             for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
         }
-        // A rocket on its pad is walked round, never through: its hull is an obstacle, the hull alone,
-        // not the fins or the hold's ring.
         for (key, r) in simulation.rockets {
             guard let st = fleet.stations[r.station] else { continue }
             let at = padPosition(station: st, slot: padSlot(station: st, key: key))
@@ -49,9 +42,6 @@ extension StationController {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
-        // Furniture and fixtures: anything standing on a room's floor that is not a tile, and only on that
-        // room's own floor. A mark lying flat on it, like the frame round an office not yet built, is walked
-        // over. Built once per static redraw and read from there: nothing on the static root moves between redraws.
         if furnitureObstaclesAt != staticRoot.childNodes.count {
             furnitureObstaclesAt = staticRoot.childNodes.count
             var furniture: [String: Set<Cell>] = [:]
@@ -69,7 +59,6 @@ extension StationController {
             furnitureObstacles = furniture
         }
         for (station, cells) in furnitureObstacles { blocked[station, default: []].formUnion(cells) }
-        // The airlock door posts stand in the walls; the way through is between them.
         for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
             let stationName = String(door.name!.dropFirst("airlockdoor:".count))
             guard let st = fleet.stations[stationName] else { continue }
@@ -82,10 +71,6 @@ extension StationController {
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 
-    /// Where an office's crate stands: a tile of its own, clear of the floor writing and of any cone in
-    /// the office, as far from the door as the office allows. Chosen once and kept, so a later redraw
-    /// never moves a crate somebody has already looked at; it is asked for again only if the office no
-    /// longer has that tile.
     func packageCell(_ station: Station, _ room: Room) -> Cell {
         let key = roomKey(station, room)
         if let held = packageCells[key], room.cells.contains(held) { return held }
@@ -103,8 +88,6 @@ extension StationController {
         return cell
     }
 
-    /// A standing crate told what its pull request says now: the plate's colour and its blink, and the
-    /// shell round a failing one. Everything else about a crate is settled when it is built.
     private func relight(_ pkg: SCNNode, light: NSColor, blink: Bool, failing: Bool, size: Double) {
         if let plate = pkg.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
             plate.geometry?.firstMaterial = flat(light)
@@ -125,9 +108,6 @@ extension StationController {
 
     private func mine(_ slot: YardSlot) -> Bool { !slot.alien && world.isMine(repo: slot.repo, number: slot.number) }
 
-    /// The yard reconciliation: the source's word against what stands on the floor, per repository.
-    /// What can be carried is handed to carriers; counts are snapped only for the rest. It runs from
-    /// the tick and before every redraw, never from the drawing itself: drawing decides nothing.
     func reconcileYards() {
         for station in fleet.stations.values where station.hasPad {
             let before = (station.stored, station.staged)
@@ -136,10 +116,8 @@ extension StationController {
             }
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }
-        // Every tick, for the stage changes waiting on the floor: a crate not down in storage yet.
         for e in world.stationEvents() { handle(e) }
         for station in fleet.stations.values where station.hasPad {
-            // A storage-to-deck carry whose crate the board has since put back in storage is off.
             for (id, job) in cargo {
                 guard case .carry(let crate, let from, _) = job.command.kind, crate.station == station.name,
                       let row = station.ledger[crate.repo, crate.number],
@@ -149,13 +127,6 @@ extension StationController {
         }
     }
 
-    /// Grey boxes pile up in an office as commits land; the pull request state colours them.
-    ///
-    /// A redraw adopts what already stands. An office whose boxes would come out the same is left
-    /// alone; a numbered yard crate keeps its node and is moved only if its slot changed, downwards as
-    /// a settle, otherwise put where the layout says; only what is new is built, and only what is gone
-    /// is taken away. So a redraw in the middle of a carry disturbs nothing, and drawing the same
-    /// floor twice costs nothing.
     func rebuildMarkers() {
         var keep: Set<ObjectIdentifier> = []
         var signatures: [String: String] = [:]
@@ -163,16 +134,14 @@ extension StationController {
             for room in station.rooms.values where room.branch != nil || world.crewBoxes[roomKey(station, room)] != nil || world.peerBoxes[roomKey(station, room)] != nil {
                 let key = roomKey(station, room)
                 var count: Int
-                var ghosts = 0                 // uncommitted work: unfinished, translucent boxes
+                var ghosts = 0
                 var pr: PullRequest?
-                var packaged = false           // a pull request bundles everything into one strapped package
+                var packaged = false
                 let boxOpacity = 1.0
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
-                    if world.haulOrdered(office: key) { continue }   // on its way to storage: drawn once, on the arms
+                    if world.haulOrdered(office: key) { continue }
                     count = min(16, max(1, cb.count))
-                    // A teammate's pull request is a crate with its sticker; pushes before a PR are cubes.
-                    // A peer's pull request, as they said it, when GitHub has not told us about it here.
                     let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
                     let prNumber = world.crewPull(key) ?? peer?.pull
                     let state = world.isClosed(key) ? "CLOSED" : (peer?.pullState ?? (prNumber != nil ? "OPEN" : cb.state))
@@ -182,19 +151,18 @@ extension StationController {
                 } else {
                     let local = world.localState(room)
                     let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
-                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) { continue }   // nothing to show, or on its way to storage
+                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) { continue }
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                     count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
                     ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
                     packaged = pr != nil
                 }
-                // No pull request: the room's own tint. With one: the status colour, shaded the same way.
                 let base = NSColor(room.color).lighter(0.12)
                 let status: NSColor?
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
                 case (nil, _, _): status = nil
                 case ("MERGED", _, _): status = NSColor(rgb: (0.6, 0.4, 0.9))
-                case ("CLOSED", _, _): status = NSColor(rgb: (0.92, 0.22, 0.22))   // closed, not merged: red, then it fades with the office
+                case ("CLOSED", _, _): status = NSColor(rgb: (0.92, 0.22, 0.22))
                 case (_, "APPROVED", _): status = NSColor(rgb: (0.45, 0.95, 0.5))
                 case (_, "CHANGES_REQUESTED", _): status = NSColor(rgb: (0.95, 0.3, 0.3))
                 case (_, _, true): status = NSColor(rgb: (0.6, 0.62, 0.68))
@@ -205,27 +173,20 @@ extension StationController {
                 if world.isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
                 let cells = farCells(station, room)
-                // Everything that shapes this office's boxes. The same signature as last time means the
-                // same boxes: they stay as they are, cubes, package, shells and all.
                 let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + [
                     "\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
                     "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(stowHeld.contains(key))", "\(world.isDusty(room))",
                 ]).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
                 if packaged {
-                    // One crate for the pull request, and it stands for as long as the pull request does.
-                    // Commits landing, checks turning, a review coming in only re-light the crate that is
-                    // already there: it is never taken away and built again, or it would blink out of the
-                    // office every time GitHub answered, and the office would look packed twice over.
                     let cell = packageCell(station, room)
-                    let size = 0.38   // one crate size everywhere: the cubes say how much work is in it
+                    let size = 0.38
                     let closed = pr?.state == "CLOSED"
                     let checks = pr?.checks ?? ""
                     let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
                         : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
                     let blink = checks == "pending" && !closed
-                    // What a standing crate cannot be re-lit into, and what it can.
-                    let mine = world.isMine(office: key)   // strapped in white from the moment it is packed, like yours in the rows
+                    let mine = world.isMine(office: key)
                     let task = world.taskNumber(room) ?? pr?.number
                     let words = crateWords(repo: room.repo, number: task)
                     let built = "\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)|\(words.title ?? "")|\(words.who ?? "")"
@@ -242,7 +203,6 @@ extension StationController {
                         pkg = p
                     }
                     guard let p = pkg else { continue }
-                    // The cubes it was packed from go; the crate itself stays.
                     drawn.filter { $0 !== p }.forEach { $0.removeFromParentNode() }
                     let at = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     if p.position.x != at.x || p.position.z != at.z { p.position = at }
@@ -258,7 +218,6 @@ extension StationController {
                     continue
                 }
                 drawn.forEach { $0.removeFromParentNode() }
-                // Deterministic clutter: sizes, turns and shades vary per box, and extras stack on top.
                 var seed = stableHash(key) | 1
                 func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
                 var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
@@ -274,7 +233,7 @@ extension StationController {
                         pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
                     } else {
                         let cell = cells[(i / 3) % cells.count]
-                        let room = max(0, 0.86 - size * 1.25)   // keep the box and its shadow inside the tile
+                        let room = max(0, 0.86 - size * 1.25)
                         pos = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * room, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * room)
                     }
                     placedBoxes.append((pos, size))
@@ -293,8 +252,6 @@ extension StationController {
                 }
                 newestCube[key] = newest
                 if stowHeld.contains(key) { newest?.opacity = 0 }
-                // More commits than last time: the newest cube is not on the floor yet. The office's worker
-                // carries it over on its head and stows it where it goes, once it is free to.
                 if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
                    let m = minions.values.first(where: { $0.station == station.name && $0.home.key == room.key && !$0.isPeer && !$0.isSubagent }) {
                     stowHeld.insert(key)
@@ -304,8 +261,6 @@ extension StationController {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
-            // the hands, for as long as the carry lasts.
             for yard in [Yard.storage, .deck, .decon] where station.hasPad {
                 let area = yard.rawValue
                 let layout = station.layout(of: yard).filter { !$0.carried }
@@ -313,8 +268,6 @@ extension StationController {
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
                 let wanted = Set(layout.map { prefix + "\($0.repo)|\($0.number)" })
-                /// True when nothing that still belongs in the rows stands between here and there in this
-                /// column: only then is a drop a stack settling, rather than two crates changing places.
                 func vacated(_ from: SIMD3<Double>, _ to: SIMD3<Double>) -> Bool {
                     standing.allSatisfy { name, nodes in
                         !wanted.contains(name) || nodes.allSatisfy { n in
@@ -327,9 +280,6 @@ extension StationController {
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
                     let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (mine(slot) ? " mine" : "")
-                    // A crate already standing here keeps its node. It moves only if its slot did: down
-                    // onto a freed level it settles over a beat; anywhere else it is put where the
-                    // layout says, as a fresh node would have been.
                     if markerSignatures[name] == spec, let n = standing[name]?.first, !keep.contains(ObjectIdentifier(n)) {
                         keep.insert(ObjectIdentifier(n))
                         signatures[name] = spec
@@ -338,7 +288,6 @@ extension StationController {
                         if abs(heading.x - slot.pos.x) > 0.001 || abs(heading.y - slot.pos.y) > 0.001 || abs(heading.z - slot.pos.z) > 0.001
                             || abs(Double(n.eulerAngles.y) - slot.yaw) > 0.001 {
                             stopCrate(n)
-                            // In decon a whole stack drops together when one is pulled out from under it.
                             if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, area == "decon" || vacated(at, slot.pos) {
                                 moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds, ease: .easeIn)])
                             } else {
@@ -348,15 +297,9 @@ extension StationController {
                         }
                         continue
                     }
-                    // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
-                    // tint of the repository it came for, so a bump for ios still reads as ios.
                     let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    // In storage the light is off. On the deck it is amber while the crate waits for QA and green once
-                    // tested; in decon it is the unscreened green of what still waits there.
                     let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight
                         : area == "deck" ? Props.gateIdle : NSColor(rgb: (0.3, 0.32, 0.38))
-                    // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
-                    // into storage it grows to a crate's size, since a crate is what it is from then on.
                     let words = crateWords(repo: slot.repo, number: slot.number)
                     let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: mine(slot), number: slot.number,
                                             title: words.title, who: words.who)
@@ -365,7 +308,6 @@ extension StationController {
                     pkg.name = name
                     pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
                     markerRoot.addChildNode(pkg)
-                    // Fresh through the hatch: it starts at hatch height and floats down onto its pile, low gravity.
                     if incoming.remove(name) != nil {
                         pkg.position.y = CGFloat(slot.pos.y + 1.2)
                         moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds * 1.5, ease: .easeIn)])
@@ -375,8 +317,6 @@ extension StationController {
                 }
             }
         }
-        // Whatever the floor no longer calls for goes. A crate waiting for its carrier stays: it is
-        // spoken for, and the layout has already left its slot alone.
         for n in markerRoot.childNodes where !keep.contains(ObjectIdentifier(n)) && n.name != "haul" { n.removeFromParentNode() }
         packages = packages.filter { $0.value.parent != nil }
         packageBuilt = packageBuilt.filter { packages[$0.key] != nil }
@@ -384,8 +324,6 @@ extension StationController {
         refreshObstacles()
     }
 
-    /// A hexagon on the floor of every berth in the bay, packed as the pad's are. They are near-black while
-    /// the bay is empty; `updateBerths` lights the ones being flown into.
     func rebuildBerths() {
         if berthRoot.parent == nil { propRoot.addChildNode(berthRoot) }
         berthRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -405,8 +343,6 @@ extension StationController {
         berthLit = [:]
     }
 
-    /// The berth a ship is flying into takes the colour of whoever is coming and pulses until it is down;
-    /// it holds that colour steady while the ship unloads and a crate of its waits to be fetched.
     func updateBerths() {
         var lit: [String: BerthLight] = [:]
         for f in simulation.flights {
@@ -414,7 +350,6 @@ extension StationController {
             let coming = f.phaseKind == .approach || f.phaseKind == .descend
             lit["\(f.station)|\(slot)"] = BerthLight(color: fleet.color(forRepo: f.repo), beat: coming)
         }
-        // An order stands until its crate has been walked in, so its berth stays lit while the crate waits.
         for order in world.truth.deliveries.values {
             let key = "\(order.station)|\(order.slot)"
             guard lit[key] == nil, let station = fleet.stations[order.station], let room = station.rooms[order.roomKey] else { continue }
@@ -435,9 +370,6 @@ extension StationController {
         }
     }
 
-
-    /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it. The
-    /// ring under a rocket is its beacon, lit by `signal` every frame.
     func rebuildPadHexes() {
         if padHexRoot.parent == nil { propRoot.addChildNode(padHexRoot) }
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
@@ -458,7 +390,6 @@ extension StationController {
         }
     }
 
-    /// Something came through decon's hatch: the light over it flashes, and that is all the fuss it gets.
     func hatchBlink(station name: String) {
         guard let light = hatchLights[name] else { return }
         light.removeAllActions()
@@ -467,13 +398,11 @@ extension StationController {
         light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
     }
 
-    /// An office's colour before its light.
     func officeBase(_ station: Station, _ room: Room) -> NSColor {
         let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
         return room.key.hasPrefix("proj:") ? full.dimmed(0.86) : full
     }
 
-    /// Occupied with anyone in it, empty while busy within the power window, dark after that.
     func officeLight(_ station: Station, _ room: Room) -> OfficeLight {
         if room.key.hasPrefix("kind:") { return .occupied }
         if minions.values.contains(where: { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }) { return .occupied }
@@ -481,8 +410,6 @@ extension StationController {
         return now.timeIntervalSince(room.lastActive) < StationController.powerWindow ? .empty : .dark
     }
 
-    /// The floor's colour at a light. A look that rims its offices keeps an empty one at full colour, so
-    /// the rim stands out only round an office with its lights off.
     func officeTone(_ base: NSColor, _ light: OfficeLight) -> NSColor {
         let floor = NSColor(rgb: (0.27, 0.28, 0.33))
         switch light {
@@ -492,7 +419,6 @@ extension StationController {
         }
     }
 
-    /// Eases each office to its light; one coming back from dark flickers on.
     func updatePower() {
         for station in fleet.stations.values {
             for room in station.rooms.values where !room.key.hasPrefix("kind:") {
@@ -518,11 +444,10 @@ extension StationController {
         }
     }
 
-    /// Lightning from the monolith into each researching minion: a jagged bolt redrawn every frame.
     func updateBeams() {
         var live = Set<String>()
         for m in minions.values where m.place == .core && m.path.isEmpty && m.state == .settled && m.opacity > 0.5 && m.activity != .sleeping {
-            guard let station = fleet.stations[m.station], station.cells(of: .core).contains(m.cell) else { continue }   // at the monolith, not out on a chore
+            guard let station = fleet.stations[m.station], station.cells(of: .core).contains(m.cell) else { continue }
             live.insert(m.id)
             let mp = station.monolithPosition
             let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
@@ -539,5 +464,4 @@ extension StationController {
     }
 }
 
-/// How lit an office is drawn.
 enum OfficeLight { case occupied, empty, dark }

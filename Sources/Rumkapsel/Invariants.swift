@@ -1,44 +1,22 @@
-// The rules of STATION.md, checked by machine.
-//
-// The simulator runs this at the end of every simulated step: thirty times a simulated second, so
-// each check is either trivial or on the half-second slow pass. A rule that fails is written to the
-// simulator log once per (rule, subject) as
-//
-//     VIOLATION: <rule>: <subject> <detail>
-//
-// and never again for that subject, so a stuck crate does not drown the log. Nothing here fixes
-// anything: it only says what the floor is doing that the rulebook does not allow.
-
 import Foundation
 import SceneKit
 
 final class Invariants {
-    /// Where a violation goes: the simulator's log.
     var onViolation: ((String) -> Void)?
 
-    /// One line per (rule, subject), ever.
     private var seen: Set<String> = []
 
-    /// The last time the geometry pass ran, on the station clock.
     private var slowAt = -1.0
     private static let slowEvery = 0.5
 
-    /// Set once the scene graph has been swept for round things.
     private var scanned = false
 
-    /// Where a crate stood when it was last seen resting, by node name.
     private var resting: [String: SIMD3<Double>] = [:]
-    /// Whether each resting crate had its tested tick when it was last seen.
     private var restingTested: [String: Bool] = [:]
-    /// Command id and phase index per actor, so a phase can only go forward.
     private var lastPhase: [String: (id: Int, phase: Int)] = [:]
-    /// A bath in progress: the command it belongs to and when it is due to end.
     private var bath: [String: (id: Int, until: Double)] = [:]
-    /// Rockets already checked at lift-off.
     private var launched: Set<String> = []
-    /// A station's floor cells, cached until its room count changes.
     private var floorCache: [String: (signature: Int, cells: Set<Cell>)] = [:]
-    /// Furniture footprints per station, cached against the static root's size.
     private var furniture: [String: [(SIMD2<Double>, Double)]] = [:]
     private var furnitureAt = -1
 
@@ -64,7 +42,6 @@ final class Invariants {
 
     // MARK: crates
 
-    /// One crate standing in a yard row, as the scene names it.
     private struct Standing {
         let name: String
         let station: String
@@ -91,12 +68,9 @@ final class Invariants {
         return out
     }
 
-    /// A crate is a merged pull request: storage holds merged work waiting for a release, the deck work
-    /// on staging. A pull request that closed without merging is not work and never becomes a crate.
     private func merged(_ c: StationController) {
         guard let fate = c.sim?.pullState else { return }
         for station in c.fleet.stations.values {
-            // An object in decon is not a crate yet: its pull request's fate is what takes it out, at the next poll.
             for row in station.ledger.crates.values where (row.placed != nil || row.at != nil) && row.placed != .decon {
                 if fate(row.repo, row.number) == "CLOSED" {
                     flag("a crate is a merged pull request", "\(station.name)|\(row.repo)#\(row.number)", "its pull request closed without merging")
@@ -105,25 +79,17 @@ final class Invariants {
         }
     }
 
-    /// A crate that has been set down does not move; and it never stands in a wall, in another
-    /// crate, in a minion or in a piece of furniture; and a stack is built from the floor.
     private func crates(_ c: StationController) {
         merged(c)
         let all = standing(c)
-        // Names are unique per crate except for unnumbered ones, which share a name: those are
-        // interchangeable and no rule here can tell one from another.
         var counts: [String: Int] = [:]
         for s in all { counts[s.name, default: 0] += 1 }
 
         var live: Set<String> = []
-        // In decon an object pulled from under a stack lets the rest drop: the one yard where a set-down
-        // thing moves, and where a stack is briefly in the air while it settles.
         for s in all where counts[s.name] == 1 && !s.name.hasPrefix("decon:") {
             live.insert(s.name)
             let crate = CrateRef(station: s.station, repo: s.repo, number: s.number)
-            // On someone's arms or in the air: it is allowed to move.
             if c.world.crate(crate)?.inTransit == true { resting[s.name] = nil; continue }
-            // Its tick taken back on the board: the one move nobody carries, straight to the untested row.
             let tested = c.world.crate(crate)?.cleared ?? false
             defer { restingTested[s.name] = tested }
             if restingTested[s.name] == true, !tested { resting[s.name] = s.pos; continue }
@@ -142,7 +108,6 @@ final class Invariants {
         }
         for name in resting.keys where !live.contains(name) { resting[name] = nil; restingTested[name] = nil }
 
-        // Nothing inside anything else.
         for (i, a) in all.enumerated() {
             guard let station = c.fleet.stations[a.station] else { continue }
             let local = SIMD2(a.pos.x - station.offset.x, a.pos.z - station.offset.y)
@@ -151,10 +116,8 @@ final class Invariants {
                 flag("a crate is never in a wall", a.name, "stands on \(cell.x),\(cell.y), which is not floor")
             }
             for b in all[(i + 1)...] where b.station == a.station {
-                guard abs(a.pos.y - b.pos.y) < 0.2 else { continue }   // a stack, not an overlap
+                guard abs(a.pos.y - b.pos.y) < 0.2 else { continue }
                 let dx = abs(a.pos.x - b.pos.x), dz = abs(a.pos.z - b.pos.z)
-                // Well inside the sum of the halves: storage nudges a crate about, and two on
-                // neighbouring columns may lean towards each other without being in each other.
                 let reach = (a.half + b.half) * 0.6
                 if dx < reach && dz < reach {
                     flag("a crate is never inside another crate", a.name + " / " + b.name,
@@ -177,9 +140,6 @@ final class Invariants {
             }
         }
 
-        // Stacks are built from the floor: no crate with air under it. Columns are half a cell apart
-        // and storage nudges each crate by up to a tenth, so a column is a cluster in x along its
-        // row rather than a rounding. A level is 0.34 high.
         var rows: [String: [Standing]] = [:]
         for s in all where !s.name.hasPrefix("decon:") {
             guard let station = c.fleet.stations[s.station] else { continue }
@@ -207,7 +167,6 @@ final class Invariants {
         }
     }
 
-    /// A station's floor, from the parts that make it: the yard, the bay, the corridor and the rooms.
     private func floor(of station: Station) -> Set<Cell> {
         let signature = station.rooms.count * 1000 + station.rooms.values.reduce(0) { $0 + $1.cells.count }
         if let cached = floorCache[station.name], cached.signature == signature { return cached.cells }
@@ -223,7 +182,6 @@ final class Invariants {
         return cells
     }
 
-    /// Everything standing on a room's floor that is not a tile: beds, couches, the shower, the desks.
     private func furnishings(_ c: StationController, station: Station) -> [(SIMD2<Double>, Double)] {
         let size = c.staticRoot.childNodes.count
         if size != furnitureAt {
@@ -247,7 +205,6 @@ final class Invariants {
     private func minions(_ c: StationController) {
         let all = Array(c.minions.values)
         for (i, m) in all.enumerated() {
-            // One thing at a time, and it has a name.
             if m.state == .settled, m.path.isEmpty {
                 if m.current == nil {
                     flag("a minion is always doing something with a name", m.id, "settled with no command")
@@ -263,12 +220,6 @@ final class Invariants {
                     flag("two never share a bed", pair(m.id, other.id), "bed \(a)")
                 }
             }
-            // A prop belongs to the activity that put it there. The outfit is worked out afresh
-            // every frame, which is what makes that true; these say it is still true. The first
-            // catches anything that reaches past the outfit to a prop of its own accord, or a
-            // frame that skipped a body. The second catches the fault that started this: a visit's
-            // order carried out of the room it belongs to, which is how the bath's pixels came to
-            // be drawn over an office desk.
             let kit = c.kit(m)
             if m.showsBathPixels != kit.pixels || m.showsTowel != kit.towel || m.holding != kit.tool {
                 flag("a prop belongs to the activity that put it there", m.id,
@@ -279,7 +230,6 @@ final class Invariants {
                 flag("a visit's order never leaves its room", m.id,
                      "washing at \(m.cell.x),\(m.cell.y), which is not the bath")
             }
-            // A visit lasts its whole time.
             if case .bath = m.current?.kind, let cur = m.current, m.phaseKind == .settle, m.phaseUntil > 0 {
                 bath[m.id] = (cur.id, m.phaseUntil)
             } else if let owed = bath[m.id] {
@@ -296,16 +246,10 @@ final class Invariants {
 
     // MARK: ships
 
-    /// A shuttle leaves before anyone walks under it.
     private func shuttlesOverhead(_ c: StationController) {
         for s in c.simulation.flights {
-            // Under means under a ship that is down over its slot, coming down or unloading. A ship on its
-            // approach is high in the air, crossing over the station on its way in.
             guard s.phaseKind == .descend || s.phaseKind == .unload else { continue }
             let local = SIMD2(s.pos.x, s.pos.z)
-            // The ship's own passenger is under it by nature until it steps out, and a crate's own carrier
-            // stands within reach on purpose: the ship holds the crate until the carrier is there. Everyone
-            // else keeps clear.
             var passenger: String?
             var order: Int?
             switch s.command.kind {
@@ -324,15 +268,12 @@ final class Invariants {
         }
     }
 
-    /// A ship flies the way it is pointing. It turns onto a new heading rather than snapping to it, so a
-    /// moment of catching up at the start of a leg is allowed; by the time it is well into one, its nose is
-    /// on the line it is flying and never sideways or backwards along it.
     private func shuttleNoses(_ c: StationController) {
         for s in c.simulation.flights {
             guard let h = s.heading, let v = c.shuttleViews[ObjectIdentifier(s)], !v.posedByLook,
                   s.progress(at: c.clock) > 0.4 else { continue }
             let flat = (h.x * h.x + h.z * h.z).squareRoot()
-            guard flat > 0.05 else { continue }   // straight up or straight down: the nose says nothing
+            guard flat > 0.05 else { continue }
             var off = (atan2(-h.z, h.x) - v.yaw).truncatingRemainder(dividingBy: 2 * .pi)
             if off > .pi { off -= 2 * .pi } else if off < -.pi { off += 2 * .pi }
             if abs(off) > .pi / 2 {
@@ -342,14 +283,10 @@ final class Invariants {
         }
     }
 
-    /// A rocket leaves only with its cargo aboard: nothing of its repository left on the deck or
-    /// on anyone's arms when the climb starts.
     private func rockets(_ c: StationController) {
         for r in c.simulation.rockets.values {
-            // The launch command loads first; the rule is about the moment the climb begins.
             guard case .launch = r.stage, r.phaseKind == .climb else { continue }
             guard launched.insert(r.key).inserted else { continue }
-            // The yard the rocket loads from: the deck with staging, storage without.
             let deck = c.world.stagingIsDeck(station: r.station, repo: r.repo)
             let prefix = "\(deck ? "deck" : "storage"):\(r.station)|\(r.repo)|"
             let left = c.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix(prefix) }.count
@@ -363,7 +300,6 @@ final class Invariants {
 
     // MARK: phases
 
-    /// A command's phases only ever go forward. A new command id starts again from anywhere.
     private func phases(_ c: StationController) {
         for m in c.minions.values {
             guard let cur = m.current else { lastPhase[m.id] = nil; continue }
@@ -382,9 +318,6 @@ final class Invariants {
 
     // MARK: nothing is round
 
-    /// One sweep of the scene graph: a sphere, or a cylinder, cone or tube smooth enough to read as
-    /// round, is a shape the rulebook does not have. The planets and the flight's craft are the world beyond,
-    /// not the station.
     private func scanShapes(_ c: StationController) {
         var found: [String: String] = [:]
         c.scene.rootNode.enumerateHierarchy { node, _ in

@@ -1,67 +1,41 @@
 import Foundation
 
-/// The station's data layer: the sources, the floor plan they feed, and the diff between one answer
-/// and the last. Nothing here draws anything and nothing here knows about SceneKit. The scene reads
-/// this model for state and consumes the events `apply…` returns for cues.
-///
-/// A source's first answer is never an event: `readyRepos` holds the repositories GitHub has spoken
-/// for, and a peer's first snapshot arrives in bulk rather than office by office.
 final class World {
     let fleet = Fleet()
     let github = GitHubResolver()
-    /// The demo runs on made-up rooms with no checkouts, so nothing is ever provisional.
     private let demo: Bool
-    /// The simulator drives a made-up org: nothing here may read or write what the real app saved.
     var simulated = false
 
     init(demo: Bool) { self.demo = demo }
 
-    /// How long an office is held for whoever last had it checked out, refreshed by their work.
     static let holdWindow: TimeInterval = 24 * 3600
-    /// A teammate's action older than this is history, not news.
     static let crewRecent: TimeInterval = 30 * 60
-    /// How long a session outside Conductor keeps its office.
     static let roomsWindow: TimeInterval = 12 * 3600
-
 
     // MARK: model state
 
-    /// Every repository we know a checkout of: its root, its name and the station it belongs to.
     private(set) var repoRoots: [String: (repo: String, station: String)] = [:]
 
-    /// A teammate's office, as GitHub describes it.
-    /// An office GitHub gave this station, a pull request's or a board issue's, and the state it was last
-    /// heard in. Whose it is, what it is called and its numbers are the record's.
     struct CrewRoomInfo { var state: String; var last: Date }
     private(set) var crewRoomInfo: [String: CrewRoomInfo] = [:]
     private(set) var crewBoxes: [String: (count: Int, state: String, color: RGB)] = [:]
     private(set) var peerBoxes: [String: (count: Int, state: String, color: RGB)] = [:]
 
-    // Peers on the local network: their snapshots and their claims on our floor.
     private(set) var peerSnapshots: [String: (snap: PeerSnapshot, at: Date)] = [:]
     private var peerFirstSeen: [String: Date] = [:]
-    /// Peers' claims on offices of the work station, by room key ("work|task:…") then peer name.
     private(set) var peerOffices: [String: [String: PeerSnapshot.Office]] = [:]
     private(set) var pushedByPeer: Set<String> = []
 
-    private var held: [String: Date] = [:]        // offices a peer left behind, held for a day
-    private var retired: [String: Date] = [:]     // merged offices cleared away while their session lingers
+    private var held: [String: Date] = [:]
+    private var retired: [String: Date] = [:]
     private(set) var roomCreated: [String: Date] = [:]
 
-    /// What the props and plots are doing: the offices ordered, the crates in the bay.
-    /// Where each crate is lives on its ledger row, on the station.
     var truth = StationTruth()
-    /// The crate each merged office's package became, by office key ("station|roomKey"), from the
-    /// moment its haul was ordered. Whether it has left is read off the crate's row, never a flag.
     private(set) var officeCrates: [String: CrateRef] = [:]
-    /// Every piece of work by every name it goes by; see `WorkBook`.
     let works = WorkBook()
-    /// What GitHub's pull requests say, read for the record; see `PullRequests`.
     var pulls: PullRequests { PullRequests(github: github) }
-    /// Stage changes heard since the last pass, waiting to become station events; see `stationEvents`.
     private var transitions: [(record: WorkBook.Record, t: Transition)] = []
 
-    /// The office on the floor for a piece of work, under whichever key it stands.
     func office(for record: WorkBook.Record) -> (station: Station, room: Room)? {
         for station in fleet.stations.values {
             for key in record.officeKeys { if let room = station.rooms[key] { return (station, room) } }
@@ -69,8 +43,6 @@ final class World {
         return nil
     }
 
-    /// The stage changes heard this pass, as what the station does about them. A change whose office is not
-    /// on the floor yet waits for it; one in a repository nobody has answered for yet is taken quietly.
     func stationEvents() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
@@ -87,10 +59,8 @@ final class World {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
             case .qa where t.from == .cleared:
-                // Clearance taken back: nothing is carried; the rows draw it with what is still untested.
                 continue
             case .qa where t.from != nil:
-                // To the staged rows, once the crate stands in storage.
                 guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
                       let number = record.number, isReady(record.repo) else { continue }
                 guard station.hasPad, !station.hall.deckCells.isEmpty, github.pipeline(repoRoot: info.key).hasStaging else { continue }
@@ -103,22 +73,20 @@ final class World {
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
             case .shipped where t.from != nil:
                 guard let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
-                // Shipped by a tag: the tag is the launch, and the work it took simply goes.
                 if github.pipeline(repoRoot: root).shipsOnTag { continue }
                 let key = info.station + "|" + info.repo
-                if !t.wasQuiet || padSlotOf[key] != nil { launches.insert(key) }   // a rocket that stands goes up
+                if !t.wasQuiet || padSlotOf[key] != nil { launches.insert(key) }
             default: break
             }
         }
         transitions = waiting
-        if !launches.isEmpty { assignPads() }   // a launch needs a slot: it takes one now
+        if !launches.isEmpty { assignPads() }
         for (key, numbers) in toDeck.sorted(by: { $0.key < $1.key }) {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
             guard let station = fleet.stations[parts[0]] else { continue }
             let commands = station.carryToDeck(repo: parts[1], numbers: numbers)
             if !commands.isEmpty { events.append(.carryToDeck(station: station.name, repo: parts[1], commands: commands)) }
         }
-        // One launch per repository per pass, however many pieces of work went up in it.
         for key in launches.sorted() {
             guard let station = fleet.stations[String(key.split(separator: "|")[0])] else { continue }
             let repo = String(key.split(separator: "|", maxSplits: 1)[1])
@@ -127,10 +95,8 @@ final class World {
         }
         return events
     }
-    /// Rockets a release or tag sent up this pass, as "station|repo".
     private var launchedThisPass: Set<String> = []
 
-    /// A source's word about the work an office holds.
     func report(office key: String, repo: String, _ stage: Stage, by source: Source, at: Date = Date()) {
         guard let r = works.find(officeKey: key, repo: repo) else { return }
         works.report(r, stage, by: source, at: at)
@@ -138,13 +104,10 @@ final class World {
     func report(crate n: Int, repo: String, _ stage: Stage, by source: Source, at: Date = Date()) {
         works.report(works.note(repo: repo, crate: n), stage, by: source, at: at)
     }
-    /// A pull request's state as its own word about the work. Said every pass, so a state remembered from
-    /// last run counts too.
     func report(pullState state: String?, record: WorkBook.Record?, at: Date = Date()) {
         guard let state, let record else { return }
         works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
     }
-    /// Whether a piece of work is yours: your own checkout of it, or the record says you are its author.
     func isMine(office key: String) -> Bool {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]] else { return false }
@@ -157,23 +120,19 @@ final class World {
         return works.find(repo: repo, crate: number)?.author == me || github.isMine(repo: repo, number: number)
     }
 
-    /// The record behind an office on this station, by "station|key".
     func record(office key: String) -> WorkBook.Record? {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let room = fleet.stations[parts[0]]?.rooms[parts[1]], let repo = room.repo else { return nil }
         return works.find(officeKey: room.key, repo: repo)
     }
-    /// A teammate's pull request on an office, if GitHub has said one.
     func crewPull(_ key: String) -> Int? { crewRoomInfo[key] != nil ? record(office: key)?.pulls.keys.min() : nil }
 
-    /// A repository's workflow: set by hand, else detected from its pipeline and whether a board follows it.
     func workflow(repo: String) -> Workflow {
         if let w = ConfigStore.shared.current.repos[repo]?.workflow { return w }
         let root = repoRoots.first { $0.value.repo == repo }?.key
         let pipeline = root.map { github.pipeline(repoRoot: $0) } ?? .configured
         return Workflow.detected(pipeline: pipeline, board: ConfigStore.shared.current.project != nil)
     }
-    /// Where the record says an office's work is. The floor acts on this, not on any one source.
     func stage(office key: String, repo: String?) -> Stage? { repo.flatMap { works.find(officeKey: key, repo: $0) }?.stage }
 
     // MARK: a crate's row, from the floor's side
@@ -184,76 +143,48 @@ final class World {
     func carriedCount(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.carriedCount(repo: repo) ?? 0 }
     func aboard(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.aboard(repo: repo) ?? 0 }
 
-    /// Spoken for by a carry: off the rows from here, drawn once, on the arms once picked up.
     func claim(_ c: CrateRef) { fleet.stations[c.station]?.ledger.claim(repo: c.repo, number: c.number) }
     func pickedUp(_ c: CrateRef, by minion: String) { fleet.stations[c.station]?.ledger.pickedUp(repo: c.repo, number: c.number, by: minion) }
     func setDown(_ c: CrateRef, at spot: Spot) {
         fleet.stations[c.station]?.ledger.setDown(repo: c.repo, number: c.number, at: spot)
     }
-    /// Nowhere in particular any more: the rows draw it where its row says it belongs.
     func forgetPlacement(_ c: CrateRef) { fleet.stations[c.station]?.ledger.forgetPlacement(repo: c.repo, number: c.number) }
-    /// Whatever this minion was holding is no longer on anyone's arms.
     func dropped(by minion: String) { for st in fleet.stations.values { st.ledger.dropped(by: minion) } }
-    /// The rocket left: what it carried is off the station.
     func clearPad(station: String, repo: String) { fleet.stations[station]?.ledger.clearPad(repo: repo) }
 
     // MARK: office hauls
 
-    /// A merged office's package is to go to storage: spoken for from now on.
     func haulOrdered(office key: String, crate: CrateRef) { officeCrates[key] = crate; claim(crate) }
     func haulOrdered(office key: String) -> Bool { officeCrates[key] != nil }
-    /// The package is down in the yard: the office may clear.
     func haulLanded(office key: String) -> Bool {
         guard let c = officeCrates[key], let row = crate(c), let area = row.area else { return false }
         return area != .office
     }
-    /// Ordered and not yet down anywhere in the yard: on the office floor still, or on someone's arms.
     func haulUnderway(office key: String) -> Bool { haulOrdered(office: key) && !haulLanded(office: key) }
     func forgetOffice(_ key: String) { officeCrates[key] = nil }
 
-    /// Repositories GitHub has answered for at least once. A repository's first answer is taken quietly:
-    /// nothing in it is new, whatever it holds. Only changes after that are events.
     private(set) var readyRepos: Set<String> = []
-    /// Everyone seen in a repository's feed, pull requests or board, with where and when last: the Teammates
-    /// list in Settings. Kept across launches, so the list is there before the feeds answer.
     private(set) lazy var seenPeople: [String: SeenPerson] = waitsForGitHub ? SeenPerson.load() : [:]
     private var savedPeople: [String: SeenPerson] = [:]
     private var crewSeen: Set<String> = []
     private var didLoadLayout = false
-    /// Scans since this run began, for the moment the floor waits before putting offices up on its own.
-    /// Counted in scans rather than seconds because a scripted run lives out a whole day in under one.
     private var scans = 0
-    /// When last run's answers were last written down.
     private var savedKnowledgeAt = Date.distantPast
-    /// How many scans offices wait for GitHub's first word. A station with no network is still your
-    /// station, so they go up regardless after this.
     static let officeGraceScans = 10
-    /// Whether offices wait for GitHub at all. A real station does, so that the offices everyone can
-    /// see are laid down before the ones only this machine knows about. Nothing scripted does: a
-    /// scenario, a model test and the gallery all have to put a station up without a network, and a
-    /// floor that stayed empty until GitHub answered would leave them with nothing to run on.
     var waitsForGitHub = true
 
-    /// Whether an office has a package standing on its floor at all.
     var hasPackage: (String) -> Bool = { _ in false }
     var rocketBusy: (String) -> Bool = { _ in false }
-    /// Whether a repository's release is on its way to staging, by "station|repo": its rocket's tip is being built.
     var stagingUnderway: (String) -> Bool = { _ in false }
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
 
-    /// Every repository the floor has found has spoken. Not one of them: offices go down in one go or
-    /// not at all, since a floor that fills a repository at a time is a stutter with a pause in it.
     var allReady: Bool { !repoRoots.isEmpty && repoRoots.values.allSatisfy { readyRepos.contains($0.repo) } }
 
-    /// The floor is still waiting to hear from GitHub, and holding its offices back until it does.
     var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady && !knewAlready }
 
-    /// The floor came back with last run's answers, so there is nothing to wait for. What arrives now
-    /// corrects a station already standing, and a room nothing vouches for yet stays provisional.
     private var knewAlready: Bool { github.hasAnswers }
 
-    /// Settings changed: forget the fleet and start again from the next scan.
     func reset() {
         fleet.removeAllStations()
         repoRoots = [:]
@@ -265,24 +196,18 @@ final class World {
 
     func crewName(_ login: String) -> String { ConfigStore.shared.current.crewNames[login] ?? login }
 
-    /// The issue an office is for, where its key says so: `task:repo#128`. A branch with no issue behind
-    /// it has none.
     func taskNumber(_ room: Room) -> Int? { Work.number(inOfficeKey: room.key) }
 
-    /// The office key for a teammate's branch: the same key a local checkout of it would get.
     func crewKey(repo: String, branch: String) -> String { Work(repo: repo, branch: branch).officeKey }
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
-    /// The repositories Settings lists: every checkout the station knows, every repository with an office
-    /// on it, a neighbour's too, and every one with settings of its own, hidden or added by hand.
     var knownRepos: [String] {
         var names = Set(repoRoots.values.map(\.repo)).union(ConfigStore.shared.current.repos.keys)
         for s in fleet.stations.values { for r in s.rooms.values { if let repo = r.repo { names.insert(repo) } } }
         return names.sorted()
     }
 
-    /// A task room whose branch is not on GitHub yet: (unpushed, commits ahead).
     func localState(_ room: Room) -> (local: Bool, commits: Int) {
         guard room.key.hasPrefix("task:"), let w = room.worktree else { return (false, 0) }
         var pushed = github.branchPushed(worktree: w) ?? true
@@ -300,36 +225,26 @@ final class World {
         !room.key.hasPrefix("kind:") && Date().timeIntervalSince(room.lastActive) > 7 * 24 * 3600
     }
 
-    /// An office GitHub knows about that nobody here has checked out: a teammate's branch or pull request.
     func isRemoteOnly(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return room.worktree == nil && (crewRoomInfo[key] != nil || pushedByPeer.contains(key))
     }
 
-    /// An office that exists only on someone's disk, or is being held for them: drawn as an outline.
     func isProvisional(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return !demo && room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && !peerLive(key)
     }
 
-    /// Drawn from last night's notes and not yet confirmed today. A different thing from provisional,
-    /// which is about whether anybody vouches for an office at all: this is about whether we have looked.
     func isUnchecked(_ station: Station, _ room: Room) -> Bool {
         !demo && !room.key.hasPrefix("kind:") && !lookedAt(room.repo)
     }
 
-    /// The floor is still arriving: some repository has not been looked at today, or none has been found
-    /// yet — which is the first second or two of every launch, and precisely when it must not be taken
-    /// for "nothing left to wait for". Bounded, so a repository that never answers cannot hold it open.
     var stillLooking: Bool {
         guard waitsForGitHub, scans < World.lookingScans else { return false }
         return repoRoots.isEmpty || repoRoots.keys.contains { !github.answered(repoRoot: $0) }
     }
-    /// The most scans the floor will call itself still arriving for.
     static let lookingScans = 60
 
-    /// GitHub has answered for this repository over the wire in this run — not from last night's notes,
-    /// and not from a neighbour. Repositories the floor has not even found yet count as unlooked-at.
     func lookedAt(_ repo: String?) -> Bool {
         guard waitsForGitHub else { return true }
         guard let repo else { return true }
@@ -337,21 +252,16 @@ final class World {
         return !roots.isEmpty && roots.contains { github.answered(repoRoot: $0) }
     }
 
-    /// Someone is at work in a peer's office right now: a session awake in it on their machine.
     func peerLive(_ key: String) -> Bool {
         peerSnapshots.values.contains { entry in entry.snap.minions.contains { !$0.asleep && "work|" + $0.office == key } }
     }
-    /// A peer's office in use but not on GitHub yet: drawn solid, with its outline kept as the mark.
     func isLocalLive(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && peerLive(key)
     }
-    /// Every peer claiming this office says it is idle.
     func peerDim(_ key: String) -> Bool { peerOffices[key].map { !$0.isEmpty && $0.values.allSatisfy(\.dim) } ?? false }
-    /// A peer's pull request on this office, as they last said.
     func peerPull(_ key: String) -> PeerSnapshot.Office? { peerOffices[key]?.values.first { $0.pull != nil } }
 
-    /// Whose office this is, for the floor: the teammate GitHub names, else the peer who has it checked out.
     func occupant(of key: String) -> String? {
         if crewRoomInfo[key] != nil, let author = record(office: key)?.author { return crewName(author) }
         if let peer = peerOffices[key]?.keys.sorted().first { return peer }
@@ -362,9 +272,6 @@ final class World {
         return nil
     }
 
-    /// Peers that have gone quiet.
-    /// How long a peer may say nothing before its figures leave. It speaks every three seconds; a wifi
-    /// network drops a station for twenty or thirty at a time, and its figures stay through that.
     static let peerQuiet: TimeInterval = 60
 
     func stalePeers(olderThan seconds: TimeInterval) -> [String] {
@@ -373,7 +280,6 @@ final class World {
 
     // MARK: kicking
 
-    /// Offices thrown off the station, by room key: peers and GitHub may not put them back for a day.
     private var simKicked: [String: Date] = [:]
     private var kicked: [String: Date] {
         get { simulated ? simKicked : (UserDefaults.standard.dictionary(forKey: "kicked") as? [String: Date]) ?? [:] }
@@ -385,7 +291,6 @@ final class World {
 
     func isKicked(_ key: String) -> Bool { kicked[key].map { Date().timeIntervalSince($0) < World.holdWindow } ?? false }
 
-    /// Throws an office off the station: nobody may put it back for a day.
     func kick(roomKey key: String) -> [WorldEvent] {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return [] }
@@ -397,7 +302,6 @@ final class World {
         return events
     }
 
-    /// Takes a room off the floor and describes it for the scene, which still has to tear its tiles down.
     private func drop(station: Station, room: Room, announce: Bool, reason: String) -> WorldEvent {
         let event = WorldEvent.officeArchived(station: station.name, key: roomKey(station, room), roomKey: room.key,
                                               name: room.name, hall: station.doorOutside(of: room.key), announce: announce, reason: reason)
@@ -407,15 +311,10 @@ final class World {
 
     // MARK: the session scan
 
-    /// What the scene knows about where a session's worker stands, so a renamed office keeps its floor.
     struct MinionHome { var station: String; var key: String; var idle: Bool }
 
-    /// The last prompt marker and count seen per session: a session's first answer is quiet here too.
     private var sessionPrompts: [String: (marker: String, count: Int)] = [:]
 
-    /// Every session touched today keeps its office alive; archived workspaces lose theirs. Archived
-    /// means two different things: Conductor deletes the worktree, Claude Code leaves it and drops its
-    /// lease, and a station that watched only the disk kept an office for every workspace ever opened.
     func applyScan(_ result: ScanResult, now: Date, minionHomes: [String: MinionHome]) -> [WorldEvent] {
         var events: [WorldEvent] = []
         var changed = false
@@ -429,8 +328,6 @@ final class World {
                 self?.transitions.append((r, t))
             }
             fleet.load(alone: peerSnapshots.isEmpty)
-            // Last run's answers come back with the floor, so the station stands whole from the first
-            // frame and the asks going out are corrections rather than the thing it is waiting for.
             if waitsForGitHub { github.loadKnowledge() }
             changed = true
             events.append(.worldLoaded)
@@ -443,18 +340,12 @@ final class World {
             && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
             let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
             let station = fleet.station(stationName)
-            // A quiet session speaks for its branch only while its checkout is on it.
             if let branch = s.branch, now.timeIntervalSince(s.lastModified) > 600 {
                 github.refreshCommits(worktree: s.cwd)
                 if let current = github.currentBranch(worktree: s.cwd), current != branch { continue }
             }
             let home = homeFor(s, station: stationName)
             sessionRooms.insert("\(stationName)|\(home.key)")
-            // The shared offices go down first, so that two stations seeing the same pull requests dig
-            // the same floor: yours are held until GitHub has spoken for the repository, by which time
-            // its own offices are already placed. An office already on the floor is never held, and
-            // nothing waits forever — after a moment they go up regardless. The whole floor is held
-            // as one, not a repository at a time, so the wait ends in a station and not a dribble.
             let held = settling && station.rooms[home.key] == nil
             if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
                !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
@@ -468,8 +359,6 @@ final class World {
             if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                 changed = true
                 roomCreated["\(stationName)|\(home.key)"] = now
-                // A floor still settling puts its offices up where they stand; a shuttle is for one that
-                // arrives on a station already at work.
                 events.append(.officeOpened(station: stationName, key: home.key, source: .session(s.id),
                                             arrival: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle))
                 report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
@@ -477,7 +366,6 @@ final class World {
             if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
                 repoRoots[root] = (s.repo, stationName)
             }
-            // A message arrived since the last scan: cones on the office floor, and its worker over to them.
             let marker = s.eventMarkers[.prompt] ?? ""
             if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
                 events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
@@ -492,11 +380,6 @@ final class World {
                 if let w = room.worktree { github.refreshCommits(worktree: w) }
             }
         }
-        // One workspace, one office. An office is keyed by its branch until GitHub names a pull request
-        // for it and then by the number, and the room under the old key was being left where it stood —
-        // so a workspace with a pull request open had two offices on the floor, both of them live.
-        // A merged office waiting for its haul is the workspace's last piece of work, not its office: the
-        // work after it has one of its own beside it.
         for station in fleet.stations.values {
             var byWorkspace: [String: [Room]] = [:]
             for room in station.rooms.values where !room.key.hasPrefix("kind:") {
@@ -504,7 +387,6 @@ final class World {
                 if let w = room.worktree { byWorkspace[w, default: []].append(room) }
             }
             for (_, rooms) in byWorkspace where rooms.count > 1 {
-                // The one named for the pull request keeps the desk; it is the one the crates know.
                 let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
                 for room in rooms where room !== keep {
                     events.append(drop(station: station, room: room, announce: false, reason: "one workspace, one office"))
@@ -518,39 +400,21 @@ final class World {
                 let pull = pulls.pull(ownOffice: room)
                 let state = pull?.state
                 if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state)) }
-                // Merged is the record's word, whoever said it.
                 let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
-                // A checkout that went away still waits for its crate to reach storage: the office
-                // stays open until the haul lands, the way it does for any merged office.
                 var gone = (room.worktree.map { !Workspaces.isOpen($0) } ?? false) && !haulUnderway(office: key)
                 if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
                     github.refreshCommits(worktree: w)
-                    if let current = github.currentBranch(worktree: w), current != branch, !haulUnderway(office: key) { gone = true }   // the checkout is on another branch
+                    if let current = github.currentBranch(worktree: w), current != branch, !haulUnderway(office: key) { gone = true }
                 }
-                // Closed without merging: the work goes nowhere. The crate turns red, sits for ten minutes, then the office clears.
                 let closed = state == "CLOSED" && !merged
                 if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
-                // Only a room this pass can read the state of may clear that clock. A teammate's
-                // office has no checkout here to ask about, so `state` is nil however closed the
-                // pull request is, and the crew pass is the one that times it out from GitHub's
-                // answer. Clearing it here on every scan reset that ten minutes before it could ever
-                // run out, and such an office stood red on the floor for good.
                 if state != nil, !closed { closedAt[key] = nil }
                 if merged, station.hasPad, !haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
-                // A merged office clears once its crate is down in the yard, or when there was nothing to carry.
                 let cleared = (merged && (!station.hasPad || haulLanded(office: key) || nothingToHaul.contains(key)))
                     || (closed && now.timeIntervalSince(closedAt[key] ?? now) > World.closedWindow)
-                // Nobody's: no checkout here, no peer claiming it, nothing on GitHub once GitHub has answered.
-                // An office a peer left behind is held for a day so their return does not move it.
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
-                // An office of three kinds, and they do not end the same way. One of yours is backed by
-                // a checkout on this disk and one of a neighbour's by their word over the network, and
-                // both last until the workspace itself is archived — a merged pull request says the work
-                // shipped, not that the desk was cleared. An office that is only GitHub's has nothing
-                // else to go on: the merge is the last anybody hears of it, since branches are left to
-                // die with their pull requests rather than deleted.
                 let mine = room.worktree.map { Workspaces.isOpen($0) } ?? false
                 let lan = peerOffices[key] != nil
                 let ended = cleared && !mine && !lan
@@ -563,8 +427,6 @@ final class World {
             }
         }
 
-        // Every Conductor repo with a checkout under ~/dev counts as a work repo for releases,
-        // even with no session today, so a release on the pad never depends on someone working.
         if firstRun, !simulated {
             let home = FileManager.default.homeDirectoryForCurrentUser
             let workspaces = home.appendingPathComponent("conductor/workspaces")
@@ -577,7 +439,6 @@ final class World {
                     }
                 }
             }
-            // A checkout added by hand in Settings is on the station the same way.
             for (repo, o) in cfg.repos where cfg.shown(repo: repo) {
                 guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git"),
                       !repoRoots.values.contains(where: { $0.repo == repo }) else { continue }
@@ -622,19 +483,12 @@ final class World {
             events.append(.log("\(who): \(change.pr.summary)"))
             events.append(.chime(change.pr.number))
         }
-        events += stationEvents()   // a pull request newly open has its office's worker pack the crate
+        events += stationEvents()
         if changed { events.append(.layoutChanged) }
         return events
     }
 
-    /// A session's office, unless that office was merged and cleared while the session lingers on the
-    /// branch: then the minion waits in the lounge rather than rebuilding the office every scan.
     func homeFor(_ s: SessionInfo, station: String) -> Home {
-        // A branch names an office until GitHub says which pull request it is, and after that the pull
-        // request does. Otherwise the same work is one office here, under the branch it is checked out
-        // on, and another from GitHub under its number — and neither knows about the other, so the
-        // rules that keep your own office standing never see the remote one at all. A branch named
-        // `gh-N/…` already arrives as `#N`; this is for every branch that is not.
         let pr = s.branch.flatMap { b in s.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
         let home = works.note(repo: s.repo, branch: s.branch, folder: s.cwd, issue: pr?.closes.first, pull: pr?.number, pullState: pr?.state)
             .work(branch: s.branch).home
@@ -646,7 +500,6 @@ final class World {
 
     // MARK: github
 
-    /// A fresh answer from GitHub: board columns that moved, and the crew's floor rebuilt around it.
     func applyGitHub(now: Date, timed: ((String, () -> [WorldEvent]) -> [WorldEvent])? = nil) -> [WorldEvent] {
         let run = timed ?? { _, b in b() }
         placementsLeft = false
@@ -659,29 +512,19 @@ final class World {
 
     // MARK: releases and the pad
 
-    /// Releases already announced, so an open one on the pad is only said once: "station|repo|number|untested".
     private var announcedReleases: Set<String> = []
-    /// Repositories whose releases have answered once. The first answer is quiet: whatever is on the
-    /// pad already existed, and the rocket simply stands there.
     private var releasesSeen: Set<String> = []
 
-    /// The staging release each repository is known to have, by "station|repo": its number and state.
     private var stagingPRs: [String: (number: Int, state: String)] = [:]
-    /// Repositories whose releases have answered once. The first answer is quiet: whatever it holds already existed.
     private var stagingSeen: Set<String> = []
 
-    /// A repository's checkout, by station and name.
     func root(station: String, repo: String) -> String? { repoRoots.first { $0.value.station == station && $0.value.repo == repo }?.key }
-    /// Whether the deck, rather than storage, is what a repository's rocket loads from: it has a staging branch.
     func stagingIsDeck(station: String, repo: String) -> Bool {
         root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? !ConfigStore.shared.current.stagingBranch.isEmpty
     }
-    /// Whether a repository's merges deploy at once, rather than waiting for a release.
     func shipsOnMerge(station: String, repo: String) -> Bool {
         root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).shipsOnMerge } ?? false
     }
-    /// A merge launch has climbed: its crates are gone from the ledger outright. No source will ever say
-    /// they shipped, so nothing else would take the rows away.
     func forgetShipped(station: String, repo: String) {
         guard let st = fleet.stations[station] else { return }
         for c in st.ledger.crates(of: repo) where c.placed == .pad {
@@ -689,39 +532,30 @@ final class World {
             st.ledger.forget(repo: repo, number: c.number)
         }
     }
-    /// Rockets going up for a merge rather than a release, as "station|repo": they stand on the pad too.
     var mergeLaunches: Set<String> = []
-    /// Whether a station's deck is in use: some repository on it has a staging branch.
     func deckInUse(station: String) -> Bool {
         let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
-    /// The release pull request whose rocket a repository's pad should hold, if any.
     private func padRelease(root: String) -> ReleasePR? {
         guard let open = github.openReleases(repoRoot: root) else { return nil }
         let hasProduction = open.contains(where: \.isProduction)
         return open.first { $0.isProduction || (!hasProduction && !github.pipeline(repoRoot: root).hasStaging) }
     }
 
-    /// The work of a repository the next rocket is for: what is cleared or in QA when the repository has
-    /// a staging area, and what is stored besides when it has not.
     func waiting(repo: String, station: String) -> [WorkBook.Record] {
         let from: Stage = stagingIsDeck(station: station, repo: repo) ? .qa : .stored
         return works.records(repo: repo).filter { r in
             guard let stage = r.stage, stage >= from, stage < .shipped else { return false }
-            // Work whose first word was already stored waits only once a count has listed it.
             return !r.quiet || r.words[.git] != nil || r.words[.board] != nil
         }
     }
-    /// Whether the rocket may load a repository's waiting work: all of it cleared, or nothing to clear here.
     func clearedToLoad(repo: String, station: String) -> Bool {
         let w = waiting(repo: repo, station: station)
         return !w.isEmpty && (!workflow(repo: repo).has(.cleared) || w.allSatisfy { $0.stage.map { $0 >= .cleared } ?? false })
     }
 
-    /// Pads that should hold a rocket, as "station|repo": a release open, a merge going up, or work waiting
-    /// for a release in a repository that has a release to wait for.
     func padRockets() -> Set<String> {
         var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(mergeLaunches)
         for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
@@ -729,23 +563,18 @@ final class World {
         return pads
     }
 
-    /// Production releases flying since their merge whose deploy run has not shown yet, by checkout.
     private var awaitingDeploy: [String: Date] = [:]
 
-    /// The camera goes up with the rocket: a production release that merged in a repository whose deploys
-    /// are watched starts its flight now, and the deploy's run, once it shows, sets the clock and ends it.
-    /// Nothing where the run was seen before the merge was, or where the repository has no deploys to watch.
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
         guard let d = github.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
         let merged = pr.mergedAt ?? Date()
-        guard Date().timeIntervalSince(merged) < Deployments.recent else { return [] }   // heard late: long gone, no flight
+        guard Date().timeIntervalSince(merged) < Deployments.recent else { return [] }
         if let began = newest.startedAt, began > merged.addingTimeInterval(-120) { return [] }
         awaitingDeploy[repoRoot] = Date()
         return [.deployStarted(station: station, repo: repo, production: true, expected: d.usual,
                                release: pr.tag ? pr.title : "#\(pr.number)", elapsed: max(0, Date().timeIntervalSince(merged)))]
     }
 
-    /// Flights begun at the merge whose run never showed: the signal is lost.
     private func lostDeploys() -> [WorldEvent] {
         let now = Date()
         var out: [WorldEvent] = []
@@ -756,7 +585,6 @@ final class World {
         return out
     }
 
-    /// A rocket for work waiting with no release opened for it: what is stored since the last one went.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
         let label = "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
@@ -764,7 +592,6 @@ final class World {
                               command: .rocket(stage, station: station.name, repo: repo))
     }
 
-    /// GitHub's comparison of what has shipped with the trunk: from the newest tag, else the production branch.
     func waitingURL(repo: String) -> String {
         guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return "" }
         let p = github.pipeline(repoRoot: root)
@@ -772,11 +599,9 @@ final class World {
         return shipped.isEmpty ? "https://github.com/\(owner)" : "https://github.com/\(owner)/compare/\(shipped)...\(p.trunk)"
     }
 
-    /// One rocket command, with what to write on the prop and how much cargo it should be sized for.
     private func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR, cleared: Bool? = nil) -> WorldEvent {
         let cleared = cleared ?? !pr.untested
         let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
-        // A tag has no number and no branch it came from: it is a name and a moment.
         let label = pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)\(status)"
             : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
         return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared,
@@ -784,13 +609,10 @@ final class World {
                               command: .rocket(stage, station: station.name, repo: repo))
     }
 
-    /// Crates a rocket would load: the deck when there is a staging branch, storage otherwise.
     func cargoWaiting(station: Station, repo: String) -> Int {
         (stagingIsDeck(station: station.name, repo: repo) ? station.staged : station.stored)[repo] ?? 0
     }
 
-    /// The launch queue and the open releases, turned into events and rocket commands. A merged
-    /// production release launches; an open one stands by while untested and loads once it is cleared.
     func applyReleases() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var launched: Set<String> = []
@@ -805,15 +627,10 @@ final class World {
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
-            // What the release carries is what shipped, wherever the floor had got it to. `waiting` is
-            // already that set — from QA up, where staging is the deck — and its records are marked
-            // shipped here. Their crates are marked with them, or a crate the release really took stays
-            // standing in a row for good, saying it is still waiting while its own record says it shipped.
             for r in waiting(repo: info.repo, station: station.name) {
                 works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date())
                 if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
             }
-            // And anything aboard that no record accounts for.
             for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
             announcedReleases = announcedReleases.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
@@ -827,11 +644,8 @@ final class World {
             releasesSeen.insert(root)
             let key = info.station + "|" + info.repo
             guard !launched.contains(key) else { continue }
-            guard padSlotOf[key] != nil || padRelease(root: root) == nil else { continue }   // no slot on the pad
+            guard padSlotOf[key] != nil || padRelease(root: root) == nil else { continue }
             guard let pr = padRelease(root: root) else {
-                // No release opened: the work still has a rocket standing, loaded once every piece of it is
-                // cleared, or at once where nothing clears here. Where a merge or a tag is the release, the
-                // work waits in storage instead, and its rocket comes with the release.
                 let w = waiting(repo: info.repo, station: station.name)
                 guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !mergeLaunches.contains(key),
                       !github.pipeline(repoRoot: root).shipsAtOnce, padSlotOf[key] != nil else { continue }
@@ -849,9 +663,6 @@ final class World {
                                              untested: pr.untested, isProduction: pr.isProduction))
                 events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
-            // Not for production: the rocket only stands. Cleared, by the record's word or, where the
-            // release's label is a word on it, the release's (an untested label holds it): it takes the
-            // cargo aboard.
             let labelClears = !pr.untested && workflow(repo: info.repo).cleared?.contains(.pulls) == true
             if labelClears { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
             let cleared = pr.isProduction && (labelClears || clearedToLoad(repo: info.repo, station: station.name))
@@ -862,9 +673,6 @@ final class World {
         return events + applyStaging()
     }
 
-    /// A rocket standing by holds nothing: what it took aboard while it was cleared goes back to the
-    /// rows it was loaded from, tested in front of the rocket and untested where it can be looked at.
-    /// Snapped back, not carried: the release was never cleared for it.
     private func standDown(station: Station, repo: String) -> [WorldEvent] {
         let yard: Yard = stagingIsDeck(station: station.name, repo: repo) ? .deck : .storage
         let back = station.ledger.unload(repo: repo, to: yard)
@@ -872,8 +680,6 @@ final class World {
         return [.log("\(repo): not cleared to ship, \(back.count) back off the rocket"), .layoutChanged]
     }
 
-    /// The staging release of each repository, diffed against the last answer: opened, merged, or
-    /// closed without merging. One open staging release per repository at a time.
     private func applyStaging() -> [WorldEvent] {
         var events: [WorldEvent] = []
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
@@ -901,22 +707,14 @@ final class World {
         return events
     }
 
-    /// Status moves on the board are the station's cues: a crate to the deck, a tick from QA, a launch.
     private func applyBoardMoves() -> [WorldEvent] {
         let st = ConfigStore.shared.current.statuses
         return github.takeProjectMoves().map { .boardMoved(item: $0.item, from: $0.from, to: st.stage(of: $0.item.status)) }
     }
 
-    /// How many offices may be found a place in one go. Finding one somewhere to stand is a search over
-    /// the whole floor, about a fiftieth of a second each, and a launch has a dozen of them to place —
-    /// which is a quarter of a second of the window standing still if they are all done at once. Waiting
-    /// on GitHub costs nothing; it is what arrives with the answer that has to be paced.
     static let placementsPerPass = 1
-    /// True while offices are still waiting for somewhere to stand, so the next pass comes round.
     private(set) var placementsLeft = false
 
-    /// Crew station: an office per open teammate pull request, boxes per push, and minions that
-    /// react only to what just happened in the repositories' activity feeds.
     private func rebuildCrew(now: Date) -> [WorldEvent] {
         var placed = 0
         var events: [WorldEvent] = []
@@ -944,14 +742,9 @@ final class World {
             }
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
-        // Issues the board says are in development, assigned to someone else: offices too, even before a pull request.
         var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
-        if cfg.project != nil, !me.isEmpty, let items = github.projectItems() {   // not before GitHub has said who I am
+        if cfg.project != nil, !me.isEmpty, let items = github.projectItems() {
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
-            // The column says an office is solid; it does not make one. An issue needs a sign of work:
-            // a linked pull request, a branch seen in the feed, or a room a session or peer already claims.
-            // "repo#N" with a gh-N/… branch pushed in the last two weeks, and not deleted or closed since:
-            // a branch that is gone is no sign of work, however recently it went.
             var branched: Set<String> = []
             let recent = now.addingTimeInterval(-14 * 24 * 3600)
             for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where e.at > recent {
@@ -963,7 +756,7 @@ final class World {
                 }
             }
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
-                if it.isClosed { continue }   // finished work, whatever column the board left it in
+                if it.isClosed { continue }
                 let key = Work(repo: it.repo, issue: it.number).officeKey
                 guard let login = it.assignees.first, login != me else { continue }
                 if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
@@ -972,8 +765,6 @@ final class World {
                 boardOffices.append((it.repo, it, login))
             }
         }
-        // Bot pull requests are not work: each is an object of unknown origin in decon, no office and
-        // nobody for it. The bots' room of old, if a saved layout still has one, goes.
         for old in ["kind:bots", "kind:mail"] where station.rooms[old] != nil { station.removeRoom(key: old); changed = true }
         var deconMoved = false
         events += screen(station: station, open: open, feed: feed, moved: &deconMoved)
@@ -984,27 +775,19 @@ final class World {
             return events
         }
 
-        // Offices for open pull requests; a new one arrives by shuttle, a gone one is archived.
-        // Your own is keyed as a session on it would key it, so a checkout later takes the same office.
         func work(_ repo: String, _ pr: OpenPR) -> Work { pr.author == me ? Work(repo: repo, branch: pr.branch, pull: pr.number) : Work(repo: repo, branch: pr.branch) }
         var liveKeys = Set(open.filter { !$0.pr.isBot }.map { work($0.repo, $0.pr).officeKey })
         liveKeys.formUnion(boardOffices.map { Work(repo: $0.repo, issue: $0.item.number).officeKey })
-        // Back on the open list: whatever closed before is not closed now.
         for k in liveKeys where crewRoomInfo[sk + k] != nil { closedAt[sk + k] = nil }
         for room in Array(station.rooms.values) where crewRoomInfo[sk + room.key] != nil && !liveKeys.contains(room.key) {
             let key = sk + room.key
             let known = room.repo.flatMap { works.find(officeKey: room.key, repo: $0) }
             let author = known?.author ?? ""
-            // A teammate's office that we also have checked out stays: the local scan decides its fate.
             guard room.worktree == nil else { crewRoomInfo[key] = nil; crewBoxes[key] = nil; continue }
-            // Gone from the open list: merged, or closed without merging. The pull request itself is the
-            // authority on which. The feed may already say; otherwise it is asked, and until it answers
-            // nothing moves: a crate that was never merged work must not be carried to storage.
             var hauling = false
             let root = repoRoots.first { $0.value.repo == room.repo }?.key
             guard let state = pulls.state(crewOffice: room, known: known, repoRoot: root, feed: feed) else { continue }
             if state == "NONE" {
-                // Never a pull request: off the board's list, it goes quietly. A teammate's station still at work in it keeps it.
                 if peerOffices[key] != nil { continue }
                 closedAt[key] = nil
                 crewRoomInfo[key] = nil; crewBoxes[key] = nil
@@ -1016,13 +799,12 @@ final class World {
             crewRoomInfo[key]?.state = state
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
             if closedUnmerged {
-                // Closed without merging: red for ten minutes, then gone. Nothing to carry, and no crate.
                 if let n = known?.number { station.ledger.forget(repo: room.repo ?? "", number: n) }
                 if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
             } else if !haulOrdered(office: key), station.hasPad {
                 let merged = haulMerged(station: station, room: room)
-                hauling = !merged.isEmpty   // the scene is about to start carrying: the office waits for it
+                hauling = !merged.isEmpty
                 events += merged
                 if isReady(room.repo) { events.append(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             }
@@ -1034,7 +816,7 @@ final class World {
         }
         for (repo, pr) in open where !pr.isBot && !isKicked(sk + work(repo, pr).officeKey) {
             let record = works.note(repo: repo, branch: pr.branch, pull: pr.number, pullState: "OPEN", author: pr.author, title: pr.title, url: pr.url)
-            works.report(record, .ready, by: .pulls, at: pr.createdAt)   // every pass: the office may have been the board's first
+            works.report(record, .ready, by: .pulls, at: pr.createdAt)
             let home = work(repo, pr).home
             let key = home.key
             let name = home.name
@@ -1075,7 +857,6 @@ final class World {
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
 
-        // One grey minion per teammate with an open PR or recent activity.
         var logins = Set(open.filter { !$0.pr.isBot && $0.pr.author != me }.map(\.pr.author))
         logins.formUnion(boardOffices.map(\.login))
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
@@ -1090,7 +871,6 @@ final class World {
         events.append(.crewRoster(members: roster))
         events.append(changed ? .layoutChanged : .markersChanged)
 
-        // What just happened: only fresh events move minions and make the log.
         for (repo, e) in feed.sorted(by: { $0.e.at < $1.e.at }) where !e.isBot {
             let id = "\(repo)|\(e.at.timeIntervalSince1970)|\(e.actor)|\(e.kind)|\(e.branch ?? "")"
             guard !crewSeen.contains(id) else { continue }
@@ -1106,14 +886,9 @@ final class World {
         return events
     }
 
-    /// Each repository counts as answered from its first reply on, an empty one included; the reply
-    /// itself was taken quietly.
     private func noteAnswered() {
         let before = readyRepos.count
         for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
-        // Kept up to date, not just filled in once: an office that has gone from GitHub is dropped on
-        // the floor and must go from what next launch is told as well, or it comes back from the dead
-        // every morning. Written when a repository first answers, and now and then after that.
         if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
             savedKnowledgeAt = Date()
             github.saveKnowledge(repoRoots.mapValues(\.repo))
@@ -1121,16 +896,12 @@ final class World {
         }
     }
 
-    /// Decon: bot pull requests, one object each. An arrival is a new number on a repository's open
-    /// list, and the hatch says so. An object gone from the list is asked after: the feed may say, else
-    /// the pull request is fetched, and until it answers the object stays. Merged, it is cleared and
-    /// ordered into storage like any merged crate; closed, it is ejected.
     private func screen(station: Station, open: [(repo: String, pr: OpenPR)], feed: [(repo: String, e: FeedEvent)],
                         moved: inout Bool) -> [WorldEvent] {
         var events: [WorldEvent] = []
         let cfg = ConfigStore.shared.current
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name && cfg.crewEnabled(repo: info.repo) {
-            guard github.teamOpenPRs(repoRoot: root) != nil else { continue }   // not answered yet: nothing has gone
+            guard github.teamOpenPRs(repoRoot: root) != nil else { continue }
             let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }
             let (arrived, gone) = station.ledger.adoptDecon(open: bots.map(\.pr.number), repo: info.repo)
             if !arrived.isEmpty { moved = true }
@@ -1164,12 +935,8 @@ final class World {
 
     // MARK: peers
 
-    /// This machine's own name on the local network, for the tie-break below. Empty until sharing starts.
     var peerName = ""
 
-    /// A peer's claim lands on our work station: its offices get the same key here, adopting the
-    /// peer's floor plan when that floor is free. A whole peer arriving fades in; one new checkout
-    /// on a peer we already follow earns a shuttle, like a new session of our own.
     func applyPeer(_ snap: PeerSnapshot, now: Date) -> [WorldEvent] {
         var events: [WorldEvent] = []
         let isNewPeer = peerFirstSeen[snap.name] == nil
@@ -1180,7 +947,7 @@ final class World {
         let station = fleet.station("work")
         let sk = station.name + "|"
         var changed = false
-        var markers = false   // a peer says the same thing every few seconds: only a difference is worth a redraw
+        var markers = false
         let cfg = ConfigStore.shared.current
         let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
         var live: Set<String> = []
@@ -1191,18 +958,15 @@ final class World {
             live.insert(key)
             let before = peerOffices[key]?[snap.name]
             peerOffices[key, default: [:]][snap.name] = o
-            // What the floor draws from the claim: the power on the tiles, the pull request on the package.
             if before?.dim != o.dim { changed = true }
             if before?.pull != o.pull || before?.pullState != o.pullState || before?.checks != o.checks || before?.review != o.review { markers = true }
-            if o.pushed, pushedByPeer.insert(key).inserted { changed = true }   // an outline becomes a room
+            if o.pushed, pushedByPeer.insert(key).inserted { changed = true }
             let boxesBefore = peerBoxes[key]?.count
             if o.boxes > 0 || o.pull != nil { peerBoxes[key] = (max(1, o.boxes), o.pullState ?? "NONE", o.color) } else { peerBoxes[key] = nil }
             if peerBoxes[key]?.count != boxesBefore { markers = true }
             if let r = station.rooms[o.key] {
                 r.lastActive = max(r.lastActive, o.lastActive, now)
                 if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
-                // The same room in two places: both placed it before hearing the other. The lower name's
-                // cells stand; the other side takes them, so the two stations agree within one round.
                 if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName { disputed.append((o.key, o.cells)) }
                 continue
             }
@@ -1225,13 +989,11 @@ final class World {
             peerOffices[key]?[snap.name] = nil
             if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; if peerBoxes.removeValue(forKey: key) != nil { markers = true } }
         }
-        // Someone starting or stopping work in an office changes whether it is outlined.
         func working(_ s: PeerSnapshot?) -> Set<String> { Set((s?.minions ?? []).filter { !$0.asleep }.map { sk + $0.office }) }
         if working(previousSnap) != working(snap) { changed = true }
         if changed { events.append(.layoutChanged) }
         else if markers { events.append(.markersChanged) }
 
-        // Their GitHub answers for repositories we also watch save us a poll; same for the board.
         if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number {
             github.adoptProject(b.items, at: b.at)
             events += applyBoardMoves()
@@ -1242,7 +1004,6 @@ final class World {
         return events
     }
 
-    /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
     func dropPeer(_ name: String) -> [WorldEvent] {
         peerSnapshots[name] = nil; peerFirstSeen[name] = nil
         for (key, claims) in peerOffices where claims[name] != nil {
@@ -1254,21 +1015,12 @@ final class World {
 
     // MARK: the yard
 
-    /// Brings the yard in line with the source, one crate at a time. The source's answer is taken into
-    /// the ledger first; then every crate the two sides disagree about is either handed to a carrier,
-    /// storage across to the deck, or, where no carry exists, redrawn where the source says. A crate
-    /// already under way is left to its carrier, and a deck a
-    /// rocket is about to load from keeps its crates.
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) {
         let k = station.name + "|" + repo
-        // A repository whose merges ship has no release and no board word about its crates: the floor's
-        // own moves are the only truth, and an empty answer must not take a crate off the pad before it goes.
         if github.pipeline(repoRoot: root).shipsOnMerge { return }
         for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? Date()) }
-        // One word per crate: the deck's count carries the cleared ones too.
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
-        // Shipped: absent from an exact git count begun after the merge was heard, or in the board's shipped column.
         let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
@@ -1280,23 +1032,19 @@ final class World {
                 works.report(r, .shipped, by: .board)
             }
         }
-        // The ledger hears the record: where each piece of work is, by whoever said it, and when.
         station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)
         let open = station.ledger.disagreements(repo: repo)
         guard !open.isEmpty else { return }
-        // The drain carries a crate the source wants on the deck; what still disagrees here is snapped.
         if open.contains(where: { $0.placed == .storage && $0.wanted == .deck && $0.heading == .deck }) { return }
         let launching = rocketBusy(k) || github.hasPendingLaunch(repoRoot: root) || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
         for crate in open {
-            if launching, crate.placed == .deck { continue }   // the rocket takes these; the source's word comes after
+            if launching, crate.placed == .deck { continue }
             station.ledger.snap(repo: repo, number: crate.number)
         }
     }
 
-    /// The record's word in the yard's terms: stored is storage, QA and cleared are the deck, shipped is gone.
     func yardWord(repo: String, station: Station) -> Ledger.Word {
         var word = Ledger.Word(storage: [], deck: [])
-        // Without a staging area there is no deck: QA and cleared work waits in storage like the rest.
         let deck = stagingIsDeck(station: station.name, repo: repo)
         for r in works.records(repo: repo) {
             guard let n = r.number, let stage = r.stage else { continue }
@@ -1313,26 +1061,16 @@ final class World {
 
     // MARK: places, asked for
 
-    /// The place a crate bound for a yard will land on, asked for now: the row holds it from the
-    /// first ask. Storage or the deck by the rows; the rocket by its hatch.
     func slotNow(for crate: CrateRef, toward yard: Yard) -> Spot? {
         guard let station = fleet.stations[crate.station] else { return nil }
         return yard == .pad ? padSpot(station: station, repo: crate.repo) : station.spot(for: crate, toward: yard)
     }
 
-    /// On the floor in front of the loading hatch, on the deck side of the hull: an ordinary set-down.
-    /// Where a crate for a rocket goes: at the foot of that repository's own rocket, in front of it,
-    /// and the carrier stands on the tile in front of that. The rocket's place on the pad is the same
-    /// rule the scene draws it by: repositories with a rocket, in name order, on the pad's slots.
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
 
-    /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one takes
-    /// the lowest free; with the pad full, one going up, with a release open or with its tip being built takes a slot from one with none of these.
     private(set) var padSlotOf: [String: Int] = [:]
 
-    /// Hands out the pad's slots for what wants one now. Once per pass, not per frame.
     func assignPads() {
-        // A rocket on its way up keeps its slot until it has gone: nothing else stands where it lifts off.
         let wanted = padRockets().union(padSlotOf.keys.filter(rocketBusy))
         for key in padSlotOf.keys where !wanted.contains(key) { padSlotOf[key] = nil }
         for station in fleet.stations.values {
@@ -1341,7 +1079,6 @@ final class World {
             func urgent(_ key: String) -> Bool {
                 if mergeLaunches.contains(key) || rocketBusy(key) { return true }
                 let repo = String(key.dropFirst(prefix.count))
-                // A release on its way to staging: its tip is being built.
                 if stagingUnderway(key) { return true }
                 return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
             }
@@ -1349,25 +1086,20 @@ final class World {
             for key in keys where padSlotOf[key] == nil {
                 let taken = Set(padSlotOf.filter { $0.key.hasPrefix(prefix) }.values)
                 if let free = (0..<count).first(where: { !taken.contains($0) }) { padSlotOf[key] = free; continue }
-                // Full: an urgent one takes a slot from a standing one that is not.
                 guard urgent(key), let victim = padSlotOf.keys.filter({ $0.hasPrefix(prefix) && !urgent($0) }).sorted().last else { continue }
                 padSlotOf[key] = padSlotOf.removeValue(forKey: victim)
             }
         }
     }
-    /// The rockets with a slot on a station's pad, in slot order.
     func padOrder(station: Station) -> [String] {
         padSlotOf.filter { $0.key.hasPrefix(station.name + "|") }.sorted { $0.value < $1.value }.map(\.key)
     }
-    /// Every rocket that has a slot, on every station.
     func padKeys() -> Set<String> { Set(padSlotOf.keys) }
 
     func padSpot(station: Station, repo: String) -> Spot {
         let slots = padSlots(station: station)
         let slot = padSlotOf[station.name + "|" + repo] ?? 0
         let pc = slots[slot % slots.count]
-        // The foot: a tile's length before the hull, so the tile it rounds to is clear of the rocket and the
-        // carrier can stand on it, an arm's length back, and the crate goes down between them and the hull.
         let foot = SIMD2(pc.x, pc.y + 1.05)
         let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))
         let cell = station.hall.padCells.contains(stand) ? stand : (station.hall.padCells.first ?? Cell(x: 0, y: 0))
@@ -1377,51 +1109,38 @@ final class World {
 
     // MARK: commands the reconciler issues
 
-    /// Merged: the office's package belongs in the storage bay. The office is free to clear from now on,
-    /// whether or not there is anything on the floor to carry.
     private func haulMerged(station: Station, room: Room) -> [WorldEvent] {
         let key = roomKey(station, room)
         guard station.hasPad, !haulOrdered(office: key) else { return [] }
-        guard hasPackage(key) else { nothingToHaul.insert(key); return [] }   // nothing to carry: free to clear at once
+        guard hasPackage(key) else { nothingToHaul.insert(key); return [] }
         let repo = room.repo ?? "work"
-        // A crate is a task: the issue the pull request closes when it closes one, else the pull request
-        // itself. With no pull request known there is nothing the yard could hold.
         let pull = pulls.pull(ownOffice: room)
         let known = works.find(officeKey: room.key, repo: repo)
         guard let prNumber = pull?.number ?? known?.pulls.keys.min(), prNumber > 0 else { nothingToHaul.insert(key); return [] }
         let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull?.closes.first, pull: prNumber, pullState: pull?.state)
         guard let number = record.number else { return [] }
-        // Work whose first word was already stored: the crate takes its place in the rows and the office
-        // clears; nothing is carried across the floor for it.
         if record.quiet { nothingToHaul.insert(key); return [] }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         works.report(record, .stored, by: .pulls)
         return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
     }
 
-    /// When an office's pull request was closed without merging, so its red crate can fade in time.
     private(set) var closedAt: [String: Date] = [:]
     static let closedWindow: TimeInterval = 10 * 60
     func isClosed(_ roomKey: String) -> Bool { closedAt[roomKey] != nil }
 
-    /// Merged offices that had no package on the floor to carry: free to clear at once.
     private var nothingToHaul: Set<String> = []
 
-    /// A completion: a crate is down in a yard by hand, in storage, on the deck, or aboard the rocket
-    /// on the pad. The station's word on it from here until the source says something newer.
     func landed(station: Station, repo: String, number: Int, in yard: Yard, at now: Date) {
         station.ledger.landed(repo: repo, number: number, in: yard, at: now)
         fleet.save()
     }
 
-    /// A carry that will not happen after all: the crate stays where it is and its slot ahead is free.
     func unorder(_ crate: CrateRef) {
         fleet.stations[crate.station]?.ledger.unorder(repo: crate.repo, number: crate.number)
     }
-
 }
 
-/// Where and when a GitHub login was last seen, for the Teammates list.
 struct SeenPerson: Codable, Equatable {
     var repo: String
     var at: Date
