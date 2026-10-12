@@ -276,9 +276,8 @@ extension StationController {
         logEvent("#\(number) \(Words.current.clearedDecon)")
         guard let node = crateNode(crate), let command = station.carryFromDecon(repo: repo, number: number) else {
             world.unorder(crate)
-            world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
+            simulation.landed(crate, in: .storage)
             rebuildMarkers(); refreshRockets()
-            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
             return
         }
         carry(command, node: node) { [weak self] in
@@ -287,7 +286,6 @@ extension StationController {
             rebuildMarkers()
             if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
             refreshRockets()
-            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
 
@@ -305,7 +303,6 @@ extension StationController {
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
-            if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
 

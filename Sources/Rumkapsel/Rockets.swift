@@ -105,6 +105,12 @@ extension Simulation {
         take(r, command)
     }
 
+    func landed(_ crate: CrateRef, in yard: Yard) {
+        guard let station = fleet.stations[crate.station] else { return }
+        world.landed(station: station, repo: crate.repo, number: crate.number, in: yard, at: now)
+        if yard == .storage, world.shipsOnMerge(station: station.name, repo: crate.repo) { launchOnMerge(station: station, repo: crate.repo) }
+    }
+
     func launchOnMerge(station: Station, repo: String) {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }

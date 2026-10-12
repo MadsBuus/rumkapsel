@@ -255,7 +255,7 @@ extension Simulation {
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
                 world.setDown(crate, at: to)
-                if let yard = Yard(area: to.area) { world.landed(station: station, repo: crate.repo, number: crate.number, in: yard, at: now) }
+                if let yard = Yard(area: to.area) { landed(crate, in: yard) }
                 cargo[id] = nil
                 cue(.landed(job))
                 finish(m)

@@ -109,7 +109,7 @@ extension Simulation {
             for (i, f) in v.flying.enumerated().reversed() where clock - f.at >= Vortex.flightSeconds {
                 v.flying.remove(at: i)
                 world.setDown(f.crate, at: world.padSpot(station: station, repo: f.crate.repo))
-                world.landed(station: station, repo: f.crate.repo, number: f.crate.number, in: .pad, at: now)
+                landed(f.crate, in: .pad)
             }
             if v.closedAt == nil, v.waiting.isEmpty, v.flying.isEmpty {
                 v.closedAt = clock
