@@ -305,11 +305,11 @@ extension StationController {
     func look(at roomName: String, in stationName: String, zoom: Double) {
         enqueue { [self] in
             guard let station = fleet.stations[stationName] else { return }
-            let areas: [String: [Cell]] = ["bay": station.hangarCells, "pad": station.padCells, "deck": station.deckCells,
-                                           "hall": station.hallCells, "yard": station.hallCells + station.padCells,
-                                           "storage": station.storageCells, "decon": station.deconCells]
+            let areas: [String: [Cell]] = ["bay": station.hangarCells, "pad": station.hall.padCells, "deck": station.hall.deckCells,
+                                           "hall": station.hall.cells, "yard": station.hall.cells + station.hall.padCells,
+                                           "storage": station.hall.storageCells, "decon": station.hall.deconCells]
             // The field: a step out onto the pad from its middle, so the cleared rows and the rocket's foot are both in.
-            if roomName == "gate", let field = station.padField {
+            if roomName == "gate", let field = station.hall.padField {
                 focused = nil
                 let mid = (field.from + field.to) / 2 + station.offset
                 userPan = SIMD2(mid.x, mid.y - 0.6) - targetFocus

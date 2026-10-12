@@ -187,7 +187,7 @@ final class Station {
     /// The fixed parts of the floor, built once per floor plan: read on every step of every route,
     /// every placement and every walk, so never as fresh arrays each time.
     private struct Blocks {
-        var core: [Cell], airlock: [Cell], hangar: [Cell], hall: [Cell], pad: [Cell], decon: [Cell], corridor: [Cell]
+        var core: [Cell], airlock: [Cell], hangar: [Cell], hall: Hall, corridor: [Cell]
         /// The hallway that is built so far, plaza included: what a room may have its door on.
         var hallway: Set<Cell>
         /// Every cell no room may take: the whole plan, built or not, and the blocks.
@@ -199,9 +199,9 @@ final class Station {
     private var blocks: Blocks {
         if let b = blocksCache { return b }
         let core = plan.plaza, airlock = makeAirlockCells(), hangar = makeHangarCells()
-        let hall = makeHallCells(), pad = makePadCells(), decon = makeDeconCells()
+        let hall = hasPad ? Hall(entrance: plan.west.last ?? Cell(x: -2, y: 0), padGap: Theme.forPlan.padGap) : .none
         var reserved = Set(core)
-        for cells in [airlock, hangar, hall, pad, decon] { reserved.formUnion(cells) }
+        for cells in [airlock, hangar, hall.cells, hall.padCells, hall.deconCells] { reserved.formUnion(cells) }
         reserved.formUnion(floor.allHall)
         reserved.formUnion(dug)   // hallway once dug is hallway for good
         // The plan's base is hallway from the first frame: it joins the plaza to the yard, the airlock
@@ -218,7 +218,7 @@ final class Station {
             let c = queue[head]; head += 1
             for n in c.neighbours where hallway.contains(n) && n != plan.monolith && dist[n] == nil { dist[n] = dist[c]! + 1; queue.append(n) }
         }
-        let b = Blocks(core: core, airlock: airlock, hangar: hangar, hall: hall, pad: pad, decon: decon,
+        let b = Blocks(core: core, airlock: airlock, hangar: hangar, hall: hall,
                        corridor: built.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, hallway: hallway, reserved: reserved, hallDistance: dist)
         blocksCache = b
         return b
@@ -310,115 +310,7 @@ final class Station {
         let lanes = hangarCells.filter { c in slots.allSatisfy { offBy(c, $0) > pow(Station.bayKeepOff + 0.15, 2) } }
         return (lanes.isEmpty ? hangarCells : lanes).min { offBy($0, at) < offBy($1, at) } ?? coreCenter
     }
-    /// The yard is one room on the station's west side, five tiles wide and eight deep, with no wall
-    /// inside it. The west arm comes in at the walkway, the column down its east side; the other four
-    /// columns hold the three zones, two rows each with an aisle between: cleared at the pad end,
-    /// staged in the middle, storage at the back. Decon is behind storage, and the pad outside beyond
-    /// the field across the pad end.
-    private var hallX0: Int { (plan.west.last?.x ?? -2) - 1 }
-    /// The hall's top row, at the pad end: six rows above the one the west arm comes in on.
-    private var hallTop: Int { (plan.west.last?.y ?? 0) - 6 }
-    static let hallWide = 5, hallDeep = 8
-    /// The four columns the zones stand in, west to east, the walkway's being the fifth.
-    private var zoneColumns: [Int] { (1...4).map { hallX0 - 5 + $0 } }
-    private func zoneRow(_ y: Int) -> [Cell] { zoneColumns.map { Cell(x: $0, y: y) } }
-    /// How far the pad stands off the hall: hard by its glass in the classic plan, a causeway's length
-    /// away on the ground, as a launch complex keeps its distance from the buildings.
-    private var padGap: Int { Theme.forPlan.padGap }
-    private func makeHallCells() -> [Cell] {
-        guard hasPad else { return [] }
-        return (0..<Station.hallDeep).flatMap { d in (0..<Station.hallWide).map { x in Cell(x: hallX0 - x, y: hallTop + d) } }
-    }
-    var hallCells: [Cell] { blocks.hall }
-    /// The walkway, from the pad end to the back: where everyone walks the hall's length.
-    var walkwayCells: [Cell] { hasPad ? (0..<Station.hallDeep).map { Cell(x: hallX0, y: hallTop + $0) } : [] }
-    /// The two aisles across the hall, the cleared rows' and storage's, each with the staged row beside it.
-    var aisleCells: [Cell] { hasPad ? zoneRow(hallTop + 2) + zoneRow(hallTop + 5) : [] }
-    /// Each zone's tiles in the order it fills them. Cleared fills from the pad end, row by row from the
-    /// west; staged and storage from the back. The first row each fills is the one further from its
-    /// aisle, so the crates reach there with a toss.
-    var clearedCells: [Cell] { hasPad ? zoneRow(hallTop) + zoneRow(hallTop + 1) : [] }
-    var stagedCells: [Cell] { hasPad ? zoneRow(hallTop + 4) + zoneRow(hallTop + 3) : [] }
-    var storageCells: [Cell] { hasPad ? zoneRow(hallTop + 7) + zoneRow(hallTop + 6) : [] }
-    /// The lab: the staged and cleared zones, where the deck's crates stand.
-    var deckCells: [Cell] { clearedCells + stagedCells }
-    var padCells: [Cell] { blocks.pad }
-    /// The pad: six wide and four deep beyond the field, and the row along the field with it. On the ground
-    /// it stands a causeway's length further out, the causeway running from the field.
-    private func makePadCells() -> [Cell] {
-        guard hasPad else { return [] }
-        let far = hallTop - 1 - padGap
-        var cells = (0..<6).flatMap { d in (1...4).map { r in Cell(x: hallX0 - d, y: far - r) } }
-        if padGap > 0 {
-            for y in (far)...(hallTop - 1) { for x in [hallX0 - 1, hallX0] { cells.append(Cell(x: x, y: y)) } }
-        } else {
-            cells += (0..<6).map { Cell(x: hallX0 - $0, y: hallTop - 1) }
-        }
-        return cells
-    }
-    /// Where rockets stand, relative to the pad's centre: a front row by the hall and a back row set
-    /// between its rockets, as a honeycomb, so the way to every rocket's foot is clear.
-    static let padSlotOffsets = Station.honeycomb(front: [0, 1, -1], back: [0.5, -0.5, 1.5, -1.5], toward: 1)
-    static let padRadius = Station.hexRadius
-    /// The pad's rocket spots that fit its four rows, nearest the front and the middle first.
-    var padSlots: [SIMD2<Double>] {
-        let c = padCenter, r = Station.padRadius
-        let fits = Station.padSlotOffsets.map { c + $0 }.filter { p in
-            abs(p.x - c.x) + r <= 3 && abs(p.y - c.y) + r <= 2
-        }
-        return fits.isEmpty ? [padCenter] : fits
-    }
-    var padCenter: SIMD2<Double> { SIMD2(Double(hallX0) - 2.5, Double(hallTop - 1 - padGap) - 2.5) }
-    /// How big a crate is once it is packed for flight.
-    static let testedScale = 0.5
-
-    /// Where the idle stand to watch a rocket: the cleared zone's aisle and the walkway's pad end.
-    var windowWatch: [Cell] { hasPad ? zoneRow(hallTop + 2) + [Cell(x: hallX0, y: hallTop), Cell(x: hallX0, y: hallTop + 1)] : [] }
-    /// The field along the hall's pad wall, the hall's whole width: its two ends. It holds the air in, and a
-    /// release goes out through it.
-    var padField: (from: SIMD2<Double>, to: SIMD2<Double>)? {
-        guard hasPad else { return nil }
-        let z = Double(hallTop) - 0.5
-        return (SIMD2(Double(hallX0) - 4.5, z), SIMD2(Double(hallX0) + 0.5, z))
-    }
-    /// The hall's pad wall, tile by tile: each top-row cell and the one beyond it. The field stands in it, so no
-    /// wall does.
-    var padWall: [(hall: Cell, out: Cell)] {
-        guard hasPad else { return [] }
-        return (0..<Station.hallWide).map { x in (Cell(x: hallX0 - x, y: hallTop), Cell(x: hallX0 - x, y: hallTop - 1)) }
-    }
-    /// Where the drones' rack stands: on the pad by the walkway's end of the field.
-    var droneRackCell: Cell? { hasPad ? Cell(x: hallX0, y: hallTop - 1 - padGap) : nil }
-
-    /// Decon: a chamber two tiles deep behind storage, the hall's walkway running on into it. Anything
-    /// from outside waits in it until someone clears it into the hall. Its hatch is in the back wall,
-    /// the row by the hatch is where the objects stand, and the row by storage is the aisle.
-    var deconCells: [Cell] { blocks.decon }
-    /// The yard cells crates stand on: the zones' tiles and decon's back row. Nobody stands on these; a
-    /// carrier works from the aisle or the walkway beside, and tosses to the row behind.
-    var crateRows: Set<Cell> {
-        Set(storageCells + stagedCells + clearedCells + deconCells.filter { $0.y == hallTop + Station.hallDeep + 1 })
-    }
-    /// A tile on the row behind another: the near tile in front of it, and the aisle beyond that. Nil for a
-    /// tile on an aisle already.
-    func backRow(_ cell: Cell) -> (over: Cell, aisle: Cell)? {
-        guard hasPad else { return nil }
-        let rows = crateRows, floor = Set(aisleCells + walkwayCells)
-        guard rows.contains(cell), !cell.neighbours.contains(where: floor.contains) else { return nil }
-        for d in [Cell(x: 0, y: 1), Cell(x: 0, y: -1), Cell(x: 1, y: 0), Cell(x: -1, y: 0)] {
-            let over = cell + d, aisle = over + d
-            if rows.contains(over), floor.contains(aisle) { return (over, aisle) }
-        }
-        return nil
-    }
-    private func makeDeconCells() -> [Cell] {
-        guard hasPad else { return [] }
-        return (0..<2).flatMap { d in (0..<Station.hallWide).map { x in Cell(x: hallX0 - x, y: hallTop + Station.hallDeep + d) } }
-    }
-    /// The hatch in decon's back wall, and which way it faces: into the chamber.
-    var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) {
-        (SIMD2(Double(hallX0) - 2, Double(hallTop + Station.hallDeep) + 1.46), SIMD2(0, -1))
-    }
+    var hall: Hall { blocks.hall }
 
     /// Every crate this station knows: the source's word and the station's, per crate. The counts
     /// below are read off it and kept nowhere.
@@ -508,8 +400,8 @@ final class Station {
         w.remove(plan.monolith)   // the monolith stands on its tile; the walk goes round it on the plaza
         w.formUnion(hangarCells)
         w.formUnion(airlockCells)
-        w.formUnion(hallCells)
-        w.formUnion(deconCells)
+        w.formUnion(hall.cells)
+        w.formUnion(hall.deconCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
         walkableCache = w
@@ -533,9 +425,9 @@ final class Station {
         case .core: return coreCells.filter { $0 != plan.monolith }
         case .room("kind:hangar"): return hangarCells
         case .room("kind:airlock"): return airlockCells
-        case .room("kind:pad"): return padCells
-        case .room("kind:storage"): return walkwayCells
-        case .room("kind:deck"): return aisleCells.isEmpty ? padCells : aisleCells
+        case .room("kind:pad"): return hall.padCells
+        case .room("kind:storage"): return hall.walkwayCells
+        case .room("kind:deck"): return hall.aisleCells.isEmpty ? hall.padCells : hall.aisleCells
         case .room(let key): return rooms[key]?.cells ?? []
         }
     }
@@ -615,8 +507,8 @@ final class Station {
     private func yardArea(_ c: Cell) -> String? {
         if let areas = yardAreaCache { return areas[c] }
         var areas: [Cell: String] = [:]
-        for (name, cells) in [("corridor", corridorCells + coreCells), ("pad", padCells), ("hall", hallCells),
-                              ("decon", deconCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
+        for (name, cells) in [("corridor", corridorCells + coreCells), ("pad", hall.padCells), ("hall", hall.cells),
+                              ("decon", hall.deconCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
             for cell in cells { areas[cell] = name }   // later names win, so the blocks outrank the corridor
         }
         yardAreaCache = areas
@@ -639,8 +531,8 @@ final class Station {
         guard hasPad, let armEnd = plan.west.last else { return out }
         // The one place the hallway meets the yard: the west arm's last cell onto the walkway; and the
         // walkway's back end on into decon.
-        out.append((armEnd, Cell(x: hallX0, y: armEnd.y)))
-        out.append((Cell(x: hallX0, y: hallTop + Station.hallDeep - 1), Cell(x: hallX0, y: hallTop + Station.hallDeep)))
+        out.append((armEnd, Cell(x: armEnd.x - 1, y: armEnd.y)))
+        if let decon = hall.deconDoorway { out.append(decon) }
         return out
     }
 

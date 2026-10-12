@@ -69,7 +69,7 @@ extension Simulation {
     func openVortex(_ r: RocketJob, station: Station, from area: String, crates numbers: [Int]) {
         guard vortices[r.key] == nil, !numbers.isEmpty else { return }
         let layout = world.yardLayout(station: station, area: area).filter { $0.repo == r.repo && !$0.carried && numbers.contains($0.number) }
-        guard !layout.isEmpty, let field = station.padField else {
+        guard !layout.isEmpty, let field = station.hall.padField else {
             StationLog.write("release", "\(r.key) no vortex: nothing of \(numbers) on the \(area) rows")
             return
         }

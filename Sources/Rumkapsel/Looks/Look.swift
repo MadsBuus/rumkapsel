@@ -278,10 +278,10 @@ enum Dressing {
     /// The pad's two corners farthest from every rocket slot.
     static func padCorners(_ station: Station) -> [Cell] {
         guard station.hasPad else { return [] }
-        let pc = station.padCenter
-        let slots = station.padSlots
+        let pc = station.hall.padCenter
+        let slots = station.hall.padSlots
         func clearance(_ c: Cell) -> Double { slots.map { simd_distance(SIMD2(Double(c.x), Double(c.y)), $0) }.min() ?? 0 }
-        let near: [Cell] = station.padCells.filter { c in clearance(c) > 1.1 && simd_distance(SIMD2(Double(c.x), Double(c.y)), pc) < 2.5 }
+        let near: [Cell] = station.hall.padCells.filter { c in clearance(c) > 1.1 && simd_distance(SIMD2(Double(c.x), Double(c.y)), pc) < 2.5 }
         let sorted: [Cell] = near.sorted { a, b in (clearance(a), a.y, a.x) > (clearance(b), b.y, b.x) }
         return Array(sorted.prefix(2))
     }

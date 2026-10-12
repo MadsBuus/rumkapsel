@@ -504,9 +504,9 @@ final class Simulation<B: Body> {
             return n
         }
         // The row behind the near one: from the near tile when nothing stands on it, from the aisle across it when something does.
-        if let back = st.backRow(cell) { return tossFrom(st, to: cell) ?? back.over }
+        if let back = st.hall.backRow(cell) { return tossFrom(st, to: cell) ?? back.over }
         // Otherwise a crate row is never stood on, however empty the tile: a crate may be set down on it any moment.
-        let rows = st.crateRows
+        let rows = st.hall.crateRows
         if blocked(cell) == 0, st.walkable.contains(cell), !rows.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
         let aisle = options.filter { !rows.contains($0) }
@@ -517,7 +517,7 @@ final class Simulation<B: Body> {
     /// Where a carrier tosses from to reach a tile on the row behind the near one: the aisle, when a crate stands on
     /// the near tile in front of it. Nil when the way to it is clear, and the carrier steps onto the near tile instead.
     func tossFrom(_ st: Station, to cell: Cell) -> Cell? {
-        guard let back = st.backRow(cell) else { return nil }
+        guard let back = st.hall.backRow(cell) else { return nil }
         let f = Station.fine
         let taken = (-1...1).contains { dx in (-1...1).contains { dy in st.obstacles.contains(Cell(x: back.over.x * f + dx, y: back.over.y * f + dy)) } }
         return taken ? back.aisle : nil
@@ -587,10 +587,10 @@ final class Simulation<B: Body> {
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
         let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isVenting || $0.isLaunching) }
-        let window = station.windowWatch
+        let window = station.hall.windowWatch
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
             .subtracting(window)
-        let clear = (rocketReady && !window.isEmpty ? window : station.corridorCells + station.aisleCells + station.walkwayCells)   // never the bay: that is outside
+        let clear = (rocketReady && !window.isEmpty ? window : station.corridorCells + station.hall.aisleCells + station.hall.walkwayCells)   // never the bay: that is outside
             .filter { !doorways.contains($0) }
             .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
         let others = bodies.values.filter { $0.id != m.id && $0.station == m.station }
@@ -756,7 +756,7 @@ final class Simulation<B: Body> {
                     let stack = stacks[m.qaStop % stacks.count]
                     m.qaStop += 1
                     let aisle = [Cell(x: stack.cell.x, y: stack.cell.y - 1), Cell(x: stack.cell.x, y: stack.cell.y + 1)]
-                        .first { station.deckCells.contains($0) } ?? stack.cell
+                        .first { station.hall.deckCells.contains($0) } ?? stack.cell
                     m.path = route(m, to: aisle)
                     m.facing = atan2(stack.pos.x - station.offset.x - Double(aisle.x), stack.pos.z - station.offset.y - Double(aisle.y))
                 }

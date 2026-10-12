@@ -25,7 +25,7 @@ struct StationHull {
     /// The gate onto the pad is a doorway through it, and the bay's mouth one wide open, behind the field.
     init(_ st: Station) {
         let b = st.bounds
-        let pad = Set(st.padCells), bay = Set(st.hangarCells)
+        let pad = Set(st.hall.padCells), bay = Set(st.hangarCells)
         // As far south as the station's own floor reaches, the bay apart: the bay hangs on past that.
         let beyond = st.walkable.subtracting(bay).subtracting(pad).map(\.y).max() ?? Int.max
         var inside = bay
@@ -33,7 +33,7 @@ struct StationHull {
             for y in b.min.y...b.max.y where y <= beyond && !pad.contains(Cell(x: x, y: y)) { inside.insert(Cell(x: x, y: y)) }
         }
         var doors = Set<[Int]>()
-        for (hall, out) in st.padWall { doors.insert([hall.x, hall.y, out.x, out.y]) }
+        for (hall, out) in st.hall.padWall { doors.insert([hall.x, hall.y, out.x, out.y]) }
         if let mouth = st.hangarCells.map(\.y).max() {
             for c in st.hangarCells where c.y == mouth { doors.insert([c.x, c.y, c.x, c.y + 1]) }
         }

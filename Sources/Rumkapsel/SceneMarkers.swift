@@ -444,7 +444,7 @@ extension StationController {
                 world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
             })
             for (i, at) in world.padSlots(station: station).enumerated() {
-                let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Station.padRadius - 0.06, outerRadius: Station.padRadius, height: 0.008)))
+                let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Hall.padRadius - 0.06, outerRadius: Hall.padRadius, height: 0.008)))
                 pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? Props.berthIdle)
                 pad.opacity = held[i] == nil ? 0.25 : 0.7
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)

@@ -64,14 +64,14 @@ extension Simulation {
                                postedAt: Double(order.id), gaveUp: order.gaveUp, only: crew ? order.session : nil, prefer: crew ? nil : order.session))
         }
         for station in fleet.stations.values where qaWanted(station) {
-            guard !bodies.values.contains(where: { $0.station == station.name && $0.isQA }), let at = station.deckCells.first else { continue }
+            guard !bodies.values.contains(where: { $0.station == station.name && $0.isQA }), let at = station.hall.deckCells.first else { continue }
             out.append(Opening(work: .qa(station: station.name), rank: .qa, station: station.name, at: at, postedAt: 0, standby: true))
         }
         return out.sorted { $0.rank != $1.rank ? $0.rank > $1.rank : $0.postedAt < $1.postedAt }
     }
 
     func qaWanted(_ station: Station) -> Bool {
-        guard !station.deckCells.isEmpty, station.staged.values.reduce(0, +) > 0,
+        guard !station.hall.deckCells.isEmpty, station.staged.values.reduce(0, +) > 0,
               !rockets.values.contains(where: { $0.station == station.name && $0.isSteaming }) else { return false }
         return world.repoRoots.contains { _, info in
             guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }

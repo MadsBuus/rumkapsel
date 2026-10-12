@@ -29,7 +29,7 @@ enum Bulkhead {
     /// in the dorm, the lounge, the bath and the gym, an office's in an office. Anywhere else is hallway.
     static func styles(of st: Station) -> [Cell: Style] {
         var out: [Cell: Style] = [:]
-        for c in st.hallCells + st.deconCells + st.padCells + st.airlockCells + st.hangarCells { out[c] = .yard }
+        for c in st.hall.cells + st.hall.deconCells + st.hall.padCells + st.airlockCells + st.hangarCells { out[c] = .yard }
         for (key, room) in st.rooms { for c in room.cells { out[c] = key.hasPrefix("kind:") ? .quarters : .office } }
         return out
     }

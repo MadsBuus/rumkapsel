@@ -93,7 +93,7 @@ final class World {
                 // To the staged rows, once the crate stands in storage.
                 guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
                       let number = record.number, isReady(record.repo) else { continue }
-                guard station.hasPad, !station.deckCells.isEmpty, github.pipeline(repoRoot: info.key).hasStaging else { continue }
+                guard station.hasPad, !station.hall.deckCells.isEmpty, github.pipeline(repoRoot: info.key).hasStaging else { continue }
                 let row = station.ledger[record.repo, number]
                 if row?.placed == .deck || row?.heading == .deck { continue }
                 guard row?.placed == .storage, !(row?.inTransit ?? false) else { waiting.append((record, t)); continue }
@@ -1292,12 +1292,12 @@ final class World {
         let neat = area != "storage"
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         // In decon the objects stand along the back wall by the hatch; the row by storage is the aisle.
-        let deconRow = station.deconCells.filter { $0.y == station.deconCells.map(\.y).max() }.sorted { $0.x < $1.x }
+        let deconRow = station.hall.deconCells.filter { $0.y == station.hall.deconCells.map(\.y).max() }.sorted { $0.x < $1.x }
         func row(_ group: Int) -> [Cell] {
             switch area {
-            case "deck": return group == 0 ? station.clearedCells : station.stagedCells
+            case "deck": return group == 0 ? station.hall.clearedCells : station.hall.stagedCells
             case "decon": return deconRow
-            default: return station.storageCells
+            default: return station.hall.storageCells
             }
         }
         guard !row(0).isEmpty else { return [] }
@@ -1433,7 +1433,7 @@ final class World {
             let layout = yardLayout(station: station, area: area)
             guard let s = layout.first(where: { $0.repo == crate.repo && $0.number == crate.number }) else {
                 return floorSpot(plain, station: station, repo: crate.repo,
-                                 cell: (yard == .deck ? station.deckCells : yard == .decon ? station.deconCells : station.storageCells).first ?? Cell(x: 0, y: 0))
+                                 cell: (yard == .deck ? station.hall.deckCells : yard == .decon ? station.hall.deconCells : station.hall.storageCells).first ?? Cell(x: 0, y: 0))
             }
             return yardSpot(s.cleared ? .tested : plain, station: station, repo: crate.repo, slot: grounded(s, in: layout))
         case .pad:
@@ -1445,7 +1445,7 @@ final class World {
     /// Where a crate for a rocket goes: at the foot of that repository's own rocket, in front of it,
     /// and the carrier stands on the tile in front of that. The rocket's place on the pad is the same
     /// rule the scene draws it by: repositories with a rocket, in name order, on the pad's slots.
-    func padSlots(station: Station) -> [SIMD2<Double>] { station.padSlots }
+    func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
 
     /// Which slot each rocket has, by "station|repo". A rocket keeps its slot while it stands; a new one takes
     /// the lowest free; with the pad full, one going up, with a release open or with its tip being built takes a slot from one with none of these.
@@ -1491,7 +1491,7 @@ final class World {
         // carrier can stand on it, an arm's length back, and the crate goes down between them and the hull.
         let foot = SIMD2(pc.x, pc.y + 1.05)
         let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))
-        let cell = station.padCells.contains(stand) ? stand : (station.padCells.first ?? Cell(x: 0, y: 0))
+        let cell = station.hall.padCells.contains(stand) ? stand : (station.hall.padCells.first ?? Cell(x: 0, y: 0))
         return Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
                     pos: SIMD3(station.offset.x + foot.x, 0, station.offset.y + foot.y))
     }

@@ -209,7 +209,7 @@ struct KingdomLook: Look {
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? {
         guard station.hasPad else { return nil }
-        let cells = station.padCells + station.storageCells + station.deckCells + station.deconCells
+        let cells = station.hall.padCells + station.hall.storageCells + station.hall.deckCells + station.hall.deconCells
         return kept("out:\(station.name)|\(signature(cells))|\(deckInUse)") { self.builtOutput(station, deckInUse: deckInUse) }
     }
 
@@ -221,22 +221,22 @@ struct KingdomLook: Look {
     private func builtOutput(_ station: Station, deckInUse: Bool) -> SetPiece? {
         let site = Site(station)
         var piece = SetPiece()
-        let all = Set(station.deconCells + station.storageCells + station.deckCells)
+        let all = Set(station.hall.deconCells + station.hall.storageCells + station.hall.deckCells)
         if let rim = site.blob(all, grow: 0.2, Self.dirtEdge, y: -0.02, wobble: 0.24) { piece.add(rim, as: .pad) }
         let areas: [(Area, [Cell], NSColor)] = [
-            (.decon, station.deconCells, NSColor(rgb: (0.62, 0.6, 0.57))),
-            (.storage, station.storageCells, NSColor(rgb: (0.58, 0.44, 0.29))),
-            (deckInUse ? .deck : .storage, station.deckCells, NSColor(rgb: (0.66, 0.55, 0.38))),
+            (.decon, station.hall.deconCells, NSColor(rgb: (0.62, 0.6, 0.57))),
+            (.storage, station.hall.storageCells, NSColor(rgb: (0.58, 0.44, 0.29))),
+            (deckInUse ? .deck : .storage, station.hall.deckCells, NSColor(rgb: (0.66, 0.55, 0.38))),
         ]
         for (area, cells, color) in areas where !cells.isEmpty {
             if let n = site.blob(Set(cells), grow: 0.04, color, y: 0.001, wobble: 0) { piece.add(n, as: area) }
         }
         // The harbour: the basin cut into the yard where the pad was, and a timber wharf standing out over it
         // for the whole of it but the outer lane, which is the water a ship lies in.
-        let pad = Set(station.padCells)
+        let pad = Set(station.hall.padCells)
         if !pad.isEmpty {
-            let west = station.padCells.map(\.x).min()!
-            let rows = Set(station.padCells.map(\.y))
+            let west = station.hall.padCells.map(\.x).min()!
+            let rows = Set(station.hall.padCells.map(\.y))
             // The whole quay is walked on, so the water lies beyond it rather than under it: the basin comes
             // up to the west edge, where the wall stands open, and the boards run to the water's edge.
             // The outer two lanes of the quay are the basin a ship lies in; nobody is sent to stand there,
@@ -299,7 +299,7 @@ struct KingdomLook: Look {
             }
         }
         // Boards across the granary and earth ruts across the market, so neither reads as a poured slab.
-        for (cells, colour, step) in [(station.storageCells, Self.wood.darker(0.06), 1.0), (station.deckCells, Self.dirtEdge, 1.0)] {
+        for (cells, colour, step) in [(station.hall.storageCells, Self.wood.darker(0.06), 1.0), (station.hall.deckCells, Self.dirtEdge, 1.0)] {
             guard !cells.isEmpty else { continue }
             let x0 = cells.map(\.x).min()!, x1 = cells.map(\.x).max()!
             for y in Set(cells.map(\.y)) {
@@ -307,18 +307,18 @@ struct KingdomLook: Look {
                 run.geometry!.firstMaterial = flat(colour)
                 run.opacity = 0.55
                 run.position = v3(site.offset.x + Double(x0 + x1) / 2, 0.004, site.offset.y + Double(y) + 0.5 * step)
-                piece.add(run, as: cells.first.map { station.storageCells.contains($0) ? .storage : .deck } ?? .storage)
+                piece.add(run, as: cells.first.map { station.hall.storageCells.contains($0) ? .storage : .deck } ?? .storage)
             }
         }
         // A palisade round the yard where it meets open ground, left open at the caravan yard's gate onto the
         // road, at the decon hatch, and wherever floor runs on.
         let floor = Set(station.allCells)
-        let hatch = station.deconHatch.0
+        let hatch = station.hall.deconHatch.0
         let fence = SCNNode()
         for c in all {
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let nb = Cell(x: c.x + dx, y: c.y + dz)
-                guard !all.contains(nb), !floor.contains(nb), !(dx == -1 && station.padCells.contains(c)) else { continue }
+                guard !all.contains(nb), !floor.contains(nb), !(dx == -1 && station.hall.padCells.contains(c)) else { continue }
                 let edge = SIMD2(Double(c.x) + Double(dx) * 0.6, Double(c.y) + Double(dz) * 0.6)
                 guard simd_distance(edge, hatch) > 0.7 else { continue }
                 let rail = SCNNode(geometry: SCNBox(width: dx != 0 ? 0.04 : 1.0, height: 0.04, length: dz != 0 ? 0.04 : 1.0, chamferRadius: 0))
@@ -533,7 +533,7 @@ struct KingdomLook: Look {
     /// and the wall opens at the gate and at the road out of the caravan yard.
     func dress(station: Station) -> [SCNNode] {
         // The quay lies outside the walls, as a harbour does, reached by a water gate; the bay is outside too.
-        let inside = Set(station.allCells).subtracting(station.hangarCells).subtracting(station.padCells)
+        let inside = Set(station.allCells).subtracting(station.hangarCells).subtracting(station.hall.padCells)
         guard !inside.isEmpty else { return [] }
         let key = "\(station.name)|\(inside.count)|\(inside.map { $0.x &* 31 &+ $0.y }.reduce(0, &+))"
         if let built = Self.walls[key] { return [built.clone()] }
@@ -548,7 +548,7 @@ struct KingdomLook: Look {
             }
         }
         // The water gate: the wall stands open where the quay meets it.
-        for c in station.padCells {
+        for c in station.hall.padCells {
             for d in [(1, 0), (0, 1), (0, -1)] where inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
                 open.insert("\(c.x + d.0),\(c.y + d.1)|\(-d.0),\(-d.1)")
             }
@@ -1271,10 +1271,10 @@ private struct Site {
     init(_ st: Station) {
         station = st
         offset = st.offset
-        floor = Set(st.allCells).subtracting(st.airlockCells).subtracting(st.hangarCells).subtracting(st.padCells)
+        floor = Set(st.allCells).subtracting(st.airlockCells).subtracting(st.hangarCells).subtracting(st.hall.padCells)
         bayCenter = st.hasHangar ? st.hangarCenter : SIMD2(0, Double(st.bounds.max.y) + 12)
-        quay = st.hasPad ? st.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
-        shoreline = (st.hasPad ? Double(st.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) + 1.55
+        quay = st.hasPad ? st.hall.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
+        shoreline = (st.hasPad ? Double(st.hall.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) + 1.55
         // The landscape is laid out to a coarse grid, so a castle that grows a ward at a time crosses a
         // boundary now and then rather than moving the whole world on every office.
         let b = st.bounds, step = 8.0

@@ -202,8 +202,8 @@ extension Simulation {
     }
 
     func rocketSpot(station: Station, repo: String) -> SIMD2<Double>? {
-        guard let slot = world.padSlotOf[station.name + "|" + repo], !station.padSlots.isEmpty else { return nil }
-        return station.padSlots[slot % station.padSlots.count]
+        guard let slot = world.padSlotOf[station.name + "|" + repo], !station.hall.padSlots.isEmpty else { return nil }
+        return station.hall.padSlots[slot % station.hall.padSlots.count]
     }
 
     func stepTips(dt: Double) {

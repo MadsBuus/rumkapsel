@@ -214,9 +214,9 @@ final class Invariants {
         var cells = Set(station.coreCells)
         cells.formUnion(station.hangarCells)
         cells.formUnion(station.airlockCells)
-        cells.formUnion(station.padCells)
-        cells.formUnion(station.hallCells)
-        cells.formUnion(station.deconCells)
+        cells.formUnion(station.hall.padCells)
+        cells.formUnion(station.hall.cells)
+        cells.formUnion(station.hall.deconCells)
         cells.formUnion(station.corridorCells)
         for room in station.rooms.values { cells.formUnion(room.cells) }
         floorCache[station.name] = (signature, cells)

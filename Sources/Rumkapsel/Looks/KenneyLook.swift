@@ -169,11 +169,11 @@ struct KenneyLook: Look {
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? {
         guard station.hasPad else { return nil }
         var piece = SetPiece()
-        let deck = deckInUse ? station.deckCells : []
-        let parts: [(Area, [Cell], NSColor)] = [(.decon, station.deconCells, Self.hazard),
-                                                (.storage, station.storageCells, Self.bayPaint),
+        let deck = deckInUse ? station.hall.deckCells : []
+        let parts: [(Area, [Cell], NSColor)] = [(.decon, station.hall.deconCells, Self.hazard),
+                                                (.storage, station.hall.storageCells, Self.bayPaint),
                                                 (.deck, deck, Self.deckPaint),
-                                                (.pad, station.padCells, Self.padPaint)]
+                                                (.pad, station.hall.padCells, Self.padPaint)]
         // The apron itself, a part at a time so the pointer still finds what it is standing over, each a
         // hair over the last so the overlaps do not fight.
         for (i, (area, cells, _)) in parts.enumerated() {
@@ -186,20 +186,20 @@ struct KenneyLook: Look {
             if let n = slab(cells, of: station, grow: -0.14, color, y: Kit.plateTop + 0.003) { piece.add(n, as: area) }
         }
         // A white line round the pad, and the gantry standing off its seaward corner.
-        if let ring = slab(station.padCells, of: station, grow: 0.06, Self.paintLine, y: Kit.plateTop + 0.0035),
-           let inner = slab(station.padCells, of: station, grow: -0.1, Self.padPaint, y: Kit.plateTop + 0.004) {
+        if let ring = slab(station.hall.padCells, of: station, grow: 0.06, Self.paintLine, y: Kit.plateTop + 0.0035),
+           let inner = slab(station.hall.padCells, of: station, grow: -0.1, Self.padPaint, y: Kit.plateTop + 0.004) {
             piece.add(ring, as: .pad)
             piece.add(inner, as: .pad)
         }
-        let px = station.padCells.map(\.x), pz = station.padCells.map(\.y)
+        let px = station.hall.padCells.map(\.x), pz = station.hall.padCells.map(\.y)
         let trench = SCNNode(geometry: SCNPlane(width: 1.15, height: 1.15))
         trench.geometry!.firstMaterial = flat(NSColor(rgb: (0.16, 0.16, 0.18)))
         trench.eulerAngles.x = -.pi / 2
         trench.eulerAngles.z = .pi / 4
-        trench.position = v3(station.offset.x + station.padCenter.x, Kit.plateTop + 0.005, station.offset.y + station.padCenter.y)
+        trench.position = v3(station.offset.x + station.hall.padCenter.x, Kit.plateTop + 0.005, station.offset.y + station.hall.padCenter.y)
         piece.add(trench, as: .pad)
         let gantry = Self.gantry()
-        gantry.position = v3(station.offset.x + Double(px.min()!) - 0.75, 0, station.offset.y + station.padCenter.y)
+        gantry.position = v3(station.offset.x + Double(px.min()!) - 0.75, 0, station.offset.y + station.hall.padCenter.y)
         piece.add(gantry, as: .pad)
         // Floodlights on the pad's own corners, where they would light a rocket standing on it.
         for (dx, dz) in [(Double(px.min()!) - 0.95, Double(pz.min()!) - 0.95), (Double(px.max()!) + 0.95, Double(pz.min()!) - 0.95)] {
@@ -459,7 +459,7 @@ private struct Cape {
                               lo: st.offset + SIMD2(Double(b.min.x), Double(b.min.y)),
                               hi: st.offset + SIMD2(Double(b.max.x), Double(b.max.y)),
                               seed: abs(st.name.hashValue % 9973)))
-            let west = st.hasPad ? st.padCells.map(\.x).min() ?? b.min.x : b.min.x
+            let west = st.hasPad ? st.hall.padCells.map(\.x).min() ?? b.min.x : b.min.x
             shore = min(shore, st.offset.x + Double(west) - 4)
         }
         guard !homes.isEmpty, shore.isFinite else { return nil }

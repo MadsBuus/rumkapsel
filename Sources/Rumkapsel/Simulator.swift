@@ -1284,8 +1284,8 @@ final class SimulatorModel: ObservableObject {
         case "Hands: one free on the deck":
             // The floor laid, not walked to: a body that can carry is put standing in the hall's aisle by the
             // cleared rows, so a carry there starts at once.
-            guard let st = station.fleet.stations.values.first(where: { !$0.aisleCells.isEmpty }),
-                  let cell = st.aisleCells.first,
+            guard let st = station.fleet.stations.values.first(where: { !$0.hall.aisleCells.isEmpty }),
+                  let cell = st.hall.aisleCells.first,
                   let m = station.minions.values.filter({ $0.isFree }).sorted(by: { $0.id < $1.id }).first
                       ?? station.minions.values.filter({ !$0.isCrew && !$0.isPeer && !$0.isSubagent }).sorted(by: { $0.id < $1.id }).first else { return }
             m.path = []

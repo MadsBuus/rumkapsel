@@ -42,7 +42,7 @@ enum DroneFlight {
 extension Simulation {
     func padDrones(_ station: Station) -> [PadDrone] {
         if let d = drones[station.name] { return d }
-        guard !station.padCells.isEmpty, station.droneRackCell != nil else { return [] }
+        guard !station.hall.padCells.isEmpty, station.hall.droneRackCell != nil else { return [] }
         let made = (0..<DroneFlight.count).map { k in
             PadDrone(id: "drone:\(station.name)#\(k)", station: station.name, berth: k, at: berth(station, k))
         }
@@ -51,7 +51,7 @@ extension Simulation {
     }
 
     func rack(_ station: Station) -> (at: SIMD2<Double>, along: SIMD2<Double>)? {
-        guard let c = station.droneRackCell else { return nil }
+        guard let c = station.hall.droneRackCell else { return nil }
         return (SIMD2(Double(c.x), Double(c.y)), SIMD2(1, 0))
     }
 
@@ -213,9 +213,9 @@ extension Simulation {
     // MARK: the kick stage
 
     func kickDepot(_ station: Station) -> SIMD3<Double> {
-        let pad = station.padCenter
-        let deck = station.deckCells.isEmpty ? pad - SIMD2(0, -1) : SIMD2(Double(station.deckCells.map(\.x).reduce(0, +)) / Double(station.deckCells.count),
-                                                                      Double(station.deckCells.map(\.y).reduce(0, +)) / Double(station.deckCells.count))
+        let pad = station.hall.padCenter
+        let deck = station.hall.deckCells.isEmpty ? pad - SIMD2(0, -1) : SIMD2(Double(station.hall.deckCells.map(\.x).reduce(0, +)) / Double(station.hall.deckCells.count),
+                                                                      Double(station.hall.deckCells.map(\.y).reduce(0, +)) / Double(station.hall.deckCells.count))
         var out = pad - deck
         out /= max(1e-6, simd_length(out))
         let p = pad + out * 6
@@ -227,7 +227,7 @@ extension Simulation {
         for r in rockets.values where r.station == station.name && r.key != key {
             if let at = rocketSpot(station: station, repo: r.repo) { others.append(at) }
         }
-        let pad = Set(station.padCells)
+        let pad = Set(station.hall.padCells)
         let ways = [SIMD2(-1.0, 0), SIMD2(0, 1), SIMD2(0, -1), SIMD2(-0.7, 0.7), SIMD2(-0.7, -0.7)]
         func room(_ w: SIMD2<Double>) -> Double {
             let p = spot + w * 1.0

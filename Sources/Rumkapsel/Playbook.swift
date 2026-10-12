@@ -60,7 +60,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.world.padKeys().contains { $0.hasSuffix("|web") } }
     /// Somebody standing in the hall.
     static let bodyOnDeck = PlaybookWait.until("somebody in the hall") { c in
-        c.minions.values.contains { m in c.fleet.stations[m.station]?.hallCells.contains(m.cell) ?? false }
+        c.minions.values.contains { m in c.fleet.stations[m.station]?.hall.cells.contains(m.cell) ?? false }
     }
     /// Web's crates on their way from storage to the staged rows, and all of them down there.
     static let toStaged = PlaybookWait.until("web's crates going to the staged rows") { c in

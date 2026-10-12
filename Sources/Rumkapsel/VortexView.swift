@@ -20,7 +20,7 @@ extension Props {
 extension StationController {
     func buildPadField(_ station: Station) -> SCNNode? {
         padFields[station.name] = nil
-        guard let field = station.padField else { return nil }
+        guard let field = station.hall.padField else { return nil }
         let width = field.to.x - field.from.x
         let built = Props.hangarField(width: width)
         let x = station.offset.x + (field.from.x + field.to.x) / 2, z = station.offset.y + field.from.y

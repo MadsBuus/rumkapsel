@@ -532,10 +532,10 @@ extension StationController {
         railPost.firstMaterial = Bulkhead.steel
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let walk = st.walkable
-            let outside = Set(st.padCells)
+            let outside = Set(st.hall.padCells)
             // The hall's pad wall and the bay's mouth both hold a field: no wall
             // stands in either.
-            let gate = Set(st.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
+            let gate = Set(st.hall.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
             let mouthRow = st.hangarCells.map(\.y).max()
             func unwalled(_ c: Cell, _ n: Cell) -> Bool {
                 gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))
@@ -776,10 +776,10 @@ extension StationController {
         }
         if st.hangarCells.contains(c) { return ("The bay", "where the shuttles land") }
         if st.airlockCells.contains(c) { return ("The airlock", nil) }
-        if st.padCells.contains(c) { return ("The pad", "where releases lift off") }
-        if st.storageCells.contains(c) { return ("Storage", "merged work waiting for a release") }
-        if st.deconCells.contains(c) { return ("Decon", nil) }
-        if st.deckCells.contains(c) { return ("The deck", "work on staging") }
+        if st.hall.padCells.contains(c) { return ("The pad", "where releases lift off") }
+        if st.hall.storageCells.contains(c) { return ("Storage", "merged work waiting for a release") }
+        if st.hall.deconCells.contains(c) { return ("Decon", nil) }
+        if st.hall.deckCells.contains(c) { return ("The deck", "work on staging") }
         if st.coreCells.contains(c) { return ("The plaza", nil) }
         return ("The hallway", nil)
     }

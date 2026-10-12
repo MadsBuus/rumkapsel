@@ -24,8 +24,8 @@ enum Signs {
     static func places(_ st: Station) -> [(name: String, cells: Set<Cell>)] {
         let v = Words.current
         var out: [(String, Set<Cell>)] = [
-            (v.bay, Set(st.hangarCells)), (v.pad, Set(st.padCells)), (v.storage, Set(st.storageCells)),
-            (v.deck, Set(st.deckCells)), (v.monolith, Set(st.coreCells)),
+            (v.bay, Set(st.hangarCells)), (v.pad, Set(st.hall.padCells)), (v.storage, Set(st.hall.storageCells)),
+            (v.deck, Set(st.hall.deckCells)), (v.monolith, Set(st.coreCells)),
         ]
         for (key, name) in [("kind:quarters", v.dorm), ("kind:lounge", v.lounge), ("kind:bath", v.bath), ("kind:gym", v.gym)] {
             if let room = st.rooms[key] { out.append((name, Set(room.cells))) }
