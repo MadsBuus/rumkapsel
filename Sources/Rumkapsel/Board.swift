@@ -1,85 +1,42 @@
-// The station's order board. Everything the station wants done is an order on the board, not a
-// command kept on a body, and whatever an order has got to is kept with the order (a carry's crate
-// where it now lies, its aim), so whoever takes it next carries on from there.
-//
-// The board hands orders out on the reconciler's beat: the highest rank first, the oldest first within
-// a rank, each to the nearest body allowed to take it. A body with nothing to do, or only resting, is
-// free. A body on lower work is taken off it for higher work, at a safe point — walking or standing,
-// never with something in its hands — and the order it was on goes back on the board to be picked up
-// again, by it or by someone else. Work of the same rank never takes a body off another, so nobody
-// flips between two. A body taken off its work stands a beat, head up, before it goes.
-//
-// Idle is not an order: it is what a body does while the board has nothing for it (`Simulation.idle`),
-// and any order takes it from there, mid-visit if need be.
-//
-// Some orders are one body's own: a message for a session's body, packing and stowing at its office, a
-// teammate's reaction. They wait on the board like any other until that body may take them, and a body
-// keeps one of each kind waiting: a newer one replaces it. The desk is no order: it is where a session's
-// body rests while its session works, and any work may borrow it from there.
-
 import Foundation
 
-/// How much a piece of work matters, lowest first.
 enum Rank: Int, Comparable {
-    /// Resting, a visit, a look round: whatever a body does when the board has nothing for it.
     case idle
-    /// A teammate reacting to what they just did.
     case crew
-    /// A session's body at its desk.
     case desk
-    /// Walking the untested rows.
     case qa
-    /// Keeping the yard: carries to storage and decon, offices from the bay, packing.
     case yard
-    /// Taking a release out: what the rocket waits on.
     case release
-    /// A message from you to a session's body.
     case message
-    /// Leaving the station, stepping out of the shuttle.
     case leaving
 
     static func < (a: Rank, b: Rank) -> Bool { a.rawValue < b.rawValue }
 }
 
-/// An order on the board that nobody has: what the board needs to hand it out.
 struct Opening {
-    /// What the order is.
     let work: Work
     let rank: Rank
     let station: String
-    /// Where the work starts, so it goes to the nearest body.
     let at: Cell
-    /// When it went up, so the oldest of a rank goes first.
     let postedAt: Double
-    /// Who gave it up: passed over for it while anyone else can take it.
     var gaveUp: Set<String> = []
-    /// Only this body may take it: a teammate fetching their own new office.
     var only: String?
-    /// This body takes it first when it is free: a session's own worker fetching its new office.
     var prefer: String?
-    /// Only a worker on standby, with no session of its own, may take it: walking the rows.
     var standby = false
 
     enum Work {
-        /// One body's own order, by its command's id.
         case own(Int)
-        /// A carry, by its command's id.
         case carry(Int)
-        /// Fetching a new office's crate from the bay, by its delivery order.
         case delivery(Int)
-        /// Walking a station's untested rows.
         case qa(station: String)
     }
 }
 
-/// An order kept for one body, and where it is: waiting, or in that body's hands.
 struct OwnOrder {
     let command: Command
     let body: String
     let rank: Rank
-    /// Where the work is: the cone, the package slot, the cube's place.
     let at: Cell
-    /// Where the body is while on it.
     let place: Place
     let postedAt: Double
     let announce: Bool
@@ -87,7 +44,6 @@ struct OwnOrder {
 }
 
 extension Simulation {
-    /// Every order nobody has, highest rank first, oldest first within a rank.
     func openings() -> [Opening] {
         var out: [Opening] = []
         for (id, o) in ownOrders where !o.held {
@@ -96,7 +52,6 @@ extension Simulation {
         }
         for (id, job) in cargo where job.carrier == nil {
             guard case .carry(let crate, let from, _) = job.command.kind else { continue }
-            // Crates stacked above this one are still on their way: it waits for them.
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
             out.append(Opening(work: .carry(id), rank: rank(of: job.command), station: crate.station, at: from.cell,
                                postedAt: job.postedAt, gaveUp: job.gaveUp, prefer: job.prefer))
@@ -115,8 +70,6 @@ extension Simulation {
         return out.sorted { $0.rank != $1.rank ? $0.rank > $1.rank : $0.postedAt < $1.postedAt }
     }
 
-    /// Whether a station's deck wants someone walking its untested rows: work there still to be tested,
-    /// and no rocket already cleared to go. What came through decon is never QA's.
     func qaWanted(_ station: Station) -> Bool {
         guard !station.deckCells.isEmpty, station.staged.values.reduce(0, +) > 0,
               !rockets.values.contains(where: { $0.station == station.name && $0.isSteaming }) else { return false }
@@ -127,12 +80,10 @@ extension Simulation {
         }
     }
 
-    /// What a command is worth on the board.
     func rank(of c: Command) -> Rank {
         if let o = ownOrders[c.id] { return o.rank }
         switch c.kind {
         case .carry(_, let from, let to):
-            // Part of a release going out: into the rocket, off its stack, through the gate.
             let job = cargo[c.id]
             if from.area == .tested || job?.aim.area == .tested { return .release }
             return .yard
@@ -145,56 +96,40 @@ extension Simulation {
         }
     }
 
-    /// Whether the board can take a body off the command it is on, here and now, and put the command
-    /// back: at a safe point, never mid-lift.
     private func releasable(_ m: B, _ c: Command) -> Bool {
         switch c.kind {
         case .carry: return cargo[c.id] != nil && m.phaseKind.interruptible
         case .qa, .work, .react: return true
-        // Idle is what a body does while the board has nothing for it: any order takes it from there.
         case .bath, .exercise, .chore, .goTo, .sleep: return true
         case .deliverOffice: return !m.hasLoad
         default: return false
         }
     }
 
-    /// Whether a body may take orders from the board at all: not a teammate, a peer or a subagent,
-    /// not the one walking the rows, not leaving, not still stepping out of the shuttle.
     private func onStaff(_ m: B) -> Bool {
         !m.isSubagent && !m.isCrew && !m.isPeer && m.state != .leaving && m.wakeUntil == 0
     }
 
-    /// Whether a body on lower work may be taken off it for work of `rank`: its order can go back on
-    /// the board, ranks lower, and it is at a safe point, walking or standing with empty hands.
     private func canTakeOff(_ m: B, for rank: Rank) -> Bool {
         guard let c = m.current, self.rank(of: c) < rank else { return false }
         return !m.hasLoad && releasable(m, c)
     }
 
-    /// A body just done with an order looks at the board before anything else: the best order it may
-    /// take, if there is one, leaving alone any it gave up (the board's own pass hands one of those back
-    /// only when nobody else can take it). False when there is nothing for it and it may go and rest.
     func takeNext(_ m: B) -> Bool {
         let mine = openings().filter { $0.station == m.station && !$0.gaveUp.contains(m.id) && ($0.only == m.id || ($0.only == nil && onStaff(m))) }
-        // Kept for these hands first, then the rest by rank.
         for o in mine.filter({ $0.prefer == m.id }) + mine.filter({ $0.prefer != m.id }) where give(o, to: m) { return true }
         return false
     }
 
-    /// Nothing in hand that ties it down: no job, nothing on the arms, and whatever it is doing may be cut
-    /// into. The board's own word for free, which a teammate can be too, for an order of their own.
     private func free(_ m: B) -> Bool {
         !m.onJob && !m.hasLoad && m.wakeUntil == 0 && (m.current == nil || m.phaseKind.interruptible)
     }
 
-    /// Hands the board out: each order nobody has, highest first, to the nearest body allowed to take
-    /// it — a free one if there is one, else one on lower work that can be taken off it.
     func assignOrders() {
         dropLostOrders()
         standDownQA()
         var taken = Set<String>()
         for o in openings() {
-            // Allowed to take it: only the body it is kept for, or anyone on the staff.
             let staff = bodies.values.filter { $0.station == o.station && !taken.contains($0.id) && (o.only != nil ? $0.id == o.only : onStaff($0))
                 && (!o.standby || $0.freeSince > 0) }
             let idle = staff.filter { o.only != nil ? free($0) : $0.isFree }
@@ -209,20 +144,17 @@ extension Simulation {
         hurryCarriers()
     }
 
-    /// Puts an order on the board for one body. It replaces any of the same kind still waiting for it.
     func post(_ c: Command, for m: B, rank: Rank, at: Cell, place: Place, announce: Bool = false) {
         for (id, o) in ownOrders where o.body == m.id && !o.held && o.command.kindName == c.kindName { drop(id) }
         ownOrders[c.id] = OwnOrder(command: c, body: m.id, rank: rank, at: at, place: place, postedAt: clock, announce: announce)
         assignOrders()
     }
 
-    /// Off the board unfinished: the scene puts back whatever it held aside for it.
     private func drop(_ id: Int) {
         guard let o = ownOrders.removeValue(forKey: id) else { return }
         cue(.ownDropped(o.body, o.command))
     }
 
-    /// Orders whose body has gone or is leaving, and orders in hand that the body is no longer on.
     private func dropLostOrders() {
         for (id, o) in ownOrders {
             let leaving: Bool = { if case .leave = o.command.kind { return true }; return false }()
@@ -231,22 +163,19 @@ extension Simulation {
         }
     }
 
-    /// Nothing left to test on a deck: whoever was walking its rows is done, and looks at the board.
     private func standDownQA() {
         for m in bodies.values where m.isQA {
             guard let station = fleet.stations[m.station], !qaWanted(station) else { continue }
             m.busy = false
-            m.activity = .waiting   // the outfit drops the scanner: nothing here has to remember to
+            m.activity = .waiting
             finish(m)
         }
     }
 
-    /// The body's order goes back on the board as it stands, and the body stands a beat before the
-    /// next thing.
     private func takeOff(_ m: B, for o: Opening) {
         guard let c = m.current else { return }
         ownOrders[c.id]?.held = false
-        dropLeftovers(m, of: c)   // off the fixture, out of the seat, the towel back on its rail
+        dropLeftovers(m, of: c)
         switch c.kind {
         case .carry: cargo[c.id]?.carrier = nil
         case .qa: m.busy = false; m.activity = .waiting
@@ -257,13 +186,11 @@ extension Simulation {
         m.wonderUntil = clock + 0.5
     }
 
-    /// The order is the body's now, and it sets off. False when the body could not take it.
     private func give(_ o: Opening, to m: B) -> Bool {
         guard let station = fleet.stations[m.station] else { return false }
         switch o.work {
         case .own(let id):
             guard let own = ownOrders[id] else { return false }
-            // A reaction plans its own walk, as rest does, before it is in hand.
             if case .react = own.command.kind { if m.place != own.place || m.path.isEmpty { send(m, to: own.place) } }
             else { m.place = own.place }
             guard start(m, own.command, announce: own.announce) else { return false }
@@ -297,7 +224,7 @@ extension Simulation {
             onEvent(.log("staging ready for QA · \(m.home.name) walks the rows"))
         }
         m.bed = nil
-        m.couch = nil   // off the couch: the seat is free for someone else
+        m.couch = nil
         return true
     }
 }

@@ -1,14 +1,9 @@
-// The hall's pad wall as the scene draws it: the field across it, which holds the air in and which a release is
-// pulled out through (`VortexView.swift`); and out on the pad the drones and their rack. The drones' flights are
-// the simulation's (`Drones.swift`); this draws them, on the station clock.
-
 import AppKit
 import SceneKit
 
 final class DroneView {
     let node: SCNNode
     let clawL: SCNNode?, clawR: SCNNode?, strobe: SCNNode?, torch: SCNNode?, eye: SCNNode?
-    /// The thrusters' nozzles, for the puffs.
     var pods: [SCNNode] = []
     var lamp: SCNNode?
     var grip = 0.0
@@ -23,7 +18,6 @@ final class DroneView {
     }
 }
 
-/// A puff of cold gas from a thruster or a vent: it spreads, drifts and is gone, on the station clock.
 struct Puff {
     let node: SCNNode
     let vel: SIMD3<Double>
@@ -31,16 +25,12 @@ struct Puff {
 }
 
 extension Props {
-    /// A crate's plate lit when it passed QA.
     static let passedLight = NSColor(rgb: (0.45, 0.95, 0.5))
     static let scanRed = NSColor(rgb: (1.0, 0.22, 0.2))
-    /// The drones' eyes at rest.
     static let scanIdle = NSColor(rgb: (0.35, 0.75, 0.95))
-    /// The amber of a light that says something is under way.
     static let gateIdle = NSColor(rgb: (0.95, 0.7, 0.15))
     static let hazard = NSColor(rgb: (0.95, 0.7, 0.15))
 
-    /// Light that adds to what is behind it: a field's sheet, a torch's glow.
     static func glowing(_ color: NSColor, alpha: CGFloat) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .constant
@@ -51,7 +41,6 @@ extension Props {
         return m
     }
 
-    /// Glass: a faint blue you see through, with a sheen.
     static func glass(alpha: CGFloat = 0.22) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .blinn
@@ -73,8 +62,6 @@ extension Props {
         return b
     }
 
-    /// The drones' rack: a low plinth along x with a cradle per berth, a light at each that the scene lights green
-    /// while its drone is home ("berth0", "berth1", ...).
     static func droneRack(count: Int, pitch: Double) -> SCNNode {
         let n = SCNNode()
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.25))), steel = lit(NSColor(rgb: (0.55, 0.57, 0.62)))
@@ -90,10 +77,6 @@ extension Props {
         return n
     }
 
-    /// A drone, nose to +z, its middle at the origin: a flat body with a hazard band, four thruster pods out on
-    /// struts with their nozzles ("nozzle") under them, a sensor strip for an eye ("eye"), red and green running
-    /// lights, a white strobe on top ("strobe"), two claws under it that close on a crate ("clawL", "clawR"), and a
-    /// torch at the nose for welding ("torch"). No round parts: every face is flat.
     static func padDrone() -> SCNNode {
         let n = SCNNode()
         let shell = lit(NSColor(rgb: (0.86, 0.87, 0.9))), dark = lit(NSColor(rgb: (0.2, 0.21, 0.25)))
@@ -134,7 +117,6 @@ extension Props {
         return n
     }
 
-    /// A puff of gas: a small pale block that the scene spreads and fades.
     static func puff() -> SCNNode {
         let p = SCNNode(geometry: SCNBox(width: 0.018, height: 0.018, length: 0.018, chamferRadius: 0))
         p.geometry!.firstMaterial = Props.glowing(NSColor(white: 0.95, alpha: 1), alpha: 0.32)
@@ -145,8 +127,6 @@ extension Props {
 }
 
 extension StationController {
-    /// The hall's pad wall for a station, built with the static floor: the field across it, and the drones' rack
-    /// out on the pad. Nothing where the station has no pad.
     func buildPadWall(_ station: Station) {
         droneRacks[station.name]?.removeFromParentNode()
         droneRacks[station.name] = nil
@@ -161,7 +141,6 @@ extension StationController {
         }
     }
 
-    /// A crate drawn on its own, off the rows: the same as the rows draw it.
     func looseCrate(_ crate: CrateRef) -> SCNNode {
         let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
         let alien = row?.alien == true
@@ -174,9 +153,6 @@ extension StationController {
 
     // MARK: the drones
 
-    /// Every drone where the simulation has it: bobbing a little in the air, tilting into its thrust, its claws
-    /// shut on what it holds and the crate under them, its strobe blinking, the torch lit at a seam, and a puff
-    /// from the nozzles opposite each push. The rack's lights say who is home.
     func drawDrones(dt: Double) {
         var seen = Set<String>()
         for (name, list) in simulation.drones {
@@ -195,7 +171,6 @@ extension StationController {
                 let phase = Double(d.berth) * 1.7
                 let bob = resting ? 0 : sin(clock * 3.1 + phase) * 0.012
                 v.node.position = v3(d.pos.x, d.pos.y + bob, d.pos.z)
-                // Leaning into the push, the way a hovering thing does, and back level when it holds still.
                 let push = SIMD2(d.push.x, d.push.z)
                 let local = SIMD2(push.x * cos(d.yaw) - push.y * sin(d.yaw), push.x * sin(d.yaw) + push.y * cos(d.yaw))
                 let pitch = max(-0.35, min(0.35, local.y * 0.09)), roll = max(-0.35, min(0.35, -local.x * 0.09))
@@ -204,7 +179,6 @@ extension StationController {
                 v.clawR?.eulerAngles.z = 0.5
                 v.strobe?.isHidden = resting || clock.truncatingRemainder(dividingBy: 1.2) > 0.08
                 v.eye?.geometry?.firstMaterial?.diffuse.contents = d.torch ? NSColor(rgb: (1.0, 0.75, 0.3)) : Props.scanIdle
-                // The torch at a seam: its tip lit, the lamp on the panel, sparks off the hull.
                 v.torch?.isHidden = !d.torch
                 if d.torch, case .weld(let key) = d.task, let r = simulation.rockets[key], let seam = seamPoint(r) {
                     let lamp = v.lamp ?? {
@@ -222,7 +196,6 @@ extension StationController {
                     l.removeFromParentNode()
                     v.lamp = nil
                 }
-                // Cold gas from the nozzles away from the push, more the harder it pushes.
                 let strength = simd_length(d.push)
                 if strength > 0.6, Double.random(in: 0...1) < min(0.5, strength * 0.08) {
                     let away = -d.push / strength
@@ -232,7 +205,6 @@ extension StationController {
                     }
                 }
             }
-            // The rack's lights: green over a drone at home, amber over one out at work.
             if let rack = droneRacks[name] {
                 for d in list {
                     rack.childNode(withName: "berth\(d.berth)", recursively: false)?.geometry?.firstMaterial?.diffuse.contents =

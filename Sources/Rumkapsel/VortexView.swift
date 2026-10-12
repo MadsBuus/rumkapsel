@@ -1,22 +1,14 @@
-// A release leaving the hall, as the scene draws it: the field across the pad wall, and while a release goes
-// out, the vortex from the drones' ring to the rocket's hatch with the crates spiralling along it. Where every
-// crate is comes from `Vortex.place`, on the station clock; this only draws it and ripples the field where a
-// crate goes through.
-
 import AppKit
 import SceneKit
 
-/// The nodes for one release going out: the swirl of light along the vortex, and the crates, by crate key.
 final class VortexView {
     let node = SCNNode()
     var motes: [SCNNode] = []
     var crates: [String: SCNNode] = [:]
-    /// Each crate's side of the field last frame, so a crossing ripples it once.
     var outside: [String: Bool] = [:]
 }
 
 extension Props {
-    /// One mote of the vortex's swirl: a small glowing chip.
     static func vortexMote() -> SCNNode {
         let n = SCNNode(geometry: SCNBox(width: 0.045, height: 0.045, length: 0.045, chamferRadius: 0))
         n.geometry!.firstMaterial = Props.glowing(fieldBlue, alpha: 0.9)
@@ -26,7 +18,6 @@ extension Props {
 }
 
 extension StationController {
-    /// The field across the hall's pad wall: the same sheet the ships fly through at the bay, holding the air in.
     func buildPadField(_ station: Station) -> SCNNode? {
         padFields[station.name] = nil
         guard let field = station.padField else { return nil }
@@ -40,8 +31,6 @@ extension StationController {
         return built.node
     }
 
-    /// One frame of every release going out, and of the pad fields: the swirl turns, each crate is where its
-    /// path puts it, and a crate going through the field ripples it.
     func drawVortices() {
         for (name, field) in padFields {
             let drift = CGFloat(clock * 0.12).truncatingRemainder(dividingBy: 1)
@@ -76,7 +65,6 @@ extension StationController {
         }
     }
 
-    /// The swirl: motes streaming from the ring to the hatch on a narrowing spiral, as strong as the vortex is.
     private func drawSwirl(_ view: VortexView, _ v: Vortex, hatch: SIMD3<Double>) {
         let strength = v.strength(at: clock)
         let axis = hatch - v.ring
@@ -95,8 +83,6 @@ extension StationController {
         }
     }
 
-    /// The crates of the release: on their tiles until their turn, then where their path puts them, rippling the
-    /// field as they go through it, and gone into the hold at the end.
     private func drawPulled(_ view: VortexView, _ v: Vortex, hatch: SIMD3<Double>) {
         let field = padFields[v.station]
         var live = Set<String>()
