@@ -1,29 +1,21 @@
-// The view that takes the input, and the camera it moves: gestures, keys, hover, focus and the remembered view.
-
 import AppKit
 import SceneKit
 
-/// SCNView that reports hovers, double-clicks and trackpad gestures.
 final class StationView: SCNView {
     var onHover: ((SCNNode?) -> Void)?
-    /// A double-click: what is under it, and where on the floor it fell, in the scene.
     var onDoubleClick: ((SCNNode?, SIMD2<Double>?) -> Void)?
     var onZoom: ((Double, NSPoint?) -> Void)?
     var onRotate: ((Double, NSPoint?) -> Void)?
     var onPan: ((Double, Double) -> Void)?
     var onTilt: ((Double) -> Void)?
-    /// A drag while walking: turns and tilts the head instead. True when it was taken.
     var onLook: ((Double, Double) -> Bool)?
     var onKey: ((String) -> Bool)?
-    /// Space held down, and let go: the station runs faster while it is held.
     var onHold: ((Bool) -> Void)?
     private var spaceHeld = false
     private func releaseSpace() { if spaceHeld { spaceHeld = false; onHold?(false) } }
-    /// Held WASD keys as a screen-relative direction (x right, y up) and Q/E as a zoom direction (+1 in), zero when none are down.
     var onMove: ((SIMD2<Double>, Double) -> Void)?
     private var heldKeys: Set<String> = []
     var onClick: ((SCNNode?) -> Void)?
-    /// The overlay's say on a point first: true when the HUD takes the hover or the click, so the scene under it does not.
     var hudTakesPoint: ((NSPoint) -> Bool)?
     var onHUDClick: ((NSPoint) -> Bool)?
     var onContextMenu: ((SCNNode?, NSEvent) -> Void)?
@@ -50,7 +42,6 @@ final class StationView: SCNView {
     }
     override func flagsChanged(with event: NSEvent) {
         if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { releaseSpace() }
-        // A modifier pressed mid-move would swallow the key-up: let go of everything.
         if !heldKeys.isEmpty, !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { heldKeys = []; moveChanged() }
         super.flagsChanged(with: event)
     }
@@ -66,7 +57,6 @@ final class StationView: SCNView {
         for k in heldKeys { v += Self.moveKeys[k]! }
         onMove?(SIMD2(v.x, v.y), v.z)
     }
-    /// The cursor's view location, or nil when it is outside the view.
     private func cursor(_ event: NSEvent) -> NSPoint? {
         let p = convert(event.locationInWindow, from: nil)
         return bounds.contains(p) ? p : nil
@@ -75,7 +65,6 @@ final class StationView: SCNView {
 
     override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { true }
-    /// A key-up never arrives once the window loses focus: let go of space then, so the station is not left running fast.
     private var resignObserver: NSObjectProtocol?
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -89,7 +78,6 @@ final class StationView: SCNView {
     override func magnify(with event: NSEvent) { onZoom?(1 + event.magnification, cursor(event)) }
     override func rotate(with event: NSEvent) { onRotate?(Double(event.rotation) * .pi / 180, cursor(event)) }
     override func scrollWheel(with event: NSEvent) {
-        // Two fingers slide the view; a mouse wheel reports in lines, so scale it up to feel like pixels.
         let k = event.hasPreciseScrollingDeltas ? 1.0 : 10.0
         if event.modifierFlags.contains(.option) { onZoom?(1 - Double(event.scrollingDeltaY) * 0.01, cursor(event)) }
         else { onPan?(Double(event.scrollingDeltaX) * k, Double(event.scrollingDeltaY) * k) }
@@ -108,7 +96,6 @@ final class StationView: SCNView {
         tracking = t
     }
 
-    /// The named thing under the point: a prop's parts are unnamed, the prop itself carries the name.
     private func node(at p: NSPoint) -> SCNNode? {
         var n = hitTest(p, options: [.boundingBoxOnly: true, .firstFoundOnly: true, .categoryBitMask: Pick.normal]).first?.node
         while let here = n, here.name == nil, let up = here.parent { n = up }
@@ -123,7 +110,6 @@ final class StationView: SCNView {
 
     override func mouseExited(with event: NSEvent) { onHover?(nil) }
 
-    /// Where the line of sight through a point of the view meets the floor.
     private func floorPoint(at p: NSPoint) -> SIMD2<Double>? {
         let near = unprojectPoint(SCNVector3(p.x, p.y, 0)), far = unprojectPoint(SCNVector3(p.x, p.y, 1))
         let a = SIMD3(Double(near.x), Double(near.y), Double(near.z)), b = SIMD3(Double(far.x), Double(far.y), Double(far.z))
@@ -155,7 +141,6 @@ final class StationView: SCNView {
 extension StationController {
     // MARK: kicking
 
-    /// Right-click on an office that a peer or GitHub put here: offer to kick it.
     func showContextMenu(for name: String?, event: NSEvent) {
         guard let name, name.hasPrefix("room:") || name.hasPrefix("box:") else { return }
         let key = String(name.dropFirst(name.hasPrefix("room:") ? 5 : 4))
@@ -191,7 +176,6 @@ extension StationController {
         }
     }
 
-    /// Clicking a minion re-asks GitHub about its repo: its branch's PR, commits and releases.
     func poke(minionId: String) {
         guard let m = minions[minionId], let station = fleet.stations[m.station] else { return }
         let room = station.rooms[m.home.key]
@@ -204,7 +188,6 @@ extension StationController {
         }
         github.refreshReleases(repoRoot: root)
         logEvent("asking github about \(m.home.repo)…")
-        // A little hop so the click feels acknowledged.
         m.node.runAction(.sequence([.moveBy(x: 0, y: 0.25, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.25, z: 0, duration: 0.12)]))
     }
 
@@ -212,7 +195,6 @@ extension StationController {
         enqueue { [self] in userZoom = 1; userYaw = 0; userPitch = -.pi / 6; userPan = .zero; focused = nil }
     }
 
-    /// Slides the view by a screen offset: dx to the right, dy down (as drags and scrolls report it).
     func pan(byPixels dx: Double, _ dy: Double) {
         focused = nil
         following = nil
@@ -225,7 +207,6 @@ extension StationController {
         userPan -= (right * dx - forward * dy) * unitsPerPixel
     }
 
-    /// The point on the floor plane under a view location, in world x/z.
     func groundPoint(at p: NSPoint) -> SIMD2<Double>? {
         let near = view.unprojectPoint(SCNVector3(p.x, p.y, 0))
         let far = view.unprojectPoint(SCNVector3(p.x, p.y, 1))
@@ -235,15 +216,9 @@ extension StationController {
         return SIMD2(Double(near.x) + Double(far.x - near.x) * t, Double(near.z) + Double(far.z - near.z) * t)
     }
 
-    /// Where the default isometric camera should look to centre these stations, and the half-extent
-    /// they cover on screen (in ground units across, and along the view before the tilt foreshortens it).
-    /// Each station's own footprint is projected, so an L-shaped fleet isn't framed by its empty corner.
     func frame(for stations: [Station]) -> (focus: SIMD2<Double>, half: SIMD2<Double>) {
         let yaw = viewYaw
         var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
-        // While the floor is still arriving, the view is pinned on the monolith at a fixed height and
-        // does not move at all: nothing about a station is steady enough to frame in that moment, since
-        // even the hallway is dug outward as offices are placed. The monolith's own tile never moves.
         if floorSettling, let st = stations.min(by: { $0.name < $1.name }) {
             let c = st.coreCenter
             return (SIMD2(st.offset.x + Double(c.x), st.offset.y + Double(c.y)), settlingHalf)
@@ -257,26 +232,21 @@ extension StationController {
                 lo = pointwiseMin(lo, SIMD2(u, v)); hi = pointwiseMax(hi, SIMD2(u, v))
             }
         }
-        // No station yet, which is the first frame of every launch: hold the height a station is
-        // watched from, so the camera has nowhere to travel once the floor turns up.
         guard lo.x.isFinite else { return (SIMD2(0, 0), settlingHalf) }
         let c = (lo + hi) / 2
         return (SIMD2(c.x * cos(yaw) + c.y * sin(yaw), -c.x * sin(yaw) + c.y * cos(yaw)), (hi - lo) / 2)
     }
 
-    /// Orthographic half-height that fits a projected half-extent at the default tilt.
     func fitScale(half: SIMD2<Double>) -> Double {
         let aspect = max(0.6, Double(viewSize.width / max(1, viewSize.height)))
         let pitch = -Double.pi / 6
         return max(half.y * abs(sin(pitch)) + 3.0, (half.x + 1.5) / aspect)
     }
 
-    /// Pans and zooms onto one station, or back to the whole fleet.
     func focus(on stationName: String?) {
         enqueue { [self] in focusNow(on: stationName) }
     }
 
-    /// Focuses the Nth station: your own in fleet order, then peers' as they sit in the void.
     func focus(onIndex i: Int) {
         enqueue { [self] in
             let names = fleet.ordered.map(\.name)
@@ -285,7 +255,6 @@ extension StationController {
         }
     }
 
-    /// The stations the camera frames: the whole fleet.
     var shownStations: [Station] { Array(fleet.stations.values) }
 
     func focusNow(on stationName: String?) {
@@ -299,16 +268,12 @@ extension StationController {
         userZoomChanged = true
     }
 
-    /// Pans onto one room of one station and holds a zoom there: for a picture of the bath, say.
-    /// The room is named by key (`kind:bath`) or by the word after `kind:`; a fixed area is named by
-    /// itself (`bay`, `pad`, `deck`, `storage`, `decon`), since those are floor rather than rooms.
     func look(at roomName: String, in stationName: String, zoom: Double) {
         enqueue { [self] in
             guard let station = fleet.stations[stationName] else { return }
             let areas: [String: [Cell]] = ["bay": station.hangarCells, "pad": station.hall.padCells, "deck": station.hall.deckCells,
                                            "hall": station.hall.cells, "yard": station.hall.cells + station.hall.padCells,
                                            "storage": station.hall.storageCells, "decon": station.hall.deconCells]
-            // The field: a step out onto the pad from its middle, so the cleared rows and the rocket's foot are both in.
             if roomName == "gate", let field = station.hall.padField {
                 focused = nil
                 let mid = (field.from + field.to) / 2 + station.offset
@@ -328,8 +293,6 @@ extension StationController {
         }
     }
 
-    /// The camera goes with one minion: near enough to see what it is up to, not on top of it. Zooming
-    /// and turning still work while it does; a pan, Esc or a click on the floor lets go.
     func follow(minionId id: String, zoom: Double? = nil) {
         guard minions[id] != nil else { return }
         following = id
@@ -338,7 +301,6 @@ extension StationController {
         else if userZoom < 2.5 { userZoom = 3; userZoomChanged = true }
     }
 
-    /// Follow by name, for the command line: the minion's id, the word after its colon, or its home's name.
     func follow(named name: String, zoom: Double? = nil) {
         enqueue { [self] in
             let want = name.lowercased()
@@ -358,7 +320,7 @@ extension StationController {
     func restoreView() {
         let d = UserDefaults.standard
         guard d.object(forKey: "view.zoom") != nil else { return }
-        if d.integer(forKey: "view.layout") != 21 {   // the fleet was laid out differently: forget the old pan
+        if d.integer(forKey: "view.layout") != 21 {
             d.set(21, forKey: "view.layout"); d.removeObject(forKey: "view.panx"); d.removeObject(forKey: "view.pany")
         }
         userYaw = d.double(forKey: "view.yaw"); userPitch = d.double(forKey: "view.pitch")
@@ -368,7 +330,6 @@ extension StationController {
             focusNow(on: f)
         } else {
             userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
-            // A remembered pan from an older layout can point at empty space: drop it if it left the fleet.
             let b = fleet.worldBounds
             let p = targetFocus + userPan
             if p.x < b.min.x - 4 || p.x > b.max.x + 4 || p.y < b.min.y - 4 || p.y > b.max.y + 4 { userPan = .zero }

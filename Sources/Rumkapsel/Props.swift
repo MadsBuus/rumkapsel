@@ -1,9 +1,7 @@
 import AppKit
 import SceneKit
 
-/// The things that populate a station, so the gallery and the scene draw the same props.
 enum Props {
-    /// The soft dark patch under a prop, the game's "foot": translucent, so it sits right on any floor.
     static func foot(size: Double) -> SCNNode {
         let f = SCNNode(geometry: SCNPlane(width: size, height: size))
         f.geometry!.firstMaterial = flat(NSColor(rgb: (0.05, 0.05, 0.08)))
@@ -13,7 +11,6 @@ enum Props {
         return f
     }
 
-    /// A square pyramid with two lit faces and two shaded, like the game's resource pyramids.
     static func pyramid(color: NSColor, size: Double, floor: NSColor) -> SCNNode {
         let geo = SCNPyramid(width: size, height: size * 0.9, length: size)
         geo.materials = [flat(color.darker(0.2)), flat(color.lighter(0.12)), flat(color.darker(0.08)), flat(color.darker(0.2)), flat(color.darker(0.14))]
@@ -25,9 +22,6 @@ enum Props {
         return n
     }
 
-    /// A plain crate: one pull request's worth of work, with a dark strap groove and a small status tag on top.
-    /// Shapes mean things: a hexagon is a packed office, a cube is a piece of work (commits),
-    /// a square strapped crate is a pull request, a pyramid is a session input.
     static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false, number: Int? = nil,
                         title: String? = nil, who: String? = nil) -> SCNNode {
         let n = SCNNode()
@@ -38,9 +32,6 @@ enum Props {
         let body = SCNNode(geometry: box)
         body.position = v3(0, h / 2, 0)
         n.addChildNode(body)
-        // Strap groove: a slightly proud ring in a deeper shade, flush like a real crate strap. Your own
-        // work is strapped in white instead: the crate is already its repository's colour, and a second
-        // colour there would read as another repository.
         let strapColor = mine ? Palette.mine : color.darker(0.3)
         let strap = SCNBox(width: size * 1.02, height: h * 0.16, length: size * 1.02, chamferRadius: 0)
         strap.materials = mine
@@ -49,9 +40,6 @@ enum Props {
         let s = SCNNode(geometry: strap)
         s.position = v3(0, h / 2, 0)
         n.addChildNode(s)
-        // Status plate on the front face, like a lock, so it reads from the side whatever is stacked above.
-        // The geometry is named, not the node: a redraw finds the plate by it and re-lights the crate
-        // rather than building a new one, while the node stays nameless so a hover still finds the crate.
         let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
         plate.geometry!.name = Props.plateName
         plate.geometry!.firstMaterial = flat(band)
@@ -64,8 +52,6 @@ enum Props {
         return n
     }
 
-    /// The pull request's number stencilled beside a crate's light: drawn only within a few tiles of the camera,
-    /// so the station's view never shows it and walking up to a crate does.
     static func crateNumber(_ number: Int, size: Double, height h: Double) -> SCNNode {
         let plane = SCNPlane(width: size * 0.36, height: h * 0.16)
         plane.firstMaterial = numberStencil(number)
@@ -75,7 +61,6 @@ enum Props {
         return n
     }
 
-    /// The task's tag above the strap: what it is called and whose it is, on a dark tag. Close up only, like the number.
     static func crateTag(title: String, who: String?, size: Double, height h: Double) -> SCNNode {
         let plane = SCNPlane(width: size * 0.62, height: h * 0.26)
         plane.firstMaterial = tagFace(title: title, who: who)
@@ -95,7 +80,6 @@ enum Props {
             NSColor(white: 1, alpha: 0.12).setStroke(); card.lineWidth = 2; card.stroke()
             let titleFont = NSFont.systemFont(ofSize: h * 0.2, weight: .semibold)
             let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
-            // Two lines at most, broken between words, the second cut short with an ellipsis if it must be.
             var lines = [""]
             for word in title.split(separator: " ").map(String.init) {
                 if lines[lines.count - 1].isEmpty { lines[lines.count - 1] = word }
@@ -139,17 +123,13 @@ enum Props {
         return m
     }
 
-    /// The name on a crate's status plate geometry, and on the shell round a failing one.
     static let plateName = "crate-plate"
     static let shellName = "crate-shell"
 
-    /// The blink a plate carries while checks run.
     static func blinking() -> SCNAction {
         .repeatForever(.sequence([.fadeOpacity(to: 0.15, duration: 0.5), .fadeOpacity(to: 1, duration: 0.5)]))
     }
 
-    /// The welding arc at a cone: a warm lamp with a billboard spark in it, put where the cone stands
-    /// and switched on and off by `Routines.Flash.weld`.
     static func weldLamp() -> SCNNode {
         let l = SCNNode()
         l.light = SCNLight()
@@ -163,8 +143,6 @@ enum Props {
         return l
     }
 
-    /// QA passed one: a green tick that floats off the head and fades. It carries its own rise, so
-    /// whoever spawns it only has to place it and let it go.
     static func qaTick() -> SCNNode {
         let tick = SCNNode(geometry: SCNBox(width: 0.16, height: 0.02, length: 0.16, chamferRadius: 0))
         tick.eulerAngles = SCNVector3(Double.pi / 2, 0, Double.pi / 4)
@@ -175,9 +153,6 @@ enum Props {
         return tick
     }
 
-    /// One commit: a cube in the office's colour with its own shadow under it. Flat game-style
-    /// shading, light top, mid and dark sides, no lights involved. The three sizes the rows pick
-    /// from are `cubeSizes`; an uncommitted one is the same cube at `ghostOpacity`.
     static let cubeSizes = [0.18, 0.26, 0.34]
     static let ghostOpacity = 0.38
 
@@ -194,7 +169,6 @@ enum Props {
         return n
     }
 
-    /// The red cage round a cube or a crate whose checks are failing.
     static func failingShell(size: Double) -> SCNNode {
         let shell = SCNNode(geometry: SCNBox(width: size, height: size, length: size, chamferRadius: 0))
         shell.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.2, 0.2)))
@@ -203,8 +177,6 @@ enum Props {
         return shell
     }
 
-    /// The monolith's answer: a cone of light down onto whoever is asking it, as the game's research
-    /// went. `aim` puts it between the two ends and breathes it.
     static func beam() -> SCNNode {
         let n = SCNNode(geometry: faceted(SCNCone(topRadius: 0.05, bottomRadius: 0.32, height: 1)))
         n.geometry!.firstMaterial = flat(NSColor(rgb: (0.75, 0.88, 1.0)))
@@ -214,7 +186,6 @@ enum Props {
         return n
     }
 
-    /// Stretches a beam from the monolith's head down onto a body's, and breathes it on the clock.
     static func aim(_ beam: SCNNode, from: SIMD3<Double>, to: SIMD3<Double>, clock: Double, phase: Double) {
         let d = to - from
         let len = max(0.001, (d.x * d.x + d.y * d.y + d.z * d.z).squareRoot())
@@ -225,24 +196,19 @@ enum Props {
         beam.opacity = 0.8 + 0.2 * sin(clock * 3 + phase)
     }
 
-    /// A hexagonal crate in the repo colour: the order for a new office.
     static func crate(color: NSColor) -> SCNNode {
         let geo = faceted(SCNCylinder(radius: 0.26, height: 0.18))
         geo.radialSegmentCount = 6
         let top = flat(color.lighter(0.16)), side = flat(color.darker(0.06))
         geo.materials = [side, top, top]
         let n = SCNNode()
-        let body = SCNNode(geometry: geo)   // same turn as the bay's hexagons, so it lands squarely on one
+        let body = SCNNode(geometry: geo)
         n.addChildNode(body)
         return n
     }
 
-    /// An unlit berth, the colour the bay and the pad are marked out in: space black, so an empty berth is
-    /// an outline scored into the floor rather than a ring drawn on top of it.
     static let berthIdle = NSColor(rgb: (0.05, 0.06, 0.09))
 
-    /// One berth: the rim that takes the colour of whoever is coming. Centred on the origin — the bay places
-    /// it over its slot, and the gallery over its tile — so a tile cannot draw a berth the station does not.
     static func berth() -> (node: SCNNode, rim: SCNNode) {
         let node = SCNNode()
         let height = Looks.current.berthHexHeight
@@ -254,22 +220,13 @@ enum Props {
         return (node, rim)
     }
 
-    /// The hull's deck plate where it meets the floor: the colour the wall starts from before it climbs and
-    /// cools, and the colour the bay's apron is laid in, so the two read as one piece of station.
     static let hullPlate = (0.28, 0.33, 0.43)
 
-    /// The approach lights either side of the airlock's outer door, on and off: something is on its way in.
     static let hullLamp = NSColor(rgb: (1.0, 0.56, 0.12))
     static let hullLampOff = NSColor(rgb: (0.26, 0.30, 0.40))
 
-    /// The amber of a lamp that says something is under way, lit and dark.
     static let amberLamp = NSColor(rgb: (1.0, 0.56, 0.12))
     static let amberLampOff = NSColor(rgb: (0.42, 0.24, 0.08))
-
-    /// A rocket in two parts: the tip, which is what stands on staging, and the lifter under it, which a
-    /// production release adds. Without the lifter the tip stands on a cradle on the pad. The tip's hull is
-    /// panels on a dark frame, so it can be shown part built. Its measurements are `RocketGeometry`'s. The
-    /// groups are named "tip", "lifter" and "cradle"; the flame stays at the top, under the engine.
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
@@ -279,8 +236,6 @@ enum Props {
         Detail.apply(.hull, to: white)
         let paint = lit(color)
         Detail.apply(.hull, to: paint)
-        /// A part's own copy of a material, its plating laid on at one size everywhere: a part `w` by `h` across
-        /// shows that much of the plating, from `at` in it, so neighbouring panels carry on into each other.
         func plated(_ m: SCNMaterial, _ w: Double, _ h: Double, at: (Double, Double) = (0, 0)) -> SCNMaterial {
             let c = m.copy() as! SCNMaterial
             let unit = RocketGeometry.platingSpan
@@ -294,8 +249,6 @@ enum Props {
         tip.setValue(base, forKey: "base")
         n.addChildNode(lifter); n.addChildNode(tip); n.addChildNode(cradle)
 
-        // The tip: a dark frame, its panels, the nose, the hatch and the portholes. The hull has six flat
-        // sides, one of them facing +x where the hatch is.
         let hullR = RocketGeometry.hullRadius, hullH = RocketGeometry.hullHeight, apothem = RocketGeometry.apothem
         let rings = RocketGeometry.panels / 6, ringH = hullH / Double(rings)
         let core = SCNNode(geometry: faceted(SCNCylinder(radius: apothem * 0.9, height: hullH)))
@@ -304,7 +257,7 @@ enum Props {
         core.name = "frame"
         tip.addChildNode(core)
         for k in 0..<6 {
-            let a = Double(k) * .pi / 3 + .pi / 3   // the corners, between the sides
+            let a = Double(k) * .pi / 3 + .pi / 3
             let rib = SCNNode(geometry: SCNBox(width: 0.014, height: hullH, length: 0.014, chamferRadius: 0))
             rib.geometry!.firstMaterial = dark
             rib.position = v3(sin(a) * hullR * 0.97, base + hullH / 2, cos(a) * hullR * 0.97)
@@ -327,8 +280,6 @@ enum Props {
         nose.position = v3(0, base + hullH + r * 1.3, 0)
         nose.name = "nose"
         tip.addChildNode(nose)
-        // The loading hatch: a door in the hull, white with a dark seam round it, a latch bar and two hinge
-        // knuckles; open, the door is the black of the hold.
         let hatch = SCNNode()
         hatch.name = "hatch"
         let frameW = r * 0.9, frameH = 0.2
@@ -356,7 +307,7 @@ enum Props {
         hatch.eulerAngles.y = .pi / 2
         tip.addChildNode(hatch)
         for k in 0..<3 {
-            let a = .pi / 2 + Double(2 * k + 1) * .pi / 3   // the three sides the hatch is not on or beside
+            let a = .pi / 2 + Double(2 * k + 1) * .pi / 3
             let port = SCNNode(geometry: SCNBox(width: r * 0.36, height: r * 0.36, length: 0.02, chamferRadius: 0))
             port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
             port.position = v3(sin(a) * (apothem + 0.008), 0.12 + h * 0.75, cos(a) * (apothem + 0.008))
@@ -365,7 +316,6 @@ enum Props {
             tip.addChildNode(port)
         }
 
-        // The lifter: the wider lower stage with its band, the fins, the engine and the landing legs.
         let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
         lower.geometry!.firstMaterial = plated(white, 2 * .pi * r, h * 0.45)
         lower.position = v3(0, 0.12 + h * 0.225, 0)
@@ -374,8 +324,6 @@ enum Props {
         band.geometry!.firstMaterial = plated(paint, 2 * .pi * r, h * 0.08)
         band.position = v3(0, 0.12 + h * 0.45, 0)
         lifter.addChildNode(band)
-        // Four tail fins: each a plate leaning in, its top edge buried in the lower stage, its bottom outer
-        // corner out by the pad.
         for k in 0..<4 {
             let pivot = SCNNode()
             pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
@@ -387,7 +335,6 @@ enum Props {
             pivot.addChildNode(fin)
             lifter.addChildNode(pivot)
         }
-        // The engine: a throat under the hull opening into a bell, its mouth just off the pad.
         let throat = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.35, height: 0.04)))
         throat.geometry!.firstMaterial = dark
         throat.position = v3(0, 0.11, 0)
@@ -396,10 +343,9 @@ enum Props {
         bell.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.36)))
         bell.position = v3(0, 0.055, 0)
         lifter.addChildNode(bell)
-        // Landing legs, splayed out at the foot: the knee on the hull above the fin roots, the pad out on the ground.
         for k in 0..<3 {
             let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3 + .pi / 3   // none in front of the hatch
+            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3 + .pi / 3
             let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
             leg.geometry!.firstMaterial = dark
             leg.position = v3(0, 0.11, r * 1.15)
@@ -412,7 +358,6 @@ enum Props {
             lifter.addChildNode(pivot)
         }
 
-        // The cradle: a collar the tip sits in and three legs down to the pad.
         let collar = SCNNode(geometry: faceted(SCNCylinder(radius: hullR * 1.12, height: 0.05)))
         collar.geometry!.firstMaterial = dark
         collar.position = v3(0, cradleTop - 0.025, 0)
@@ -431,20 +376,15 @@ enum Props {
         flame.name = "flame"
         flame.opacity = 0
         n.addChildNode(flame)
-        // The parts keep their names under a key of their own: on the pad every node is named for the hover.
         n.enumerateChildNodes { c, _ in if let name = c.name { c.setValue(name, forKey: "part") } }
         shape(n, lifter: tall, panels: RocketGeometry.panels)
         return n
     }
 
-    /// A rocket's part by the name the prop gave it, whatever the node is called now.
     static func part(_ rocket: SCNNode, _ name: String) -> SCNNode? {
         rocket.childNodes.first { ($0.value(forKey: "part") as? String) == name }
     }
 
-    /// A rocket drawn as it stands: with its lifter or on the cradle, and the tip's hull built to `panels`.
-    /// The nose, the hatch and the portholes go on with the last panel. A rocket from a look without these
-    /// parts is left as it is.
     static func shape(_ rocket: SCNNode, lifter: Bool, panels: Int) {
         guard let tip = part(rocket, "tip") else { return }
         let base = (tip.value(forKey: "base") as? Double) ?? 0
@@ -458,8 +398,6 @@ enum Props {
             else if name == "nose" || name == "hatch" || name == "port" { c.isHidden = !whole }
         }
     }
-
-
 }
 
 extension Props {

@@ -3,12 +3,11 @@ import Foundation
 struct PullRequest: Equatable {
     let number: Int
     let title: String
-    let state: String          // OPEN, MERGED, CLOSED
-    let reviewDecision: String // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or empty
+    let state: String
+    let reviewDecision: String
     let isDraft: Bool
     let url: String
-    var checks: String = ""    // failure, pending, success or empty
-    /// The issues this pull request closes: the tasks its work is for. With a board, the first is the crate.
+    var checks: String = ""
     var closes: [Int] = []
 
     var summary: String {
@@ -32,77 +31,60 @@ struct PullRequest: Equatable {
 struct ReleasePR: Equatable {
     let number: Int
     let title: String
-    let base: String     // staging or production
+    let base: String
     let head: String
     let state: String
     let url: String
     let labels: [String]
     let mergedAt: Date?
-    /// Whether the base is this repository's own production or staging branch, set when the release is
-    /// read against the repository's pipeline. Nil falls back to the branch names in the settings.
     var production: Bool? = nil
     var staging: Bool? = nil
     var isProduction: Bool { production ?? (base == ConfigStore.shared.current.productionBranch) }
-    /// A release into the staging branch: what puts crates in the staged rows.
     var isStaging: Bool {
         if let staging { return staging }
         let name = ConfigStore.shared.current.stagingBranch
         return !name.isEmpty && base == name
     }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
-    /// Not a pull request at all: a tag on the trunk, which in a repository that ships by tagging is the
-    /// whole release. It has no number and nothing to review; it has already happened when it is seen.
     var tag = false
 }
 
-/// A repository's own way to production: the branch work merges into, an optional staging branch
-/// between, and the branch releases go into. Read from the branches the repository actually has.
 struct Pipeline: Equatable {
     var trunk: String
     var staging: String
     var production: String
-    /// Head branches a release may come from besides the trunk and staging: "release*" matches release/v9.7.1.
     var releaseBranches: [String] = PipelineDetection.defaultReleaseBranches
-    /// Whether the board's storage and QA columns fill this repository's yard; nil lets the board decide.
     var boardColumns: Bool? = nil
-    /// Where this came from, "file", "history", "branches" or "settings", and in a few words why.
     var source: String = "settings"
     var why: String = ""
-    /// "merge" when every merge into the trunk deploys and ships at once, "tag" when a tag on the trunk
-    /// is the release, "release" when a release pull request is.
     var ship: String = "release"
     var shipsOnMerge: Bool { ship == "merge" }
-    /// Shipped by tagging the trunk: no release branch, no release pull request, a tag and that is that.
     var shipsOnTag: Bool { ship == "tag" }
-    /// The release is the moment it ships, a merge or a tag: no rocket stands waiting for one.
     var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
     var hasStaging: Bool { !staging.isEmpty }
     func isReleaseHead(_ head: String) -> Bool {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
     }
-    /// The settings' names, for a repository whose branches have not been read yet.
     static var configured: Pipeline {
         let c = ConfigStore.shared.current
         return Pipeline(trunk: c.trunkBranch, staging: c.stagingBranch, production: c.productionBranch)
     }
 }
 
-/// One entry from a repository's activity feed.
 struct FeedEvent: Equatable, Codable {
     let at: Date
     let actor: String
     let isBot: Bool
-    let kind: String        // push, pr_open, pr_merge, pr_close, review, comment, branch_create, branch_delete, issue_open, release
+    let kind: String
     let branch: String?
     let prNumber: Int?
     let title: String?
     let url: String?
-    let detail: String      // review state, commit count, etc.
+    let detail: String
 }
 
-/// One issue on the team's GitHub project, with where the Status field says it is.
 struct ProjectItem: Equatable, Codable {
-    let repo: String          // repository name without the owner
+    let repo: String
     let number: Int
     let title: String
     let status: String
@@ -110,7 +92,6 @@ struct ProjectItem: Equatable, Codable {
     let prURLs: [String]
     let url: String
     var updatedAt: Date? = nil
-    /// The issue's own state, OPEN or CLOSED: a closed issue is finished work, whatever column it sits in.
     var state: String = "OPEN"
     var isClosed: Bool { state == "CLOSED" }
 }
@@ -125,39 +106,26 @@ struct OpenPR: Equatable, Codable {
     let createdAt: Date
 }
 
-/// Resolves pull requests for task branches with the gh CLI, off the main thread.
 final class GitHubResolver {
-    /// A login that is a bot's, by its name: the one rule for the open list and the feed alike.
     static func isBot(_ login: String) -> Bool {
         let l = login.lowercased()
         return l.contains("dependabot") || login.contains("[bot]") || l.hasSuffix("-bot") || l.contains("webhook")
     }
 
-    /// A string as a GraphQL literal, quotes and all.
     static func quoted(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    /// Poll interval for pull requests, releases and open PRs; the feed stays at two minutes.
     var intervalMinutes = 5
-    /// Frozen: every refresh is a no-op and nothing is written to disk. Only the simulator sets it,
-    /// and only a frozen resolver accepts injected answers.
     var frozen = false
-    /// Set while the simulator writes a batch of answers, so one push wakes the scene once.
     var injectSilently = false
     private var interval: TimeInterval { Double(intervalMinutes) * 60 }
     private var openPRs: [String: ([OpenPR], Date)] = [:]
 
-    /// Anything at all known about anybody's open pull requests, from this run or the last.
     var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
 
-    /// Repository roots GitHub has answered for over the wire in this run. Remembered answers and a
-    /// neighbour's word do not count: this is what says a room has been looked at today, and so what
-    /// the floor dims until.
     private var answeredLive: Set<String> = []
     func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
-    /// Roots whose answers came off last night's notes. They carry the time they were fetched, so the
-    /// poll would otherwise count them as fresh and skip the one ask that confirms them.
     private var fromCache: Set<String> = []
 
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
@@ -165,14 +133,10 @@ final class GitHubResolver {
         return openPRs[repoRoot]?.0
     }
 
-    /// Polls wait until this moment: a random hold at start-up so apps opening together on one
-    /// network don't all ask GitHub at once, and the first one to answer feeds the rest.
     var holdUntil = Date.distantPast
 
-    /// Where last run's answers are kept, so a station can be drawn whole before GitHub has said a word.
     private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
 
-    /// Everything worth keeping until next time, by repository root.
     func saveKnowledge(_ roots: [String: String]) {
         var out: [String: Knowledge] = [:]
         for (root, repo) in roots { if let k = knowledge(repoRoot: root, repo: repo) { out[root] = k } }
@@ -180,8 +144,6 @@ final class GitHubResolver {
         Fleet.writing.async { try? json.write(to: GitHubResolver.cacheURL) }
     }
 
-    /// Last run's answers, taken the way a neighbour's are: `adopt` keeps whichever is newer, so a cache
-    /// can never talk over something fresher, and the floor stands complete while the asks go out.
     func loadKnowledge() {
         guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
               let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
@@ -189,7 +151,6 @@ final class GitHubResolver {
         lock.lock(); fromCache.formUnion(saved.keys); lock.unlock()
     }
 
-    /// What a peer could use: everyone's open pull requests and the recent feed, with fetch times.
     struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
     struct ProjectKnowledge: Codable { var owner: String; var number: Int; var items: [ProjectItem]; var at: Date }
     func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? {
@@ -206,7 +167,6 @@ final class GitHubResolver {
         return Knowledge(repo: repo, openPRs: prs?.0, prsAt: prs?.1, feed: f.map { Array($0.0.filter { $0.at > recent }.prefix(80)) }, feedAt: f?.1)
     }
 
-    /// Takes a peer's fresher answer instead of asking GitHub again.
     func adopt(_ k: Knowledge, repoRoot: String) {
         var changed = false
         lock.lock()
@@ -222,12 +182,11 @@ final class GitHubResolver {
         if changed { DispatchQueue.main.async { self.onUpdate?() } }
     }
 
-    /// Everyone's open pull requests, every five minutes.
     func refreshOpenPRs(repoRoot: String) {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { lock.unlock(); return }
-        let remembered = fromCache.remove(repoRoot) != nil   // one ask owed, whatever its age says
+        let remembered = fromCache.remove(repoRoot) != nil
         if !remembered, let (_, at) = openPRs[repoRoot],
            Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
         if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
@@ -238,7 +197,6 @@ final class GitHubResolver {
             defer { lock.lock(); inFlight.remove("o:" + repoRoot); lock.unlock() }
             let iso = ISO8601DateFormatter()
             var found: [OpenPR] = []
-            // A failed call must not count as "no open PRs", or everything looks new on the next success.
             guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else { trace("openPRs \(repoRoot) failed"); return }
             if let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 let stale = Date().addingTimeInterval(-14 * 24 * 3600)
@@ -256,8 +214,6 @@ final class GitHubResolver {
             let changed = openPRs[repoRoot]?.0 != found
             openPRs[repoRoot] = (found, Date())
             let first = answeredLive.insert(repoRoot).inserted
-            // Who is behind each one and what it is called: the list is where that is said plainest, and
-            // it stops saying it the moment the pull request merges, which is when the crate turns up.
             var learned = false
             if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
                 for pr in found where !pr.isBot {
@@ -273,41 +229,26 @@ final class GitHubResolver {
     }
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
-    /// Packages waiting per repo: merged into trunk but not yet on staging, and on staging but not yet in production.
-    /// What a source counts where for a repository. `updated` is the source's own time per number,
-    /// when it has one: a board item carries when it last moved; git history carries nothing.
     struct Cargo: Equatable {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
-        /// Who counted: the board, or git history.
         var source: Source = .git
-        /// Counted by an exact diff between branches or from a tag, not estimated from merge dates.
         var exact = false
-        /// When the count began, before its fetch.
         var at = Date.distantPast
     }
     private var cargo: [String: Cargo] = [:]
-    /// Each repository's pipeline, as its branches said at the last release read.
     private var pipelines: [String: Pipeline] = [:]
-    /// When each repository's history and file were last read: at most once an hour.
     private var pipelineCheckedAt: [String: Date] = [:]
-    /// Repositories whose work moves through the board's storage and QA columns: their yard is the board's.
     private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
 
-    /// What waits where for a repository: from the project board when one is configured, else from git history.
     func cargo(repoRoot: String) -> Cargo? {
         lock.lock(); defer { lock.unlock() }
-        // A board is configured but this repository's name is not known yet: nothing is drawn rather
-        // than the git-history yard, which the board's answer would only redraw a moment later.
         if ConfigStore.shared.current.project != nil, project != nil, owners[repoRoot] == nil { return nil }
         if let items = project?.0, let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
-            let mine = items.filter { $0.repo == repo && !$0.status.isEmpty }   // a stage left unset matches nothing
-            // The board fills a repository's yard only once the repository moves work through the storage and
-            // QA columns. One that goes from development straight to shipped is on the board but not in its
-            // middle: its yard comes from git, like a repository not on the board at all.
-            let decided = pipelines[repoRoot]?.boardColumns   // the repository's own file says, when it says
+            let mine = items.filter { $0.repo == repo && !$0.status.isEmpty }
+            let decided = pipelines[repoRoot]?.boardColumns
             if decided == nil, mine.contains(where: { [st.storage, st.deck, st.cleared].contains($0.status) }), !boardYards.contains(repo) {
                 boardYards.insert(repo)
                 if let (all, at) = project { saveBoard(all, at: at) }
@@ -321,7 +262,6 @@ final class GitHubResolver {
             }
         }
         guard var c = cargo[repoRoot] else { return nil }
-        // Releases are made of pull requests; the floor shows tasks. Where the link is known, translate.
         if let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             c.storage = c.storageNumbers.count; c.deck = c.deckNumbers.count
@@ -332,12 +272,9 @@ final class GitHubResolver {
     // MARK: project board
 
     private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard() { didSet { BoardNumbers.note(project?.0 ?? []) } }
-    /// "owner/name" per checkout, learned once from `gh repo view` and kept with the board: the yard
-    /// cannot tell which board items are a repository's until it knows the repository's name.
     private var owners: [String: String] = GitHubResolver.loadBoardFile()?.owners ?? [:]
     private var projectMoves: [(item: ProjectItem, from: String?)] = []
 
-    /// The last board read is kept on disk, so the first read after a launch still knows what moved.
     private static var boardURL: URL {
         let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
         return dir.appendingPathComponent("board.json")
@@ -360,26 +297,17 @@ final class GitHubResolver {
         let saved = SavedBoard(items: items, at: at, owners: owners,
                                tasks: tasks.mapValues { Dictionary(uniqueKeysWithValues: $0.map { (String($0.key), $0.value) }) },
                                yards: boardYards.sorted(),
-                               // Numbers only ever climb, so the newest few hundred per repository are the
-                               // ones any crate can still be about; older notes are dropped rather than kept for ever.
                                works: works.mapValues { Dictionary(uniqueKeysWithValues: $0.sorted { $0.key > $1.key }.prefix(500).map { (String($0.key), $0.value) }) })
         if let data = try? JSONEncoder().encode(saved) { try? data.write(to: GitHubResolver.boardURL) }
     }
 
     // MARK: tasks
 
-    /// Which issue each pull request's work is for, by repository name then pull request number: an
-    /// issue is the task, the pull request the work done for it. Learned from every pull request answer
-    /// and from the board's links, and kept with the board, since the board forgets a link on merge.
     private var tasks: [String: [Int: Int]] = (GitHubResolver.loadBoardFile()?.tasks ?? [:])
         .mapValues { Dictionary(uniqueKeysWithValues: $0.compactMap { k, v in Int(k).map { ($0, v) } }) }
 
     // MARK: who and what
 
-    /// What is known about one numbered thing in a repository: what it is called, whose work it is and
-    /// when it first showed up. Every source knows a piece of this for a while and then forgets it — a
-    /// pull request leaves the open list on merge, the feed scrolls past, the board drops the link — so
-    /// what they say is written down here and kept with the board.
     struct WorkNote: Codable, Equatable {
         var title = ""
         var author: String?
@@ -387,14 +315,9 @@ final class GitHubResolver {
         var isEmpty: Bool { title.isEmpty && author == nil && at == nil }
     }
 
-    /// By repository name, then number: a pull request's number and, where a pull request is done for an
-    /// issue, that issue's number too, since the crate on the floor is the issue where one is known.
     private var works: [String: [Int: WorkNote]] = (GitHubResolver.loadBoardFile()?.works ?? [:])
         .mapValues { Dictionary(uniqueKeysWithValues: $0.compactMap { k, v in Int(k).map { ($0, v) } }) }
 
-    /// Writes down what one source just said, without losing what another one knew: the first title, the
-    /// first author and the earliest time stand, since they are the ones nearest the work's own beginning.
-    /// Called with the lock held. True when anything was new, so the caller knows to save.
     @discardableResult
     private func note(repo: String, number: Int, title: String? = nil, author: String? = nil, at: Date? = nil) -> Bool {
         guard !repo.isEmpty, number > 0 else { return false }
@@ -408,8 +331,6 @@ final class GitHubResolver {
         return true
     }
 
-    /// What is known about a numbered thing on the floor: the board's word first, since a crate is an
-    /// issue where the board tracks one, then what the pull requests said. Nil when nothing is known.
     func work(repo: String, number: Int) -> WorkNote? {
         lock.lock(); defer { lock.unlock() }
         var w = works[repo]?[number] ?? WorkNote()
@@ -417,7 +338,6 @@ final class GitHubResolver {
             if w.title.isEmpty { w.title = item.title }
             if w.author == nil { w.author = item.assignees.first }
         }
-        // An issue nobody wrote down: the work done for it was somebody's, and that is whose crate it is.
         if w.title.isEmpty || w.author == nil {
             for pull in (tasks[repo] ?? [:]).filter({ $0.value == number }).keys.sorted() {
                 guard let p = works[repo]?[pull] else { continue }
@@ -429,8 +349,6 @@ final class GitHubResolver {
         return w.isEmpty ? nil : w
     }
 
-    /// The board's items by repository and number. A row of crates asks this one by one on every redraw,
-    /// so the list is turned into a lookup once per board read rather than walked each time.
     private var boardIndex: [String: ProjectItem] = [:]
     private var boardIndexAt: Date?
     private func boardItem(repo: String, number: Int) -> ProjectItem? {
@@ -441,7 +359,6 @@ final class GitHubResolver {
         return boardIndex["\(repo)#\(number)"]
     }
 
-    /// Whether a numbered crate is your own work, as far as anything known says so.
     func isMine(repo: String, number: Int) -> Bool {
         guard let me = myLogin() else { return false }
         return work(repo: repo, number: number)?.author == me
@@ -463,9 +380,6 @@ final class GitHubResolver {
         if known != issue, let (items, at) = snapshot { saveBoard(items, at: at) }
     }
 
-    /// Who wrote a pull request and when, from any answer that carries them: written down for the crate
-    /// its merge will become, and for the issue it is done for, since a crate is the issue where the
-    /// board tracks one. Called without the lock.
     private func noteAuthor(_ o: [String: Any], number: Int, repoRoot: String, issue: Int?) {
         let login = ((o["author"] as? [String: Any])?["login"] as? String) ?? ""
         let at = (o["createdAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
@@ -479,17 +393,14 @@ final class GitHubResolver {
         if let (items, at) = snapshot { saveBoard(items, at: at) }
     }
 
-    /// The task a pull request's work is for, if known.
     func task(repo: String, pull: Int) -> Int? {
         lock.lock(); defer { lock.unlock() }
         return tasks[repo]?[pull]
     }
-    /// The pull requests known to work on a task.
     func pulls(repo: String, task: Int) -> [Int] {
         lock.lock(); defer { lock.unlock() }
         return (tasks[repo] ?? [:]).filter { $0.value == task }.map(\.key).sorted()
     }
-    /// A repository's name just learned: written down with the board so the next launch starts knowing it.
     private func learned(owner: String, repoRoot: String) {
         lock.lock(); owners[repoRoot] = owner; lock.unlock()
         if let (items, at) = project { saveBoard(items, at: at) }
@@ -498,18 +409,15 @@ final class GitHubResolver {
     func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
     func projectFetchedAt() -> Date? { lock.lock(); defer { lock.unlock() }; return project?.1 }
 
-    /// Items whose Status changed since the previous read, each returned once.
     func takeProjectMoves() -> [(item: ProjectItem, from: String?)] {
         lock.lock(); defer { lock.unlock() }
         let out = projectMoves; projectMoves = []; return out
     }
 
-    /// One read of the whole board: every issue, its status, its assignees and linked pull requests.
     func refreshProject(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
         if Date() < holdUntil { trace("project held until \(holdUntil)"); lock.unlock(); return }
-        // The whole board on the slow cadence, as the backstop; `refreshProjectDelta` is the pace.
         if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("project") { lock.unlock(); return }
         inFlight.insert("project")
@@ -517,7 +425,6 @@ final class GitHubResolver {
         trace("ask project (whole board)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("project"); lock.unlock() }
-            // GraphQL rather than `gh project item-list`: it carries when each item last moved.
             let fieldName = GitHubResolver.quoted(ConfigStore.shared.current.statusField)
             let iso = ISO8601DateFormatter()
             var items: [ProjectItem] = []
@@ -553,27 +460,20 @@ final class GitHubResolver {
         }
     }
 
-    /// When the delta was last asked, and the newest item time it has seen: the next ask starts there.
     private var deltaAt = Date.distantPast
     private var deltaSince: Date?
 
-    /// Which hundred of the not-shipped items the next delta asks by number.
     private var deltaPage = 0
 
-    /// The board's changes only: items updated since the last look, by search, every twenty seconds. A
-    /// board grows, Shipped most of all, and the whole of it is read only as a backstop; what moved
-    /// in the last while is a handful of items and one small query. Each moved item's linked pull
-    /// requests are then expected to change, and asked.
     func refreshProjectDelta(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
-        guard let (items, at) = project else { lock.unlock(); return }   // nothing to add to yet: the whole read comes first
+        guard let (items, at) = project else { lock.unlock(); return }
         if Date() < holdUntil { lock.unlock(); return }
         if Date().timeIntervalSince(deltaAt) < gate("projectDelta", base: 20) { lock.unlock(); return }
         if inFlight.contains("projectDelta") { lock.unlock(); return }
         inFlight.insert("projectDelta")
         deltaAt = Date()
-        // From the newest change we know of, less a minute for the search index to catch up.
         let since = (deltaSince ?? items.compactMap(\.updatedAt).max() ?? at).addingTimeInterval(-60)
         lock.unlock()
         let iso = ISO8601DateFormatter()
@@ -591,9 +491,6 @@ final class GitHubResolver {
             if let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
                let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
                let found = ((obj["data"] as? [String: Any])?["search"] as? [String: Any])?["nodes"] as? [[String: Any]] { nodes += found }
-            // A move on the board does not touch the issue's own timestamp, so the search above never
-            // sees one. The items that can still move, everything not shipped, are asked by number,
-            // a hundred at a time, round and round: a move shows within a round.
             let shipped = ConfigStore.shared.current.statuses.shipped
             let live = items.filter { shipped.isEmpty || $0.status != shipped }.sorted { ($0.repo, $0.number) < ($1.repo, $1.number) }
             if !live.isEmpty {
@@ -644,14 +541,12 @@ final class GitHubResolver {
             trace("project delta: \(fresh.count) item(s), \(moved.count) moved")
             if changed {
                 saveBoard(merged, at: Date())
-                // Each moved item's pull requests are what change next: ask them soon.
                 for (it, _) in moved { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { expect("pull#:\(it.repo)#\(n)", for: 120, every: 15) } } }
                 DispatchQueue.main.async { self.onUpdate?() }
             }
         }
     }
 
-    /// Takes a board read, ours or a peer's, when it is fresher than what we hold; notes every move.
     func adoptProject(_ items: [ProjectItem], at: Date) {
         lock.lock()
         guard at > (project?.1 ?? .distantPast) else { lock.unlock(); return }
@@ -666,41 +561,30 @@ final class GitHubResolver {
         if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
-    /// The REST API asked directly and conditionally: an unchanged answer costs nothing, so these are asked often.
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
-    /// Per checkout: each recently updated pull request's last update, as the watch last saw them.
     private var pullsSeen: [String: [Int: String]] = [:]
     private var pullsWatchedAt: [String: Date] = [:]
-    /// Per "root|branch": the newest deploy read there, and how long that repository's deploys usually take.
     private var deployNewest: [String: DeployRun] = [:]
     private var deployUsual: [String: TimeInterval] = [:]
     private var deploysRead: [String: Date] = [:]
-    /// Per "root|branch": when the station first read it. A deploy over before then never flies.
     private var deployWatchedSince: [String: Date] = [:]
-    /// Per "root|branch": the workflows whose file deploys on a push to that branch, read at most hourly.
     private var deployWorkflows: [String: (names: Set<String>, at: Date)] = [:]
     private var pendingDeploys: [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] = []
     private var stateChanges: [(branch: String, pr: PullRequest, previous: PullRequest?)] = []
     private var feeds: [String: ([FeedEvent], Date)] = [:]
-    /// Whether this run has asked GitHub who it is yet; the answer is remembered between runs.
     private var askedWho = false
     private var me: String? = ConfigStore.shared.current.viewerLogin
 
-    /// Open release pull requests for a repository, or nil if not fetched yet.
     func openReleases(repoRoot: String) -> [ReleasePR]? {
         lock.lock(); defer { lock.unlock() }
         return releases[repoRoot]?.0.filter { $0.state == "OPEN" }
     }
 
-    /// Every release pull request a repository has answered with, whatever its state.
     func releases(repoRoot: String) -> [ReleasePR]? {
         lock.lock(); defer { lock.unlock() }
         return releases[repoRoot]?.0
     }
 
-    /// The repository's newest tags, newest first, with when each was made. Read from git rather than the
-    /// API: a tag is pushed to the repository itself, whoever publishes the build and wherever it lands.
-    /// Newest is by date, never by name: v0.9.1 sorts after v0.41 and is years older.
     static func tags(repoRoot: String, run: ([String], String) -> Data?) -> [(name: String, at: Date)] {
         _ = run(["git", "fetch", "-q", "--tags", "origin"], repoRoot)
         guard let out = run(["git", "for-each-ref", "--sort=-creatordate", "--count=8",
@@ -712,13 +596,10 @@ final class GitHubResolver {
             guard parts.count == 2, let at = iso.date(from: String(parts[1])) else { return nil }
             return (String(parts[0]), at)
         }
-        // A version is what a release is named. A tag put on something for another reason — a branch
-        // point kept, a bisect marked — is not a release and must not pass for the newest one.
         let versions = all.filter { $0.name.firstMatch(of: #/^v?\d+(\.\d+)*$/#) != nil }
         return versions.isEmpty ? all : versions
     }
 
-    /// Whether one of the repository's workflows, as the trunk has them, deploys on a push to the trunk.
     private func workflowsDeploy(onPushTo trunk: String, repoRoot: String) -> Bool {
         let ref = run(["git", "rev-parse", "--verify", "-q", "origin/\(trunk)"], cwd: repoRoot) != nil ? "origin/\(trunk)" : "HEAD"
         guard let listing = run(["git", "ls-tree", "--name-only", ref, ".github/workflows/"], cwd: repoRoot),
@@ -730,51 +611,39 @@ final class GitHubResolver {
         return false
     }
 
-    /// The repository's pipeline as its branches say, or the settings' names until they are read, under
-    /// anything set for it by hand.
     func pipeline(repoRoot: String) -> Pipeline { detectedPipeline(repoRoot: repoRoot).overridden(by: Pipeline.override(forRoot: repoRoot)) }
 
-    /// What the repository itself says, before anything set by hand.
     func detectedPipeline(repoRoot: String) -> Pipeline {
         lock.lock(); defer { lock.unlock() }
         return pipelines[repoRoot] ?? .configured
     }
 
-    /// A release merged that the scene has not launched yet: the deck must keep its crates for it.
     func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
 
-    /// Release pull requests that merged since the last poll, each returned once.
     func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
         lock.lock(); defer { lock.unlock() }
         let out = pendingLaunches; pendingLaunches = []; return out
     }
 
-    /// Deploys that started or ended since the last poll, each returned once, with the repository's usual length.
     func takeDeploys() -> [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] {
         lock.lock(); defer { lock.unlock() }
         let out = pendingDeploys; pendingDeploys = []; return out
     }
 
-    /// What is known of a repository's deploys, per branch it deploys from.
     func deploys(repoRoot: String) -> [(branch: String, production: Bool, newest: DeployRun?, usual: TimeInterval)] {
         let branches = deployBranches(pipeline(repoRoot: repoRoot))
         lock.lock(); defer { lock.unlock() }
         return branches.map { ($0.branch, $0.production, deployNewest[repoRoot + "|" + $0.branch], deployUsual[repoRoot + "|" + $0.branch] ?? Deployments.fallback) }
     }
 
-    /// The branches a repository deploys from, and whether each is production: staging and production, or
-    /// the trunk where every merge deploys.
     private func deployBranches(_ p: Pipeline) -> [(branch: String, production: Bool)] {
         if p.shipsOnMerge { return [(p.trunk, true)] }
         return [(p.staging, false), (p.production, true)].filter { !$0.branch.isEmpty }
     }
 
-    /// The deploys GitHub Actions runs on a push to the repository's staging and production branches. Asked on
-    /// the slow cadence; every ten seconds after a release merges, and while one runs.
     func refreshDeploys(repoRoot: String) {
         if frozen { return }
         lock.lock()
-        // Asked directly, an unchanged answer is free: every quarter minute. Through `gh`, on the slow cadence.
         let slow = owners[repoRoot] != nil && http.hasToken ? 15 : interval
         if let at = deploysRead[repoRoot], Date().timeIntervalSince(at) < gate("deploys:" + repoRoot, base: slow) { lock.unlock(); return }
         if inFlight.contains("d:" + repoRoot) || pipelines[repoRoot] == nil { lock.unlock(); return }
@@ -784,7 +653,6 @@ final class GitHubResolver {
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("d:" + repoRoot); deploysRead[repoRoot] = Date(); lock.unlock() }
             var running = false, ended = false
-            // One read of every push's runs, sorted by branch here: GitHub's own branch filter can answer weeks behind.
             var all: [DeployRun]
             lock.lock(); let owner = owners[repoRoot]; lock.unlock()
             if let owner, let answer = http.get("repos/\(owner)/actions/runs?event=push&per_page=60") {
@@ -809,7 +677,6 @@ final class GitHubResolver {
                 deployUsual[key] = usual
                 if let newest = runs.first {
                     deployNewest[key] = newest
-                    // Asked fast while it runs, up to a point: past three times its usual length, the slow pace finds its end.
                     let age = newest.startedAt.map { Date().timeIntervalSince($0) } ?? 0
                     running = running || newest.running && age < max(3 * usual, 1800)
                 }
@@ -820,7 +687,6 @@ final class GitHubResolver {
                 lock.unlock()
                 for c in changes { trace("deploy \(branch) \(c)") }
             }
-            // Fast until the deploy is green or red; then back to the slow pace.
             if running { expect("deploys:" + repoRoot, for: 60, every: 10) }
             else if ended { lock.lock(); expected["deploys:" + repoRoot] = nil; lock.unlock() }
             lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
@@ -828,9 +694,6 @@ final class GitHubResolver {
         }
     }
 
-    /// The doorbell that costs nothing: the repository's most recently updated pull requests, asked every
-    /// ten seconds, conditionally. Any that moved since the last look ring for their own reads at once; a
-    /// release merged rings the releases and the deploys. The first look only notes what is there.
     func watchPulls(repoRoot: String) {
         if frozen { return }
         lock.lock()
@@ -865,8 +728,6 @@ final class GitHubResolver {
         }
     }
 
-    /// Workflows whose file runs on a push to `branch` and deploys: names a GitHub environment or runs a
-    /// deploy tool. By the workflow's own name, which is what a run reports.
     private func deployingWorkflows(branch: String, repoRoot: String) -> Set<String> {
         let key = repoRoot + "|" + branch
         lock.lock(); let cached = deployWorkflows[key]; lock.unlock()
@@ -884,7 +745,6 @@ final class GitHubResolver {
         return names
     }
 
-    /// Task pull requests whose state changed since the last poll, each returned once.
     func takeStateChanges() -> [(branch: String, pr: PullRequest, previous: PullRequest?)] {
         lock.lock(); defer { lock.unlock() }
         let out = stateChanges; stateChanges = []; return out
@@ -892,7 +752,6 @@ final class GitHubResolver {
 
     func myLogin() -> String? { lock.lock(); defer { lock.unlock() }; return me }
 
-    /// True while any GitHub or git call for the repository is running.
     func isBusy(repoRoot: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix(repoRoot + "@") || $0.hasPrefix("c:" + repoRoot) }
@@ -902,13 +761,8 @@ final class GitHubResolver {
         return feeds[repoRoot]?.0
     }
 
-    /// The feed's ETag per repository: an unchanged feed answers 304, which costs nothing.
     private var feedETags: [String: String] = [:]
 
-    /// The repository's activity feed: everyone's pushes, pull requests, reviews and branches. Once a
-    /// minute, the pace GitHub asks for, on a conditional request so a quiet repository costs nothing.
-    /// It is also the doorbell: a pull request opened, merged or closed in it, or a push, has the
-    /// pull request itself asked right away and for a while after.
     func refreshFeed(repoRoot: String) {
         if frozen { return }
         lock.lock()
@@ -920,8 +774,6 @@ final class GitHubResolver {
         trace("ask feed \(repoRoot)")
         queue.async { [self] in
             defer { lock.lock(); inFlight.remove("f:" + repoRoot); lock.unlock() }
-            // Asked once a session even when it is already remembered, so a wrong name puts itself
-            // right within a few seconds rather than lasting until someone clears the config.
             if !askedWho, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
                let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
                 lock.lock(); askedWho = true; let changed = me != login; me = login; lock.unlock()
@@ -940,10 +792,8 @@ final class GitHubResolver {
             for page in 1...2 {
                 let arr: [[String: Any]]
                 if page == 1 {
-                    // The first page carries the ETag: nothing new means a 304 and the answer stands.
                     var args = ["gh", "api", "-i", "repos/\(owner)/events?per_page=100&page=1"]
                     if let etag { args += ["-H", "If-None-Match: \(etag)"] }
-                    // A failed call is not an empty feed: what was known stands until the next ask.
                     guard let (_, raw) = runRaw(args, cwd: repoRoot), let (status, headers, body) = GitHubResolver.split(raw) else { return }
                     if status == 304 {
                         trace("feed \(repoRoot) unchanged (304)")
@@ -1009,7 +859,6 @@ final class GitHubResolver {
             let known = feeds[repoRoot]?.0
             let changed = known != events
             feeds[repoRoot] = (events, Date())
-            // The feed is the only source that still names the author of a pull request after it merged.
             var learned = false
             if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
                 for e in events where !e.isBot {
@@ -1021,7 +870,6 @@ final class GitHubResolver {
             let board = learned ? project : nil
             lock.unlock()
             if let (items, at) = board { saveBoard(items, at: at) }
-            // The doorbell: what the feed has that it did not have last time names what to ask about.
             if let known {
                 let newest = known.map(\.at).max() ?? .distantPast
                 for e in events where e.at > newest {
@@ -1035,7 +883,7 @@ final class GitHubResolver {
                             expect("deploys:" + repoRoot, for: 300, every: 20)
                         }
                     case "push":
-                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 180, every: 30) }   // checks will run
+                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 180, every: 30) }
                     case "release":
                         expect("releases:" + repoRoot, for: 120, every: 15)
                     default: break
@@ -1046,7 +894,6 @@ final class GitHubResolver {
         }
     }
 
-    /// `gh api -i` output split into the status, the headers (lower-cased names) and the body.
     private static func split(_ raw: Data) -> (Int, [String: String], Data)? {
         guard let sep = raw.range(of: Data("\r\n\r\n".utf8)) ?? raw.range(of: Data("\n\n".utf8)) else { return nil }
         guard let head = String(data: raw[..<sep.lowerBound], encoding: .utf8) else { return nil }
@@ -1060,7 +907,6 @@ final class GitHubResolver {
         return (status, headers, raw[sep.upperBound...])
     }
 
-    /// Forgets cache ages for one repository so its next refresh hits GitHub again.
     func invalidate(repoRoot: String) {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
@@ -1068,7 +914,6 @@ final class GitHubResolver {
         if let r = releases[repoRoot] { releases[repoRoot] = (r.0, old) }
     }
 
-    /// Forgets all cache ages so the next refresh calls hit GitHub again.
     func invalidate() {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
@@ -1089,13 +934,10 @@ final class GitHubResolver {
             let countBegan = Date()
             var found: [ReleasePR] = []
             let cfg = ConfigStore.shared.current
-            // Which of the configured branches this repository actually has.
             var remoteBranches = Set<String>()
             if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
                 for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
-            // This repository's own pipeline: its file, else its release history, else its branch names.
-            // History and file are asked at most once an hour; the branch list is read every time.
             lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; lock.unlock()
             let detected: Pipeline
             if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.source != "settings" {
@@ -1111,12 +953,10 @@ final class GitHubResolver {
                         return PipelineDetection.Merge(base: b, head: h)
                     }
                 }
-                // A missing file is a failed call: no file.
                 let file = run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
                     .flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
                 let names = (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch)
                 var read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names)
-                // No releases found: a workflow that deploys on every push to the trunk means every merge ships.
                 if read.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: read.trunk, repoRoot: repoRoot) {
                     read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
                 } else if read.production.isEmpty, file?.ship == nil, !GitHubResolver.tags(repoRoot: repoRoot, run: run).isEmpty {
@@ -1143,25 +983,18 @@ final class GitHubResolver {
                                            production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch))
                 }
             }
-            // A repository that ships by tagging: its newest tag is the release, and it has already
-            // happened. The tag stands in for a merged production release, so a rocket, a log line and
-            // the yard all read it the way they read any other.
             if pipe.shipsOnTag, let newest = GitHubResolver.tags(repoRoot: repoRoot, run: run).first {
                 lock.lock(); let owner = owners[repoRoot]; lock.unlock()
                 let url = owner.map { "https://github.com/\($0)/releases/tag/\(newest.name)" } ?? ""
                 found.append(ReleasePR(number: 0, title: newest.name, base: trunk, head: newest.name, state: "MERGED",
                                        url: url, labels: [], mergedAt: newest.at, production: true, staging: false, tag: true))
             }
-            // Cargo: PRs merged into trunk, split by the last staging and production releases.
             let iso = ISO8601DateFormatter()
             let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
             var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
-            // No release pipeline in this repository: nothing waits for a launch here. A tag is a pipeline
-            // of its own: everything merged since it is waiting for the next one.
             let hasPipeline = (!bases.isEmpty && (lastStaging != nil || lastProduction != nil)) || pipe.shipsOnTag
             let floor = Date().addingTimeInterval(-30 * 24 * 3600)
-            // Exact diff between branches when they all exist: pull request numbers named in the commits.
             func prNumbers(_ range: String) -> [Int]? {
                 guard let out = run(["git", "log", "--format=%s", "--no-merges", "--max-count=300", range], cwd: repoRoot),
                       let text = String(data: out, encoding: .utf8) else { return nil }
@@ -1189,7 +1022,6 @@ final class GitHubResolver {
                     exact = true
                 }
             }
-            // Shipped by tagging: what the trunk has that the newest tag has not is waiting in storage.
             if hasPipeline, !exact, pipe.shipsOnTag, let tag = found.first(where: \.tag)?.head {
                 _ = run(["git", "fetch", "-q", "origin", trunk], cwd: repoRoot)
                 if let storage = prNumbers("\(tag)..origin/\(trunk)") {
@@ -1198,8 +1030,6 @@ final class GitHubResolver {
                     exact = true
                 }
             }
-            // No staging: what the trunk has that production has not is waiting in storage, whatever route the
-            // release takes to production, a release branch included.
             if hasPipeline, !exact, stagingBranch.isEmpty, !productionBranch.isEmpty {
                 _ = run(["git", "fetch", "-q", "origin", trunk, productionBranch], cwd: repoRoot)
                 if let storage = prNumbers("origin/\(productionBranch)..origin/\(trunk)") {
@@ -1209,15 +1039,14 @@ final class GitHubResolver {
                     exact = true
                 }
             }
-            var merged: [Int: String] = [:]   // who merged work into the trunk: whose crate each one is
+            var merged: [Int: String] = [:]
             if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", trunk, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 for o in arr {
                     guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
                     if let login = (o["author"] as? [String: Any])?["login"] as? String { merged[n] = login }
-                    // A bot's merge ships like anyone's: its parcel counts in the yard, grey, and rides the rocket.
                     if m < floor { continue }
-                    if let lp = lastProduction, m <= lp { continue }                 // already shipped
+                    if let lp = lastProduction, m <= lp { continue }
                     if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
                     else { newCargo.deck += 1; newCargo.deckNumbers.append(n) }
                 }
@@ -1229,10 +1058,8 @@ final class GitHubResolver {
             let previous = releases[repoRoot]?.0 ?? []
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
-                expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)   // its deploy starts now
+                expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
             }
-            // A tag nobody has seen before is a launch. The first answer is taken quietly, like every
-            // other source's: whatever was tagged before this run had already shipped.
             if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
                 pendingLaunches.append((repoRoot, tag))
             }
@@ -1256,10 +1083,6 @@ final class GitHubResolver {
 
     // MARK: expecting a change
 
-    /// Something is expected to change soon at one key: a pull request just opened here, a push whose
-    /// checks will run, an issue the board just moved, a merge seen in the feed. For a while that key
-    /// is asked every few seconds instead of on the slow cadence. Keys: "openPRs:<root>",
-    /// "pull:<root>@<branch>", "pull#:<root>#<n>", "releases:<root>", "feed:<root>", "projectDelta".
     private var expected: [String: (until: Date, every: TimeInterval)] = [:]
 
     func expect(_ key: String, for seconds: TimeInterval = 120, every: TimeInterval = 15) {
@@ -1274,7 +1097,6 @@ final class GitHubResolver {
         trace("expect \(key) every \(Int(every))s for \(Int(seconds))s")
     }
 
-    /// How long an answer at this key stays fresh: the burst's pace while one is expected, else the base.
     private func gate(_ key: String, base: TimeInterval) -> TimeInterval {
         if let e = expected[key] {
             if Date() < e.until { return e.every }
@@ -1283,7 +1105,6 @@ final class GitHubResolver {
         return base
     }
 
-    /// What the poller is doing, on stderr, when GITHUB_DIAG is set or `--github-diag` runs.
     static var diag = ProcessInfo.processInfo.environment["GITHUB_DIAG"] != nil
     private func trace(_ text: String) {
         StationLog.write("github", text)
@@ -1303,7 +1124,6 @@ final class GitHubResolver {
         return pulls[repoRoot + "@" + branch]?.0
     }
 
-    /// Whether the branch's pull request has been asked for and answered at all, even with "none".
     func pullAnswered(branch: String, repoRoot: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return pulls[repoRoot + "@" + branch] != nil
@@ -1311,8 +1131,6 @@ final class GitHubResolver {
 
     // MARK: a pull request by number
 
-    /// Pull requests asked for by number, by "root#number": the authority on whether one merged or
-    /// closed once it has left the open list, when the branch it came from is not known for sure.
     private var pullsByNumber: [String: (PullRequest?, Date)] = [:]
 
     func pull(number: Int, repoRoot: String) -> PullRequest? {
@@ -1324,7 +1142,6 @@ final class GitHubResolver {
         return pullsByNumber[repoRoot + "#\(number)"] != nil
     }
 
-    /// Asks GitHub for one pull request by number. A failed call keeps what was known.
     func refresh(pull number: Int, repoRoot: String) {
         if frozen { return }
         let key = repoRoot + "#\(number)"
@@ -1349,26 +1166,21 @@ final class GitHubResolver {
         }
     }
 
-    /// The simulator's answer for a pull request asked by number.
     func inject(pull pr: PullRequest, number: Int, repoRoot: String) {
         guard frozen else { return }
         lock.lock(); pullsByNumber[repoRoot + "#\(number)"] = (pr, Date()); lock.unlock()
     }
 
-    /// Commits on the worktree's branch that are not on the default branch, or nil if unknown yet.
     func commitsAhead(worktree: String) -> Int? {
         lock.lock(); defer { lock.unlock() }
         return commits[worktree]?.0
     }
 
-    /// Changed or new files not yet committed in the worktree.
     func dirtyFiles(worktree: String) -> Int {
         lock.lock(); defer { lock.unlock() }
         return dirty[worktree] ?? 0
     }
 
-    /// Whether the worktree's branch exists on origin, or nil if unknown yet.
-    /// The branch a checkout is on, as last asked.
     func currentBranch(worktree: String) -> String? {
         lock.lock(); defer { lock.unlock() }
         return checkedOut[worktree]
@@ -1388,7 +1200,6 @@ final class GitHubResolver {
         inFlight.insert("c:" + worktree)
         lock.unlock()
         queue.async { [self] in
-            // Work branches off develop where it exists; otherwise main, master, or the remote default.
             var base = "origin/HEAD"
             let trunk = ConfigStore.shared.current.trunkBranch
             for candidate in ["origin/" + trunk, "origin/develop", "origin/main", "origin/master"] where run(["git", "rev-parse", "--verify", "--quiet", candidate], cwd: worktree) != nil {
@@ -1427,7 +1238,6 @@ final class GitHubResolver {
         return owners[repoRoot]
     }
 
-    /// Refreshes stale entries; each branch at most once every two minutes.
     func refresh(branch: String, repoRoot: String) {
         if frozen { return }
         let key = repoRoot + "@" + branch
@@ -1465,7 +1275,7 @@ final class GitHubResolver {
                 return pr
             }
             let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,statusCheckRollup,closingIssuesReferences"
-            var answered = false   // a failed call is not "no pull request": keep what we knew
+            var answered = false
             if let out = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
                 pr = parse(o); answered = true
@@ -1475,7 +1285,7 @@ final class GitHubResolver {
             }
             lock.lock()
             if !answered, let old = pulls[key] {
-                pulls[key] = (old.0, Date().addingTimeInterval(60 - interval))   // try again in a minute
+                pulls[key] = (old.0, Date().addingTimeInterval(60 - interval))
                 inFlight.remove(key)
                 lock.unlock()
                 return
@@ -1483,7 +1293,6 @@ final class GitHubResolver {
             let changed = pulls[key]?.0 != pr
             if changed, let pr, let old = pulls[key] { stateChanges.append((branch, pr, old.0)) }
             pulls[key] = (pr, Date())
-            // Checks still running, or approved and open: this one is about to change; keep asking.
             if let pr, pr.state == "OPEN", pr.checks == "pending" || pr.reviewDecision == "APPROVED" {
                 expected["pull:" + key] = (Date().addingTimeInterval(180), 30)
             }
@@ -1498,8 +1307,6 @@ final class GitHubResolver {
         return data
     }
 
-    /// The command's exit status and output, whatever the status: `gh api -i` exits non-zero on a 304
-    /// and still prints the headers, which is the answer.
     private func runRaw(_ args: [String], cwd: String) -> (Int32, Data)? {
         guard FileManager.default.fileExists(atPath: cwd) else { return nil }
         let p = Process()
@@ -1521,10 +1328,7 @@ final class GitHubResolver {
 
 // MARK: injection
 
-/// What the simulator writes into the resolver in place of an answer from GitHub. Every one of these
-/// is a no-op unless `frozen` is set, so nothing outside the simulator can push facts in here.
 extension GitHubResolver {
-    /// Forgets every cached answer, including the board read that came off disk at launch.
     func simulationReset() {
         guard frozen else { return }
         lock.lock()
@@ -1550,8 +1354,6 @@ extension GitHubResolver {
         notify()
     }
 
-    /// A branch's pull request. `changed` puts it in the queue `takeStateChanges` drains, the way a
-    /// real poll would when the state moved.
     func inject(pull pr: PullRequest?, for branch: String, repoRoot: String, changed: Bool = true) {
         guard frozen else { return }
         lock.lock()
@@ -1574,14 +1376,12 @@ extension GitHubResolver {
         notify()
     }
 
-    /// A repository's pipeline, in place of the one its branches would have said.
     func inject(pipeline p: Pipeline, for repoRoot: String) {
         guard frozen else { return }
         lock.lock(); pipelines[repoRoot] = p; lock.unlock()
         notify()
     }
 
-    /// Release pull requests for a repository. Anything in `merged` is queued for `takeLaunches`.
     func inject(releases rs: [ReleasePR], for repoRoot: String, merged: [ReleasePR] = []) {
         guard frozen else { return }
         lock.lock()
@@ -1591,7 +1391,6 @@ extension GitHubResolver {
         notify()
     }
 
-    /// The board, without the freshness check `adoptProject` applies to a peer's copy.
     func inject(project items: [ProjectItem], at: Date = Date(), quiet: Bool = false) {
         guard frozen else { return }
         lock.lock()

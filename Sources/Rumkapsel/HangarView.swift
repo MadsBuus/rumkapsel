@@ -1,22 +1,12 @@
-// The bay as the scene draws it in a look whose station is in space: a hangar under the hull, the hull's foot
-// along its two sides and across its mouth, and the field in the mouth, a sheet of light that holds the air
-// in and lets the ships through. The field drifts with faint lines while nothing passes, and ripples out from
-// wherever a ship goes through it. Where the ships are is the simulation's (`Ships.swift`); this only watches
-// them cross the mouth's line.
-
 import AppKit
 import SceneKit
 
-/// One station's field.
 final class HangarField {
     let node: SCNNode
     let sheet: SCNNode
-    /// The station's mouth, in world coordinates, and its span along x.
     let z: Double, x0: Double, x1: Double
-    /// Each ship's side of the line last frame, so a crossing is seen once.
     var sides: [ObjectIdentifier: Bool] = [:]
     var ripples: [(node: SCNNode, born: Double)] = []
-    /// When a ship last went through, for the glow it leaves.
     var struck = -10.0
     init(node: SCNNode, sheet: SCNNode, z: Double, x0: Double, x1: Double) {
         self.node = node; self.sheet = sheet; self.z = z; self.x0 = x0; self.x1 = x1
@@ -26,7 +16,6 @@ final class HangarField {
 extension Props {
     static let fieldBlue = NSColor(rgb: (0.45, 0.82, 1.0))
 
-    /// The field's face: faint lines across it, brighter toward its edges where the emitters are.
     static let fieldImage: NSImage = {
         NSImage(size: NSSize(width: 64, height: 256), flipped: false) { r in
             NSColor.black.setFill(); r.fill()
@@ -39,8 +28,6 @@ extension Props {
         }
     }()
 
-    /// The field across a mouth `width` wide and `Station.fieldTop` high, standing on the origin and facing +z:
-    /// the sheet ("sheet") between an emitter bar on the floor and one under the lintel, both lit.
     static func hangarField(width: Double) -> (node: SCNNode, sheet: SCNNode) {
         let n = SCNNode()
         let h = Station.fieldTop
@@ -70,7 +57,6 @@ extension Props {
         return (n, sheet)
     }
 
-    /// A ripple on the field: a square outline the scene grows and fades.
     static func fieldRipple() -> SCNNode {
         let n = SCNNode()
         let m = Props.glowing(fieldBlue, alpha: 0.9)
@@ -86,9 +72,6 @@ extension Props {
 }
 
 extension StationController {
-    /// The bay's hull and its field, built with the static floor: the hull's foot down both sides of the bay
-    /// leaning in over it, and across the mouth with the whole mouth cut out of it and the field standing in the
-    /// opening. Nothing for a look that has no hull.
     func buildHangar(_ station: Station) {
         fields[station.name]?.node.removeFromParentNode()
         fields[station.name] = nil
@@ -117,8 +100,6 @@ extension StationController {
         fields[station.name] = HangarField(node: built.node, sheet: built.sheet, z: mouth, x0: cx - wide / 2, x1: cx + wide / 2)
     }
 
-    /// One frame of every field: its lines drift, it glows a moment where a ship went through, and each ship
-    /// crossing its line sends a ripple out from where it crossed.
     func tickHangars() {
         for (name, field) in fields {
             guard let station = fleet.stations[name] else { continue }

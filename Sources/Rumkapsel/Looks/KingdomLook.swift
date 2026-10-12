@@ -1,11 +1,3 @@
-// Kenney Kingdom: the station as a walled castle on the sea, drawn in the layers of THEMES.md.
-// The curtain wall follows the station's own outline, so the castle's shape is the floor plan's and it gains a
-// stretch whenever an office opens; offices are flagstoned wards under the house's banner and hallways are
-// cobbled. The output is a harbour outside the walls, where a release lies at the quay as a great ship and
-// casts off for the open water; the input a caravan gate on the road, where a new office arrives by wagon. The
-// center is a keep with four turrets. The ground round it is planned in rings: the ditch and its moat against
-// the wall, an open sward, then woods well back, with a hamlet along the road. Built from Kenney's kits (CC0).
-
 import AppKit
 import SceneKit
 
@@ -55,8 +47,6 @@ struct KingdomLook: Look {
     private static var pieces: [String: SetPiece] = [:]
     private static var banners: [String: SCNNode] = [:]
 
-    /// A set piece kept against what it was built from. The floor round the yard and the bay changes rarely,
-    /// and the sampling that draws them is the dearest thing this look does.
     private func kept(_ key: String, _ build: () -> SetPiece?) -> SetPiece? {
         func copy(_ p: SetPiece) -> SetPiece {
             var out = SetPiece()
@@ -69,7 +59,6 @@ struct KingdomLook: Look {
         Self.pieces[key] = made
         return copy(made)
     }
-
 
     func input(_ station: Station) -> SetPiece? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
@@ -84,7 +73,6 @@ struct KingdomLook: Look {
         for n in [site.blob(lock, grow: 0.0, Self.stoneEdge, y: -0.02), site.blob(lock, grow: -0.1, Self.stone, y: 0.001)] { if let n { piece.add(n, as: .airlock) } }
         let xs = station.hangarCells.map(\.x), zs = station.hangarCells.map(\.y)
         let west = Double(xs.min()!), east = Double(xs.max()!), front = Double(zs.min()!), back = Double(zs.max()!)
-        // A jetty out from the quay beside every mooring, where its ship draws up.
         for slot in station.hangarSlots {
             let jetty = SCNNode()
             let deck = SCNNode(geometry: SCNBox(width: 0.3, height: 0.05, length: 1.0, chamferRadius: 0))
@@ -99,7 +87,6 @@ struct KingdomLook: Look {
             jetty.position = v3(site.offset.x + slot.x + 0.55, 0.0, site.offset.y + slot.y)
             piece.add(jetty, as: .bay)
         }
-        // Lanterns at the quay's landward corners, goods beside them, and a lighthouse on rocks off the cove's west side.
         for (x, z) in [(west - 0.3, front - 0.3), (east + 0.3, front - 0.3)] {
             if let lamp = Kit.node("lantern", from: .town) {
                 lamp.scale = SCNVector3(0.34, 0.34, 0.34)
@@ -131,15 +118,13 @@ struct KingdomLook: Look {
         let row = SCNNode()
         for x in spans {
             guard let gate = Kit.node("gate", from: .castle) else { return Classic.airlockFrame(width: width, spans: spans, tint: tint) }
-            gate.eulerAngles.y = .pi / 2   // its face across the doorway
+            gate.eulerAngles.y = .pi / 2
             gate.position = v3(x, 0, 0)
             row.addChildNode(gate)
         }
         return (row, false)
     }
 
-    /// A caravan wagon: a covered cart in the house's colours, drawn by an ox, nose along +x as the scene
-    /// expects, so it rolls in the way it is pointed.
     func shuttle(color: NSColor) -> SCNNode {
         let cart = SCNNode()
         let bed = SCNNode(geometry: SCNBox(width: 1.0, height: 0.22, length: 0.52, chamferRadius: 0.04))
@@ -181,7 +166,6 @@ struct KingdomLook: Look {
         return cart
     }
 
-    /// The moorings are jetties on the quay, not hexagons painted on a floor.
     var drawsBerthHexes: Bool { false }
     var hangarField: Bool { false }
     func hullWall(width: Double, depth: Double, doorway: Double, doorTop: Double) -> SCNNode? { nil }
@@ -189,7 +173,6 @@ struct KingdomLook: Look {
 
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? {
         let s = leg.slot, t = leg.progress
-        // A caravan comes down the road from the south, draws up on its stand, and rolls back out the same way.
         let stand = SIMD2(s.x, s.y), wait = SIMD2(s.x, s.y + 3.6), far = SIMD2(s.x + 1.2, s.y + 17)
         let smooth = t * t * (3 - 2 * t)
         func heading(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Double { atan2(-(b.y - a.y), b.x - a.x) }
@@ -213,7 +196,6 @@ struct KingdomLook: Look {
         return kept("out:\(station.name)|\(signature(cells))|\(deckInUse)") { self.builtOutput(station, deckInUse: deckInUse) }
     }
 
-    /// What a run of cells is, for keeping a piece against: how many and where.
     private func signature(_ cells: [Cell]) -> Int {
         cells.reduce(cells.count) { $0 &* 31 &+ $1.x &* 7 &+ $1.y }
     }
@@ -231,20 +213,13 @@ struct KingdomLook: Look {
         for (area, cells, color) in areas where !cells.isEmpty {
             if let n = site.blob(Set(cells), grow: 0.04, color, y: 0.001, wobble: 0) { piece.add(n, as: area) }
         }
-        // The harbour: the basin cut into the yard where the pad was, and a timber wharf standing out over it
-        // for the whole of it but the outer lane, which is the water a ship lies in.
         let pad = Set(station.hall.padCells)
         if !pad.isEmpty {
             let west = station.hall.padCells.map(\.x).min()!
             let rows = Set(station.hall.padCells.map(\.y))
-            // The whole quay is walked on, so the water lies beyond it rather than under it: the basin comes
-            // up to the west edge, where the wall stands open, and the boards run to the water's edge.
-            // The outer two lanes of the quay are the basin a ship lies in; nobody is sent to stand there,
-            // since a berth is always a tile and a half in from the water.
             let berth = pad.filter { $0.x < west + 2 }, deck = pad.filter { $0.x >= west + 2 }
             if let stone = site.blob(deck, grow: 0.42, Self.stoneEdge, y: -0.006, wobble: 0.05) { piece.add(stone, as: .pad) }
             if let boards = site.blob(deck, grow: 0.3, Self.planks, y: 0.001, wobble: 0) { piece.add(boards, as: .pad) }
-            // Piles under the quay's lip, standing in the water.
             for c in deck.filter({ $0.x == west + 2 }) {
                 for dz in [-0.3, 0.3] {
                     let pile = SCNNode(geometry: SCNBox(width: 0.09, height: 0.42, length: 0.09, chamferRadius: 0))
@@ -259,7 +234,6 @@ struct KingdomLook: Look {
                 seam.position = v3(site.offset.x + Double(west) + 3.6, 0.004, site.offset.y + Double(y) + 0.5)
                 piece.add(seam, as: .pad)
             }
-            // A crane at the quay head, and goods waiting to go aboard.
             if let mid = rows.sorted().dropFirst(rows.count / 2).first {
                 let crane = SCNNode()
                 let mast = SCNNode(geometry: SCNBox(width: 0.12, height: 1.15, length: 0.12, chamferRadius: 0))
@@ -276,7 +250,6 @@ struct KingdomLook: Look {
                 crane.addChildNode(rope)
                 crane.position = v3(site.offset.x + Double(west) + 2.4, 0, site.offset.y + Double(mid))
                 piece.add(crane, as: .pad)
-                // Goods along the quay, sized to the men who carry them, not to the kit.
                 let goods: [(String, Double, SIMD2<Double>)] = [
                     ("barrel", 0.32, SIMD2(1.1, 0.8)), ("barrel", 0.3, SIMD2(1.45, 1.05)), ("crate", 0.3, SIMD2(1.2, -0.9)),
                     ("chest", 0.26, SIMD2(2.4, 1.2)), ("crate", 0.28, SIMD2(3.4, -1.1)), ("barrel", 0.3, SIMD2(4.1, 0.9)),
@@ -290,7 +263,6 @@ struct KingdomLook: Look {
                     piece.add(n, as: .pad)
                 }
             }
-            // Bollards along the wharf's outer edge, and a crate or two waiting to go aboard.
             for c in deck.filter({ $0.x == west + 2 }) {
                 let bollard = SCNNode(geometry: SCNBox(width: 0.11, height: 0.2, length: 0.11, chamferRadius: 0.02))
                 bollard.geometry!.firstMaterial = lit(Self.wood)
@@ -298,7 +270,6 @@ struct KingdomLook: Look {
                 piece.add(bollard, as: .pad)
             }
         }
-        // Boards across the granary and earth ruts across the market, so neither reads as a poured slab.
         for (cells, colour, step) in [(station.hall.storageCells, Self.wood.darker(0.06), 1.0), (station.hall.deckCells, Self.dirtEdge, 1.0)] {
             guard !cells.isEmpty else { continue }
             let x0 = cells.map(\.x).min()!, x1 = cells.map(\.x).max()!
@@ -310,8 +281,6 @@ struct KingdomLook: Look {
                 piece.add(run, as: cells.first.map { station.hall.storageCells.contains($0) ? .storage : .deck } ?? .storage)
             }
         }
-        // A palisade round the yard where it meets open ground, left open at the caravan yard's gate onto the
-        // road, at the decon hatch, and wherever floor runs on.
         let floor = Set(station.allCells)
         let hatch = station.hall.deconHatch.0
         let fence = SCNNode()
@@ -336,7 +305,6 @@ struct KingdomLook: Look {
             }
         }
         piece.add(fence.flattenedClone(), as: .pad)
-        // Hay and barrels by the caravan yard's gate onto the road, and a lantern at the road's start.
         if let start = site.road.first {
             let props: [(String, Kit.Pack, Double, SIMD2<Double>)] = [("crate", .pirate, 0.3, SIMD2(0.3, -1.6)), ("barrel", .pirate, 0.3, SIMD2(0.6, 1.8)),
                                                                      ("barrel", .pirate, 0.28, SIMD2(0.2, 2.1)), ("lantern", .town, 0.34, SIMD2(-0.2, -1.2))]
@@ -358,11 +326,6 @@ struct KingdomLook: Look {
         return (n, 1.0)
     }
 
-    /// A release as a great ship lying alongside the quay: a deep clinkered hull with a raised bulwark, a
-    /// stern castle, a single square sail in the house's colours and a pennant at the masthead. The hull is
-    /// carried out past the boards and set down into the water, with its wash round it, so it reads as
-    /// floating rather than standing on the quay; the gangway and the hatch stay on the boards, where a
-    /// minion walks up to it.
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         let ship = SCNNode()
         let moored = SCNNode()
@@ -373,7 +336,6 @@ struct KingdomLook: Look {
             n.position = v3(at.x, at.y, at.z)
             return n
         }
-        // The wash the hull sits in, so its foot is water rather than a cut-off box on the boards.
         let wash = plank(length + 0.5, 0.02, beam + 0.42, Self.foam, SIMD3(0, 0.012, 0), chamfer: 0.2)
         wash.opacity = 0.75
         moored.addChildNode(wash)
@@ -381,7 +343,6 @@ struct KingdomLook: Look {
         let bow = plank(beam * 0.78, depth, beam * 0.78, Self.wood, SIMD3(-length / 2, depth / 2 - 0.08, 0))
         bow.eulerAngles.y = .pi / 4
         moored.addChildNode(bow)
-        // The bulwark: the strake a hull shows above the water, in the house's colour.
         moored.addChildNode(plank(length + 0.05, 0.12, beam + 0.05, color.darker(0.12), SIMD3(0, depth - 0.02, 0)))
         moored.addChildNode(plank(length - 0.14, 0.04, beam - 0.16, Self.planks, SIMD3(0, depth + 0.02, 0), chamfer: 0))
         moored.addChildNode(plank(0.5, 0.34, beam - 0.1, Self.wood.lighter(0.1), SIMD3(length / 2 - 0.26, depth + 0.16, 0)))
@@ -399,10 +360,8 @@ struct KingdomLook: Look {
                 moored.addChildNode(box)
             }
         }
-        // Out past the boards, and set down so the waterline is at the quay's foot.
         moored.position = v3(-2.1, -0.06, 0)
         ship.addChildNode(moored)
-        // The gangway from the boards down to the stern, and the hatch the crates go in by.
         let gang = plank(1.5, 0.05, 0.3, Self.planks, SIMD3(-1.0, 0.16, 0), chamfer: 0)
         gang.eulerAngles.z = 0.09
         ship.addChildNode(gang)
@@ -417,8 +376,6 @@ struct KingdomLook: Look {
         return ship
     }
 
-    /// The ship casts off, gathers way and stands out to sea, fading as it goes. Its bow already points that
-    /// way, so it leaves forwards.
     func launch(_ rocket: SCNNode) -> SCNAction {
         rocket.childNode(withName: "flame", recursively: true)?.runAction(.fadeIn(duration: 1.2))
         let cast = SCNAction.moveBy(x: -1.2, y: 0, z: 0, duration: 3.5)
@@ -429,9 +386,6 @@ struct KingdomLook: Look {
 
     // MARK: the center
 
-    /// The keep: a square donjon on a stone motte, four corner turrets standing above its battlements, a
-    /// great door at its foot and the king's banner at the top. It is the first thing the eye finds, so it is
-    /// built rather than borrowed.
     func monolith() -> SCNNode {
         let n = SCNNode()
         let block = 1.35, tall = 1.75
@@ -447,7 +401,6 @@ struct KingdomLook: Look {
         shaft.geometry!.firstMaterial = lit(Self.wallStone)
         shaft.position = v3(0, 0.22 + tall / 2, 0)
         n.addChildNode(shaft)
-        // A string course, then the battlements the wall-walk runs behind.
         let course = SCNNode(geometry: SCNBox(width: block + 0.12, height: 0.08, length: block + 0.12, chamferRadius: 0))
         course.geometry!.firstMaterial = lit(Self.wallShade)
         course.position = v3(0, 0.22 + tall, 0)
@@ -464,7 +417,6 @@ struct KingdomLook: Look {
                 n.addChildNode(merlon)
             }
         }
-        // Four turrets, each carried a little past the keep's own top.
         for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
             let turret = SCNNode()
             let h = tall + 0.62
@@ -487,7 +439,6 @@ struct KingdomLook: Look {
             turret.position = v3(sx * block / 2, 0.22, sz * block / 2)
             n.addChildNode(turret)
         }
-        // Tall windows on every face, and the great door at the foot.
         for side in 0..<4 {
             let a = Double(side) * .pi / 2
             for k in [-0.3, 0.3] {
@@ -521,18 +472,11 @@ struct KingdomLook: Look {
     static let wallStone = NSColor(rgb: (0.72, 0.70, 0.66))
     static let wallShade = NSColor(rgb: (0.57, 0.55, 0.52))
     static let wallCap = NSColor(rgb: (0.80, 0.78, 0.74))
-    /// A house's wall inside the castle: limewashed daub between its timbers, not dressed stone.
     static let plaster = NSColor(rgb: (0.87, 0.83, 0.74))
-    /// A wall stands about a villager's height: enough to read as a castle from above, low enough that the
-    /// floor, its signs and whoever is walking behind it are all still visible.
     static let wallHeight = 0.5
     static let towerHeight = 1.05
 
-    /// The curtain wall, run along the station's own outline, so the castle's shape is the floor plan's and it
-    /// grows a new stretch whenever an office opens. Towers stand only at corners well apart from one another,
-    /// and the wall opens at the gate and at the road out of the caravan yard.
     func dress(station: Station) -> [SCNNode] {
-        // The quay lies outside the walls, as a harbour does, reached by a water gate; the bay is outside too.
         let inside = Set(station.allCells).subtracting(station.hangarCells).subtracting(station.hall.padCells)
         guard !inside.isEmpty else { return [] }
         let key = "\(station.name)|\(inside.count)|\(inside.map { $0.x &* 31 &+ $0.y }.reduce(0, &+))"
@@ -547,13 +491,11 @@ struct KingdomLook: Look {
                 open.insert("\(c.x),\(c.y)|\(d.0),\(d.1)")
             }
         }
-        // The water gate: the wall stands open where the quay meets it.
         for c in station.hall.padCells {
             for d in [(1, 0), (0, 1), (0, -1)] where inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
                 open.insert("\(c.x + d.0),\(c.y + d.1)|\(-d.0),\(-d.1)")
             }
         }
-        // Every doorway the scene walks through stays open, and no tower stands on one.
         var doors = Set<Cell>()
         for (a, b) in station.yardDoorways { leave(a, b); doors.insert(a); doors.insert(b) }
         for room in station.rooms.values {
@@ -561,8 +503,6 @@ struct KingdomLook: Look {
             leave(d, o); doors.insert(d); doors.insert(o)
         }
 
-        // The curtain and each ward's wall are kept apart, so opening an office builds one wall rather than
-        // every wall on the station. Merging thousands of stones was the whole of a second-long redraw.
         let outer = Self.walls["outer:\(station.name)|\(signature(Array(inside)))"] ?? {
             let made = Self.merge(curtain(over: inside, gaps: open, clear: doors, merged: false))
             Self.walls = Self.walls.filter { !$0.key.hasPrefix("outer:" + station.name + "|") }
@@ -587,14 +527,9 @@ struct KingdomLook: Look {
         return [built.clone()]
     }
 
-    /// The curtain wall over a set of cells: a stretch of rampart on every edge that faces open ground, with
-    /// towers at corners well apart. A straight run is one stone, not one a tile, so a long wall is cheap and
-    /// has no seams down it.
     func curtain(over inside: Set<Cell>, gaps: Set<String> = [], clear: Set<Cell> = [], merged: Bool = true,
                  height: Double? = nil, towers: Bool = true) -> SCNNode {
         let wall = SCNNode()
-        // Every boundary edge, gathered by which way it faces and which line it lies on, so the ones in a row
-        // can be drawn as one stretch.
         var runs: [String: [Int]] = [:]
         var corners: [Cell] = []
         for c in inside {
@@ -633,7 +568,6 @@ struct KingdomLook: Look {
         return merged ? Self.merge(wall) : wall
     }
 
-    /// Runs of consecutive numbers, as first and last of each.
     private static func stretches(_ sorted: [Int]) -> [(Int, Int)] {
         var out: [(Int, Int)] = []
         var from = sorted.first ?? 0, prev = from
@@ -645,8 +579,6 @@ struct KingdomLook: Look {
         return out
     }
 
-    /// Everything under a node as one node per material. `flattenedClone` loses where the pieces stand when
-    /// they were never in a scene, so the stones are baked into their own geometry here instead.
     private static func merge(_ node: SCNNode) -> SCNNode {
         let holder = SCNNode()
         var byColor: [String: [SCNNode]] = [:]
@@ -671,7 +603,6 @@ struct KingdomLook: Look {
 
     private static var walls: [String: SCNNode] = [:]
 
-    /// A stretch of curtain wall: a stone band on a shadowed foot, with merlons along its top.
     private static func rampart(at p: SIMD2<Double>, length: Double, along northSouth: Bool, height: Double = wallHeight,
                                 battlements: Bool = true, stone: NSColor = wallStone) -> SCNNode {
         let n = SCNNode()
@@ -707,7 +638,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// A drum tower: a faceted stone shaft with a battlemented head, taller at a gate.
     private static func tower(at p: SIMD2<Double>, gate: Bool = false) -> SCNNode {
         let n = SCNNode()
         let h = gate ? towerHeight + 0.22 : towerHeight, r = gate ? 0.34 : 0.3
@@ -737,7 +667,6 @@ struct KingdomLook: Look {
 
     // MARK: the idle areas
 
-    /// A tavern fire: the fire where the table stood, logs to sit on where the couches were, barrels in the corners.
     func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         let o = station.offset
@@ -765,8 +694,6 @@ struct KingdomLook: Look {
         return f
     }
 
-    /// A washing corner: a bucket turned over to sit on where the bowl was, a wooden tub under the spout,
-    /// the pipes in timber, and a linen cloth on the rail.
     func furnishBath(_ bath: Room, in station: Station) -> Furnishing {
         var f = Classic.bath(bath, in: station)
         rustic(f.props)
@@ -790,8 +717,6 @@ struct KingdomLook: Look {
         return f
     }
 
-    /// A training yard: a hay bale where the treadmill was, a log to lift on timber uprights, a straw sack on a
-    /// post, all in timber and straw.
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing {
         var f = Classic.gym(gym, in: station)
         rustic(f.fixtures)
@@ -818,7 +743,6 @@ struct KingdomLook: Look {
         return f
     }
 
-    /// Straw bedrolls on the floor; above, a timber bunk with a bedroll on it.
     func bed(level: Int) -> SCNNode {
         guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(level: level, floorTop: floorTop) }
         roll.scale = SCNVector3(0.85, 0.85, 0.85)
@@ -838,15 +762,10 @@ struct KingdomLook: Look {
 
     // MARK: work in the village
 
-    /// No welding at a field: working a message is digging, hoeing, reaping and looking it over by lantern.
     var workSparks: Bool { false }
 
-    /// Village tools for the station's: a hoe to swing for the hammer, a spade for the goggles, a sickle-like axe
-    /// for the scanner, a hanging lantern for the torch, a scroll for the tablet, a ledger for the clipboard and a
-    /// wooden staff for the wand.
     func tool(_ tool: Minion.Tool, height h: Double, depth d: Double) -> SCNNode? {
         let n = SCNNode()
-        /// A kit tool lying along the body's facing: its handle's foot at the grip, its head outward.
         func held(_ name: String, _ scale: Double) -> SCNNode? {
             guard let m = Kit.node(name, from: .survival) else { return nil }
             m.scale = SCNVector3(scale, scale, scale)
@@ -866,7 +785,7 @@ struct KingdomLook: Look {
             guard let spade = held("tool-shovel", 1.3) else { return nil }
             let grip = SCNNode()
             grip.position = v3(0.08, h * 0.34, d / 2 + 0.04)
-            grip.eulerAngles.x = 0.7   // blade down into the soil ahead
+            grip.eulerAngles.x = 0.7
             grip.addChildNode(spade)
             n.addChildNode(grip)
         case .scanner:
@@ -896,8 +815,6 @@ struct KingdomLook: Look {
         case .tablet:
             let scroll = SCNNode(geometry: SCNBox(width: 0.17, height: 0.006, length: 0.12, chamferRadius: 0))
             scroll.geometry!.firstMaterial = flat(NSColor(rgb: (0.95, 0.9, 0.76)))
-            // The same hang as the classic slab: the near edge tucked at the belly and the far edge lifted,
-            // so the writing faces back at the reader. A positive pitch drops the far edge and reads wrong.
             scroll.position = v3(0, h * 0.26, d / 2 + 0.09)
             scroll.eulerAngles.x = -0.35
             for z in [-0.065, 0.065] {
@@ -954,7 +871,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// A message as a sheaf of wheat tied with a ribbon in the office's colour.
     func message(color: NSColor, floor: NSColor) -> SCNNode? {
         guard let wheat = Kit.node("crops_wheatStageB", from: .nature, tint: Self.cropTint) else { return nil }
         let n = SCNNode()
@@ -967,7 +883,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// Recolour classic furniture: its greys become timber, its colours straw.
     private func rustic(_ nodes: [SCNNode]) {
         for root in nodes {
             for n in [root] + root.childNodes(passingTest: { _, _ in true }) {
@@ -1001,14 +916,12 @@ struct KingdomLook: Look {
         tile.childNode(withName: "patch", recursively: true)?.geometry?.firstMaterial?.diffuse.contents = Self.ward(color)
     }
 
-    /// A soft-edged patch over the tile that runs on into its owner's neighbours: floorboards laid in a room,
-    /// cobbles out on the street.
     private func patch(_ tile: Tile, inset: Double, round: Double, _ color: NSColor, boards: Bool) -> SCNNode? {
         guard let shape = Shapes.patch(same: tile.same, inset: inset, round: round)?.copy() as? SCNGeometry,
               let ground = Shapes.node(shape, color, y: 0.002) else { return nil }
         ground.name = "patch"
         let holder = SCNNode()
-        holder.eulerAngles.x = .pi / 2   // upright again under a plane tilted flat
+        holder.eulerAngles.x = .pi / 2
         holder.addChildNode(ground)
         if let grain = boards ? floorboards(tile) : cobbles(tile) { holder.addChildNode(grain) }
         return holder
@@ -1016,16 +929,12 @@ struct KingdomLook: Look {
 
     private static var paving: [String: SCNNode] = [:]
 
-    /// A ward's paving: the repo's colour worked into stone rather than laid on it, so a courtyard still reads
-    /// as whose it is from across the map while looking like a paved yard up close.
     static func ward(_ color: NSColor) -> NSColor {
         stone.mixed(with: color, 0.42).darker(0.02)
     }
 
-    /// Floorboards laid across a room: long boards with a joint between them, turned with the room so a ward
-    /// reads as the inside of a house rather than as a slab. Built once a pattern and shared.
     private func floorboards(_ tile: Tile) -> SCNNode? {
-        let along = tile.same & 0b0000_0101 != 0 ? 0 : 1   // boards run the way the room is long
+        let along = tile.same & 0b0000_0101 != 0 ? 0 : 1
         let key = "b\(along)"
         if let built = Self.paving[key] { return built.clone() }
         let n = SCNNode()
@@ -1039,7 +948,6 @@ struct KingdomLook: Look {
             line.position = v3(along == 0 ? 0 : t, 0.005, along == 0 ? t : 0)
             n.addChildNode(line)
         }
-        // The short ends of the boards, staggered so it does not read as one sheet.
         for k in [-1, 1] {
             let end = SCNNode(geometry: SCNBox(width: along == 0 ? 0.02 : 0.24, height: 0.003,
                                                length: along == 0 ? 0.24 : 0.02, chamferRadius: 0))
@@ -1054,7 +962,6 @@ struct KingdomLook: Look {
         return built.clone()
     }
 
-    /// Cobbles on the street: a scatter of small stones, keyed to nothing so one tile is every tile.
     private func cobbles(_ tile: Tile) -> SCNNode? {
         if let built = Self.paving["cobble"] { return built.clone() }
         let n = SCNNode()
@@ -1072,13 +979,8 @@ struct KingdomLook: Look {
         return built.clone()
     }
 
-    /// Nothing is lettered on a castle's ground: a ward is known by the banner at its wall.
     var writesOnFloor: Bool { false }
 
-    /// The house's banner at the ward's outer wall: a pole, a long cloth in the repo's colour, the issue
-    /// number across it and whoever is working there under it. A name will not fit on a banner and a number
-    /// will, so the number is what is flown; the banner carries the office's own name for the pointer, so it
-    /// is hovered and clicked like the ward it stands over.
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
         guard let wall = Dressing.officeWall(room, in: station) else { return nil }
         let key = "\(sign.number ?? -1)|\(sign.who ?? "")|\(NSColor(room.color).description)"
@@ -1090,7 +992,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// The cloth and its lettering, which is text and therefore the dearest thing on it.
     private func built(banner room: Room, sign: OfficeSign) -> SCNNode {
         let n = SCNNode()
         let cloth = NSColor(room.color)
@@ -1112,7 +1013,6 @@ struct KingdomLook: Look {
         n.addChildNode(hem)
         let c = cloth.usingColorSpace(.deviceRGB) ?? .gray
         let ink = c.brightnessComponent > 0.62 ? NSColor(rgb: (0.15, 0.13, 0.11)) : NSColor(rgb: (0.97, 0.95, 0.9))
-        // Standing the sign upright undoes the turn that lays it on the floor, so it reads off the cloth.
         func sewn(_ text: String, size: Double, y: Double) {
             let made = floorSign(text, color: ink, size: size)
             made.node.eulerAngles.x = .pi / 2
@@ -1124,8 +1024,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// A crate of work as a bound chest: boards, iron straps and a lid painted in the house's colour. No
-    /// lamps on it — a castle has none to put there.
     func crate(color: NSColor) -> SCNNode? {
         let n = SCNNode()
         let body = SCNNode(geometry: SCNBox(width: 0.46, height: 0.2, length: 0.34, chamferRadius: 0.02))
@@ -1149,7 +1047,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// A release not yet cleared is roped off with pennants, not taped.
     func hold(tall: Bool) -> SCNNode? {
         let n = SCNNode()
         let radius = 0.78
@@ -1182,7 +1079,6 @@ struct KingdomLook: Look {
     // MARK: people
     // MARK: people
 
-    /// Earthy dyes a tunic could be made in, so a crowd reads as a village and not as a paint chart.
     static let tunics: [NSColor] = [
         NSColor(rgb: (0.55, 0.28, 0.24)), NSColor(rgb: (0.35, 0.42, 0.55)), NSColor(rgb: (0.45, 0.47, 0.32)),
         NSColor(rgb: (0.62, 0.5, 0.28)), NSColor(rgb: (0.4, 0.34, 0.42)), NSColor(rgb: (0.3, 0.45, 0.4)),
@@ -1193,9 +1089,6 @@ struct KingdomLook: Look {
         NSColor(rgb: (0.93, 0.8, 0.68)), NSColor(rgb: (0.42, 0.3, 0.24)),
     ]
 
-    /// A figure of the castle, built rather than borrowed: a hooded villager in a dyed tunic, or a guard in
-    /// mail with a helm for the crew. The kit's own people wear suits and carry satchels, which no castle
-    /// ever did. Picked by the minion's id, so a session is the same person every time it is seen.
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? {
         var h: UInt64 = 0xcbf2_9ce4_8422_2325
         for b in id.utf8 { h = (h ^ UInt64(b)) &* 0x100_0000_01b3 }
@@ -1212,7 +1105,6 @@ struct KingdomLook: Look {
         let hose = NSColor(rgb: (0.32, 0.28, 0.24))
         for side in [-1.0, 1.0] { part(0.075, 0.2, 0.09, hose, 0.1, side * 0.055) }
         for side in [-1.0, 1.0] { part(0.09, 0.05, 0.13, Self.wood.darker(0.25), 0.025, side * 0.055, 0.01) }
-        // The tunic, belted, with a skirt a little wider than the chest.
         part(0.26, 0.22, 0.17, tunic, 0.3)
         part(0.23, 0.2, 0.15, tunic.lighter(0.06), 0.5)
         part(0.245, 0.04, 0.16, Self.wood.darker(0.1), 0.4)
@@ -1220,7 +1112,6 @@ struct KingdomLook: Look {
         for side in [-1.0, 1.0] { part(0.055, 0.05, 0.075, skin, 0.38, side * 0.14) }
         part(0.19, 0.17, 0.17, skin, 0.68)
         if crew {
-            // A guard: a mail coif, a helm with a nasal, and a surcoat band.
             part(0.21, 0.1, 0.19, NSColor(rgb: (0.6, 0.61, 0.64)), 0.62)
             part(0.21, 0.09, 0.2, NSColor(rgb: (0.72, 0.73, 0.76)), 0.79)
             part(0.2, 0.05, 0.21, NSColor(rgb: (0.66, 0.67, 0.7)), 0.73)
@@ -1234,13 +1125,11 @@ struct KingdomLook: Look {
             part(0.2, 0.07, 0.18, hair, 0.79)
             part(0.2, 0.12, 0.06, hair, 0.72, 0, -0.07)
         }
-        // Eyes, so it reads as a person at a glance rather than a peg.
         for side in [-1.0, 1.0] { part(0.03, 0.035, 0.02, NSColor(rgb: (0.16, 0.13, 0.12)), 0.7, side * 0.045, 0.088, chamfer: 0) }
         pose(figure: n, height: height, torso: height)
         return n
     }
 
-    /// Scaled to the box's height by its own; on a seat it shortens, feet at the box's new foot.
     func pose(figure: SCNNode, height: Double, torso: Double) {
         let s = height / max(0.1, Double(figure.boundingBox.max.y))
         figure.scale = SCNVector3(s, s * torso / height, s)
@@ -1248,24 +1137,15 @@ struct KingdomLook: Look {
     }
 }
 
-/// One station's village as the Kingdom lays it out, in the station's own cells: where its floor is, where the
-/// coast runs and curls into the cove round the bay, and where the road leaves.
 private struct Site {
     let station: Station
     let offset: SIMD2<Double>
-    /// Every floor cell but the airlock's, the bay's and the quay's: the ground the castle stands on. The
-    /// quay is left out so the water can come right up to it rather than being pushed off by dry land.
     let floor: Set<Cell>
     let bayCenter: SIMD2<Double>
-    /// The line the coast wanders about, in x: just past the quay's outer edge, so the sea lies beyond the
-    /// harbour and a release sails out of it. Everything landward of it is the castle's ground.
     let shoreline: Double
-    /// The middle of the quay, which the harbour basin is scooped out around.
     let quay: SIMD2<Double>
-    /// The road from the caravan yard's west edge out of the world.
     let road: [SIMD2<Double>]
     let lo: SIMD2<Double>, hi: SIMD2<Double>
-    /// Cells within reach of the floor and of the road: anywhere else is simply far from both.
     private let nearFloor: Set<Cell>, nearRoad: Set<Cell>
 
     init(_ st: Station) {
@@ -1275,8 +1155,6 @@ private struct Site {
         bayCenter = st.hasHangar ? st.hangarCenter : SIMD2(0, Double(st.bounds.max.y) + 12)
         quay = st.hasPad ? st.hall.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
         shoreline = (st.hasPad ? Double(st.hall.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) + 1.55
-        // The landscape is laid out to a coarse grid, so a castle that grows a ward at a time crosses a
-        // boundary now and then rather than moving the whole world on every office.
         let b = st.bounds, step = 8.0
         func down(_ v: Int) -> Double { (Double(v) / step).rounded(.down) * step }
         func up(_ v: Int) -> Double { (Double(v) / step).rounded(.up) * step }
@@ -1301,11 +1179,8 @@ private struct Site {
         nearRoad = near
     }
 
-    /// How many tiles out from the nearest castle in the fleet a point is: what the ground round it is
-    /// planned by. `toFloor` measures finely but only three tiles out, and only this station's own floor.
     func out(_ p: SIMD2<Double>) -> Double { Realm.out(p + offset) }
 
-    /// How far outside the nearest floor cell's square a point is, negative inside; 99 when none is within three cells.
     func toFloor(_ p: SIMD2<Double>) -> Double {
         nearFloor.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) ? Site.toCells(p, floor) : 99
     }
@@ -1324,8 +1199,6 @@ private struct Site {
         return best
     }
 
-    /// How far inside a set of cells a point is, taken as one shape: positive inside, negative outside, so the
-    /// seams between two of its cells are inside too.
     static func inside(_ p: SIMD2<Double>, _ cells: Set<Cell>) -> Double {
         let here = Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))
         guard cells.contains(here) else { return -toCells(p, cells) }
@@ -1352,17 +1225,13 @@ private struct Site {
         return best
     }
 
-    /// How far onto land a point is: positive on land, negative at sea. The coast wanders about the shoreline
-    /// and curls round the cove; the village's own floor always stands on land.
     func land(_ p: SIMD2<Double>) -> Double {
         let coast = p.x - (shoreline + (Noise.fbm(SIMD2(0.5, p.y), scale: 9, seed: 3) - 0.5) * 4.4)
-        // The basin: open water scooped in front of the quay so a ship has somewhere to lie and to sail out by.
         let d = p - SIMD2(shoreline - 4, quay.y), len = max(0.001, simd_length(d))
         let basin = len - (10 + (Noise.value(d / len * 1.5 + SIMD2(20, 20)) - 0.5) * 3)
         return max(min(coast, basin), 1.2 - toFloor(p))
     }
 
-    /// A soft-edged shape over some of the station's cells, `grow` past their squares and wobbling a little, in the world.
     func blob(_ cells: Set<Cell>, grow: Double, _ color: NSColor, y: Double, wobble: Double = 0.16) -> SCNNode? {
         guard let x0 = cells.map(\.x).min(), let x1 = cells.map(\.x).max(), let z0 = cells.map(\.y).min(), let z1 = cells.map(\.y).max() else { return nil }
         let geometry = Shapes.fill(from: SIMD2(Double(x0) - 1, Double(z0) - 1), to: SIMD2(Double(x1) + 1, Double(z1) + 1), step: 0.1) { p in
@@ -1374,21 +1243,16 @@ private struct Site {
         return n
     }
 
-    /// The road out, sampled every few steps from where it leaves the ditch: where a hamlet would stand.
     func road2() -> [SIMD2<Double>] {
         stride(from: 6, to: road.count, by: 5).map { road[$0] }
     }
 
-    /// The ditch round the wall, which is the one part of the ground that must follow a new ward. It is
-    /// sampled only where the floor is, so it costs a fraction of the landscape.
     func ditch(into root: SCNNode) {
         func band(_ grid: Shapes.Grid, _ level: Double, _ color: NSColor, _ y: Double) {
             guard let n = Shapes.node(Shapes.fill(grid, level: level), color, y: y) else { return }
             n.position.x += offset.x; n.position.z += offset.y
             root.addChildNode(n)
         }
-        // The moat: a ring of water in the ditch outside the wall, cut where the causeway and the road cross it.
-        // Only the ground within a few tiles of the wall can hold a ditch, so only that is sampled.
         let b = station.bounds
         let near = SIMD2(Double(b.min.x) - 5, Double(b.min.y) - 5), far = SIMD2(Double(b.max.x) + 5, Double(b.max.y) + 5)
         let cut = Shapes.sample(from: near, to: far, step: 0.25) { p in
@@ -1400,13 +1264,10 @@ private struct Site {
         }
         band(cut, -0.25, KingdomLook.dirtEdge.darker(0.1), -0.066)
         band(cut, 0, KingdomLook.water.darker(0.18), -0.064)
-
     }
 
     private static var worlds: [String: SCNNode] = [:]
 
-    /// The world round the station: sea, shallows, foam, beach, meadow, road, woods, rocks and cottages. Built
-    /// once for a floor and kept, so a redraw that did not move the floor does not rebuild it.
     func world() -> SCNNode {
         let key = "\(station.name)|\(lo.x),\(lo.y),\(hi.x),\(hi.y)|\(offset.x),\(offset.y)"
         if let w = Site.worlds[key] { return w }
@@ -1419,7 +1280,6 @@ private struct Site {
         func layer(_ grid: Shapes.Grid, _ level: Double, _ color: NSColor, _ y: Double) {
             if let n = Shapes.node(Shapes.fill(grid, level: level), color, y: y) { w.addChildNode(n) }
         }
-        // The land sampled once; the sea's bands, the beach and the grass are cut from it at rising levels.
         let ground = Shapes.sample(from: lo, to: hi, step: 0.4) { land($0) }
         layer(ground, -2.8, KingdomLook.water, -0.095)
         layer(ground, -1.2, KingdomLook.shallows, -0.09)
@@ -1438,8 +1298,6 @@ private struct Site {
             n.position = v3(p.x, -0.07, p.y)
             props.addChildNode(n)
         }
-        // The land round a castle is planned in rings, not scattered: bare ground and the ditch against the
-        // wall, then an open sward nothing is built on, then outliers, and only well back from it the woods.
         let sward = 7.5, edge = 15.0
         let forest = ["tree_pineTallA_detailed", "tree_pineTallC_detailed", "tree_pineRoundA", "tree_default_dark", "tree_oak_dark", "tree_fat_darkh", "tree_detailed_dark"]
         let tufts = ["grass_large", "grass", "plant_bush", "flower_yellowA", "flower_redA"]
@@ -1451,7 +1309,6 @@ private struct Site {
                 let clear = out(p), road = toRoad(p)
                 guard ground > 0.05, road > 1.3, clear > 3.5 else { continue }
                 if clear > sward, ground > 1.4 {
-                    // How much wood stands here: none at the sward's edge, all of it once well back.
                     let depth = min(1, (clear - sward) / (edge - sward))
                     let density = Noise.fbm(p, scale: 11, seed: 11) * depth
                     if density > 0.54 {
@@ -1461,13 +1318,11 @@ private struct Site {
                         continue
                     }
                 }
-                // A haystack or a woodpile on the open sward, where a castle's stores would stand.
                 if clear > 4, clear < 9, ground > 1.6, h3 > 0.955 {
                     put(h1 < 0.5 ? "log" : "rock_tallA", .nature, p, scale: h1 < 0.5 ? 0.8 : 0.4,
                         yaw: h2 * 6.28, tint: KingdomLook.groundTint)
                     continue
                 }
-                // Rocks along the beach, tufts and flowers on the open sward.
                 if ground > 0.05, ground < 0.7, h3 > 0.88, simd_distance(p, bayCenter) > 6.5 {
                     put(h1 < 0.5 ? "rock_largeA" : "rock_tallA", .nature, p, scale: 0.3 + h2 * 0.25, yaw: h1 * 6.28, tint: KingdomLook.groundTint)
                 } else if ground > 1, h3 > 0.87 {
@@ -1475,7 +1330,6 @@ private struct Site {
                 }
             }
         }
-        // A hamlet strung along the road where it leaves the castle, rather than houses dropped about the map.
         for (i, at) in road2().enumerated() {
             guard Noise.hash(i * 7, 3, seed: 31) > 0.42 else { continue }
             let side: Double = Noise.hash(i * 7, 5, seed: 32) < 0.5 ? -1 : 1
@@ -1493,10 +1347,6 @@ private struct Site {
     }
 }
 
-
-/// The whole fleet's ground, surveyed once a redraw: how many tiles from the nearest castle every cell near
-/// one is. Castles stand side by side in one landscape, so what grows between two of them has to keep back
-/// from both; a site that knew only its own floor planted a wood over its neighbour.
 enum Realm {
     private(set) static var ring: [Cell: Int] = [:]
     private(set) static var key = ""
@@ -1530,7 +1380,6 @@ enum Realm {
         Realm.ring = ring
     }
 
-    /// Tiles out from the nearest castle, to twenty; past that, twenty-one.
     static func out(_ world: SIMD2<Double>) -> Double {
         Double(ring[Cell(x: Int(world.x.rounded()), y: Int(world.y.rounded()))] ?? 21)
     }

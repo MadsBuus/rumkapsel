@@ -1,18 +1,11 @@
-// The station's walls as the walk sees them: painted ship's panelling over a dark kick plate, a steel cap, and
-// steel pilasters where a wall turns or ends. One family, a panel of its own for each kind of place: a light slot
-// along the hallways, a rail at desk height in the offices, soft grooved panels in the living quarters, grey
-// bays between tapered pilasters in the yard.
-
 import AppKit
 import SceneKit
 import simd
 
 enum Bulkhead {
-    /// The skin's maps, one wall section long and the wall's height high.
     struct Skin { let color: NSImage, normal: NSImage, roughness: NSImage, metalness: NSImage, glow: NSImage? }
 
     static let size = 512
-    /// Skins to pick from in each style, so neighbouring sections differ.
     static let count = 4
 
     static func pick(_ c: Cell, _ dx: Int, _ dy: Int, _ station: String) -> Int {
@@ -22,11 +15,8 @@ enum Bulkhead {
         return Int(h % UInt64(count))
     }
 
-    /// The panel for each kind of place.
     enum Style: String, CaseIterable { case hallway, office, quarters, yard }
 
-    /// Which panel faces into each cell of a station: the yard's in the yard, the airlock and the bay, the quarters'
-    /// in the dorm, the lounge, the bath and the gym, an office's in an office. Anywhere else is hallway.
     static func styles(of st: Station) -> [Cell: Style] {
         var out: [Cell: Style] = [:]
         for c in st.hall.cells + st.hall.deconCells + st.hall.padCells + st.airlockCells + st.hangarCells { out[c] = .yard }
@@ -34,16 +24,12 @@ enum Bulkhead {
         return out
     }
 
-    /// Loads every skin off the thread that draws, from the files `bake` wrote: the walls are plain paint until
-    /// they are in, then built again with them. Once.
     static func prepare() {
         lock.lock(); let started = preparing; preparing = true; lock.unlock()
         guard !started else { return }
         DispatchQueue.global(qos: .utility).async { prepareNow() }
     }
 
-    /// The same, here and now: for a still that must have them. A skin whose files are missing is drawn afresh,
-    /// all of those at once across the cores.
     static func prepareNow() {
         let styles = Style.allCases
         var drawn = [Skin?](repeating: nil, count: styles.count * count)
@@ -63,7 +49,6 @@ enum Bulkhead {
     private static func seed(_ k: Int) -> UInt64 { UInt64(101 + k * 37) }
     private static let maps = ["color", "normal", "roughness", "metalness", "glow"]
 
-    /// Where the baked skins are: in the app's resources, or beside the sources when run from a build.
     static let root: URL? = {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Walls"), FileManager.default.fileExists(atPath: r.path) { return r }
         return FileManager.default.fileExists(atPath: sourceRoot.path) ? sourceRoot : nil
@@ -72,7 +57,6 @@ enum Bulkhead {
         .appendingPathComponent("Resources/Walls")
     private static func file(_ style: Style, _ k: Int, _ map: String) -> String { "wall-\(style.rawValue)-\(k)-\(map).png" }
 
-    /// A skin as baked, or nil when any of its maps is missing. Only a skin with lights has a glow map.
     private static func load(_ style: Style, _ k: Int) -> Skin? {
         guard let root else { return nil }
         let images = maps.map { NSImage(contentsOf: root.appendingPathComponent(file(style, k, $0))) }
@@ -80,8 +64,6 @@ enum Bulkhead {
         return Skin(color: color, normal: normal, roughness: roughness, metalness: metalness, glow: images[4])
     }
 
-    /// `rumkapsel --bake-walls`: draws every skin and writes it beside the sources, to be committed. Run it again
-    /// after changing how a wall is drawn.
     static func bake() -> Never {
         try? FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
         for style in Style.allCases {
@@ -103,10 +85,8 @@ enum Bulkhead {
     private static var preparing = false
     private static var skinSets: [Style: [Skin]] = [:]
     private static var made: [String: SCNMaterial] = [:]
-    /// Bumped when the skins are done, so whoever built walls without them builds them again.
     private(set) static var generation = 0
 
-    /// The face of a wall section: its skin once drawn, plain paint of its colour until then.
     static func material(_ variant: Int, style: Style) -> SCNMaterial {
         lock.lock(); let set = skinSets[style]; lock.unlock()
         guard let set else {
@@ -135,7 +115,6 @@ enum Bulkhead {
         return m
     }
 
-    /// Steel: the cap, the ends and the pilasters, in the rocket's own plating.
     static let steel: SCNMaterial = {
         let maps = Plating.maps(seed: 21)
         let m = SCNMaterial()
@@ -152,8 +131,6 @@ enum Bulkhead {
         return m
     }()
 
-    /// The cap along a wall's top, `length` long: a broad steel rail with a narrower one on it, so its edge
-    /// steps in like a chamfer.
     static func cap(length: Double, thickness t: Double, across: Bool) -> SCNNode {
         let n = SCNNode()
         for (w, h, y) in [(t + 0.026, 0.026, Walker.wallHeight - 0.013), (t + 0.008, 0.014, Walker.wallHeight + 0.007)] {
@@ -163,11 +140,9 @@ enum Bulkhead {
             node.position = v3(0, y, 0)
             n.addChildNode(node)
         }
-        return n.flattenedClone()   // one node with its own geometry: placed by its position, also once the walls are flattened
+        return n.flattenedClone()
     }
 
-    /// A pilaster where a wall turns or ends: a steel shaft, broader at its foot and its head. Now and then it
-    /// carries two small indicators.
     static func pilaster(seed: Int) -> SCNNode {
         let n = SCNNode()
         let h = Walker.wallHeight + 0.03
@@ -196,12 +171,8 @@ enum Bulkhead {
 
     // MARK: the skin
 
-    /// What a texel is: painted panel, a seam between panels, bare steel, the dark of a slot or the kick plate, or a light.
     private enum Kind: UInt8 { case paint, seam, steel, dark, lamp }
 
-    /// A wall section's skin in a style: its panels, recesses, slots and indicators by the section's seed,
-    /// the rocket's fine plating over the painted faces, and a little wear: soft enough that from a step back it
-    /// reads as one plain wall, with the detail there when you are close.
     private static func make(seed: UInt64, style: Style) -> Skin {
         let n = size, H = Walker.wallHeight
         var r = Textures.Seeded(s: seed)
@@ -211,8 +182,6 @@ enum Bulkhead {
         var light = [Float](repeating: 0, count: n * n)
         var lightColor = SIMD3(0.85, 0.92, 1.0)
 
-        /// Every texel inside a rectangle of the wall (in its own units, y up from the floor), with how far it is
-        /// in from the rectangle's nearest side.
         func each(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, _ body: (Int, Double, Double, Double) -> Void) {
             let c0 = max(0, Int(x0 * Double(n))), c1 = min(n - 1, Int(x1 * Double(n)))
             let r0 = max(0, Int((1 - y1 / H) * Double(n))), r1 = min(n - 1, Int((1 - y0 / H) * Double(n)))
@@ -222,7 +191,6 @@ enum Bulkhead {
                 body(row * n + col, x, y, min(min(x - x0, x1 - x), min(y - y0, y1 - y)))
             } }
         }
-        /// A panel: a seam round it, a chamfer up from the seam, and its face a shade of its own.
         func panel(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, face: Float = 0.6) {
             let tone = Float(0.96 + r.next() * 0.06)
             each(x0, y0, x1, y1) { i, _, _, e in
@@ -233,7 +201,6 @@ enum Bulkhead {
                 if k < 1 { edge[i] = 1 - k }
             }
         }
-        /// A recess in a panel, its sides chamfered; `cut` takes its corners off at forty-five degrees.
         func inset(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, depth: Float = 0.12, cut: Double = 0) {
             each(x0, y0, x1, y1) { i, x, y, e in
                 var e = e
@@ -247,16 +214,14 @@ enum Bulkhead {
                 if k < 1 { edge[i] = max(edge[i], 0.5 * (1 - k)) }
             }
         }
-        /// A strip that gives light: recessed, and lit in the emission.
         func slot(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double, glow: Float) {
             each(x0, y0, x1, y1) { i, _, _, e in height[i] = 0.35; kind[i] = .lamp; light[i] = glow * Float(min(1, e / 0.004)) }
         }
-        each(0, 0, 1, 0.06) { i, _, _, _ in height[i] = 0.45; kind[i] = .dark }   // the kick plate
+        each(0, 0, 1, 0.06) { i, _, _, _ in height[i] = 0.45; kind[i] = .dark }
 
         var paint: SIMD3<Double>
         switch style {
         case .hallway:
-            // Off-white panels with their corners cut, over a lower course, a light slot running between them.
             paint = SIMD3(0.78, 0.78, 0.77)
             for k in 0..<2 { let x0 = Double(k) * 0.5
                 panel(x0, 0.06, x0 + 0.5, 0.2); inset(x0 + 0.04, 0.085, x0 + 0.46, 0.175, depth: 0.06, cut: 0.03) }
@@ -265,7 +230,6 @@ enum Bulkhead {
             inset(0.05, 0.27, 0.48, 0.61, depth: 0.1, cut: 0.05); inset(0.52, 0.27, 0.95, 0.61, depth: 0.1, cut: 0.05)
             each(0, 0.66, 1, H) { i, _, _, _ in height[i] = 0.3; kind[i] = .dark }
         case .office:
-            // The hallway's panels a shade cooler, with a steel rail at desk height instead of the light slot.
             paint = SIMD3(0.75, 0.76, 0.78)
             for k in 0..<3 { let x0 = Double(k) / 3
                 panel(x0, 0.06, x0 + 1.0 / 3, 0.3); inset(x0 + 0.035, 0.09, x0 + 1.0 / 3 - 0.035, 0.27, depth: 0.05) }
@@ -275,7 +239,6 @@ enum Bulkhead {
                 panel(x0, 0.318, x1, 0.66); inset(x0 + 0.04, 0.35, x1 - 0.04, 0.63, depth: 0.08, cut: 0.03) }
             each(0, 0.66, 1, H) { i, _, _, _ in height[i] = 0.3; kind[i] = .dark }
         case .quarters:
-            // Warmer and calmer: finely grooved panels low down, one big soft-cornered panel above.
             paint = SIMD3(0.8, 0.78, 0.75)
             panel(0, 0.06, 1, 0.24)
             each(0, 0.075, 1, 0.225) { i, x, _, _ in
@@ -286,7 +249,6 @@ enum Bulkhead {
             inset(0.06, 0.29, 0.94, 0.61, depth: 0.06, cut: 0.07)
             each(0, 0.66, 1, H) { i, _, _, _ in height[i] = 0.3; kind[i] = .dark }
         case .yard:
-            // Grey bays between tapered pilasters, a rail across them, now and then a tiny pair of indicators.
             paint = SIMD3(0.66, 0.67, 0.68)
             panel(0, 0.06, 1, 0.66)
             for (x, w0, w1) in [(0.0, 0.07, 0.035), (1.0, 0.07, 0.035)] {
@@ -309,7 +271,6 @@ enum Bulkhead {
             each(0, 0.66, 1, H) { i, _, _, _ in height[i] = 0.3; kind[i] = .dark }
         }
 
-        // The rocket's fine plating on every painted face.
         for i in 0..<(n * n) where kind[i] == .paint || kind[i] == .steel { height[i] += (micro[i] - 0.5) * 0.06 }
 
         let ao = Plating.occlusion(height, size: n, radius: 2)
@@ -325,7 +286,6 @@ enum Bulkhead {
                 var c: SIMD3<Double>, ro: Double, me: Double
                 switch kind[i] {
                 case .paint:
-                    // Worn through to the steel here and there along the edges.
                     let worn = Double(edge[i]) * (0.2 + 1.2 * max(0, Plating.noise(x * 22, y * 22, seed: seed ^ 41) - 0.4)) > 0.5
                     c = worn ? bare : paint * Double(shade[i]); ro = worn ? 0.35 : 0.5; me = worn ? 0.7 : 0
                 case .steel: c = bare * 1.15; ro = 0.32; me = 0.8
@@ -333,7 +293,6 @@ enum Bulkhead {
                 case .dark: c = dark; ro = 0.6; me = 0.4
                 case .lamp: c = SIMD3(0.9, 0.9, 0.9); ro = 0.2; me = 0
                 }
-                // Soft wear: faint streaks, a darker foot, dirt in what is sunk.
                 let blotch = Plating.noise(x * 6, y * 8, seed: seed ^ 5)
                 let streak = Plating.noise(x * 80, y * 1.4, seed: seed ^ 11)
                 let foot = max(0, 1 - y / 0.2)

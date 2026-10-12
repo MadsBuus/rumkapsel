@@ -1,12 +1,7 @@
-// Walking the station at a minion's eye height. The camera dives out of the station's view, the borders
-// rise into walls under a dome, and the floor is walked by the minions' own rules: the same walkable
-// cells, the same doorways, the same props in the way. A click on a minion rides along behind it on a crane.
-
 import AppKit
 import SceneKit
 import SpriteKit
 
-/// Where the walk's camera is: the point it is on, its height there, turn, tilt, and how far it hangs back.
 struct WalkView {
     var focus: SIMD2<Double>
     var height: Double
@@ -15,70 +10,47 @@ struct WalkView {
     var distance: Double
 }
 
-/// Whoever walks the station, and what is drawn only while they do.
 final class Walker {
-    /// A minion's visor: just under the top of a body half a tile tall.
     static let eye = 0.4
-    /// Half a body's width, so a shoulder never goes through a wall.
     static let radius = 0.13
     static let pace = 1.4, runPace = 3.0
     static let fieldOfView = 68.0
     static let wallHeight = 0.72
-    /// Where the floor is outside, the bay and the pad: a rail you can see space over.
     static let railHeight = 0.16
     static let diveSeconds = 1.8, riseSeconds = 1.3
-    /// The crane: how far behind the minion it hangs, and how steeply it looks down by default.
     static let craneReach = 1.5, craneTilt = -0.8
-    /// The jetpack on space: its push up, the station's low gravity pulling back down, the fastest climb or
-    /// fall, and the highest it takes you out under open space. Indoors the hull is the ceiling.
     static let thrust = 3.4, gravity = 1.6, climbLimit = 1.3, ceiling = 6.0
-    /// The top of your head over your eyes, which the hull stops.
     static let crown = 0.1
 
     var station: String
-    /// Where you stand, in world x/z; while riding, where the minion stands.
     var pos: SIMD2<Double>
     var yaw: Double
     var pitch = -0.08
     var velocity = SIMD2<Double>(0, 0)
-    /// The jetpack: firing while space is held, how high your feet are off the floor, and how fast that changes.
     var thrusting = false
     var altitude = 0.0
     var climb = 0.0
-    /// The hull over each station, by name, as built with the walls, and which drawing of the walls' skins they had.
     var hulls: [String: StationHull] = [:]
-    /// The signs' arrows, rolling.
     var arrows: [Signs.Arrow] = []
-    /// The pieces of the hull the station's view draws, faded out as the walk's hull comes in.
     var fragments: [SCNNode] = []
     var skins = -1
-    /// The minion the crane rides behind, while it does.
     var riding: String?
-    /// The crane swung round the minion and tilted, by drags.
     var orbit = 0.0, craneTilt = Walker.craneTilt
-    /// The camera as shown, eased toward where it should be; seconds left of easing after a change of mode.
     var view: WalkView
     var settling = 0.0
-    /// 0 up in the station's view, 1 at eye height; it runs back to 0 on the way out.
     var phase = 0.0
     var leaving = false
-    /// The station's view at the top of the dive: where it looked, its turn and tilt, its half-height.
     var top: (focus: SIMD2<Double>, yaw: Double, pitch: Double, scale: Double)
     var stride = 0.0
     var place = ""
     var placeAt = -10.0
-    /// The floor the walls were built for, and the offset your station had when last looked at: the fleet
-    /// moves a station sideways when another one grows, and you move with it.
     var builtFor = 0
-    /// When the station's scene was last rebuilt as the floor was read for `builtFor`.
     var readAt = -1.0
     var anchor: SIMD2<Double>?
-    /// How long you have been pushing against something, for the log.
     var pushedFor = 0.0
     let walls = SCNNode()
     let dome = SCNNode()
     let sky: SCNNode
-    /// The camera worn while walking, the flight's film look on it; the station's waits until you step out.
     let camera = SCNCamera()
     var stationCamera: SCNCamera?
     let title = SKLabelNode(fontNamed: "HelveticaNeue-Light")
@@ -98,7 +70,6 @@ final class Walker {
             l.alpha = 0
         }
         FlightCraft.film(camera)
-        // The station is lit far brighter than space: held down, the white suits keep their seams.
         camera.exposureOffset = -0.45
         camera.bloomThreshold = 1.4
         camera.zNear = 0.02
@@ -109,15 +80,12 @@ final class Walker {
 }
 
 extension StationController {
-    /// In or out of the station on foot: `f` and the View menu.
     func toggleWalk() {
         enqueue { [self] in
             if let w = walker { stepOut(w) } else { stepIn() }
         }
     }
 
-    /// Down into the station where the view is looking, or onto the crane behind the minion it follows.
-    /// Down at a point on the floor, given one (a double-click on it), looking the way the view looks.
     func stepIn(at point: SIMD2<Double>? = nil) {
         guard walker == nil, let station = cameraNode.camera else { return }
         let focus = SIMD2(Double(rig.position.x), Double(rig.position.z))
@@ -151,7 +119,6 @@ extension StationController {
         poseWalkCamera(w)
     }
 
-    /// Back up into the station's view, centred on where you got to, at the turn and zoom you left it at.
     func stepOut(_ w: Walker) {
         guard !w.leaving else { return }
         w.leaving = true
@@ -159,13 +126,11 @@ extension StationController {
         w.top = (w.pos, viewYaw + userYaw, userPitch, fitScale(half: targetHalf) / userZoom)
     }
 
-    /// Esc: off the crane onto your own feet first, then out.
     func walkEscape() {
         guard let w = walker else { return }
         if w.riding != nil { dismount(w) } else { stepOut(w) }
     }
 
-    /// Onto the crane behind a minion: a click on one while walking.
     func ride(minionId id: String) {
         guard let w = walker, !w.leaving, let m = minions[id] else { return }
         w.riding = m.id
@@ -175,7 +140,6 @@ extension StationController {
         w.settling = 1.2
     }
 
-    /// Down off the crane where the minion stands, looking the way the crane looked.
     private func dismount(_ w: Walker) {
         w.riding = nil
         w.yaw = w.view.yaw
@@ -200,8 +164,6 @@ extension StationController {
         pitchNode.eulerAngles.x = w.top.pitch
     }
 
-    /// A few steps out along one of the arms, looking down the hallway at the monolith: the arm whose view
-    /// of it turns the camera least. The nearest hallway tile where no arm runs straight.
     private func hallwayStart(near p: SIMD2<Double>, facing: Double) -> (station: Station, pos: SIMD2<Double>, yaw: Double)? {
         func world(_ st: Station, _ c: Cell) -> SIMD2<Double> { st.offset + SIMD2(Double(c.x), Double(c.y)) }
         guard let st = fleet.stations.values.min(by: {
@@ -226,7 +188,6 @@ extension StationController {
         return (st, world(st, c), facing)
     }
 
-    /// The walk's own frame, in place of the station's view; false when nobody is walking.
     func tickWalk(dt: Double, move: SIMD2<Double>, turn: Double) -> Bool {
         guard let w = walker else { return false }
         if w.leaving {
@@ -255,7 +216,7 @@ extension StationController {
         ease(w, toward: wantedView(w), dt: dt)
         let floor = timed("walk floor") { floorSignature(w) }
         if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) }; timed("dome") { buildDome(w) } }
-        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) } }   // the walls' skins are done
+        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) } }
         poseWalkCamera(w)
         Signs.roll(w.arrows, at: clock)
         showPlace(w)
@@ -263,7 +224,6 @@ extension StationController {
         return true
     }
 
-    /// A look from a drag or two fingers, in radians: x turns, y tilts. On the crane it swings round the minion.
     func walkLook(_ d: SIMD2<Double>) {
         guard let w = walker, w.phase >= 1, !w.leaving else { return }
         if w.riding != nil {
@@ -275,7 +235,6 @@ extension StationController {
         }
     }
 
-    /// The line along the bottom while walking: what the keys do here.
     var walkHint: String? {
         guard let w = walker else { return nil }
         if let id = w.riding, let m = minions[id] {
@@ -290,28 +249,22 @@ extension StationController {
                             pitch: w.craneTilt, distance: Walker.craneReach)
         }
         let moving = w.altitude > 0 ? 0 : min(1, simd_length(w.velocity) / Walker.pace)
-        // Under thrust the pack shudders a little.
         let shudder = w.thrusting ? sin(w.stride * 9 + Double(w.altitude) * 40) * 0.004 : 0
         return WalkView(focus: w.pos, height: Walker.eye + w.altitude + abs(sin(w.stride * .pi)) * 0.012 * moving + shudder,
                         yaw: w.yaw, pitch: w.pitch, distance: 0)
     }
 
-    /// The highest your feet may go where you are: under the hull indoors, open space outside.
     private func ceiling(_ w: Walker) -> Double {
         guard let st = fleet.stations[w.station], let hull = w.hulls[w.station],
               let roof = hull.roof(over: w.pos - st.offset, top: w.altitude + Walker.eye + Walker.crown) else { return Walker.ceiling }
         return roof - Walker.eye - Walker.crown
     }
 
-    /// Up on the jetpack while space is held, and back down under the station's low gravity once it is let
-    /// go, landing on whatever floor is under you.
     private func fly(_ w: Walker, dt: Double) {
         w.climb += ((w.thrusting ? Walker.thrust : 0) - Walker.gravity) * dt
         w.climb = min(Walker.climbLimit, max(-Walker.climbLimit, w.climb))
         let was = w.altitude
         w.altitude += w.climb * dt
-        // Coming down past the tops of the walls where a body cannot stand: held there, and eased over the
-        // middle of the tile below until it can.
         if was > Walker.wallHeight, w.altitude <= Walker.wallHeight, let st = fleet.stations[w.station] {
             let q = w.pos - st.offset
             if !fits(q, from: q, in: st, high: false) {
@@ -323,10 +276,9 @@ extension StationController {
         }
         if w.altitude <= 0 { w.altitude = 0; w.climb = max(0, w.climb) }
         if w.altitude >= ceiling(w) { w.altitude = max(0, ceiling(w)); w.climb = min(0, w.climb) }
-        if w.thrusting { w.stride += dt * 3 }   // what the shudder runs on while hovering still
+        if w.thrusting { w.stride += dt * 3 }
     }
 
-    /// Your own eyes follow you exactly; a crane lags and swings, and a change between the two is eased.
     private func ease(_ w: Walker, toward want: WalkView, dt: Double) {
         guard w.riding != nil || w.settling > 0 else { w.view = want; return }
         w.settling = max(0, w.settling - dt)
@@ -349,7 +301,6 @@ extension StationController {
         let pace = NSEvent.modifierFlags.contains(.shift) ? Walker.runPace : Walker.pace
         w.velocity += (dir * pace - w.velocity) * (1 - exp(-dt * 9))
         let step = w.velocity * dt
-        // One axis at a time, so a walk into a wall at an angle slides along it.
         var q = w.pos - st.offset
         for axis in [SIMD2<Double>(1, 0), SIMD2<Double>(0, 1)] {
             let next = q + axis * simd_dot(step, axis)
@@ -364,7 +315,6 @@ extension StationController {
         w.stride += moved * 2.4
     }
 
-    /// What stops you, written to the station log: the wall, the prop or the minion in the way.
     private func logBlocked(at q: SIMD2<Double>, toward dir: SIMD2<Double>, in st: Station) {
         let here = Cell(x: Int(q.x.rounded()), y: Int(q.y.rounded()))
         let ahead = q + dir * (Walker.radius + 0.05)
@@ -378,15 +328,10 @@ extension StationController {
         StationLog.write("walk", "blocked at \(here.x),\(here.y) toward \(there.x),\(there.y) on \(st.name): \(why.isEmpty ? "nothing found" : why.joined(separator: "; "))")
     }
 
-    /// Whether a body as wide as a minion can stand at `q` (station cells) having come from `from`: every
-    /// corner on floor reached through a doorway the minions may use, and no deeper into a prop than before.
-    /// Flown higher than the walls, only the hull and the station's edge stop you: walls, props, minions and the
-    /// bare deck pass underneath.
     private func fits(_ q: SIMD2<Double>, from: SIMD2<Double>, in st: Station, high: Bool? = nil) -> Bool {
         let r = Walker.radius
         let here = Cell(x: Int(from.x.rounded()), y: Int(from.y.rounded()))
         let corners = [SIMD2(0, 0), SIMD2(r, r), SIMD2(r, -r), SIMD2(-r, r), SIMD2(-r, -r)]
-        // Nobody goes through the hull: indoors your head stays under it, and in from open space is only through a doorway.
         if let w = walker, let hull = w.hulls[st.name] {
             let top = w.altitude + Walker.eye + Walker.crown
             for k in corners { if let roof = hull.roof(over: q + k, top: top), roof < top { return false } }
@@ -404,7 +349,6 @@ extension StationController {
         }
         func inProps(_ p: SIMD2<Double>) -> Int { corners.filter { st.obstacles.contains(Station.sub(p + $0 * 0.8)) }.count }
         guard inProps(q) <= inProps(from) else { return false }
-        // Minions are in the way too: no closer to one already within a shoulder's width.
         for m in minions.values where m.station == st.name && m.opacity > 0.5 {
             let at = SIMD2(Double(m.node.position.x), Double(m.node.position.z)) - st.offset
             let near = r + 0.12
@@ -413,8 +357,6 @@ extension StationController {
         return true
     }
 
-    /// Whether nothing stands between one cell and the next: floor beyond, and no wall on the way. A step
-    /// across a corner needs both ways round it open.
     private func open(from a: Cell, to b: Cell, in st: Station) -> Bool {
         if a == b { return true }
         let walk = st.walkable
@@ -427,8 +369,6 @@ extension StationController {
         return abs(a.x - b.x) + abs(a.y - b.y) == 1 && st.canStep(from: a, to: b)
     }
 
-    /// The camera along the dive: the station's orthographic view at the top, opened out by a lens that
-    /// starts nearly flat and widens as it drops, so the first frame is the view you were looking at.
     private func poseWalkCamera(_ w: Walker) {
         let camera = w.camera, v = w.view
         func ease(_ x: Double) -> Double { let t = min(1, max(0, x)); return t * t * t * (t * (t * 6 - 15) + 10) }
@@ -449,13 +389,11 @@ extension StationController {
         pitchNode.eulerAngles.x = pitch
         w.sky.position = cameraNode.worldPosition
         w.sky.opacity = ease((t - 0.3) / 0.6)
-        // The walls rise out of the floor and fade in as they come, never a flat outline before they start.
         let rising = ease((t - 0.4) / 0.6)
         w.walls.isHidden = rising <= 0
         w.walls.scale.y = max(0.001, rising)
         w.walls.opacity = ease((t - 0.4) / 0.3)
         w.dome.opacity = ease((t - 0.45) / 0.55)
-        // The station view's pieces of the hull give way to the whole of it as the view comes down.
         let fragments = 1 - ease(t / 0.5)
         for n in w.fragments { n.opacity = fragments; n.isHidden = fragments <= 0 }
         let film = ease((t - 0.2) / 0.8)
@@ -465,7 +403,6 @@ extension StationController {
         camera.bloomIntensity = 0.9 * film
     }
 
-    /// The station's own overlay steps back while you walk: the repositories along the top and the log.
     func fadeOverlay() {
         guard let w = walker else { return }
         let k = 1 - min(1, max(0, w.phase / 0.6))
@@ -475,8 +412,6 @@ extension StationController {
 
     // MARK: seeing
 
-    /// Whether a straight look from the camera to a point on a station's floor gets there without crossing a
-    /// wall or the monolith. From up over the walls, on the crane, everything is in sight.
     private func inSight(of target: SIMD2<Double>, in st: Station) -> Bool {
         let eye = cameraNode.worldPosition
         guard Double(eye.y) < Walker.wallHeight else { return true }
@@ -493,7 +428,6 @@ extension StationController {
         return true
     }
 
-    /// The bath's pixels are drawn over everything so the body never hides them; while walking, a wall does.
     private func hidePixelsBehindWalls(_ w: Walker) {
         for m in minions.values {
             guard m.bathing, let st = fleet.stations[m.station] else { m.staticSeen = true; continue }
@@ -501,7 +435,6 @@ extension StationController {
         }
     }
 
-    /// Whether the one walking is at an airlock door, for it to open: as near as a minion walking up to it.
     func walkerAt(door: SCNNode, in st: Station, half: Double) -> Bool {
         guard let w = walker, w.riding == nil, w.station == st.name else { return false }
         let q = w.pos - st.offset
@@ -510,8 +443,6 @@ extension StationController {
 
     // MARK: the walls and the dome
 
-    /// A wall on every edge the minions may not cross, as tall as the hallway needs to feel like one, panelled
-    /// with a light strip in the colour of the floor it faces; a rail where the floor is outside.
     private func buildWalls(_ w: Walker) {
         w.walls.childNodes.forEach { $0.removeFromParentNode() }
         w.arrows = []
@@ -533,8 +464,6 @@ extension StationController {
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let walk = st.walkable
             let outside = Set(st.hall.padCells)
-            // The hall's pad wall and the bay's mouth both hold a field: no wall
-            // stands in either.
             let gate = Set(st.hall.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
             let mouthRow = st.hangarCells.map(\.y).max()
             func unwalled(_ c: Cell, _ n: Cell) -> Bool {
@@ -544,7 +473,6 @@ extension StationController {
             let root = SCNNode()
             var corners: [Cell: [Bool]] = [:], railCorners: [Cell: [Bool]] = [:]
             func tint(_ c: Cell) -> NSColor? { tints[Cell(x: Int((st.offset.x + Double(c.x)).rounded()), y: Int((st.offset.y + Double(c.y)).rounded()))] }
-            // Every stretch of wall, by the cell it stands beside and the way out of it.
             var stretches: [(c: Cell, dx: Int, dy: Int)] = []
             for c in walk.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
                 for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
@@ -562,10 +490,7 @@ extension StationController {
                     let low = outside.contains(c) && (!floored || outside.contains(n))
                     let h = low ? Walker.railHeight : Walker.wallHeight
                     let across = dx != 0
-                    // Corner point to corner point, no further: an end then lies inside whatever wall it meets, never in
-                    // the plane of one of its faces, where the two would flicker. The posts close the corners.
                     let box = SCNBox(width: across ? t : 1, height: h, length: across ? 1 : t, chamferRadius: 0)
-                    // SCNBox faces: +z, +x, -z, -x, top, bottom.
                     func side(_ x: Int, _ y: Int) -> Int { x > 0 ? 1 : x < 0 ? 3 : y > 0 ? 0 : 2 }
                     var faces = Array(repeating: low ? plain : Bulkhead.steel, count: 6)
                     if !low {
@@ -584,9 +509,7 @@ extension StationController {
                     let cap = Bulkhead.cap(length: 1, thickness: t, across: across)
                     cap.position = v3(wall.position.x, 0, wall.position.z)
                     root.addChildNode(cap)
-                    // Its two ends, in half-tile steps: a post stands where a wall turns or stops.
                     for e in ends { corners[e, default: []].append(across) }
-                    // A strip of light along the foot of each tall wall, in the colour of the floor it runs along.
                     for (cell, sign) in [(c, -1.0)] + (floored ? [(n, 1.0)] : []) {
                         let strip = SCNBox(width: across ? 0.012 : 1, height: 0.022, length: across ? 1 : 0.012, chamferRadius: 0)
                         strip.firstMaterial = glow(tint(cell))
@@ -602,7 +525,6 @@ extension StationController {
                 p.position = v3(st.offset.x + Double(k.x) / 2, 0, st.offset.y + Double(k.y) / 2)
                 root.addChildNode(p)
             }
-            // A rail turns or stops at a short post of its own, unless a wall's post stands there already.
             for (k, ends) in railCorners where !(ends.count == 2 && ends[0] == ends[1]) && corners[k] == nil {
                 let p = SCNNode(geometry: railPost)
                 p.position = v3(st.offset.x + Double(k.x) / 2, (Walker.railHeight + 0.02) / 2, st.offset.y + Double(k.y) / 2)
@@ -615,22 +537,17 @@ extension StationController {
         }
     }
 
-
-    /// A way-finding sign on its wall: a lit panel at eye height, a line for each way, only drawn close by.
     private func signNode(_ sign: Signs.Sign, in st: Station, thickness t: Double, arrows: inout [Signs.Arrow]) -> SCNNode {
         let (n, rolling) = Signs.panel(sign)
         arrows += rolling
         let p = SIMD2(Double(sign.wall.x), Double(sign.wall.y))
         let at = st.offset + SIMD2(Double(sign.cell.x), Double(sign.cell.y)) + p * (0.5 - t / 2 - 0.004)
         n.position = v3(at.x, 0.47, at.y)
-        n.eulerAngles.y = CGFloat(atan2(-p.x, -p.y))   // facing back into the junction
+        n.eulerAngles.y = CGFloat(atan2(-p.x, -p.y))
         n.categoryBitMask = Pick.scenery
         return n
     }
 
-    /// Everything the walls and the dome are built from: each station's place, its walkable floor, the steps
-    /// between its cells and the room each cell is part of. Read again only once the station's scene was rebuilt,
-    /// which draws the hull pieces anew too: those are picked up again for the walk to fade.
     private func floorSignature(_ w: Walker) -> Int {
         guard w.readAt != lastRebuildAt else { return w.builtFor }
         w.readAt = lastRebuildAt
@@ -647,9 +564,6 @@ extension StationController {
         return h.finalize()
     }
 
-    /// The hull over each station: its own glass vault on a low steel sill, with doorways cut where the gate and
-    /// the airlock go through it. The pieces of it the station's view draws
-    /// stand in the same place, so they step aside while you walk.
     private func buildDome(_ w: Walker) {
         w.dome.childNodes.forEach { $0.removeFromParentNode() }
         w.hulls = [:]
@@ -658,7 +572,6 @@ extension StationController {
         for st in fleet.stations.values {
             let hull = StationHull(st)
             w.hulls[st.name] = hull
-            // Indoors, every tile is floored: where the station has none of its own, a bare deck plate.
             let bare = SCNNode()
             for c in hull.inside where !st.walkable.contains(c) && c != st.plan.monolith {
                 let tile = SCNNode(geometry: WallPanel.bareDeck)
@@ -670,7 +583,6 @@ extension StationController {
             flatDeck.categoryBitMask = Pick.scenery
             w.dome.addChildNode(flatDeck)
             var glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
-            // Heights on the grid's corners, each measured once for the squares that share it.
             let n = Int((1 / step).rounded())
             var heights: [SIMD2<Int>: Double] = [:]
             func height(_ k: SIMD2<Int>) -> Double {
@@ -687,7 +599,6 @@ extension StationController {
                         let x0 = Double(c.x) - 0.5 + Double(i) * step, y0 = Double(c.y) - 0.5 + Double(j) * step
                         let corners = [SIMD2(x0, y0), SIMD2(x0 + step, y0), SIMD2(x0 + step, y0 + step), SIMD2(x0, y0 + step)]
                         let hs = [SIMD2(gx, gy), SIMD2(gx + 1, gy), SIMD2(gx + 1, gy + 1), SIMD2(gx, gy + 1)].map(height)
-                        // A doorway: the hull's foot left open across it, as high as a door.
                         if door {
                             let near = hull.reach(SIMD2(x0 + step / 2, y0 + step / 2))
                             if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
@@ -700,11 +611,10 @@ extension StationController {
                     }
                 }
             }
-            // The sill the glass stands on, along every stretch of its foot but the doorways.
             let foot = SCNNode()
             for f in hull.feet where !f.door {
                 let mid = (f.a + f.b) / 2, along = f.b - f.a
-                let across = abs(along.x) < abs(along.y)   // the stretch runs along z
+                let across = abs(along.x) < abs(along.y)
                 var inward = across ? SIMD2(1.0, 0) : SIMD2(0, 1.0)
                 if !hull.covers(mid + inward * 0.25) { inward = -inward }
                 let sill = SCNBox(width: across ? 0.07 : 1, height: 0.06, length: across ? 1 : 0.07, chamferRadius: 0)
@@ -729,7 +639,6 @@ extension StationController {
         }
     }
 
-    /// The colour of every floor tile as drawn, by world cell: walls take the colour of the floor they face.
     private func drawnFloor() -> [Cell: NSColor] {
         var out: [Cell: NSColor] = [:]
         staticRoot.enumerateHierarchy { n, _ in
@@ -744,7 +653,6 @@ extension StationController {
 
     // MARK: where you are
 
-    /// The name of the place you have walked into, large for a moment, the way a game names a level.
     private func showPlace(_ w: Walker) {
         if let st = fleet.stations[w.station], w.phase >= 1 {
             let q = w.pos - st.offset
@@ -784,7 +692,6 @@ extension StationController {
         return ("The hallway", nil)
     }
 
-    /// Which way an idle minion turns: toward you when you walk near it, toward the camera otherwise.
     func idleFacing(_ m: Minion) -> Double {
         if let w = walker, w.riding == nil, w.phase > 0.5, m.station == w.station {
             let d = w.pos - SIMD2(Double(m.node.position.x), Double(m.node.position.z))
@@ -794,15 +701,12 @@ extension StationController {
     }
 }
 
-/// The walk's materials besides the walls' own (`Bulkhead`): the hull's glass, the bare deck under it, and the
-/// key a colour is cached by.
 enum WallPanel {
     static func key(_ c: NSColor) -> String {
         guard let s = c.usingColorSpace(.sRGB) else { return "?" }
         return String(format: "%.2f/%.2f/%.2f", s.redComponent, s.greenComponent, s.blueComponent)
     }
 
-    /// The bare deck under the hull where the station has no floor of its own: a tile of the hull's plate, darker.
     static let bareDeck: SCNGeometry = {
         let g = SCNPlane(width: 1, height: 1)
         let m = lit(NSColor(rgb: Props.hullPlate).darker(0.35))
@@ -810,7 +714,6 @@ enum WallPanel {
         return g
     }()
 
-    /// The hull's glass: the dome's panes, one to a tile, laid on by where they are.
     static let hullGlass: SCNMaterial = {
         let m = glass.copy() as! SCNMaterial
         m.diffuse.wrapS = .repeat
@@ -818,7 +721,6 @@ enum WallPanel {
         return m
     }()
 
-    /// The dome's glass: a faint tint on each pane and a light frame round it.
     static let glass: SCNMaterial = {
         let n = 128
         let image = Textures.draw(n, n) { ctx, w, h in

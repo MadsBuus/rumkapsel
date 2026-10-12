@@ -1,32 +1,19 @@
-// The station's hull: one vault over everything indoors, the bay's hangar included, with the pad left outside
-// under open space. The pieces of it drawn in the station's view, round the bay and its mouth and along the
-// pad, are where it meets the floor; walking, the whole of it is overhead.
-
 import Foundation
 import simd
 
 struct StationHull {
-    /// How far the hull leans in from where it meets the floor, and how high its crown stands: the same
-    /// section as the pieces of it at the airlock and the pad, so the three are one surface.
     static let section = Classic.hullSection(depth: Station.hullDepth)
-    /// How high a doorway through it is cut.
     static let doorTop = 1.0
 
-    /// One stretch of where the hull meets the floor, along a cell's side, in the station's own cells.
     struct Foot { let a: SIMD2<Double>, b: SIMD2<Double>; let door: Bool }
 
-    /// The cells under the hull, every stretch of its foot, and for each cell the stretches near enough to
-    /// shape the hull over it: the rest are further than it leans, where it is at its crown.
     let inside: Set<Cell>
     let feet: [Foot]
     private let near: [Cell: [Int]]
 
-    /// Indoors is the station's whole extent but the pad, and the bay's hangar past the end of the passage.
-    /// The gate onto the pad is a doorway through it, and the bay's mouth one wide open, behind the field.
     init(_ st: Station) {
         let b = st.bounds
         let pad = Set(st.hall.padCells), bay = Set(st.hangarCells)
-        // As far south as the station's own floor reaches, the bay apart: the bay hangs on past that.
         let beyond = st.walkable.subtracting(bay).subtracting(pad).map(\.y).max() ?? Int.max
         var inside = bay
         for x in b.min.x...b.max.x {
@@ -70,8 +57,6 @@ struct StationHull {
 
     func covers(_ p: SIMD2<Double>) -> Bool { inside.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) }
 
-    /// How far a point is from the hull's foot, and whether that nearest stretch is a doorway: as far as it
-    /// leans at most, where it is at its crown.
     func reach(_ p: SIMD2<Double>, doors: Bool = true) -> (distance: Double, door: Bool) {
         var best = (distance: StationHull.section.lean, door: false)
         let candidates = near[Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))] ?? Array(feet.indices)
@@ -82,19 +67,14 @@ struct StationHull {
         return best
     }
 
-    /// Whether a doorway's foot is near enough to a cell to shape the hull over it.
     func nearDoor(_ c: Cell) -> Bool { near[c]?.contains { feet[$0].door } ?? false }
 
-    /// How high the hull stands over a point indoors: the quarter ellipse of its section, upright where it
-    /// meets the floor and lying flat once it is in as far as it leans.
     static func height(atDistance d: Double) -> Double {
         let (lean, rise) = section
         let k = min(1, max(0, d / lean))
         return rise * (1 - (1 - k) * (1 - k)).squareRoot()
     }
 
-    /// The room over a point for something whose top is `top` off the floor: nil under open space, else how
-    /// high the hull is there. Low enough to go through a doorway, a doorway's foot does not count.
     func roof(over p: SIMD2<Double>, top: Double) -> Double? {
         guard covers(p) else { return nil }
         let r = reach(p, doors: true)

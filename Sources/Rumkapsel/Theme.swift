@@ -1,7 +1,3 @@
-// Which look the station is drawn in, as the model knows it: a name for the config, a title and a
-// credit for the picker, and the one knob a theme may turn on the floor plan. Nothing here draws;
-// how a theme draws lives in Looks/, behind `Look`, and the scene is the only thing that asks.
-
 import Foundation
 
 enum Theme: String, CaseIterable, Identifiable {
@@ -18,7 +14,6 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Whose work the look is built from, for the settings page.
     var credit: String? {
         switch self {
         case .classic: return nil
@@ -27,8 +22,6 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Tiles between the test deck and the launch pad: hard by it in Classic, a causeway's length out on
-    /// the ground. The only way a theme reaches the floor plan.
     var padGap: Int {
         switch self {
         case .classic, .kingdom: return 0
@@ -36,8 +29,6 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The colours a theme gives its repositories, in the order they are handed out. Classic's are the
-    /// game's, spread out to ten; a theme that draws the station as something else brings its own.
     var repoColors: [RGB] {
         switch self {
         case .classic, .kenney: return Colors.classicRepos
@@ -45,7 +36,6 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The words the station's parts and doings are called by in this theme.
     var vocabulary: Vocabulary {
         var v = Vocabulary()
         guard self == .kingdom else { return v }
@@ -75,48 +65,36 @@ enum Theme: String, CaseIterable, Identifiable {
         return v
     }
 
-    /// The theme the plan is laid out for: the config's, unless a test pins one.
     static var pinnedForPlan: Theme?
     static var forPlan: Theme { pinnedForPlan ?? ConfigStore.shared.current.theme }
 }
 
-/// The words a theme calls the station's parts and doings by: floor signs, hover text, orders and the log.
-/// These are Classic's; a theme changes only the ones it draws as something else.
 struct Vocabulary {
-    // Floor signs.
     var bay = "bay", airlock = "airlock", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
-    /// The hall's three zones, painted on the walkway beside each, back to front.
     var zoneWaiting = "waiting", zoneTesting = "testing", zoneCleared = "cleared"
     var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", monolith = "monolith"
-    // Places, as said in a sentence.
     var theBay = "the bay", theAirlock = "the airlock", thePad = "the pad", theRocket = "the rocket"
     var inStorage = "storage", theDeck = "the deck", testedRow = "the cleared rows", testDeck = "test deck", inDecon = "decon"
     var theMonolith = "the monolith", theDorm = "the dorm", theCouch = "the couch", theBath = "the bath", theGym = "the gym"
-    // What minions are doing.
     var lookRound = "having a look round the station", leaving = "off the station on the next shuttle"
     var inbound = "shuttle inbound with", stow = "stowing a cube for the commit", pack = "packing a crate for the pull request"
     var asleep = "asleep in the dorm"
     var qaWalk = "walking the rows on the deck"
-    // Releases.
     var crate = "crate", crates = "crates", loadInto = "into the rocket", standingBy = "standing by on the pad"
     var steaming = "go for launch", liftingOff = "lifting off", launchedTo = "launched to", onThePad = "on the pad"
     var holding = "untested, holding on the pad", cleared = "cleared for launch"
-    // The station log.
     var liftedOff = "lifted off", aboard = "aboard", passedInspection = "passed inspection"
     var office = "office", offices = "offices", job = "job", jobs = "jobs"
-    // The log.
     var kicked = "kicked", kickedOff = "off the station", unidentified = "unidentified object", ejected = "ejected from decon"
     var clearedDecon = "cleared decon, into storage", toStorage = "package to storage", toDeck = "moving to the test deck"
     var atMonolith = "at the monolith", foldsAway = "its crate folds away on the bay", shipLeaving = "the ship to lift off"
     var shipBeside = "a ship coming down beside", shipComing = "its ship", lightsOn = "lights on"
-    // Hover text.
     var monolithHover = "the monolith: web research and subagents", bayHover = "hangar · new offices arrive here by ship"
     var padHover = "launch pad · release pull requests wait here; merging launches"
     var deconHover = "decon · dependabot and friends wait here"
 }
 
 enum Words {
-    /// Pinned by the test runs, so the log lines a scenario expects read the same whatever theme is picked.
     static var pinned: Vocabulary?
     static var current: Vocabulary { pinned ?? Theme.forPlan.vocabulary }
 }

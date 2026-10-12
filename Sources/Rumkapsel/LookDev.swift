@@ -1,9 +1,3 @@
-// One still of the flight rocket, rendered offscreen in a second or two, for working on how it looks:
-// `rumkapsel --look-dev <out.png> [shot]`. The shots: "down", the camera bolted to the lifter; from outside,
-// "hull" close on the plating, "wide" the whole rocket, "base" the lifter's foot, "under" the tip from below
-// burning, "feet" with its flaps out. The light and the
-// camera's character are the flight's own.
-
 import AppKit
 import SceneKit
 import Metal
@@ -13,7 +7,6 @@ enum LookDev {
         if shot == "crates" { crates(out: out) }
         if shot == "signs" { signs(out: out) }
         if shot.hasPrefix("wall") {
-            // "wall" or "wall-close", with ":office", ":quarters" or ":yard" for a place other than a hallway.
             let parts = shot.split(separator: ":")
             let style = parts.count > 1 ? Bulkhead.Style(rawValue: String(parts[1])) ?? .hallway : .hallway
             walls(out: out, close: parts[0] == "wall-close", style: style)
@@ -25,7 +18,6 @@ enum LookDev {
         FlightCraft.mountCameras(lifter: lifter, tip: tip)
         scene.rootNode.addChildNode(lifter)
         scene.rootNode.addChildNode(tip)
-        // The planets' sun, low and from the side, and the bounce off everything else.
         let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 1600
         sun.look(at: SCNVector3(-1, -0.3, -0.6))
         scene.rootNode.addChildNode(sun)
@@ -65,7 +57,6 @@ enum LookDev {
         exit(0)
     }
 
-    /// A hallway wall with a sign on it, close, at a minion's eye height.
     private static func signs(out: String) -> Never {
         Bulkhead.prepareNow()
         let scene = SCNScene()
@@ -105,7 +96,6 @@ enum LookDev {
         render(scene, from: eye, to: out)
     }
 
-    /// Crates side by side at a minion's eye height, one in each of the crate details, numbered.
     private static func crates(out: String) -> Never {
         let scene = SCNScene()
         scene.background.contents = NSColor(rgb: (0.015, 0.02, 0.035))
@@ -148,8 +138,6 @@ enum LookDev {
         render(scene, from: eye, to: out)
     }
 
-    /// A stretch of hallway at a minion's eye height, lit as the station is and seen through the walk's camera:
-    /// two walls of the walk's sections either side, a turn at the far end, pilasters where they turn or stop.
     private static func walls(out: String, close: Bool, style: Bulkhead.Style) -> Never {
         Bulkhead.prepareNow()
         let scene = SCNScene()
@@ -166,7 +154,7 @@ enum LookDev {
         scene.rootNode.addChildNode(floor)
         let t = 0.07, length = 5
         for side in [-1.0, 1.0] {
-            for k in 0..<length where !(side > 0 && k == 3) {   // a doorway on the right
+            for k in 0..<length where !(side > 0 && k == 3) {
                 let box = SCNBox(width: 1, height: Walker.wallHeight, length: t, chamferRadius: 0)
                 let variant = (k * 3 + (side > 0 ? 1 : 0)) % Bulkhead.count
                 var faces = Array(repeating: Bulkhead.steel, count: 6)

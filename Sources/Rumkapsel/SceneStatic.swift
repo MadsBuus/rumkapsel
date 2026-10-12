@@ -1,17 +1,11 @@
-// The station as it stands: floor tiles, walls, outlines and the names written on the floor.
-
 import AppKit
 import SceneKit
 
 extension StationController {
-    /// Whose floor a cell is. Asked a dozen times for every tile — four sides and eight neighbours — and
-    /// it used to answer by looking through seven arrays of cells and then every room, which on a station
-    /// of four hundred tiles is millions of comparisons for a picture that has not changed shape. It is
-    /// read off a map now, built once for each station in a redraw.
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if let m = owners[station.name] { return m[c] }
         var m: [Cell: String] = [:]
-        for (key, room) in station.rooms { for c in room.cells { m[c] = key } }   // rooms give way to all the rest
+        for (key, room) in station.rooms { for c in room.cells { m[c] = key } }
         for c in station.corridorCells where station.isCorridor(c) { m[c] = "corridor" }
         for c in station.coreCells { m[c] = "corridor" }
         for c in station.hall.deconCells { m[c] = "kind:decon" }
@@ -27,7 +21,6 @@ extension StationController {
         owner(station, b) == key || openEdges.contains("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
     }
 
-    /// What kind of floor an owner's tile is, for the look.
     private func floorKind(_ key: String) -> Floor {
         switch key {
         case "corridor": return .hallway
@@ -39,16 +32,7 @@ extension StationController {
         }
     }
 
-    /// Full-size floor tile; borders are drawn separately as strips so corners meet cleanly.
     @discardableResult
-    /// A square of floor, or a strip of border, shared by everything that looks the same. A station is
-    /// four hundred tiles and each of them a plane and up to four borders, so a redraw was making a
-    /// couple of thousand geometries and as many materials; there are a dozen distinct ones.
-    ///
-    /// The key must carry everything that goes into the material, since a shared one cannot be tweaked
-    /// afterwards — that is the whole bargain. Opacity is not in it: opacity is set on the node, and the
-    /// nodes are not shared. Nor is anything a look decides, because the cache is emptied when the look
-    /// changes; a tile drawn by a look is that look's until it is.
     private func shared(_ id: String, width: Double, height: Double, _ material: () -> SCNMaterial) -> SCNGeometry {
         guard Looks.current.sharesTiles else {
             let p = SCNPlane(width: width, height: height)
@@ -63,8 +47,6 @@ extension StationController {
         return p
     }
 
-    /// A colour as a key, or nil for one that will not resolve — those are built fresh rather than risk
-    /// two unlike colours sharing a square.
     private func swatch(_ c: NSColor) -> String? {
         guard let s = c.usingColorSpace(.sRGB) else { return nil }
         return String(format: "%.4f/%.4f/%.4f/%.4f", s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent)
@@ -96,10 +78,6 @@ extension StationController {
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
         n.name = name
         root.addChildNode(n)
-        // Dark border toward any neighbouring floor of another owner, run on past a corner where another
-        // border meets it there, and stopped at the corner where none does, so it never pokes into an
-        // open doorway. Edges with no floor beyond are open, numbered round the tile (z-, x-, z+, x+) for
-        // the look's kerbs.
         let g = 0.075
         func parted(_ a: Cell, _ b: Cell) -> Bool {
             guard let oa = owner(station, a), let ob = owner(station, b), oa != ob else { return false }
@@ -111,7 +89,7 @@ extension StationController {
         ]
         var open = Set<Int>(), walled: [Int: Floor] = [:]
         for (nb, off, vertical, edge) in sides {
-            guard let other = owner(station, nb) else { open.insert(edge); continue }   // the void: a kerb, no border
+            guard let other = owner(station, nb) else { open.insert(edge); continue }
             guard other != key, !joined(station, cell, nb, key) else { continue }
             walled[edge] = floorKind(other)
             guard look.drawsBorders else { continue }
@@ -122,7 +100,6 @@ extension StationController {
             }
             let lo = meets(-1) ? g : 0, hi = meets(1) ? g : 0
             let length = 1 + lo + hi, shift = (hi - lo) / 2
-            // Every border is the void, in a few sizes: a handful of geometries for the whole fleet.
             let strip = shared("border:\(vertical):\(length)", width: vertical ? g * 2 : length,
                                height: vertical ? length : g * 2) { flat(Palette.void) }
             let b = SCNNode(geometry: strip)
@@ -133,8 +110,6 @@ extension StationController {
             b.opacity = n.opacity
             root.addChildNode(b)
         }
-        // Whatever the look hangs under the plane; the plane keeps the name, the colour and the place
-        // the scene reads.
         var same: UInt8 = 0
         for (k, (dx, dz)) in Tile.around.enumerated() where owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == key { same |= 1 << k }
         if let detail = look.tileDetail(Tile(floor: floor, color: color, open: open, walled: walled, same: same)) {
@@ -144,36 +119,28 @@ extension StationController {
         return n
     }
 
-    /// The office's own colour along the tile's edges that face out of the office, just inside the dark
-    /// border and just under it; none across the doorway, where the rim beside it runs on to the edge. Where only the void lies beyond, the border is drawn here, so the rim
-    /// keeps one line all round. A strip runs on to the tile's end where the office goes on that way and
-    /// stops at the border where it turns a corner; a corner turning inward gets a square of its own.
-    /// Hung on the tile, so it fades, folds and unfolds with it; the tile's tint leaves it alone.
     private func rim(_ tile: SCNNode, cell: Cell, of room: Room, in station: Station, color: NSColor) {
         let inside = Set(room.cells)
         func outside(_ dx: Int, _ dz: Int) -> Bool { !inside.contains(Cell(x: cell.x + dx, y: cell.y + dz)) }
         func door(_ dx: Int, _ dz: Int) -> Bool { joined(station, cell, Cell(x: cell.x + dx, y: cell.y + dz), room.key) && outside(dx, dz) }
         func void(_ dx: Int, _ dz: Int) -> Bool { owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == nil }
         let border = 0.075, wide = 0.13
-        // The border out to the void reaches a little past the tile, so no sliver of floor shows at its edge.
         let over = 0.03
         let at = 0.5 - border - wide / 2, edge = 0.5 - border / 2 + over / 2
         func add(_ w: Double, _ h: Double, _ x: Double, _ z: Double, _ c: NSColor, _ y: Double) {
             let piece = shared("rim:\(w):\(h):\(c.description)", width: w, height: h) { flat(c) }
             let r = SCNNode(geometry: piece)
-            // The plane lies face up: its x is the floor's x, its y the floor's -z.
             r.position = SCNVector3(x, -z, y)
             r.name = tile.name
             tile.addChildNode(r)
         }
         for (dx, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] where outside(dx, dz) && !door(dx, dz) {
-            let (ax, az) = dx != 0 ? (0, 1) : (1, 0)   // along the edge
+            let (ax, az) = dx != 0 ? (0, 1) : (1, 0)
             func stops(_ x: Int, _ z: Int) -> Bool { outside(x, z) && !door(x, z) }
             let lo = stops(-ax, -az) ? -0.5 + border : -0.5, hi = stops(ax, az) ? 0.5 - border : 0.5
             let length = hi - lo, mid = (lo + hi) / 2
             if dx != 0 { add(wide, length, Double(dx) * at, mid, color, 0.001) } else { add(length, wide, mid, Double(dz) * at, color, 0.001) }
             guard void(dx, dz) else { continue }
-            // Past an end only where the void or the office itself goes on, never into a doorway.
             let before = void(-ax, -az) || !outside(-ax, -az) ? over : 0, after = void(ax, az) || !outside(ax, az) ? over : 0
             let run = 1 + before + after, on = (after - before) / 2
             if dx != 0 { add(border + over, run, Double(dx) * edge, on, Palette.void, 0.0015) }
@@ -186,14 +153,12 @@ extension StationController {
         }
     }
 
-    /// A look's set piece into the scene, each part named for its area so the pointer and the clicks find it.
     private func addSetPiece(_ piece: SetPiece, _ station: Station) {
         for (area, nodes) in piece.parts {
             for n in nodes { n.name = area.rawValue + ":" + station.name; staticRoot.addChildNode(n) }
         }
     }
 
-    /// Dashed outline around a room's footprint, the game's look for a room under construction.
     private func outline(station: Station, room: Room) -> SCNNode {
         let group = SCNNode()
         let color = NSColor(room.color)
@@ -227,7 +192,7 @@ extension StationController {
 
     func rebuildStatic() {
         fleet.arrange()
-        owners = [:]   // the floor is about to be read afresh: last redraw's map is last redraw's
+        owners = [:]
         staticRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomTiles = [:]
         openEdges = []
@@ -248,7 +213,6 @@ extension StationController {
             anchor.position = v3(station.offset.x, 0, station.offset.y)
             let oldDug = knownSpine[station.name] ?? station.dugCount
             knownSpine[station.name] = station.dugCount
-            // Hallway given back is taken up from its far end inward, the reverse of how it was laid.
             let gone = (knownHall[station.name] ?? []).filter { !station.isCorridor($0) }
             knownHall[station.name] = station.dugCells
             for (i, c) in gone.reversed().enumerated() {
@@ -259,16 +223,12 @@ extension StationController {
             }
             for c in station.corridorCells + station.coreCells {
                 let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
-                // Hallway dug since the last redraw is built tile by tile, in the order it was dug.
                 let order = station.digOrder(of: c)
-                if order > oldDug {   // the plaza and the fixed arms are order 0; they are never new
+                if order > oldDug {
                     t.opacity = 0
                     t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
                 }
             }
-            // Nothing to put on the floor yet: the hallway pulses out from the plaza while the station
-            // waits to hear which offices it has, in the order the hallway was dug, so the waiting reads
-            // as the same outward movement as the building.
             if world.settling {
                 for c in station.corridorCells + station.coreCells {
                     let mark = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.34))
@@ -284,10 +244,8 @@ extension StationController {
                     staticRoot.addChildNode(mark)
                 }
             }
-            // The input and the output: a look's set pieces, or tiles.
             let input = Looks.current.input(station)
             if let input { addSetPiece(input, station) } else {
-                // The bay is a hangar under the hull, floored wall to wall in the hull's own deck plate.
                 for c in station.hangarCells {
                     addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(rgb: Props.hullPlate), name: "hangar:" + station.name)
                 }
@@ -298,11 +256,9 @@ extension StationController {
             let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
             if let output { addSetPiece(output, station) }
             if station.hasHangar, !station.airlockCells.isEmpty {
-                // Two rectangular door frames across the passage's full width: the door on the corridor side,
-                // the hatch on the bay side. Posts and a lintel, a dark pane between that drops for a walker.
                 let xs = station.airlockCells.map(\.x), ys = station.airlockCells.map(\.y)
                 let cx = station.offset.x + Double(xs.min()! + xs.max()!) / 2
-                let width = Double(xs.max()! - xs.min()! + 1) - 0.1   // posts in the walls
+                let width = Double(xs.max()! - xs.min()! + 1) - 0.1
                 for (edge, tint) in [(Double(ys.min()!) - 0.46, NSColor(rgb: (0.55, 0.6, 0.72))),
                                      (Double(ys.max()!) + 0.46, NSColor(rgb: (0.75, 0.62, 0.25)))] {
                     let door = SCNNode()
@@ -314,7 +270,7 @@ extension StationController {
                         post.geometry!.firstMaterial = frame
                         post.position = v3(side * width / 2, 0.35, 0)
                         post.name = "post"
-                        post.isHidden = !drawn.showsPosts   // drawn or not, the walks go between them
+                        post.isHidden = !drawn.showsPosts
                         door.addChildNode(post)
                     }
                     door.addChildNode(drawn.node)
@@ -332,9 +288,6 @@ extension StationController {
             for c in station.hall.padCells where output == nil {
                 addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name)
             }
-            // The pad's east edge, where the pad gives onto open space: the same hull as round the bay, turned a
-            // quarter so it leans east, away from the pad and over the station.
-            // Nothing comes through this stretch, so no door.
             if station.hasPad, output == nil, let east = station.hall.padCells.map(\.x).max(),
                let y0 = station.hall.padCells.map(\.y).min(), let y1 = station.hall.padCells.map(\.y).max(),
                let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Station.hullDepth, doorway: 0, doorTop: 0) {
@@ -344,7 +297,6 @@ extension StationController {
                 staticRoot.addChildNode(hull)
             }
             if output == nil {
-                // One room, its zones told apart by the floor: storage darker, the lab light, the walk between.
                 let lab = world.deckInUse(station: station.name)
                 let storage = Set(station.hall.storageCells), deck = Set(station.hall.deckCells)
                 for c in station.hall.cells {
@@ -353,8 +305,6 @@ extension StationController {
                 }
             }
             if station.hasPad {
-                // Decon: a darker floor at the back of storage, and the hatch in the back wall that
-                // everything from outside comes through, with its light over it.
                 for c in station.hall.deconCells where output == nil {
                     addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name)
                 }
@@ -381,8 +331,6 @@ extension StationController {
                 prop.name = "station:" + station.name
                 staticRoot.addChildNode(prop)
             }
-            // The fixed rooms' furniture, from the look. The solid pieces carry the room's name; the gym's are
-            // stood on and stepped round, so they carry the gym's; the towel, the bar and the bag move.
             if let lounge = station.rooms["kind:lounge"] {
                 for n in Looks.current.furnishLounge(lounge, in: station).props { n.name = "room:" + roomKey(station, lounge); staticRoot.addChildNode(n) }
             }
@@ -427,19 +375,15 @@ extension StationController {
             for room in station.rooms.values {
                 let key = roomKey(station, room)
                 var tiles: [SCNNode] = []
-                // Construction progress: no branch = empty grey floor; a local branch starts the tiling,
-                // commits add more, and pushing finishes it.
-                // Dark while it's just a conversation; lit as soon as a branch exists; power cut when left alone.
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
                 let light = officeLight(station, room)
                 roomLight[key] = light
                 roomPower[key] = light != .dark
                 let failing = world.checksFailing(room)
                 let dusty = world.isDusty(room)
-                let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))      // where tiles have not been laid yet
+                let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))
                 let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
                 let provisional = world.isProvisional(station, room)
-                // Drawn from last night's notes and not yet confirmed today: dim until it is.
                 let unchecked = world.isUnchecked(station, room)
                 let ordered = room.cells.sorted { (a, b) in
                     let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
@@ -450,9 +394,6 @@ extension StationController {
                 let rimmed = Looks.current.rimsOffices && !room.key.hasPrefix("kind:") && !unchecked && !provisional
                 let pending = undelivered.contains(key)
                 for (i, c) in ordered.enumerated() {
-                    // Nothing on the plot before the office unfolds from its crate: no grey placeholder.
-                    // An office with nothing done yet is its own colour, a touch down. It used to lose a
-                    // third off every channel, which took the palette with it.
                     let color = i < tiled || progress == 0 ? officeTone(officeBase(station, room), light) : subfloor
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
                     if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: officeBase(station, room)) }
@@ -464,7 +405,6 @@ extension StationController {
                         let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
                         overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
                         overlay.eulerAngles.x = -.pi / 2
-                        // Under the borders and the rim: dust and failing tint the floor, not its edges.
                         overlay.position = v3(t.position.x, Looks.current.floorTop + 0.0005, t.position.z)
                         overlay.name = "room:" + key
                         if failing {
@@ -479,15 +419,11 @@ extension StationController {
                 roomTiles[key] = tiles
                 if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, in: station)) {
                     prop.position.x += station.offset.x; prop.position.z += station.offset.y
-                    // The office's own name, so a look that marks it instead of lettering the floor is
-                    // hovered and clicked like the office it stands for.
                     prop.name = "room:" + roomKey(station, room)
                     if provisional { prop.opacity = 0.38 }
                     staticRoot.addChildNode(prop)
                 }
-                // Outlined while not built; a peer's local office someone works in is solid and keeps the frame as a mark.
                 if provisional || world.isLocalLive(station, room), !pending {
-                    // A thin frame round each tile's outer edges: reserved, not built.
                     let cellSet = Set(room.cells)
                     for c in room.cells {
                         for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] where !cellSet.contains(Cell(x: c.x + dx, y: c.y + dy)) {
@@ -505,7 +441,6 @@ extension StationController {
         for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
         groundRoot.childNodes.forEach { $0.removeFromParentNode() }
         if headless {
-            // A run with no window draws no world round the stations: nothing would see it.
         } else {
             Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
@@ -525,7 +460,6 @@ extension StationController {
         fleet.save()
     }
 
-    /// What an office is known by: its issue number, whoever is in it, and the name that would be written.
     private func sign(for room: Room, in station: Station) -> OfficeSign {
         let digits = room.name.drop { !$0.isNumber }.prefix { $0.isNumber }
         return OfficeSign(number: Int(digits), who: world.occupant(of: roomKey(station, room)),
@@ -542,7 +476,6 @@ extension StationController {
         }
     }
 
-    /// Lays each room's name flat beside it on the side with free floor, or cut into the tile when boxed in.
     private func rebuildLabels() {
         labelRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomLabels = [:]
@@ -558,13 +491,10 @@ extension StationController {
             node.eulerAngles.y = yaw
             let y = node.position.y > 0 ? Double(node.position.y) : 0.01
             node.position = v3(center.x, y, center.y)
-            // After the floor, text included: the order is each node's own, and the text is a child.
             node.enumerateHierarchy { n, _ in n.renderingOrder = 10 }
             labelRoot.addChildNode(node)
             floorLabels.append((node, yaw))
         }
-        // The corner of a room a label goes in: the front one, unless something of the room's own stands
-        // on it — a couch, a landing pad — and then the next corner that is clear. Props by footprint, in world space.
         func corner(of cells: [Cell], width: Double, height: Double, station: Station, clearOf names: Set<String>) -> SIMD2<Double> {
             let o = SIMD2(station.offset.x, station.offset.y)
             let props: [(lo: SIMD2<Double>, hi: SIMD2<Double>)] = staticRoot.childNodes.filter { names.contains($0.name ?? "") }.map { n in
@@ -577,7 +507,6 @@ extension StationController {
             let half = SIMD2(width / 2, height / 2)
             let front = y1 + 0.42 - half.y, back = y0 - 0.42 + half.y, right = x1 + 0.42 - half.x, left = x0 - 0.42 + half.x
             let midX = (x0 + x1) / 2, midY = (y0 + y1) / 2
-            // The corners first, then the middle of each side; failing all of them, whichever is least covered.
             let options = [SIMD2(right, front), SIMD2(left, front), SIMD2(right, back), SIMD2(left, back),
                            SIMD2(midX, front), SIMD2(right, midY), SIMD2(left, midY), SIMD2(midX, back)].map { $0 + o }
             func covered(_ c: SIMD2<Double>) -> Double {
@@ -591,12 +520,10 @@ extension StationController {
                 return ca != cb ? ca < cb : a.offset < b.offset
             }!.element
         }
-        // A look may keep the floor clear of lettering and carry the names some other way.
         guard Looks.current.writesOnFloor else { return }
         for station in fleet.stations.values {
             let ox = station.offset.x, oz = station.offset.y
             if station.hasPad {
-                // Each zone's word on the walkway beside it, reading toward the pad: the crates never stand on it.
                 var zones: [(String, [Cell])] = [(Words.current.zoneWaiting, station.hall.storageCells)]
                 if world.deckInUse(station: station.name) {
                     zones += [(Words.current.zoneTesting, station.hall.stagedCells), (Words.current.zoneCleared, station.hall.clearedCells)]
@@ -637,7 +564,6 @@ extension StationController {
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {
-                // Tiles are centred on integer coordinates: any tile the text touches counts.
                 let x0 = Int((lo.x + 0.25).rounded(.down)), x1 = max(x0, Int((hi.x - 0.25).rounded(.down)))
                 let y0 = Int((lo.y + 0.25).rounded(.down)), y1 = max(y0, Int((hi.y - 0.25).rounded(.down)))
                 for x in x0...x1 {
@@ -651,11 +577,9 @@ extension StationController {
             for room in station.rooms.values.sorted(by: { $0.key < $1.key }) {
                 let text = StationController.displayName(room)
                 if room.key.hasPrefix("kind:") {
-                    // Fixed rooms: a short word cut into the middle of the floor.
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
                     let label = floorSign(text, color: accent, size: 0.36)
                     label.node.position.y = 0.012
-                    // Tucked into a corner of the floor, clear of the room's own furniture.
                     let key = roomKey(station, room)
                     add(label.node, yaw: 0, center: corner(of: room.cells, width: label.width, height: label.height,
                                                            station: station, clearOf: ["room:" + key, "gym:" + key]))
@@ -663,7 +587,6 @@ extension StationController {
                     roomLabels[roomKey(station, room)] = label.node
                     continue
                 }
-                // 3. Long names get smaller type.
                 let size = max(0.3, min(0.46, 6.4 / Double(max(14, text.count))))
                 let minX = room.cells.map(\.x).min()!, maxX = room.cells.map(\.x).max()!
                 let minY = room.cells.map(\.y).min()!, maxY = room.cells.map(\.y).max()!
@@ -672,8 +595,6 @@ extension StationController {
                 let key = roomKey(station, room)
                 var node: SCNNode?
 
-                // Whose office it is, stamped in the front row's right-hand corner, no wider than the floor
-                // that row has there: the whole name if it reads at that size, else its first word.
                 var stamped: Set<Cell> = []
                 if let who = world.occupant(of: key) {
                     let maxYRow = room.cells.map(\.y).max()!
@@ -716,15 +637,14 @@ extension StationController {
                     break
                 }
                 if node == nil, let r = Station.largestRect(in: Set(room.cells).subtracting(stamped)) {
-                    // Boxed in: cut the name into the room's biggest clear rectangle, shrunk until it fits.
                     let rw = Double(r.hi.x - r.lo.x + 1), rd = Double(r.hi.y - r.lo.y + 1)
                     let horizontal = rw >= rd
                     let along = (horizontal ? rw : rd) - 0.3
                     let across = (horizontal ? rd : rw) - 0.3
                     var size = size * 0.85
                     var lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
-                    let fitWidth = 3 * along / (Double(text.count) * 0.5)          // three lines at most
-                    let fitDepth = across / (Double(lines) * 1.15)                 // stacked lines must fit too
+                    let fitWidth = 3 * along / (Double(text.count) * 0.5)
+                    let fitDepth = across / (Double(lines) * 1.15)
                     size = max(0.16, min(size, fitWidth, fitDepth))
                     lines = max(1, min(3, Int((Double(text.count) * 0.5 * size / along).rounded(.up))))
                     let label = floorText(text, color: StationController.inkOnTile, size: size, maxWidth: along, lines: lines, bold: true)
@@ -746,13 +666,12 @@ extension StationController {
         }
     }
 
-    /// An office's floor from the far corners in: boxes go there first, so the doorway stays clear.
     func farCells(_ station: Station, _ room: Room) -> [Cell] {
         let door = station.doorCell(of: room.key) ?? room.cells.first!
         let written = labelCells[roomKey(station, room)] ?? []
         return room.cells.sorted { a, b in
             let wa = written.contains(a), wb = written.contains(b)
-            if wa != wb { return !wa }   // cells under writing come last
+            if wa != wb { return !wa }
             let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
             return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
         }

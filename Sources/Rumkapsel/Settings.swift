@@ -3,17 +3,13 @@ import Combine
 import SwiftUI
 
 struct Named: Identifiable, Hashable { let id: String }
-/// What the station knows about one repository, for its page under Repositories.
 struct RepoDetail {
     var path: String?
     var remote: String?
-    /// What the repository itself says, before anything set by hand; nil until it has been read.
     var detected: Pipeline?
-    /// The way of working that follows from it, set by hand or detected.
     var workflow: Workflow?
 }
 
-/// The settings window: general options, repositories, GitHub and teammates.
 final class SettingsModel: ObservableObject {
     @Published var config: AppConfig = ConfigStore.shared.current
     @Published var knownRepos: [String] = []
@@ -26,8 +22,6 @@ final class SettingsModel: ObservableObject {
 
     func commit() { pending?.cancel(); ConfigStore.shared.update { $0 = config } }
 
-    /// A colour well reports every step of a drag, a text field every key, and each commit rebuilds the
-    /// station: wait for the hand to stop.
     private var pending: DispatchWorkItem?
     func commitSoon() {
         pending?.cancel()
@@ -237,7 +231,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    /// Who is first in line for a stage: the picker names a source, and the rest follow as detected.
     private func stagePicker(_ title: String, _ repo: String, _ workflow: Workflow, _ path: WritableKeyPath<Workflow, [Source]>) -> some View {
         Picker(title, selection: Binding(
             get: { workflow[keyPath: path].first ?? .pulls },
@@ -246,7 +239,6 @@ struct SettingsView: View {
         }
     }
 
-    /// The same, for a stage a repository may do without.
     private func optionalStagePicker(_ title: String, _ repo: String, _ workflow: Workflow, _ path: WritableKeyPath<Workflow, [Source]?>, off: String) -> some View {
         Picker(title, selection: Binding(
             get: { workflow[keyPath: path]?.first },
@@ -269,7 +261,6 @@ struct SettingsView: View {
         Color(nsColor: NSColor(model.config.repos[repo]?.color ?? Fleet.color(slot: Fleet.slot(for: repo))))
     }
 
-    /// A folder picked from disk, taken only if it is inside a git checkout; a worktree counts as the checkout it came from.
     private func addRepository() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -386,8 +377,6 @@ struct SettingsView: View {
         .onAppear { if on { board.loadOrganisations(); if let o = model.config.projectOwner { board.loadProjects(owner: o) } } }
     }
 
-    /// A new project or field: each stage whose value the field does not have takes the likeliest one it does,
-    /// by the names boards usually give them, or none.
     private func guessStages() {
         guard let project = model.board.projects?.first(where: { $0.number == model.config.projectNumber }),
               let field = project.fields.first(where: { $0.name == model.config.statusField }) ?? project.fields.first(where: { $0.name == "Status" }) else { return }
@@ -406,7 +395,6 @@ struct SettingsView: View {
         model.config.projectStatuses = s
     }
 
-    /// One of the station's stages, and which of the field's values sends an issue there.
     private func stageRow(_ title: String, _ meaning: String, _ path: WritableKeyPath<AppConfig.ProjectStatuses, String>, _ field: BoardField?) -> some View {
         let current = model.config.statuses[keyPath: path]
         return Picker(selection: Binding(
@@ -422,7 +410,6 @@ struct SettingsView: View {
         }
     }
 
-    /// What GitHub offers, plus the saved value when GitHub does not list it.
     private func options(_ offered: [String], keeping saved: String?) -> [String] {
         guard let saved, !saved.isEmpty, !offered.contains(saved) else { return offered }
         return offered + [saved]
@@ -457,8 +444,6 @@ struct SettingsView: View {
 struct BoardField: Hashable { let name: String; let options: [String] }
 struct BoardProject: Identifiable, Hashable { let number: Int; let title: String; let fields: [BoardField]; var id: Int { number } }
 
-/// What GitHub has to offer for the board settings: your organisations, their projects, and each
-/// project's single-select fields with their values. Asked when the GitHub tab is shown.
 final class BoardCatalog: ObservableObject {
     @Published var organisations: [String] = []
     @Published var projects: [BoardProject]?

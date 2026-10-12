@@ -1,7 +1,3 @@
-// The station's log on disk: every event, command, give-up and GitHub ask, one line each, so what
-// the running app is doing can be read from outside it. `station.log` in Application Support, rolled
-// to `station.log.1` past a few megabytes.
-
 import Foundation
 
 enum StationLog {
@@ -10,7 +6,6 @@ enum StationLog {
     private static let clock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
     private static var handle: FileHandle?
     private static var written = 0
-    /// The noise: ticks that say nothing about what changed.
     private static let quiet: Set<String> = ["markersChanged", "crewRoster", "layoutChanged"]
 
     static func write(_ kind: String, _ text: String) {

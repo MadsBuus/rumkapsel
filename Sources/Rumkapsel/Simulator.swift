@@ -1,56 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// A station driven by presses. It holds a real `StationController` with the scanner, GitHub and the
-/// network switched off, and a model that writes synthetic facts into the same entry points production
-/// uses: `applyScan`, `applyGitHub`, `applyPeer`. Every `WorldEvent` and every `Command` goes to the log,
-/// so a cue that never fires is visible. The scenarios press it, `--simulate` presses it, and the
-/// playbook presses it to lay a floor and play one moment; there is no panel of its own any more.
-///
-/// The presses are a board and the moves on it. **The board** is the position: one knob per fact —
-/// the session in the target office and what it is doing, its commits, whether its branch is pushed,
-/// its pull request, its column, its repository's pipeline and open releases, whether the peer is on
-/// the network, whether it is night. **The moves** are the things that happen, one press each. A move
-/// whose ground is not laid lays it first, quietly, and plays a beat later on the station clock, saying
-/// in the log what it set up. So "Merge PR" on an office with no pull request opens one and then merges
-/// it. Only a move that has already happened — a second staging release while one is open — is out of
-/// reach, and it says why.
-///
-///     Target: web#455                     the office every knob and move acts on
-///     Set: <knob> = <value>               a knob, by its name or its last words
-///     Set: pipeline = no staging branch
-///     Set: commits ahead = 8              a count takes a number, a flag "yes" or "no"
-///     Merge PR                            a move, by the name below
-///
-/// The moves, by name:
-///
-///     Mine:      New branch in repo, Prompt, Commit, Session ends, Switch branch, Open PR,
-///                Approve PR, Checks failing, Merge PR, Close PR
-///     Teammate:  Teammate: New branch, Teammate: Open PR, Teammate: Push, Teammate: Merge PR,
-///                Teammate: Close PR, Teammate: Close PR (feed lags)
-///     Bots:      Bot: Open PR, Bot: Merge PR, Bot: Close PR
-///     Peer:      Peer: Arrive, Peer: New office, Peer: Push branch, Peer: Leave, Peer: Kick office,
-///                Peer: Same branch as teammate
-///     Sources:   Stage: ready, Stage: stored, Stage: QA, Stage: cleared, Stage: shipped
-///     Board:     Board: Move <repo>#<n> to <column>, Board: Catch up
-///     Polls:     GitHub: Poll, Scan: again
-///     Release:   Repo: No staging, Repo: Ships on merge, Release: Staging opens,
-///                Release: Staging merges, Release: Staging merges (board lags),
-///                Release: Staging closes, Release: Production opens, Release: Mark tested,
-///                Release: Production merges
-///     Deploys:   Deploy: Staging starts, Deploy: Staging goes live, Deploy: Staging fails,
-///                Deploy: Production starts, Deploy: Goes live, Deploy: Fails, Deploy: Cancelled
-///     Everyone:  Night, Day, Everyone to lounge, Breather, Everyone asleep, Bath, Chore, Workout,
-///                Meet in the hall, Wedge carrier
-///     Floor:     Hands: one free on the deck
-///     Time:      Pause, Resume, Step, ¼x, ½x, 1x, 4x, 16x
-///
-/// Without a target the presses act on the first office of mine, ios#298.
 @MainActor
 final class SimulatorController {
     let station: StationController
     let model: SimulatorModel
-    /// Set by whoever owns the window: tear everything down and seed again.
     var onReset: (() -> Void)? { get { model.onReset } set { model.onReset = newValue } }
     let view = NSView()
 
@@ -72,24 +26,21 @@ final class SimulatorController {
 
 // MARK: the made-up org
 
-/// Who an office belongs to.
 enum SimOwner { case me, teammate, peer }
 
-/// One office in the simulator's org, whoever it belongs to. This list is the whole truth: the
-/// scan, the pull request lists and the peer snapshot are all derived from it before every push.
 struct SimOffice: Identifiable {
-    let uid: String                 // stable through a branch switch, so the picker keeps its choice
+    let uid: String
     var repo: String
     var number: Int
     var branch: String
     var title: String
     var owner: SimOwner
-    var who: String                 // "me", the teammate's name, the peer's name
-    var cwd = ""                    // mine: the checkout on disk
+    var who: String
+    var cwd = ""
     var pushed = false
-    var commits = 0                 // mine: commits ahead. Teammate: pushes on top of the branch. Peer: boxes.
-    var pull: PullRequest?          // mine: what GitHub says about my branch
-    var prOpen = false              // teammate: an open pull request on this branch
+    var commits = 0
+    var pull: PullRequest?
+    var prOpen = false
     var startedAt = Date()
 
     var id: String { uid }
@@ -97,7 +48,6 @@ struct SimOffice: Identifiable {
     var label: String { "\(repo)#\(number) \(title) (\(who))" }
 }
 
-/// One session of mine, in the office it belongs to.
 private struct SimSession {
     var id: String
     var office: String
@@ -110,7 +60,6 @@ private struct SimSession {
 
 @MainActor
 final class SimulatorModel: ObservableObject {
-    /// The clock rate a speed press stands for.
     static func speedValue(_ name: String) -> Double { ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1 }
 
     var onReset: (() -> Void)?
@@ -121,34 +70,26 @@ final class SimulatorModel: ObservableObject {
     let teammate = "leo"
     let peerName = "kim"
 
-    /// The one office everything acts on, by uid.
     @Published var target = ""
     @Published var column = ""
-    /// Who the stage panel speaks as: the station hears a stage by the rules, so the source matters.
     @Published var stageSource: Source = .board
     @Published var speed = 1.0
     @Published var paused = false
     @Published private(set) var offices: [SimOffice] = []
 
-    private var sessions: [String: SimSession] = [:]     // by office uid
+    private var sessions: [String: SimSession] = [:]
     private var board: [ProjectItem] = []
     private var feeds: [String: [FeedEvent]] = [:]
     private var releases: [String: [ReleasePR]] = [:]
-    /// Repositories pressed to have no staging branch: develop to master through a release branch, like android.
     private var noStaging: Set<String> = []
-    /// Repositories pressed to deploy on every merge, with no release at all.
     private var shipsOnMerge: Set<String> = []
-    /// Repositories pressed to ship by tagging the trunk, as rumkapsel does.
     private var shipsOnTag: Set<String> = []
     private var launches: [(repo: String, pr: ReleasePR)] = []
-    /// Dependabot's open pull requests per repository: objects in decon, not offices.
     private var botPRs: [String: [(number: Int, title: String, branch: String)]] = [:]
     let bot = "dependabot[bot]"
     private var peerHere = false
     private var peerBeat: Timer?
-    /// Whether the peer claims the teammate's office, so one person arrives from both sources at once.
     private var peerSharesTeammate = false
-    /// Issue numbers per repository, continuing each one's own range so a new office reads like its neighbours.
     private var nextIssues: [String: Int] = ["web": 460, "api": 5160, "ios": 300]
     private func nextIssue(_ repo: String) -> Int { nextIssues[repo, default: 700] += 1; return nextIssues[repo]! }
     private var nextRelease = 9000
@@ -171,7 +112,6 @@ final class SimulatorModel: ObservableObject {
         }
         station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text, .violation(text)) }
         station.sim?.pullState = { [weak self] repo, number in self?.pullFates["\(repo)#\(number)"] }
-        // A peer that stops talking is dropped after twenty seconds, so keep saying the same thing.
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushPeer() }
         }
@@ -186,10 +126,6 @@ final class SimulatorModel: ObservableObject {
 
     // MARK: the seed
 
-    /// A deterministic org: three repositories, five offices, three sessions of mine, one teammate
-    /// with a pull request, one peer on the network, and crates on the board.
-    /// `crowd` is the rest of the desk: the other two offices of mine, the teammate and the peer. A play
-    /// about one body in a dorm wants none of them, and the org is the same org without them.
     func seed(crowd: Bool = true) {
         for r in repos { makeDir(root(r)) }
         github.injectSilently = true
@@ -230,7 +166,7 @@ final class SimulatorModel: ObservableObject {
 
         github.inject(project: board, quiet: true)
         github.injectSilently = false
-        pushGitHub()          // taken quietly: the repositories answer for the first time here
+        pushGitHub()
         pushScan()
         peerHere = crowd
         pushPeer()
@@ -249,7 +185,6 @@ final class SimulatorModel: ObservableObject {
         return SimOffice(uid: "off-\(nextOffice)", repo: repo, number: number, branch: branch, title: title, owner: owner, who: who)
     }
 
-    /// An office of mine with a session in it: the checkout is made, the branch is pushed.
     @discardableResult
     private func addMine(repo: String, number: Int, slug: String, branch: String, title: String,
                          activity: Activity, commits: Int) -> SimOffice {
@@ -290,8 +225,6 @@ final class SimulatorModel: ObservableObject {
         defer { github.injectSilently = false; station.simulateGitHub() }
         for r in repos {
             let sent = launches.filter { $0.repo == r }.map(\.pr)
-            // `gh pr list` returns everyone's, your own included: that is how the station learns whose
-            // work each crate is, so your own open pull requests belong in the answer too.
             var open = offices.filter { $0.repo == r && ($0.owner == .teammate ? $0.prOpen : $0.pull?.state == "OPEN") }.map {
                 OpenPR(number: $0.number, title: $0.title, author: $0.owner == .me ? "me" : $0.who, isBot: false, branch: $0.branch,
                        url: "https://example.invalid/\(r)/\($0.number)", createdAt: $0.startedAt)
@@ -315,11 +248,7 @@ final class SimulatorModel: ObservableObject {
                                 color: station.world.fleet.color(forRepo: o.repo), cells: [], pushed: o.pushed,
                                 startedAt: o.startedAt, lastActive: station.now, boxes: o.commits, dim: false)
         }
-        // A peer is a person, and at night their session is as quiet as anyone's: without this the one
-        // state a peer's body is hardest to place — asleep, wanting a bunk of its own — is unreachable.
         let asleep = station.sim?.night == true
-        // The ghost case: the same colleague on the board and on the network, holding the same branch.
-        // Two sources, one person — and until this there was no way to stand them next to each other.
         let office = peerSharesTeammate ? offices.first { $0.owner == .teammate }?.home.key : nil
         let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: office ?? $0.key, asleep: asleep, busy: !asleep) }
         let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: station.now.addingTimeInterval(-600),
@@ -334,7 +263,6 @@ final class SimulatorModel: ObservableObject {
         feeds[repo] = Array(feeds[repo]!.prefix(40))
     }
 
-    /// Every pull request's fate as the simulated GitHub knows it, by "repo#number".
     private var pullFates: [String: String] = [:]
 
     private func setPull(_ pr: PullRequest?, on uid: String) {
@@ -357,7 +285,6 @@ final class SimulatorModel: ObservableObject {
 
     private func index(_ uid: String) -> Int? { offices.firstIndex { $0.uid == uid } }
 
-    /// Keeps the picker and the column choice on something that exists.
     func refresh() {
         if index(target) == nil { target = offices.first { $0.owner == .me }?.uid ?? offices.first?.uid ?? "" }
         if !columns.contains(column) { column = columns.first ?? "" }
@@ -370,7 +297,6 @@ final class SimulatorModel: ObservableObject {
     private var targetRepo: String { office?.repo ?? repos[0] }
     private var targetSession: SimSession? { office.flatMap { sessions[$0.uid] } }
 
-    /// leo acts on the target when the target is his; otherwise on his newest office in the target's repository.
     private var leoOffice: SimOffice? {
         if let o = office, o.owner == .teammate { return o }
         return offices.last { $0.owner == .teammate && $0.repo == targetRepo }
@@ -384,13 +310,11 @@ final class SimulatorModel: ObservableObject {
         return offices.last { $0.owner == .teammate && $0.repo == targetRepo && $0.prOpen }
     }
 
-    /// kim acts on the target when the target is hers; otherwise on her newest office.
     private var kimOffice: SimOffice? {
         if let o = office, o.owner == .peer { return o }
         return offices.last { $0.owner == .peer }
     }
 
-    /// What the target office has, in the panel's own words.
     var status: [String] {
         guard let o = office else { return ["no office"] }
         var out: [String] = []
@@ -445,14 +369,8 @@ final class SimulatorModel: ObservableObject {
     }
     // MARK: the board, and the moves on it
 
-    /// Why a move cannot be played right now. Two kinds, and they are not the same thing: a move
-    /// whose ground is simply not laid yet can lay it and go, which is what keeps every move one
-    /// press away however the board stands; a move that has already happened cannot happen twice
-    /// and stays out of reach.
     enum Blocked {
-        /// Something has to be there first. The closure puts it there.
         case missing(String, () -> Void)
-        /// It is already so, or cannot be done from here. Nothing to arrange.
         case already(String)
 
         var words: String {
@@ -463,13 +381,10 @@ final class SimulatorModel: ObservableObject {
         }
     }
 
-    /// One thing that can happen.
     struct Button: Identifiable {
-        let name: String        // the stable name, the one `--simulate` and the scenarios use
-        let label: String       // what the panel shows, with the target's repository filled in
-        let blocked: Blocked?   // why it cannot run as things stand, nil when it can
-        /// Whether it has a button of its own. A few moves are worked by a knob on the board
-        /// instead, and keep their name only so a script can still press them.
+        let name: String
+        let label: String
+        let blocked: Blocked?
         var shown = true
         var id: String { name }
     }
@@ -480,9 +395,6 @@ final class SimulatorModel: ObservableObject {
         Button(name: name, label: label ?? name, blocked: blocked, shown: shown)
     }
 
-    /// One knob on the board: what it says now, and what to do when it is moved. A knob is not a
-    /// quieter kind of button — the station reacts to a knob as it reacts to anything — it is the
-    /// other half of the panel: a knob says what the position *is*, a button plays one move on it.
     struct Setting: Identifiable {
         let id: String
         let note: String?
@@ -497,19 +409,14 @@ final class SimulatorModel: ObservableObject {
 
     // MARK: setting the board
 
-    /// The activities a session can be in, as the panel offers them. "waiting for you" is the quiet
-    /// one: its last word was ten minutes ago, which is what makes the office go quiet.
     static let activities: [(name: String, act: Activity)] = [
         ("coding", .coding("src")), ("reading code", .exploring), ("testing", .testing),
         ("writing", .writing), ("thinking", .thinking), ("QA testing", .qa),
         ("web research", .researching), ("waiting for you", .waiting),
-        // A session gone quiet past `sleepMinutes` is asleep, and an asleep body is the only one the
-        // night sends to a bunk: without this the knob could not reach the one state bedtime needs.
         ("sleeping", .sleeping),
     ]
     static let noSession = "no session"
 
-    /// What a pull request of mine can be. `pullOf` reads one back.
     static let pullStates = ["none", "open", "approved", "checks failing", "merged", "closed"]
 
     private func pullOf(_ o: SimOffice) -> String {
@@ -528,7 +435,6 @@ final class SimulatorModel: ObservableObject {
         }
     }
 
-    /// Puts the target's pull request into that state, whoever's office it is.
     private func setPullState(_ state: String) {
         guard let o = office, let i = index(o.uid) else { return }
         if o.owner == .teammate {
@@ -558,8 +464,6 @@ final class SimulatorModel: ObservableObject {
         return noStaging.contains(targetRepo) ? SimulatorModel.pipelines[1] : SimulatorModel.pipelines[0]
     }
 
-    /// Back to a trunk, a staging branch and a production branch: the shape most repositories have,
-    /// and the one the other two are pressed away from. Without this the panel is a one-way door.
     private func normalPipeline() {
         let repo = targetRepo, cfg = ConfigStore.shared.current
         noStaging.remove(repo)
@@ -585,7 +489,6 @@ final class SimulatorModel: ObservableObject {
         return last.untested ? "open, untested" : "open, tested"
     }
 
-    /// The position, knob by knob: everything above the line in the panel.
     var position: [Setting] {
         let repo = targetRepo
         var out: [Setting] = []
@@ -653,7 +556,6 @@ final class SimulatorModel: ObservableObject {
             return pushScan()
         }
         guard let act = SimulatorModel.activities.first(where: { $0.name == pick })?.act else { return }
-        // A new session needs a checkout on disk and a pushed branch, the way the scanner would find one.
         if sessions[o.uid] == nil {
             guard let i = index(o.uid) else { return }
             if offices[i].cwd.isEmpty { offices[i].cwd = worktree(o.repo, "sim-\(offices[i].number)") }
@@ -663,7 +565,6 @@ final class SimulatorModel: ObservableObject {
             startSession(in: o.uid, activity: act)
         }
         sessions[o.uid]?.activity = act
-        // Quiet is the same session with nothing said for ten minutes; anything else is this moment.
         sessions[o.uid]?.last = act == .waiting ? station.now.addingTimeInterval(-600) : station.now
         pushScan()
     }
@@ -711,8 +612,6 @@ final class SimulatorModel: ObservableObject {
 
     // MARK: laying the ground for a move
 
-    /// Whatever the target office needs to be a working office of mine: mine, checked out, pushed,
-    /// with a session in it.
     private func layMine() {
         guard let o = office, let i = index(o.uid) else { return }
         if offices[i].owner != .me {
@@ -729,13 +628,11 @@ final class SimulatorModel: ObservableObject {
         pushGitHub()
     }
 
-    /// And an open pull request on it.
     private func layOpenPull() {
         layMine()
         setPullState("open")
     }
 
-    /// A branch of the teammate's on the target's repository, with or without a pull request on it.
     private func layTeammate(withPull: Bool) {
         if leoOffice == nil || (withPull && leoOpenPR == nil) || (!withPull && leoBranchWithoutPR == nil) {
             run("Teammate: New branch")
@@ -789,8 +686,6 @@ final class SimulatorModel: ObservableObject {
         let o = office
         let mine = o?.owner == .me
         let hasSession = targetSession != nil
-        // What is not in place yet, and how to put it there. Nothing here refuses a move for want
-        // of ground: it lays it.
         let needsMine: Blocked? = mine && hasSession ? nil
             : .missing(mine ? "a session here" : "this office as mine, with a session", { [weak self] in self?.layMine() })
         let needsOpenPull: Blocked? = mine && o?.pull?.state == "OPEN" ? nil
@@ -830,8 +725,6 @@ final class SimulatorModel: ObservableObject {
                 button("Teammate: Open PR", "He opens a pull request", teammateBranch),
                 button("Teammate: Merge PR", "…merges it", teammatePull),
                 button("Teammate: Close PR", "…closes it unmerged", teammatePull),
-                // The close is seen on the open list and answered when the pull request is asked,
-                // but the activity feed has not caught up.
                 button("Teammate: Close PR (feed lags)", "…closes it, the feed lagging", teammatePull),
             ]),
             Group(id: "Bots (dependabot)", note: "on \(repo): an object in decon, cleared into storage on merge, ejected on close", buttons: [
@@ -848,23 +741,16 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Arrive", shown: false),
                 button("Peer: Leave", shown: false),
             ]),
-            // The station half on its own: a stage said straight to the record, no integration played.
             Group(id: "A source speaks", note: "Says a stage to the record as the source picked, by the rules; the floor reacts. No GitHub, no board.", buttons:
                 Stage.allCases.filter { $0 >= .ready }.map {
                     button("Stage: \($0)", "→ \($0)", o == nil ? .already("no office picked") : nil)
                 }),
             Group(id: "Late polls", note: "a source asked again, or answering after the fact: where the ordering bugs live", buttons: [
-                // The app asks its sources again every few seconds or minutes, and some rules only
-                // come round on a later answer: an office red for ten minutes clears on the poll
-                // after the tenth. A scripted run gets one of each at press time and never sees
-                // them, so both asks are moves of their own.
                 button("GitHub: Poll", "GitHub is asked again"),
                 button("Scan: again", "The scanner looks again"),
-                // The board's own poll arriving late: everything of the repository still in storage moves to the deck.
                 button("Board: Catch up", "The board catches up: \(repo) storage → deck",
                        board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil
                            : .missing("something of \(repo) in storage", { [weak self] in self?.layInStorage() })),
-                // The merge is seen but the board is not: its poll comes later, by "Board: Catch up".
                 button("Release: Staging merges (board lags)", "Staging merges, the board lagging", stagingOpen),
             ]),
             Group(id: "Release (\(repo))", note: nil, buttons: [
@@ -875,7 +761,6 @@ final class SimulatorModel: ObservableObject {
                 button("Release: Staging closes", "Staging closes unmerged", stagingOpen),
                 button("Release: Production opens", "Production opens, untested",
                        openRelease(repo, production: true) != nil ? .already("a production release is already open") : nil),
-                // Without staging there is no deck to test on: marking the release tested is the whole of it.
                 button("Release: Mark tested", "QA passes it",
                        noStaging.contains(repo)
                            ? (releases[repo]?.contains(where: { $0.state == "OPEN" && $0.isProduction && $0.untested }) == true ? nil
@@ -907,15 +792,12 @@ final class SimulatorModel: ObservableObject {
         ]
     }
 
-    /// The clock's own row, never blocked.
     let timeNames = ["Pause", "Resume", "Step", "¼x", "½x", "1x", "4x", "16x"]
 
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
 
-    /// Stops the beats this model keeps, for a station that is being thrown away.
     func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
 
-    /// The station a repository's deploy belongs to.
     private func deployStation(_ repo: String) -> String {
         station.world.repoRoots.values.first { $0.repo == repo }?.station ?? station.fleet.ordered.first?.name ?? "work"
     }
@@ -925,7 +807,6 @@ final class SimulatorModel: ObservableObject {
         if name.hasPrefix("Target: ") {
             pick(String(name.dropFirst(8)))
         } else if name.hasPrefix("Board: Move "), let to = name.range(of: " to ") {
-            // Scripted: "Board: Move api#5161 to Backlog", any item, any column, the picker untouched.
             let id = String(name[name.index(name.startIndex, offsetBy: 12)..<to.lowerBound])
             let column = String(name[to.upperBound...])
             guard let it = board.first(where: { "\($0.repo)#\($0.number)" == id }) else {
@@ -933,8 +814,6 @@ final class SimulatorModel: ObservableObject {
             }
             move([it], to: column)
         } else if name.hasPrefix("Set: "), let eq = name.range(of: " = ") {
-            // Scripted: "Set: session = waiting for you", "Set: web's pipeline = no staging branch".
-            // The knob's name may be given in full or by its last words, so "pipeline" finds it too.
             setKnob(String(name[name.index(name.startIndex, offsetBy: 5)..<eq.lowerBound]), to: String(name[eq.upperBound...]))
         } else if timeNames.contains(name) {
             time(name)
@@ -945,8 +824,6 @@ final class SimulatorModel: ObservableObject {
             case .already(let why):
                 note("skipped", why, .skipped(why))
             case .missing(let what, let lay):
-                // The ground goes down without the move being played, and the move follows a beat
-                // later, on the station clock, so what was just put there has been taken in first.
                 note("set up", what)
                 lay()
                 station.after(1) { [weak self] in
@@ -964,8 +841,6 @@ final class SimulatorModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
     }
 
-    /// A knob of the board, from a script. The value must be one the knob offers; "yes" and "no"
-    /// work a flag, and a number a count.
     private func setKnob(_ id: String, to value: String) {
         let want = id.lowercased(), had = value.lowercased()
         guard let knob = position.first(where: { $0.id.lowercased() == want || $0.id.lowercased().hasSuffix(" " + want) }) else {
@@ -992,7 +867,6 @@ final class SimulatorModel: ObservableObject {
         }
     }
 
-    /// The picker, from a script: "Target: web#455".
     private func pick(_ id: String) {
         guard let o = offices.first(where: { "\($0.repo)#\($0.number)" == id }) else {
             return note("skipped", "no office \(id)", .skipped("no office \(id)"))
@@ -1012,7 +886,6 @@ final class SimulatorModel: ObservableObject {
         }
     }
 
-    /// Every button's work. Nothing here checks whether it applies: `press` did that.
     private func run(_ name: String) {
         let repo = targetRepo
         if name.hasPrefix("Stage: "), let stage = Stage.allCases.first(where: { "\($0)" == String(name.dropFirst(7)) }), let o = office {
@@ -1021,14 +894,11 @@ final class SimulatorModel: ObservableObject {
                 ?? works.note(repo: o.repo, branch: o.branch, issue: o.number)
             works.report(record, stage, by: stageSource, at: station.now)
             note("sim", "\(o.repo)#\(o.number) → \(stage) · \(stageSource.rawValue) · now \(record.stage.map { "\($0)" } ?? "-")")
-            pushScan()   // nothing else the station watches has changed: its own sessions again, so it looks
+            pushScan()
             return
         }
         switch name {
-
-        // Me
         case "New branch in repo":
-            // A new office of mine beside the target, in the target's repository. It becomes the target.
             let n = nextIssue(repo)
             let o = addMine(repo: repo, number: n, slug: "sim-\(n)", branch: "gh-\(n)/new-work-\(n)",
                             title: "new work \(n)", activity: .coding("src"), commits: 2)
@@ -1037,11 +907,10 @@ final class SimulatorModel: ObservableObject {
             pushGitHub()
             pushScan()
         case "Commit":
-            // One more commit ahead on the branch: the worker stows a cube for it.
             guard let o = office, let i = index(o.uid) else { return }
             offices[i].commits += 1
             pushScan()
-            station.simulateGitHub()   // the commit count is GitHub's answer; a poll would have said so
+            station.simulateGitHub()
         case "Prompt":
             guard var s = targetSession else { return }
             s.prompts += 1
@@ -1050,7 +919,6 @@ final class SimulatorModel: ObservableObject {
             sessions[s.office] = s
             pushScan()
         case "Session ends":
-            // The office stays in the picker with no session in it, which is a state worth pressing on.
             sessions[target] = nil
             pushScan()
         case "Switch branch":
@@ -1079,7 +947,6 @@ final class SimulatorModel: ObservableObject {
             }
             setPull(pr, on: o.uid)
 
-        // The teammate, through the open pull request list and the activity feed
         case "Teammate: New branch":
             let n = nextIssue(repo)
             var o = makeOffice(repo: repo, number: n, branch: "gh-\(n)/teammate-\(n)", title: "teammate work \(n)",
@@ -1106,7 +973,6 @@ final class SimulatorModel: ObservableObject {
             offices.removeAll { $0.uid == o.uid }
             let fate = name.contains("Merge PR") ? "MERGED" : "CLOSED"
             pullFates["\(o.repo)#\(o.number)"] = fate
-            // Asked by number or by branch, GitHub answers the pull request's state; the feed may or may not have it yet.
             let answer = PullRequest(number: o.number, title: o.title, state: fate, reviewDecision: "", isDraft: false, url: "https://example.invalid/\(o.repo)/\(o.number)")
             github.inject(pull: answer, for: o.branch, repoRoot: root(o.repo))
             github.inject(pull: answer, number: o.number, repoRoot: root(o.repo))
@@ -1115,7 +981,6 @@ final class SimulatorModel: ObservableObject {
             }
             pushGitHub()
 
-        // Dependabot, through the open pull request list and the activity feed
         case "Bot: Open PR":
             let n = nextIssue(repo)
             let names = ["lodash", "swift-argument-parser", "sentry", "alamofire", "rails"]
@@ -1133,7 +998,6 @@ final class SimulatorModel: ObservableObject {
             feedEvent(fate == "MERGED" ? "pr_merge" : "pr_close", repo: repo, branch: pr.branch, pr: pr.number, title: pr.title, actor: bot)
             pushGitHub()
 
-        // The peer, over the network
         case "Peer: Arrive":
             peerHere = true
             if !offices.contains(where: { $0.owner == .peer }) { addPeerOffice(repo: repo, aged: true) }
@@ -1159,14 +1023,12 @@ final class SimulatorModel: ObservableObject {
         case "Scan: again":
             pushScan()
 
-        // Board
         case "Board: Move":
             guard let it = office.flatMap(boardItem) else { return }
             move([it], to: column)
         case "Board: Catch up":
             move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
 
-        // Releases, on the target's repository
         case "Repo: Ships on merge":
             shipsOnMerge.insert(repo)
             let cfg = ConfigStore.shared.current
@@ -1177,11 +1039,9 @@ final class SimulatorModel: ObservableObject {
             let cfg = ConfigStore.shared.current
             github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "tags",
                                              why: "no release branch: what is tagged on \(cfg.trunkBranch) has shipped", ship: "tag"), for: root(repo))
-            // Without staging nothing of the repository is ever on a deck: whatever the seed put there waits in storage.
             move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
             pushGitHub()
         case "Release: Tag":
-            // The tag is the release, and it has happened by the time anyone sees it.
             let cfg = ConfigStore.shared.current
             nextRelease += 1
             let name = "v0.\(nextRelease - 9000)"
@@ -1195,7 +1055,6 @@ final class SimulatorModel: ObservableObject {
             noStaging.insert(repo)
             let cfg = ConfigStore.shared.current
             github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "master"), for: root(repo))
-            // Without staging nothing of the repository is ever on a deck: whatever the seed put there waits in storage.
             move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
             pushGitHub()
         case "Release: Staging opens":
@@ -1210,11 +1069,8 @@ final class SimulatorModel: ObservableObject {
             let pr = releases[repo]![i]
             releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED",
                                            url: pr.url, labels: pr.labels, mergedAt: station.now, production: pr.production, staging: pr.staging)
-            // With a board, the merge is a bell; the crates move because the columns move.
             if ConfigStore.shared.current.project != nil { launches.append((repo, releases[repo]![i])) }
             pushGitHub()
-            // The board is its own poll: in life it answers minutes after the release did. The lagging
-            // press leaves it where it is, for "Board: Catch up" to move later.
             if !name.hasSuffix("(board lags)") { move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck) }
         case "Release: Staging closes":
             guard let i = openRelease(repo, production: false) else { return }
@@ -1242,8 +1098,6 @@ final class SimulatorModel: ObservableObject {
                                                          production: true, staging: false))
             pushGitHub()
         case "Release: Mark tested":
-            // QA passing takes the untested label off an open production release as well as
-            // moving the column: that is what clears the rocket to load.
             if let i = releases[repo]?.lastIndex(where: { $0.state == "OPEN" && $0.isProduction && $0.untested }) {
                 let pr = releases[repo]![i]
                 releases[repo]![i] = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head,
@@ -1259,9 +1113,6 @@ final class SimulatorModel: ObservableObject {
             releases[repo]![i] = merged
             launches.append((repo, merged))
             pushGitHub()
-            // The board catches up after the rocket has been loaded, the way a later poll would;
-            // moving the column in the same breath empties the deck before anyone can carry it.
-            // On the station clock, so a stepped or paused station waits for it too.
             let shipping = repo
             station.after(6) { [weak self] in
                 guard let self else { return }
@@ -1269,7 +1120,6 @@ final class SimulatorModel: ObservableObject {
                 move(board.filter { $0.repo == shipping && ($0.status == st.cleared || $0.status == st.deck || (self.noStaging.contains(shipping) && $0.status == st.storage)) }, to: st.shipped)
             }
 
-        // Station
         case "Night": station.simulate(.night(true))
         case "Day": station.simulate(.night(false))
         case "Everyone to lounge": station.simulate(.lounge)
@@ -1282,8 +1132,6 @@ final class SimulatorModel: ObservableObject {
         case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
         case "Hands: one free on the deck":
-            // The floor laid, not walked to: a body that can carry is put standing in the hall's aisle by the
-            // cleared rows, so a carry there starts at once.
             guard let st = station.fleet.stations.values.first(where: { !$0.hall.aisleCells.isEmpty }),
                   let cell = st.hall.aisleCells.first,
                   let m = station.minions.values.filter({ $0.isFree }).sorted(by: { $0.id < $1.id }).first
@@ -1308,20 +1156,15 @@ final class SimulatorModel: ObservableObject {
 
     // MARK: the log
 
-    /// The event and command taps fire on the scene's render thread, so the log is kept behind a
-    /// lock and the panel only asks it for text.
     private let lines = SimLog()
 
-    /// A line for the panel, and, when it is one of the things a scenario judges, the typed record of it.
     nonisolated func note(_ kind: String, _ text: String, _ record: SimRecord? = nil) {
         lines.add(kind: kind, text: text, record: record)
         DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
     var logText: String { lines.text }
-    /// The whole run as text, oldest first: what `--scenarios-verbose` prints.
     var logLines: [String] { lines.ordered }
-    /// The whole run as it happened, typed: what `--scenarios` judges. Never the text.
     var records: [SimRecord] { lines.records }
 
     nonisolated static func describe(_ e: WorldEvent) -> String {
@@ -1363,16 +1206,11 @@ final class SimulatorModel: ObservableObject {
     }
 }
 
-/// One thing a simulated run did, as the value it was: what a scenario's expectations match on.
-/// The text in the log is for reading; nothing judges it.
 enum SimRecord {
     case press(String)
-    /// A press the panel refused, and why.
     case skipped(String)
     case event(WorldEvent)
-    /// A command and who ran it: a worker's office, or "shuttle" and "rocket".
     case command(Command, by: String)
-    /// A rule of STATION.md broken, in the words `Invariants` gives it.
     case violation(String)
 
     var words: String {
@@ -1386,17 +1224,14 @@ enum SimRecord {
     }
 }
 
-/// The simulator's log, written from any thread and read by the panel.
 final class SimLog: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
-    /// The typed side of `whole`, kept only for the things a scenario can judge.
     private var typed: [SimRecord] = []
     private static let stamp: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
 
-    /// The same lines the panel shows, oldest first and uncapped: what a scripted run reads.
     private var whole: [String] = []
 
     func add(kind: String, text: String, record: SimRecord?) {
@@ -1427,38 +1262,25 @@ final class SimLog: @unchecked Sendable {
 }
 // MARK: the simulator's way in
 
-/// What a simulator window plants in a live controller: the event and command taps, its own clock,
-/// and the two things no source drives. A normal window leaves `sim` nil and none of this runs.
 final class SimHooks {
     var onEvent: ((WorldEvent) -> Void)?
-    /// What the simulated GitHub says a pull request's fate is, by repository and number: OPEN, MERGED
-    /// or CLOSED, or nil for one it never spoke about. The rulebook's meaning checks read it.
     var pullState: ((String, Int) -> String?)?
-    /// The command and who is running it: a worker's office, or "shuttle" and "rocket".
     var onCommand: ((Command, String) -> Void)?
-    /// A rule of STATION.md the floor just broke, in the words `Invariants` gives it.
     var onViolation: ((String) -> Void)?
-    /// The rulebook, checked at the end of every simulated step.
     let invariants = Invariants()
-    /// 1, 4 or 16: how fast the tick's dt runs.
     var timeScale = 1.0
     var paused = false
-    /// Single ticks asked for while paused.
     var steps = 0
-    /// Night forced on or off; nil leaves it to the clock.
     var night: Bool?
     var clock = 0.0
     var lastReal = 0.0
 }
 
-/// Something to poke that no source can say: a bath, a chore, everyone to the lounge.
 enum SimNudge { case bath, breather(Place), chore, lounge, meet, night(Bool?), turnIn, wedge, workout }
 
 extension StationController {
-    /// Small enough that a minion at sixteen times speed still walks rather than jumps.
     private static var simStep: Double { 1.0 / 30.0 }
 
-    /// Station time, stepped directly with no frame and no wall clock: what the scenario suite runs on.
     func stepSimulated(seconds: Double) {
         guard let sim else { return }
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
@@ -1473,7 +1295,6 @@ extension StationController {
         }
     }
 
-    /// The simulator's clock: real time scaled, or one step at a time while paused.
     func advanceSimulated(to time: TimeInterval) {
         guard let sim else { return }
         let real = sim.lastReal == 0 ? 0 : min(0.25, max(0, time - sim.lastReal))
@@ -1489,22 +1310,17 @@ extension StationController {
         }
     }
 
-    /// A scan, as the transcript reader would have handed it over.
     func simulate(scan: ScanResult) { enqueue { [self] in apply(scan) } }
 
-    /// GitHub answered: the same path a poll takes when something came back changed.
     func simulateGitHub() { enqueue { [self] in onGitHubUpdate() } }
 
-    /// A snapshot off the network, and a peer going quiet.
     func simulate(peer: PeerSnapshot) { enqueue { [self] in receivePeer(peer) } }
     func simulatePeerLeft(_ name: String) { enqueue { [self] in dropPeer(name) } }
 
-    /// The right-click menu's kick, without the menu.
     func simulateKick(roomKey key: String) {
         enqueue { [self] in handle(world.kick(roomKey: key)); flushScene() }
     }
 
-    /// A sim press says "now": whatever a minion was doing that is not a job is dropped so the press can take.
     private func free(_ m: Minion) {
         m.busy = false
         m.activity = .waiting
@@ -1515,13 +1331,12 @@ extension StationController {
         enqueue { [self] in
             switch nudge {
             case .bath:
-                // The press says "now": whoever is resting goes for a shower straight away, picked as for the gym.
                 let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
-                    ?? could.first   // the press says now: a busy worker drops its work for it
+                    ?? could.first
                 guard let m, let station = fleet.stations[m.station], station.rooms["kind:bath"] != nil else {
                     handle(.log(could.isEmpty ? "nobody free for the bath" : "no bath on the station")); return
                 }
@@ -1529,16 +1344,12 @@ extension StationController {
                 m.showering = true
                 if !visitBath(m, station: station) { handle(.log("both fixtures in the bath are taken")) }
             case .workout:
-                // The press says "now": whoever is resting takes a turn straight away, night or not.
-                // A worker on the couch first; then any worker not working; then a worker whose session is
-                // quiet but still counted busy; then a teammate asleep in the quarters. Only a job, the
-                // bath or a turn already in hand rules someone out.
                 let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
-                    ?? could.first   // the press says now: a busy worker drops its work for it
+                    ?? could.first
                 guard let m, let station = fleet.stations[m.station], let gym = station.rooms["kind:gym"] else {
                     handle(.log(could.isEmpty ? "nobody free for the gym" : "no gym on the station")); return
                 }
@@ -1547,7 +1358,6 @@ extension StationController {
                 free(m)
                 if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
             case .wedge:
-                // Whoever is carrying a crate stops dead: the station has to catch up without them.
                 guard let m = minions.values.first(where: { !$0.wedged && { if case .carry = $0.current?.kind { return true }; return false }($0) }) else {
                     handle(.log("nobody is carrying anything to wedge")); return
                 }
@@ -1562,9 +1372,6 @@ extension StationController {
                 m.bathDue = 0
                 if let st = fleet.stations[m.station], !startRoam(m, station: st) { handle(.log("nowhere clear to roam")) }
             case .meet:
-                // Two free minions set at the two ends of the hall's east-west arm, facing each other, each
-                // ordered straight along the row to the other's spot: they have to pass, and the walk rule shows how.
-                // The press says "now": any two, whatever they were doing, the way "Everyone to lounge" does it.
                 let any = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.hasLoad }.sorted { $0.isCrew == $1.isCrew ? $0.id < $1.id : !$0.isCrew }
                 guard any.count >= 2, let st = fleet.stations[any[0].station] else { handle(.log("fewer than two minions to meet")); return }
                 let a = any[0], b = any.first { $0.station == a.station && $0.id != a.id } ?? any[1]
@@ -1587,10 +1394,6 @@ extension StationController {
                     send(m, to: .lounge)
                 }
             case .turnIn:
-                // Every session gone quiet at once, which is what a real night looks like and what a
-                // single body in a dorm never tests: the bunks are claimed together and the walks to
-                // them cross. Only a body whose session is asleep is ever sent to a bunk, so this says
-                // that of all of them and lets the night do the rest.
                 for m in minions.values where !m.isSubagent && !m.onJob && !m.hasLoad {
                     m.busy = false
                     m.activity = .sleeping
@@ -1598,11 +1401,6 @@ extension StationController {
                     send(m, to: restPlace(m))
                 }
             case .breather(let place):
-                // "Everyone to lounge" ends the work: it makes a body idle and parks it there. This does
-                // not. A body at work walks off, sits a moment and goes back to what it was doing, because
-                // the trip is a reaction — the activity and the office are untouched, and when the reaction
-                // runs out the body is sent back to its place. Nothing on the station ever chooses this;
-                // it is a press, so the floor never tells you a session is resting when it is working.
                 let atWork = minions.values.filter {
                     $0.busy && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.bathing && !$0.exercising
                 }
@@ -1618,13 +1416,10 @@ extension StationController {
         }
     }
 
-
     func simulateLog(_ text: String) { enqueue { [self] in logEvent(text) } }
 }
 
 extension SimulatorModel {
-    /// The board's knobs as lines of text: what `--dump-board` prints, so a scripted run can check
-    /// the position without a picture of the panel.
     var boardLines: [String] {
         position.map { s in
             switch s.kind {

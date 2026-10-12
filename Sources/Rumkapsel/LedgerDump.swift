@@ -1,18 +1,6 @@
-// What the station thinks is where: `rumkapsel --dump-ledger [seconds] [repo]`.
-//
-// The floor draws its crates from the ledger, and the ledger is fed by the source — the board, or git
-// history — through `World.reconcile`. When the two disagree about what stands in a yard, the question
-// is always which of the three links dropped it: the source's word, the ledger's record of it, or the
-// rule that decides whether a record may be snapped into place.
-//
-// This prints all three, per repository: what the source counts, what the ledger holds for every crate,
-// and the state of each rule that can hold a snap back. It runs the real app against the real board and
-// the real checkouts, waits for the poller to answer, prints and exits.
-
 import AppKit
 
 extension StationController {
-    /// One line per crate, and the reasons a crate may be standing somewhere the source did not ask for.
     func ledgerReport(only repo: String?) -> String {
         var lines: [String] = []
         func say(_ s: String) { lines.append(s) }
@@ -26,7 +14,6 @@ extension StationController {
                 .union(world.repoRoots.values.filter { $0.station == station.name }.map(\.repo))
             for name in repos.sorted() where repo == nil || name == repo {
                 let root = world.repoRoots.first { $0.value.repo == name && $0.value.station == station.name }?.key
-                // The source's word, and whether it is the board's or git's.
                 let cargo = root.flatMap { github.cargo(repoRoot: $0) }
                 say("")
                 say("  \(name)")
@@ -35,7 +22,6 @@ extension StationController {
                 } else {
                     say("    source: nothing — the poller has no count for this repository")
                 }
-                // Every rule in `reconcile` that can stop a crate being snapped where the source wants it.
                 if let root {
                     let pipeline = github.pipeline(repoRoot: root)
                     let launching = github.hasPendingLaunch(repoRoot: root)
@@ -52,7 +38,6 @@ extension StationController {
                                           pad(c.cleared ? "yes" : "no", 8), pad(when(c.movedAt), 12),
                                           pad(when(c.wantedAt), 12), c.disagrees ? "yes" : "no"].joined(separator: " "))
                 }
-                // A crate the source counts that the ledger has never heard of is the loudest case.
                 if let c = cargo {
                     let known = Set(crates.map(\.number))
                     let missing = (c.storageNumbers + c.deckNumbers).filter { !known.contains($0) }

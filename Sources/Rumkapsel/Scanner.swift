@@ -1,6 +1,5 @@
 import Foundation
 
-/// What a session is doing right now, as far as its transcript tells us.
 enum Activity: Equatable {
     case researching, exploring, coding(String), testing, running, shipping, skill(String), planning, delegating
     case writing, thinking, reading, waiting, sleeping, qa
@@ -33,7 +32,7 @@ struct SessionInfo {
     let cwd: String
     let repo: String
     let repoRoot: String?
-    let owner: String?          // GitHub owner of the origin remote, lowercased
+    let owner: String?
     let lastModified: Date
     let activity: Activity
     let area: String?
@@ -41,20 +40,16 @@ struct SessionInfo {
     var branch: String?
     let toolCount: Int
     let isSubagent: Bool
-    /// The checkout is there and still somebody's: not deleted, and not a workspace the desktop app has archived.
     let cwdExists: Bool
-    let promptCount: Int       // your messages seen in the tail
-    let queuedCount: Int       // messages still waiting in the queue
-    /// Marker of the newest record for each event kind, so the scene can detect fresh ones.
+    let promptCount: Int
+    let queuedCount: Int
     let eventMarkers: [StationEvent: String]
 }
 
 struct ScanResult {
-    /// Every session touched within the rooms window; the scene decides which are live.
     var sessions: [SessionInfo] = []
 }
 
-/// Reads the tails of Claude Code transcripts and turns them into session facts.
 final class TranscriptScanner {
     private struct Parsed {
         var cwd: String?
@@ -109,20 +104,14 @@ final class TranscriptScanner {
                     cwdExists: Workspaces.isOpen(cwd), promptCount: parsed.promptCount, queuedCount: max(0, parsed.queued), eventMarkers: parsed.markers))
             }
         }
-        // One checkout is on one branch: the session that wrote last says which. An older session in the
-        // same place still names the branch it last saw, and would put up an office of its own for it.
         let current = Dictionary(grouping: result.sessions, by: \.cwd).compactMapValues { $0.max { $0.lastModified < $1.lastModified }?.branch }
         for i in result.sessions.indices { if let b = current[result.sessions[i].cwd] { result.sessions[i].branch = b } }
         return result
     }
 
-    /// The checkout a directory lies in: the nearest folder holding a `.git`, or the directory itself when
-    /// none does. A session that changed directory into `Sources/` is still the session of its workspace,
-    /// and the workspace is what the desktop app leases and what an office stands for.
     private var checkoutCache: [String: String] = [:]
     func checkout(of cwd: String) -> String {
         if let c = checkoutCache[cwd] { return c }
-        // A deleted worktree is nobody's checkout: not the main checkout's, which the walk up would reach.
         var standing = URL(fileURLWithPath: cwd)
         while standing.path.count > 1, !FileManager.default.fileExists(atPath: standing.path) { standing.deleteLastPathComponent() }
         if standing.path != cwd, standing.lastPathComponent == "worktrees" || standing.deletingLastPathComponent().lastPathComponent == "workspaces" {
@@ -140,7 +129,6 @@ final class TranscriptScanner {
         return found
     }
 
-    /// The repository a directory belongs to, seeing through git worktrees (Conductor workspaces).
     func repoInfo(for cwd: String) -> (name: String, root: String?) {
         if let r = repoCache[cwd] { return r }
         var root: String?
@@ -161,7 +149,6 @@ final class TranscriptScanner {
                           let line = text.split(separator: "\n").first(where: { $0.hasPrefix("gitdir:") }) {
                     let target = line.dropFirst(7).trimmingCharacters(in: .whitespaces)
                     if let r = target.range(of: "/.git/worktrees/") {
-                        // A worktree: the repository is the main checkout it was created from.
                         let main = String(target[..<r.lowerBound])
                         name = URL(fileURLWithPath: main).lastPathComponent
                         root = main
@@ -177,7 +164,6 @@ final class TranscriptScanner {
         return (name, root)
     }
 
-    /// The GitHub owner in the origin remote of a repository, read from its git config.
     func remoteOwner(for root: String) -> String? {
         if let cached = ownerCache[root] { return cached }
         var owner: String?

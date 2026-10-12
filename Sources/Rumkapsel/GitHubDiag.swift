@@ -1,9 +1,3 @@
-// The GitHub poller on its own: `.build/debug/Rumkapsel --github-diag [seconds]`.
-//
-// No window, no station. The same refresh calls the station makes every five seconds, against the
-// real settings and checkouts, with every ask and every answer that changed on stderr. For seeing
-// what the poller does with a real board and real repositories, and how fast a change reaches it.
-
 import Foundation
 
 enum GitHubDiag {
@@ -12,11 +6,8 @@ enum GitHubDiag {
         let cfg = ConfigStore.shared.current
         let github = GitHubResolver()
         github.intervalMinutes = cfg.githubMinutes
-        // The same checkouts the station finds on its first run: every Conductor repository under ~/dev.
         let home = FileManager.default.homeDirectoryForCurrentUser
         var roots: [String] = []
-        // One checkout named on the command line, for looking at a single repository's answers without
-        // asking GitHub about every other one on the desk.
         if let only {
             roots = [(only as NSString).expandingTildeInPath]
         } else if let repos = try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent("conductor/workspaces").path) {

@@ -1,25 +1,11 @@
-// The body reconciler: what the crate ledger is for crates, this is for minions.
-//
-// Every command in hand is either making progress, or waiting on a fact it has named. Anything else
-// is a stall, and after ten station seconds the minion gives up: it says so in the log, puts down what
-// it holds where it stands, and is free again. Nothing is lost by giving up, because the work is not
-// kept in the minion: a carry goes back on the board from where the crate now lies, a new
-// office's crate stays on the floor for whoever is free next, and a visit simply ends. The ordinary
-// rules then re-issue whatever truth still wants, so a stranded job is retried rather than abandoned,
-// and a job whose conditions went away is dropped without a body left standing somewhere.
-
 import Foundation
 
 extension Simulation {
     func reconcileBodies() {
         for m in Array(bodies.values) where m.state != .leaving && m.wakeUntil == 0 && m.opacity > 0.5 {
             guard let c = m.current else { m.stallMark = ""; continue }
-            // Where it stands, what it holds, what phase it is in: the same for ten seconds is a stall.
-            // Standing still is the whole point of a rest that has arrived, a lie-down or an act with time
-            // left on it. A wait on a named fact is allowed its time, but not forever: a fact that has not
-            // come in ninety station seconds is one that is not coming, and the wait is given up too.
-            let steady = (c.isRest && m.path.isEmpty) || m.lying || (m.path.isEmpty && clock < m.phaseUntil)   // any timed phase: an act, a reaction, a crouch
-                || m.isQA || { if case .leave = c.kind { return true }; return false }()   // walking the rows, the airlock's cycle: standing is the work
+            let steady = (c.isRest && m.path.isEmpty) || m.lying || (m.path.isEmpty && clock < m.phaseUntil)
+                || m.isQA || { if case .leave = c.kind { return true }; return false }()
             if steady { m.stallMark = ""; continue }
             let s = Station.sub(m.pos)
             let mark = "\(c.id)|\(m.phase)|\(s.x),\(s.y)|\(m.path.count)|\(m.waitingOn ?? "")"
@@ -36,9 +22,6 @@ extension Simulation {
         queueDeliveries()
     }
 
-    /// The command goes back to truth and the minion is free: a carry goes back on the board from where the
-    /// crate now lies; a new office's crate waits on the floor for the next free hands; anything
-    /// else just ends. Said in the log every time, so a repeat is a bug that shows rather than hides.
     func giveUp(_ m: B, _ c: Command, why: String) {
         onEvent(.log("\(m.home.name) gives up \(c.words): \(why)"))
         switch c.kind {
@@ -47,28 +30,27 @@ extension Simulation {
             var spot = from
             if m.load == .crate(crate), let st = fleet.stations[m.station] {
                 let behind = dropPoint(m, station: st)
-                dropLoad(m)   // the crate lies an arm's length behind, on the way it came: the next carrier reaches it without passing the body
+                dropLoad(m)
                 let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
                 spot = Spot(area: from.area, station: from.station, owner: from.owner, label: from.label, cell: cell,
                             pos: SIMD3(st.offset.x + behind.x, 0.12, st.offset.y + behind.y))
             }
-            cargo[c.id]?.command = c.from(spot)   // the same order, the same id: only where it starts moved
+            cargo[c.id]?.command = c.from(spot)
             cargo[c.id]?.carrier = nil
             cargo[c.id]?.hurry = false
-            cargo[c.id]?.gaveUp.insert(m.id)   // somebody else's turn, while there is somebody else
+            cargo[c.id]?.gaveUp.insert(m.id)
             m.current = nil; m.phase = 0; m.phaseUntil = 0; m.fetchSpot = nil
             finish(m)
         case .deliverOffice(let id):
-            // The crate stays on the floor, wherever that is, under its order: the queue hands it on.
             if m.hasLoad { dropLoad(m) }
             if world.truth.deliveries[id] != nil { world.truth.crateLanded(order: id); world.truth.fetchGivenUp(order: id, by: m.id) }
             finish(m)
         case .react:
-            crewRested(m)   // a teammate's reaction ends the way it always ends: activity, tools and all
+            crewRested(m)
         default:
             if c.isRest {
                 m.current = nil
-                send(m, to: m.place)   // the same rest, planned afresh from here
+                send(m, to: m.place)
             } else {
                 m.seatedOnBowl = false
                 m.fixture = nil
@@ -78,9 +60,6 @@ extension Simulation {
         }
     }
 
-    /// New offices are orders on the board, not errands tied to one body. A crate whose office went away
-    /// while it lay on the bay floor folds away where it lies. A pending office with no order at all, no
-    /// ship and nobody on it, has its shuttle ordered again, for its own session if it is here.
     func queueDeliveries() {
         for station in fleet.stations.values {
             for order in world.truth.deliveries.values where order.station == station.name && order.landed && station.rooms[order.roomKey] == nil {

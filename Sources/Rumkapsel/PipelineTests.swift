@@ -1,8 +1,3 @@
-// Model-only tests of pipeline detection: `.build/debug/Rumkapsel --pipeline-tests`.
-//
-// Histories shaped like the real repositories', and the cases detection must not get wrong: a staging
-// branch nobody releases through, a branch that is gone, no history at all, and a repository's own file.
-
 import Foundation
 
 enum PipelineTests {
@@ -86,8 +81,6 @@ enum PipelineTests {
             expect(!p.shipsOnMerge && p.production.isEmpty, "a tag is not a production branch, and not a deploy on merge")
             let q = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, names: names)
             expect(!q.shipsOnTag, "untagged, it waits for a release that never comes")
-            // Tags are what is left when nothing better is known: a repository that releases by branch,
-            // or deploys every push, ships that way however many tags it has lying about.
             let r = PipelineDetection.detect(branches: ["develop", "staging", "production"],
                                              merges: features("develop", 6) + times(M(base: "production", head: "staging"), 2) + times(M(base: "staging", head: "develop"), 2),
                                              file: nil, names: names, tagged: true)

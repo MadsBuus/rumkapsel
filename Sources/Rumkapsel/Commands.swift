@@ -1,12 +1,5 @@
 import Foundation
 
-/// Commands and station truth: the seam between what the world wants and what is on the floor.
-///
-/// Reconciliation compares the two and issues `Command`s as values. Actors — minions, mostly — run
-/// one command at a time, phase by phase. Completions write `StationTruth` and nothing else, so a
-/// source catching up later cannot undo what a minion just did.
-
-/// One crate on a station: whose repository, which pull request.
 struct CrateRef: Hashable {
     var station: String
     var repo: String
@@ -16,20 +9,15 @@ struct CrateRef: Hashable {
     var words: String { "#\(number)" }
 }
 
-/// Somewhere on the floor a crate can stand, and enough to walk there.
 struct Spot {
     enum Area: String, Codable { case office, storage, deck, tested, pad, decon }
     var area: Area
     var station: String
-    /// The room key of an office, the repository of a yard row; empty elsewhere.
     var owner = ""
-    /// What to call it out loud: an office's name, a repository's.
     var label = ""
     var cell: Cell
     var pos: SIMD3<Double>
-    /// How high in a stack: 0 on the floor, 1 at waist height, 2 and up a reach. `pos.y` follows it.
     var level = 0
-    /// Which way the crate stands there, so a set-down ends turned as the layout will redraw it.
     var yaw = 0.0
 
     var words: String {
@@ -44,47 +32,32 @@ struct Spot {
     }
 }
 
-/// A job, as a value. Everything a minion or a prop can be asked to do.
 struct Command {
     let id: Int
     let kind: Kind
-    /// Commands that must finish first: the crates stacked above this one, moved aside.
     let after: [Int]
-    /// For the log and the speech bubble.
     let words: String
 
     enum Kind {
-        /// A crate from where it stands to a yard: an office's package to storage, storage to the
-        /// deck, either to the rocket. The yard alone: the slot is asked for with the crate on the arms.
         case carry(crate: CrateRef, from: Spot, to: Yard)
-        /// Fetch a new office's crate from the bay and walk it in.
         case deliverOffice(order: Int)
-        /// Somewhere to be: the lounge, the dorm, the hallway.
         case goTo(place: Place)
-        /// A visit carries its own length in station seconds: it starts on arrival, whoever hands the order over.
         case bath(kind: Bath, back: Place, seconds: Double)
-        /// A turn in the gym on one of its four fixtures, then back to where the minion was.
         case exercise(kind: Workout, back: Place, seconds: Double)
         case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
-        /// Packing the office's crate for a pull request just opened, cones cleared first.
         case pack(office: String)
-        /// Stowing the cube for a commit that just landed, where the office keeps its cubes.
         case stow(office: String)
         case leave
         case sleep
         case work(office: String)
-        /// A shuttle flight to one bay slot: a new worker, or an office's crate.
         case flight(kind: Flight, station: String, slot: Int)
-        /// A rocket on the pad, one stage at a time.
         case rocket(stage: RocketStage, station: String, repo: String)
-        /// A teammate acting on something they just did, until the time runs out.
         case react(activity: Activity, place: Place, for: TimeInterval)
     }
 
     enum Bath { case shower, quick }
 
-    /// What there is to do in the gym: one minion to a fixture.
     enum Workout: Int, CaseIterable {
         case treadmill, bench, bag, mat
         var words: String {
@@ -97,18 +70,15 @@ struct Command {
         }
     }
 
-    /// What a shuttle comes for: a worker to bring in, an office's crate to drop, a leaver to take away.
     enum Flight: Equatable {
         case bringWorker(String)
         case dropCrate(order: Int)
         case takeWorker(String)
     }
 
-    /// A rocket's stages, in the order they can only ever go.
     enum RocketStage: Equatable {
         case standBy, load(Int), steam, launch
 
-        /// Stages only move forward: a wish for an earlier one is stale and ignored.
         var rank: Int {
             switch self {
             case .standBy: return 0
@@ -119,35 +89,20 @@ struct Command {
         }
     }
 
-    /// A command is a sequence of phases; the actor holds an index into it.
     enum Phase {
-        /// Walking there: anything may cut in.
         case walk
-        /// Shuffling to arm's length of the crate: still fine to cut in.
         case approach
-        /// Crouched with the crate coming up past the chest: not now.
         case lift
-        /// Carrying: only a new destination for the same crate may cut in.
         case haul
-        /// Setting it down squarely: not now.
         case setDown
-        /// Stepping out of the shuttle: not now.
         case stepOut
-        /// Being there: resting, working, walking the rows.
         case settle
-        /// In the middle of something that lasts its whole time, a shower say: not now.
         case act
-        /// A shuttle coming down onto its slot: not now.
         case descend
-        /// A shuttle setting its cargo out: not now.
         case unload
-        /// A shuttle lifting off the slot again.
         case rise
-        /// A shuttle on its way out of the frame.
         case leave
-        /// A rocket taking its crates aboard.
         case load
-        /// A rocket on its way up: nothing stops that.
         case climb
 
         var interruptible: Bool {
@@ -156,12 +111,10 @@ struct Command {
             case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .climb, .act: return false
             }
         }
-        /// Carrying can be redirected, but only to another destination for the crate on the arms.
         var takesNewDestination: Bool { self == .haul }
     }
 
     var phases: [Phase] { Command.phases(of: kind) }
-    /// The kind without its payload: "carry", "bath", "goTo".
     var kindName: String { String(String(describing: kind).split(separator: "(").first ?? "") }
 
     static func phases(of kind: Kind) -> [Phase] {
@@ -169,7 +122,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .exercise, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
+        case .bath, .exercise, .pack, .stow: return [.walk, .act]
         case .rocket(let stage, _, _):
             switch stage {
             case .standBy, .steam: return [.settle]
@@ -180,7 +133,6 @@ struct Command {
         }
     }
 
-    /// Carrying and delivering are jobs: they hold something and may not simply be dropped.
     var isJob: Bool {
         switch kind {
         case .carry, .deliverOffice, .leave: return true
@@ -188,7 +140,6 @@ struct Command {
         }
     }
 
-    /// Resting: the couch and the bed only pull on a minion while one of these is current.
     var isRest: Bool {
         switch kind {
         case .goTo, .sleep, .work: return true
@@ -215,20 +166,16 @@ struct Command {
         self.id = id; self.kind = kind; self.words = words; self.after = after
     }
 
-    /// The same carry, the same order, bound for another yard: what a carrier is handed when the
-    /// board changes its mind and the crate goes back where it came from.
     func aimed(at yard: Yard) -> Command {
         guard case .carry(let crate, let from, _) = kind else { return self }
         return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", after: after)
     }
 
-    /// The same carry from where the crate lies now: after a give-up, the next carrier starts there.
     func from(_ spot: Spot) -> Command {
         guard case .carry(let crate, _, let to) = kind else { return self }
         return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words, after: after)
     }
 
-    /// The same command said differently: for hover and the log when its pace changes.
     func reworded(_ words: String) -> Command {
         Command(id: id, kind: kind, words: words, after: after)
     }
@@ -257,7 +204,6 @@ struct Command {
         Command(kind: .chore(spot: spot, seconds: seconds), words: Words.current.lookRound)
     }
 
-    /// How long the visit lasts once there, for the orders that are visits; nil for the rest.
     var visitSeconds: Double? {
         switch kind {
         case .bath(_, _, let s), .exercise(_, _, let s), .chore(_, let s): return s
@@ -279,7 +225,6 @@ struct Command {
 
     static var leave: Command { Command(kind: .leave, words: Words.current.leaving) }
 
-    /// A shuttle on its way in. `what` is what the log and the bubble call the cargo.
     static func flight(_ flight: Flight, station: String, slot: Int, what: String) -> Command {
         Command(kind: .flight(kind: flight, station: station, slot: slot),
                 words: "\(Words.current.inbound) \(what)")
@@ -296,13 +241,10 @@ struct Command {
         return Command(kind: .rocket(stage: stage, station: station, repo: repo), words: words)
     }
 
-    /// A teammate acting on what they just did: coding in their office, walking the halls, at the core.
     static func react(_ activity: Activity, place: Place, for seconds: TimeInterval, words: String) -> Command {
         Command(kind: .react(activity: activity, place: place, for: seconds), words: words)
     }
 
-    /// Where a minion should be when it has no job: asleep in the dorm, at work in its office, or just there.
-    /// `office` is the office's own name; only one of yours waits for you, a teammate's is just at work.
     static func rest(place: Place, home: String, office: String, yours: Bool, asleep: Bool) -> Command {
         if asleep && place == .quarters { return Command(kind: .sleep, words: Words.current.asleep) }
         if place == .room(home), !home.hasPrefix("kind:") {
@@ -313,7 +255,6 @@ struct Command {
 }
 
 extension Place {
-    /// The room as a person would say it.
     var words: String {
         switch self {
         case .core: return Words.current.theMonolith
@@ -333,23 +274,15 @@ extension Place {
     }
 }
 
-/// What the station's props and plots are doing: the offices ordered and the crates waiting in the bay. Where a crate itself is lives on its ledger row.
 struct StationTruth {
-    /// Offices on the floor whose crate has not been walked in yet, by "station|roomKey".
     private(set) var pendingOffices: Set<String> = []
-    /// A new office's crate on its way in, by order number: the one identity the shuttle, the crate
-    /// on the floor and the carrier share, whatever the office is called by the time it lands. The
-    /// room key follows every rename; the order is done only when the crate is walked in.
     struct DeliveryOrder: Equatable {
         let id: Int
         let station: String
         var roomKey: String
         let slot: Int
-        /// The session it was ordered for: its own worker fetches it when free.
         let session: String?
-        /// Set down on the bay floor by the shuttle: from here it must be fetched, by anyone.
         var landed = false
-        /// Who gave the fetch up: passed over while anyone else is free.
         var gaveUp: Set<String> = []
         var key: String { station + "|" + roomKey }
     }
@@ -358,7 +291,6 @@ struct StationTruth {
     // MARK: offices
 
     mutating func officeOrdered(_ key: String) { pendingOffices.insert(key) }
-    /// The office is on the floor, or gone: nothing is owed to it any more, its order included.
     @discardableResult
     mutating func officeDelivered(_ key: String) -> Bool {
         for (id, d) in deliveries where d.key == key { deliveries[id] = nil }
@@ -378,15 +310,11 @@ struct StationTruth {
         deliveries[id] = DeliveryOrder(id: id, station: station, roomKey: roomKey, slot: slot, session: session)
         return id
     }
-    /// The shuttle has set the crate down: on the floor until somebody walks it in.
     mutating func crateLanded(order id: Int) { deliveries[id]?.landed = true }
     mutating func fetchGivenUp(order id: Int, by who: String) { deliveries[id]?.gaveUp.insert(who) }
     func delivery(for key: String) -> DeliveryOrder? { deliveries.values.first { $0.key == key } }
-    /// Slots in a station's bay with nothing lying on them and no ship bound for them.
     func freeSlots(station: String, of count: Int) -> [Int] {
         let held = Set(deliveries.values.filter { $0.station == station }.map(\.slot))
         return (0..<count).filter { !held.contains($0) }
     }
-
-
 }

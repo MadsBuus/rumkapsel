@@ -1,8 +1,3 @@
-// Model-only tests of how a piece of work is named: `.build/debug/Rumkapsel --work-tests`.
-//
-// No station. A branch, an issue and a pull request in every combination a source can bring them,
-// and the office key, the crate number and the name must come out the one way, whoever asked.
-
 import Foundation
 
 enum WorkTests {

@@ -1,15 +1,10 @@
-// Model-only tests of the walk step: `.build/debug/Rumkapsel --walk-tests`.
-//
-// A made-up floor, made-up bodies, no station controller: a clear line is walked straight; someone
-// in the way is passed on the side away from them; where no side is walkable the line is kept.
-
 import Foundation
 
 enum WalkTests {
     private static var failures = 0
 
     static func run() -> Never {
-        let station = Station(name: "work")   // the bare corridor cross is walkable
+        let station = Station(name: "work")
         func body(_ id: String, _ x: Double, _ y: Double) -> Body {
             let b = Body(id: id, station: "work", home: Home(key: "k", name: id, repo: "r", issue: nil), cwd: "", toolCount: 0, isSubagent: false, start: Cell(x: 0, y: 0))
             b.pos = SIMD2(x, y); b.opacity = 1; b.state = .settled
@@ -25,7 +20,7 @@ enum WalkTests {
         test("someone close ahead is passed with a lean to the walker's own right, facing them; behind is nobody's business") {
             let m = body("a", 0.6, 0), o = body("b", 1, 0); m.path = [SIMD2(1, 0), SIMD2(2, 0)]
             var near: Body?
-            for _ in 0..<12 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }   // closer than the lean gap now
+            for _ in 0..<12 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) }
             expect(near?.id == "b" && m.lean.y < 0 && abs(m.lean.y) > Walk.sidestep * 0.5, "leaning right after the turn: \(m.lean)")
             expect(abs(m.facing - atan2(0.0, 1.0)) < 1e-9, "turned side-on, a quarter turn to its left: \(m.facing)")
             let back = body("c", 0, 0); back.path = [SIMD2(1, 0), SIMD2(2, 0)]
@@ -62,7 +57,7 @@ enum WalkTests {
         }
 
         test("somebody standing where the walker is going is given up on, not passed the whole way") {
-            let m = body("a", 0, 0), o = body("b", 4.1, 0)   // standing on the far end of a long walk
+            let m = body("a", 0, 0), o = body("b", 4.1, 0)
             m.path = [SIMD2(1, 0), SIMD2(2, 0), SIMD2(3, 0), SIMD2(4, 0)]
             var sideways = 0.0
             for _ in 0..<2000 where !m.path.isEmpty {
@@ -75,7 +70,7 @@ enum WalkTests {
         }
 
         test("somebody standing aside is not in the way: no turn, no slowing down") {
-            let m = body("a", 0, 0), o = body("b", 0.5, 0.8)   // a tile off the line
+            let m = body("a", 0, 0), o = body("b", 0.5, 0.8)
             m.path = [SIMD2(2, 0)]
             var near: Body?
             for _ in 0..<20 { near = Walk.step(m, speed: 1.4, dt: 1.0 / 30, others: [o]) ?? near }

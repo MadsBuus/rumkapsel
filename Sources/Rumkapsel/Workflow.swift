@@ -1,24 +1,14 @@
 import Foundation
 
-/// A repository's way of working, as STAGES.md asks it: for each stage, which sources may say it, in
-/// the order they are first in line, and which stages the repository does without. Detected from the
-/// repository unless set by hand; the settings only hold what someone changed.
 struct Workflow: Codable, Equatable {
-    /// When is work stored?
     var stored: [Source] = [.board, .pulls, .git]
-    /// Does it go through QA? Nil: no, stored goes straight to the rocket.
     var qa: [Source]? = [.board, .deploy, .pulls]
-    /// When is it cleared to ship? Nil: always, the rocket never waits.
     var cleared: [Source]? = [.board, .deploy, .pulls]
-    /// When has it shipped?
     var shipped: [Source] = [.board, .deploy, .pulls, .git]
-    /// Whose pull requests are outside work.
     var outside: Outside = .bots
 
     enum Outside: String, Codable { case bots, strangers, nobody }
 
-    /// Who may say a stage, first in line first; nil for a stage the repository does without. The first
-    /// three stages are the same everywhere: a session and a pull request say them, nothing else could.
     func inLine(_ stage: Stage) -> [Source]? {
         switch stage {
         case .inbound: return [.session, .pulls, .board, .neighbour]
@@ -32,23 +22,17 @@ struct Workflow: Codable, Equatable {
     }
     func has(_ stage: Stage) -> Bool { inLine(stage) != nil }
 
-    /// What the repository itself says: its pipeline as detected, and whether a board follows it.
     static func detected(pipeline p: Pipeline, board: Bool) -> Workflow {
         var w = Workflow()
         w.qa = p.hasStaging ? (board ? [.board, .deploy, .pulls] : [.deploy, .pulls]) : nil
-        // With a board its column alone clears, crate by crate. Without one only the release's label
-        // clears, which is the pull request's word; a repository that ships every merge or by tagging has
-        // nothing to clear at all.
         w.cleared = p.shipsOnMerge || p.shipsOnTag ? nil : board ? [.board, .deploy] : [.deploy, .pulls]
         w.stored = board ? [.board, .pulls, .git] : [.pulls, .git]
         w.shipped = p.shipsOnMerge ? [.git] : p.shipsOnTag ? [.git, .board] : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
         return w
     }
 
-    /// The list with one source moved to the front: "the board first", the rest in their order.
     static func first(_ s: Source, in list: [Source]) -> [Source] { [s] + list.filter { $0 != s } }
 
-    /// The answers in a few words each, for the settings window.
     var summary: [(question: String, answer: String)] {
         func list(_ s: [Source]?) -> String { s.map { $0.map(\.title).joined(separator: ", ") } ?? "" }
         return [

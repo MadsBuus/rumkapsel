@@ -1,11 +1,3 @@
-// Model-only tests of the simulation: `.build/debug/Rumkapsel --sim-tests`.
-//
-// A station of the fleet's own making, bare bodies, no scene: the clock stepped by hand a thirtieth
-// of a second at a time. A body sent somewhere walks there and settles; a visit to the bath lasts
-// its whole time from arrival, with the sitter sat, up again and the flush behind; a turn in the
-// gym ends back where it began; nothing but rest moves a body that has a visit in hand; and the way
-// out is through the airlock, faded and gone.
-
 import Foundation
 
 enum SimulationTests {
@@ -24,7 +16,7 @@ enum SimulationTests {
 
         test("a visit to the bowl lasts its minute from arrival: sat, then up with the flush, then back") {
             let (sim, station, m) = fixture()
-            sim.hooks = SimHooks()   // visits are logged only for the checks
+            sim.hooks = SimHooks()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = false
@@ -173,8 +165,6 @@ enum SimulationTests {
             guard let v = sim.vortices["work|web"] else { return expect(false, "the merge opens a vortex: phase \(String(describing: sim.rockets["work|web"]?.phaseKind))") }
             expect(v.waiting.count == 3 && v.flying.isEmpty, "three crates wait their turn: \(v.waiting.count)")
             expect(station.layout(of: .deck).filter { !$0.carried }.isEmpty, "off the rows from the start: the vortex draws them")
-            // Aboard is the pad's word on a crate; the climb takes them off the station, so it is read before.
-            // Halfway, GitHub says they shipped, as it does at the merge: the rows forget them, the vortex does not.
             var climbedEarly = false, climbed = false, heard = false
             let done = step(sim, seconds: 20, until: { sim.vortices["work|web"] == nil }, beat: {
                 if !heard, (sim.vortices["work|web"]?.flying.count ?? 0) > 0 {
@@ -430,7 +420,6 @@ enum SimulationTests {
             for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
             sim.assignOrders()
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
-            // The floor it stood on is gone: an office archived under it, say.
             let north = station.walkable.map(\.y).min()! - 4
             m.pos = SIMD2(Double(station.walkable.filter { $0.y == north + 4 }.map(\.x).min()!), Double(north))
             m.path = []
@@ -473,7 +462,6 @@ enum SimulationTests {
 
         test("a crate a walk cannot get any closer to is reached with the last shuffle, not waited on for good") {
             let (sim, station, m) = fixture()
-            // Storage's back row fills first and is reached with a toss; the fifth crate stands on the near row, at arm's length.
             station.ledger.adopt(Ledger.Word(storage: [440, 441, 442, 443, 444], deck: []), repo: "web")
             _ = station.layout(of: .storage)
             let crate = CrateRef(station: "work", repo: "web", number: 444)
@@ -481,7 +469,6 @@ enum SimulationTests {
             guard case .carry(_, let from, _)? = commands.first?.kind else { return expect(false, "a carry") }
             let at = SIMD2(from.pos.x - station.offset.x, from.pos.z - station.offset.y)
             let crateCell = Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))
-            // One step off diagonally, and every other floor cell round the crate with something on its middle.
             let own = [Cell(x: crateCell.x + 1, y: crateCell.y + 1), Cell(x: crateCell.x - 1, y: crateCell.y + 1),
                        Cell(x: crateCell.x + 1, y: crateCell.y - 1), Cell(x: crateCell.x - 1, y: crateCell.y - 1)].first { station.walkable.contains($0) }
             guard let own else { return expect(false, "a floor cell diagonal to the crate") }
@@ -504,7 +491,6 @@ enum SimulationTests {
             let crate = CrateRef(station: "work", repo: "web", number: 440)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            // A tile north of the northernmost floor: where an office stood a moment ago.
             let north = station.walkable.map(\.y).min()!
             let x = station.walkable.filter { $0.y == north }.map(\.x).min()!
             let spot = Spot(area: .office, station: "work", owner: "gone", label: "gone", cell: Cell(x: x, y: north - 1),
@@ -526,7 +512,7 @@ enum SimulationTests {
             guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
             expect(sim.takeTurnInGym(m, station: station, gym: gym) && m.fetchSpot != nil && m.place == .gym, "off to the gym, a fixture spot in mind")
             _ = step(sim, seconds: 1)
-            sim.start(m, .deliverOffice(order: 9001, name: "an office"))   // a job: it cuts in on the walk
+            sim.start(m, .deliverOffice(order: 9001, name: "an office"))
             expect(!m.exercising && m.fetchSpot == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words), spot \(String(describing: m.fetchSpot))")
             sim.finish(m)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
@@ -543,9 +529,6 @@ enum SimulationTests {
             _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
             m.activity = .sleeping
             m.napping = true
-            // Getting into a bunk takes the sit on the edge and the swing up into line, and that beat is
-            // a second or so plus a random moment so four of them do not turn in together. Long enough
-            // for the longest of those, or the body is still on its feet when the flat pose is asked for.
             _ = step(sim, seconds: 6, until: { m.lying })
             expect(m.lying, "asleep in the quarters, flat on its back")
             let bedSpot = m.pos
@@ -567,12 +550,11 @@ enum SimulationTests {
         exit(failures == 0 ? 0 : 1)
     }
 
-    /// A station with the fixed rooms, and one body settled in it with nothing to do.
     private static func fixture() -> (Simulation<Body>, Station, Body) {
         let world = World(demo: true)
         let station = world.fleet.station("work")
         let sim = Simulation<Body>(world: world)
-        sim.idleRoll = { 0.99 }   // what follows an order is the rest, every time: the choice has its own table test
+        sim.idleRoll = { 0.99 }
         let m = Body(id: "a", station: "work", home: Home(key: "kind:lounge", name: "a", repo: "r", issue: nil), cwd: "",
                      toolCount: 0, isSubagent: false, start: station.coreCenter)
         m.state = .settled
@@ -581,7 +563,6 @@ enum SimulationTests {
         return (sim, station, m)
     }
 
-    /// Another body on the same station, settled and waiting like the fixture's.
     private static func body(_ id: String, sim: Simulation<Body>, station: Station) -> Body {
         let m = Body(id: id, station: "work", home: Home(key: "kind:lounge", name: id, repo: "r", issue: nil), cwd: "",
                      toolCount: 0, isSubagent: false, start: station.coreCenter)
@@ -591,7 +572,6 @@ enum SimulationTests {
         return m
     }
 
-    /// Steps station time until the condition holds or the seconds run out; true when it held.
     private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }, beat: () -> Void = {}) -> Bool {
         let dt = 1.0 / 30
         var left = seconds
@@ -599,7 +579,7 @@ enum SimulationTests {
         while left > 0 {
             sim.clock += dt
             sinceBeat += dt
-            if sinceBeat >= 0.5 { sinceBeat = 0; beat() }   // the half-second pass: the reconcilers
+            if sinceBeat >= 0.5 { sinceBeat = 0; beat() }
             sim.stepTips(dt: dt)
             sim.stepVortices()
             sim.stepShuttles()
