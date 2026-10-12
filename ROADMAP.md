@@ -6,6 +6,23 @@ and deliberately not started.
 
 ## Next
 
+### Air and weight
+STATION.md's "Air and weight": the hull is the line between air and none. Minions work inside, drones outside,
+and crossing the hull is the hand-off from people to machines. Built in this order:
+
+- **The cargo lock and the window.** The X-ray, its belt, the laser fence and the robot operator give way to a
+  lock between the deck and the pad, which cycles a crate out with a scan, and a window beside it where the idle
+  watch a loaded rocket.
+- **Drones on the pad.** They take crates from the lock, load the rocket, weld the tip, and wait in a rack when
+  the pad is quiet. No minion on the pad.
+- **The bay as a hangar.** Under the hull, open to space behind the field; shuttles thread the mouth and ripple
+  the field; the people airlock goes; leavers board a shuttle.
+- **Undocking, and the kick stage.** A production release opening brings a kick stage that drones set under the
+  tip, in place of the lifter. The rocket does not lift off: clamps let go, thrusters puff it clear, the burn
+  comes well away from the station. The flight's opening shot follows.
+- **Spacewalks.** A minion suited and on its jetpack goes out through the field. Wanted; what for is open.
+- **The walk's jetpack stays** as a toy for the one walking, gravity or not.
+
 ### The deploy flight
 The flight is `FlightCraft.swift` (the rocket), `Plating.swift` (its hull, baked into `Resources/Plating` by
 `--bake-plating`) and the cameras in `Mission.swift`. `rumkapsel --look-dev <png> [shot]` renders a still in a

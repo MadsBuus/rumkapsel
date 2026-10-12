@@ -14,13 +14,17 @@ station draw the same one. Hallway that no office needs any more is taken up aga
 inward, once nobody is on it, so a quiet station shrinks back to its plaza, arms and quarters. The monolith is the ancient artefact the game's minions researched for new
 skills. Here it stands for the outside world: sessions that search the web or talk to other systems send
 their subagents to it, and it answers with cones of light, never lightning. The **bay** at the south
-arm's end is outside: shuttles land there and nowhere else, on a honeycomb of berths, and the berth a ship is
-flying into burns in its repository's colour until the crate on it has been carried in. The **airlock** sits in the arm's own line
-between its end and the bay, a chamber one wide and two deep with a rectangular inner door and a
-rectangular hatch, so hallway, chamber and bay read as one straight way out. Everyone who arrives or leaves goes through it, and a leaver waits
-inside for the cycle before stepping out. Nobody goes to the bay for any other reason: it is outside. Space walks, visits to other stations and other ships docking are its future. The **yard** along the west side is three
+arm's end is a hangar under the hull, open to space at its mouth behind the **field**: a sheet of light
+that holds the air in and lets ships through. Shuttles fly in through the field and land in the bay and
+nowhere else, on a honeycomb of berths, and the berth a ship is flying into burns in its repository's
+colour until the crate on it has been carried in. The arm runs straight into the bay through a wide
+door, so hallway and hangar read as one straight way out. Everyone who arrives steps off a shuttle
+there, and everyone who leaves boards one. Nobody goes to the bay for any other reason. Spacewalks, visits
+to other stations and other ships docking are its future. The **yard** along the west side is three
 blocks: **storage** (merged work waiting for a release), the **deck** (work on staging, tested on the
-row nearest the pad, untested on the far row) and the **pad** (rockets). Blocks connect by doorways and
+row nearest the pad, untested on the far row) and the **pad** (rockets), which is outside the hull. The
+deck and the pad are joined only by the **cargo lock**, with a **window** beside it onto the pad.
+Blocks connect by doorways and
 have aisles down the middle; crates stack against the far walls, aisles stay clear. Nobody stands on a
 crate row, however empty the spot: two repositories share a row cell as two columns half a tile apart,
 and a body between them is inside one of them. A carrier works from the aisle beside the row.
@@ -38,6 +42,25 @@ says when that began, otherwise from when the office first stood here. The **dor
 together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
 since real stations mandate both.
 
+## Air and weight
+
+The hull is the line between air and none. Inside it there is air and a low gravity, and work is done
+by hands: minions, who stand for the sessions and the people, for whatever still needs judgement.
+Outside there is neither, and work is done by **drones**: small faceted machines that fly on puffs of
+thrust, never propellers, and stand for what machines do on their own, the builds, the deploys, the
+bots. Nobody works outside and no drone comes in: a minion goes out only on a spacewalk, suited and on
+its jetpack, through the field. What crosses the hull crosses through the field or a
+lock, and the cargo lock is the hand-off: on the deck side a person is still needed, past it nobody is.
+
+- Inside, things fall, slowly: the station's gravity is low, so a crate with nothing under it settles
+  rather than drops, and a pallet floats on its own lift.
+- Outside, nothing falls and nothing is let go of. A drone holds what it carries, the pad's clamps hold
+  the rocket, and anything set loose would drift away.
+- The bay is inside: a shuttle lands there and stands on its berth, and minions walk to it. Space is
+  only past the field.
+- Idle drones wait in a rack on the pad side of the cargo lock, and that is all they do when the pad is
+  quiet.
+
 ## Shapes mean things
 
 - hexagon: a packed office, on its way to being built
@@ -51,16 +74,21 @@ since real stations mandate both.
 - pyramid: the message a session is working on, one per session, on the cell nearest the door. Messages
   queued behind it stand in a row inward, translucent. A new message shrinks the old cone away; a session
   that waits for you has none.
+- drone: a machine at work outside the hull; it is none of the shapes above, and never carries a
+  repository's colour
 - pallet: a staging release being assembled
-- rocket: a production release; the service tower stands beside it from the moment it is on the pad until
-  it goes, its beacon red while the release is untested and dark once cleared; cargo goes up the tower and in
-  through the hatch high on the payload section; steam means loaded and waiting
+- rocket: a release on its way down to production, the planet below, where the users live. It comes in
+  two pieces. The tip is the staging release, welded on the pad by drones while staging deploys. The
+  **kick stage** is the production release: when one opens, drones fly it out and set it under the tip,
+  and it is the burn that takes the tip down. The service tower stands beside it from the moment it is on
+  the pad until it goes, its beacon red while the release is untested and dark once cleared; drones
+  carry the cargo to the hatch high on the payload section; venting means loaded and waiting
 - nothing is round; everything has flat sides
 
 ## Things are heavy
 
-- A crate moves only in a minion's hands, on a pallet, or by the wand while loading a pallet. Never
-  by itself. Never through a wall, a crate, a minion or a piece of furniture.
+- A crate moves only in a minion's hands, on a pallet, by the wand while loading a pallet, through
+  the cargo lock, or outside in a drone's grip. Never by itself. Never through a wall, a crate, a minion or a piece of furniture.
 - A crate that has been set down does not move again until someone picks it up. The layout is
   drawn around what stands there; it never shoves.
 - A crate keeps its slot until it leaves. Stacks are taken from the top and built from the floor. When
@@ -73,13 +101,18 @@ since real stations mandate both.
   set-down, and it says so.
 - A pallet is pushed, from behind, along one axis at a time, slowly, and only where a pallet fits.
 - A shuttle lands only in the bay and leaves before anyone walks under it. No two come in alike: each
-  draws its own way down — a high hover, a low sweep across the bay's mouth, a dive, a long shallow final —
-  and its own way out, and its nose follows the line it is flying the whole way. A rocket leaves only
-  with its cargo aboard.
-- A rocket is loaded at its foot: the carrier walks up to the hull, an arm's length off, and sets
-  the crate down on the loading hatch at its base; the hatch takes the crate up into the hold, the
-  crate shrinking as it goes since the rocket is far too small for it, and the hatch closes. The
-  rocket grows a little with what it holds. Nothing is thrown, nothing goes in from a corner of the pad.
+  draws its own way in, out in space — a high swing round, a low sweep past the hull, a dive, a long
+  shallow final — but every one threads the bay's mouth and comes through the field, which ripples where
+  it passes, and goes out the same way. Its nose follows the line it is flying the whole way.
+- A rocket is loaded through the cargo lock. The carrier sets the crate inside on the deck side and
+  goes; the inner door shuts, the air goes while a scan sweeps the crate, the outer door opens, and a
+  drone takes the crate, flies it to the hatch and holds it there while the hatch takes it in, the
+  crate shrinking as it goes since the rocket is far too small for it. The rocket grows a little with
+  what it holds. A crate that is no longer cleared is refused: the lock's light goes red, the outer
+  door stays shut, and the inner one opens again for a hand to carry it to the untested row.
+- A rocket leaves only with its cargo aboard, and it does not lift off: the station has no weight to
+  fight. The pad's clamps let go, its thrusters puff it clear, and only well away from the station does
+  the kick stage light for the way down.
 - A moving pallet is as solid as a standing one. When the floor changes under a walk, the walk is
   re-planned; nobody finishes a leg through something that arrived in the way.
 
@@ -136,7 +169,7 @@ since real stations mandate both.
 - A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
   floor. It is an object of unknown origin, and it waits in **decon**, the chamber at the back of
   storage with a hatch in its back wall. Objects come in through the hatch, never by shuttle and never
-  through the airlock: the hatch light flashes, and that is all the fuss an update gets. They stack
+  through the bay: a drone sets them in from outside, the hatch light flashes, and that is all the fuss an update gets. They stack
   by repository like storage does, a dozen at most, small and dark with the unscreened green on the
   plate, one pile per repository; the rest are counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
 - An object whose pull request merges is cleared: whoever is free pulls it straight out, wherever it
@@ -204,13 +237,12 @@ since real stations mandate both.
   pace, a stroll a third; getting up from bed is slow, then quicker.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
 - Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
-- When a rocket stands loaded and steaming, the idle drift toward the pad to watch.
-- A rocket is loaded from the front: the carrier walks straight to the tile before its hatch, sets
-  the crate down at its foot, and the crate goes in. Nobody walks through a rocket.
+- When a rocket stands loaded and venting, the idle drift to the window to watch.
+- Nobody goes onto the pad. A carrier's walk toward a rocket ends at the cargo lock.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
-  chores when bored, a turn in the gym when the lounge gets dull; leave through the airlock when
-  there is nothing left to do.
+  chores when bored, a turn in the gym when the lounge gets dull; board a shuttle in the bay
+  when there is nothing left to do.
 - The gym is one room off the living cluster with four fixtures, a treadmill, a bench with a barbell,
   a bag and a mat, one minion to each, a turn lasting its whole time. Loungers who stand near each
   other talk; the rest stretch, look round, shuffle and yawn now and then.
@@ -221,7 +253,7 @@ since real stations mandate both.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
   the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
   Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts
-  when the minion arrives, never when it sets off. Roamers keep apart, except to watch a steaming rocket.
+  when the minion arrives, never when it sets off. Roamers keep apart, except to watch a venting rocket.
 - You may pick a lounger's next thing from its bubble: the gym, bed, a book on the couch, the shower or
   the bowl, given the way the idle clock gives it. One with a job in hand, or at work, is not for picking.
 
