@@ -284,6 +284,25 @@ enum LayoutTests {
             }
         }
 
+        test("a full yard: every crate on its own zone's tiles, none sharing a place, every stack built from the floor") {
+            let a = fresh()
+            for (k, repo) in ["web", "api", "ios", "android"].enumerated() {
+                let base = 100 * (k + 1)
+                a.ledger.adopt(Ledger.Word(storage: Array(base..<base + 12), deck: Array(base + 50..<base + 62), cleared: Array(base + 50..<base + 56)), repo: repo)
+            }
+            for (yard, zones) in [(Yard.storage, [0: a.hall.storageCells]), (Yard.deck, [0: a.hall.clearedCells, 1: a.hall.stagedCells])] {
+                let layout = a.layout(of: yard)
+                expect(layout.count == 48, "\(yard) holds all 48: \(layout.count)")
+                for s in layout { expect(zones[s.group]?.contains(s.cell) == true, "\(yard) #\(s.number) stands in its zone, not on \(s.cell)") }
+                for (place, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)|\($0.level)" }) where here.count > 1 {
+                    expect(false, "\(yard) \(place) holds \(here.count) crates")
+                }
+                for (column, stack) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)" }) {
+                    expect(Set(stack.map(\.level)) == Set(0..<stack.count), "\(yard) column \(column) is built from the floor: \(stack.map(\.level).sorted())")
+                }
+            }
+        }
+
         test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {
             let a = fresh()
             expect(a.hall.cells.count == Hall.wide * Hall.deep, "the hall is \(Hall.wide) by \(Hall.deep): \(cells(a.hall.cells))")

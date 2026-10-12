@@ -110,7 +110,6 @@ final class SimulatorModel: ObservableObject {
         station.sim?.onCommand = { [weak self] c, who in
             self?.note("command", "\(who): \(c.words)", .command(c, by: who))
         }
-        station.sim?.invariants.onViolation = { [weak self] text in self?.note("check", text, .violation(text)) }
         station.sim?.pullState = { [weak self] repo, number in self?.pullFates["\(repo)#\(number)"] }
         peerBeat = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushPeer() }
@@ -1211,7 +1210,6 @@ enum SimRecord {
     case skipped(String)
     case event(WorldEvent)
     case command(Command, by: String)
-    case violation(String)
 
     var words: String {
         switch self {
@@ -1219,7 +1217,6 @@ enum SimRecord {
         case .skipped(let why): return "skipped: \(why)"
         case .event(let e): return "event \(SimulatorModel.describe(e))"
         case .command(let c, let who): return "command \(who): \(c.words)"
-        case .violation(let t): return t
         }
     }
 }
@@ -1266,8 +1263,6 @@ final class SimHooks {
     var onEvent: ((WorldEvent) -> Void)?
     var pullState: ((String, Int) -> String?)?
     var onCommand: ((Command, String) -> Void)?
-    var onViolation: ((String) -> Void)?
-    let invariants = Invariants()
     var timeScale = 1.0
     var paused = false
     var steps = 0
@@ -1291,7 +1286,6 @@ extension StationController {
             budget -= step
             sim.clock += step
             tick(now: sim.clock)
-            sim.invariants.check(self)
         }
     }
 
@@ -1306,7 +1300,6 @@ extension StationController {
             budget -= step
             sim.clock += step
             tick(now: sim.clock)
-            sim.invariants.check(self)
         }
     }
 

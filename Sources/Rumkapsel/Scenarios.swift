@@ -561,9 +561,7 @@ final class ScenarioRunner {
             }
         }
         var reason: String?
-        let violations = records.compactMap { if case .violation(let t) = $0 { return t }; return nil }
-        if let v = violations.first { reason = v }
-        if reason == nil, !s.allowGiveUp, let gaveUp = records.lazy.compactMap({ r -> String? in
+        if !s.allowGiveUp, let gaveUp = records.lazy.compactMap({ r -> String? in
             if case .event(.log(let t)) = r, t.contains(" gives up ") { return t }; return nil }).first {
             reason = "a minion gave up · " + gaveUp
         }
@@ -594,7 +592,6 @@ final class ScenarioRunner {
         } else {
             say(String(format: "PASS  %-52@  (%.1fs)", s.name as NSString, seconds))
         }
-        for v in violations.dropFirst() { say("      " + v) }
         self.sim = nil
         begin()
     }

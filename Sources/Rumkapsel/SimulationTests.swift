@@ -523,6 +523,17 @@ enum SimulationTests {
             expect(!m.bathing && m.fixture == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: fixture \(String(describing: m.fixture)), place \(m.place.words)")
         }
 
+        test("more resting than there are seats: nobody shares a couch or a bed") {
+            let (sim, station, first) = fixture()
+            let crowd = [first] + (1..<12).map { body("r\($0)", sim: sim, station: station) }
+            for (k, m) in crowd.enumerated() { sim.send(m, to: k % 2 == 0 ? .lounge : .quarters) }
+            _ = step(sim, seconds: 60)
+            let couches = crowd.compactMap(\.couch), beds = crowd.compactMap(\.bed)
+            expect(couches.count > 1 && beds.count > 1, "several seated and several in bed: \(couches.count) couches, \(beds.count) beds")
+            expect(Set(couches).count == couches.count, "one to a couch: \(couches.sorted())")
+            expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
+        }
+
         test("a sleeper given something to do stands up where it lies before it walks anywhere") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .quarters)

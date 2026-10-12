@@ -34,8 +34,7 @@ numbered pictures from the delay on, for a contact sheet or a gif.
 
 - `--scenarios` builds a station of its own per scenario, with a made-up org, presses simulator buttons,
   and steps station time in 1/30 s ticks in a tight loop. No frames are drawn and no wall clock is
-  involved. A scenario is judged on the record of events and commands, on invariants checked every
-  tick, and on the floor at the end.
+  involved. A scenario is judged on the record of events and commands and on the floor at the end.
 - `--ledger-tests`, `--pipeline-tests` and the body rules are model-only: facts in, rules out, no station.
 - The suite runs the exact code the app runs, scene-side logic included, which is where most bugs have
   lived: walks, doorways, deliveries, carries. That is its strength. Its weakness is the same fact: every
