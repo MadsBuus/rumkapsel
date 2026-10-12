@@ -50,27 +50,4 @@ extension Simulation {
         }
         if let outcome { onLog("\(repo): staging deploy \(outcome == .live ? "is live" : "\(outcome)")") }
     }
-
-    func rocketSpot(station: Station, repo: String) -> SIMD2<Double>? {
-        guard let slot = world.padSlotOf[station.name + "|" + repo], !station.padSlots.isEmpty else { return nil }
-        return station.padSlots[slot % station.padSlots.count]
-    }
-
-    func stepTips(dt: Double) {
-        let full = Double(RocketGeometry.panels)
-        for r in rockets.values {
-            let b = staging[r.key].flatMap { $0.merged ? $0 : nil }
-            let running = b?.deploy == .running
-            let live = b?.deploy == .live
-            let pace = (full - 1) / max(20, (b?.deployUsual ?? Deployments.fallback) * 0.85)
-            if running, !r.deployRunning, let b { r.welded = max(r.fresh ? r.welded : 0, min(full - 1, (clock - b.deploySince) * pace)) }
-            r.deployRunning = running
-            if b == nil { r.welded = full }
-            else if running, r.welded < full - 1 { r.welded = min(full - 1, r.welded + dt * pace) }
-            else if live { r.welded = min(full, r.welded + dt * 6) }
-            if r.welded >= full { r.fresh = false }
-            r.panels = r.fresh ? Int(r.welded) : RocketGeometry.panels
-            r.welding = b != nil && (running || (live && r.welded < full))
-        }
-    }
 }
