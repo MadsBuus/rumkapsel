@@ -750,7 +750,7 @@ final class Simulation<B: Body> {
         case .settled:
             if m.isQA, clock >= m.nextWanderAt {
                 // Stack by stack along the untested row: stand in the aisle beside it, face it, sweep it.
-                let stacks = Dictionary(grouping: world.yardLayout(station: station, area: "deck").filter { !$0.cleared }, by: \.column)
+                let stacks = Dictionary(grouping: station.layout(of: .deck).filter { !$0.cleared }, by: \.column)
                     .values.compactMap { $0.first }.sorted { $0.column < $1.column }
                 if !stacks.isEmpty {
                     let stack = stacks[m.qaStop % stacks.count]

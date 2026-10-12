@@ -66,11 +66,11 @@ final class Vortex {
 }
 
 extension Simulation {
-    func openVortex(_ r: RocketJob, station: Station, from area: String, crates numbers: [Int]) {
+    func openVortex(_ r: RocketJob, station: Station, from yard: Yard, crates numbers: [Int]) {
         guard vortices[r.key] == nil, !numbers.isEmpty else { return }
-        let layout = world.yardLayout(station: station, area: area).filter { $0.repo == r.repo && !$0.carried && numbers.contains($0.number) }
+        let layout = station.layout(of: yard).filter { $0.repo == r.repo && !$0.carried && numbers.contains($0.number) }
         guard !layout.isEmpty, let field = station.hall.padField else {
-            StationLog.write("release", "\(r.key) no vortex: nothing of \(numbers) on the \(area) rows")
+            StationLog.write("release", "\(r.key) no vortex: nothing of \(numbers) on the \(yard) rows")
             return
         }
         let middle = layout.map { $0.pos.x }.reduce(0, +) / Double(layout.count)
@@ -80,8 +80,7 @@ extension Simulation {
             let da = simd_distance(SIMD2(a.pos.x, a.pos.z), SIMD2(ring.x, ring.z)), db = simd_distance(SIMD2(b.pos.x, b.pos.z), SIMD2(ring.x, ring.z))
             return abs(da - db) > 0.01 ? da < db : a.level > b.level
         }.map { s -> (crate: CrateRef, from: Spot) in
-            (CrateRef(station: station.name, repo: s.repo, number: s.number),
-             Spot(area: area == "deck" ? .tested : .storage, station: station.name, owner: s.repo, label: s.repo, cell: s.cell, pos: s.pos, level: s.level, yaw: s.yaw))
+            (CrateRef(station: station.name, repo: s.repo, number: s.number), station.standing(s, in: yard))
         }
         for c in crates {
             station.ledger.order(repo: c.crate.repo, number: c.crate.number, to: .pad)

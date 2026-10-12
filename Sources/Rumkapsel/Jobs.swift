@@ -309,7 +309,7 @@ extension StationController {
     func haulCleared(station: Station, repo: String, number: Int) {
         let crate = CrateRef(station: station.name, repo: repo, number: number)
         logEvent("#\(number) \(Words.current.clearedDecon)")
-        guard let node = crateNode(crate), let command = world.carryFromDecon(station: station, repo: repo, number: number) else {
+        guard let node = crateNode(crate), let command = station.carryFromDecon(repo: repo, number: number) else {
             world.unorder(crate)
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             rebuildMarkers(); refreshRockets()
@@ -338,7 +338,7 @@ extension StationController {
         let exact = Spot(area: .office, station: station.name, owner: room.key, label: room.name,
                          cell: Cell(x: Int((Double(at.x) - station.offset.x).rounded()), y: Int((Double(at.z) - station.offset.y).rounded())),
                          pos: SIMD3(Double(at.x), Double(at.y), Double(at.z)))
-        let command = world.carryToStorage(station: station, room: room, repo: repo, number: number).from(exact)
+        let command = station.carryToStorage(room: room, repo: repo, number: number).from(exact)
         carry(command, node: pkg, roomKey: key) { [weak self] in
             guard let self else { return }
             pkg.removeFromParentNode()
@@ -352,7 +352,7 @@ extension StationController {
     /// A staging release merged: the repo's storage crates are carried to the test deck. Without
     /// commands from the reconciler, every crate of the repository belonging to storage goes.
     func stageCargo(station: Station, repo: String, commands: [Command]? = nil) {
-        let list = commands ?? world.carryToDeck(station: station, repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
+        let list = commands ?? station.carryToDeck(repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
         var started = 0
         for command in list {
             guard let crate = command.crate, let node = crateNode(crate) else {
@@ -418,7 +418,7 @@ extension StationController {
     /// A tested crate goes through the gate on someone's arms, to stand small beside its rocket. Anything
     /// stacked on top of it is moved aside first, one carry each, and those go first.
     func carryAcrossDeck(station: Station, repo: String, number: Int) {
-        for command in world.carryToTested(station: station, repo: repo, number: number) {
+        for command in station.carryToTested(repo: repo, number: number) {
             guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
             carry(command, node: node) { [weak self] in
                 guard let self else { return }

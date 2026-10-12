@@ -388,7 +388,7 @@ enum Scenarios {
             }
             if carried { return "#431 was carried off its stack" }
             guard let station = sim.station.fleet.stations.values.first,
-                  let slot = sim.station.world.yardLayout(station: station, area: "deck").first(where: { $0.repo == "web" && $0.number == 431 }) else {
+                  let slot = station.layout(of: .deck).first(where: { $0.repo == "web" && $0.number == 431 }) else {
                 return "#431 is not on the deck"
             }
             if slot.cleared { return "#431 still stands with the tested" }

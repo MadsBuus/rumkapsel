@@ -123,6 +123,8 @@ extension StationController {
         }
     }
 
+    private func mine(_ slot: YardSlot) -> Bool { !slot.alien && world.isMine(repo: slot.repo, number: slot.number) }
+
     /// The yard reconciliation: the source's word against what stands on the floor, per repository.
     /// What can be carried is handed to carriers; counts are snapped only for the rest. It runs from
     /// the tick and before every redraw, never from the drawing itself: drawing decides nothing.
@@ -304,8 +306,9 @@ extension StationController {
             }
             // Crates on somebody's arms are left out by `yardLayout` itself: they are drawn once, in
             // the hands, for as long as the carry lasts.
-            for area in ["storage", "deck", "decon"] where station.hasPad {
-                let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
+            for yard in [Yard.storage, .deck, .decon] where station.hasPad {
+                let area = yard.rawValue
+                let layout = station.layout(of: yard).filter { !$0.carried }
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
@@ -323,7 +326,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "")
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (mine(slot) ? " mine" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -355,7 +358,7 @@ extension StationController {
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
                     let words = crateWords(repo: slot.repo, number: slot.number)
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine, number: slot.number,
+                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: mine(slot), number: slot.number,
                                             title: words.title, who: words.who)
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw

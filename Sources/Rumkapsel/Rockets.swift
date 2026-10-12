@@ -172,20 +172,19 @@ extension Simulation {
         take(r, .rocket(.steam, station: r.station, repo: r.repo))
     }
 
-    private func loadSource(_ r: RocketJob) -> String { world.stagingIsDeck(station: r.station, repo: r.repo) ? "deck" : "storage" }
+    private func loadSource(_ r: RocketJob) -> Yard { world.stagingIsDeck(station: r.station, repo: r.repo) ? .deck : .storage }
 
     private func loadCrates(_ r: RocketJob) {
         guard let station = fleet.stations[r.station] else { return }
-        let source = loadSource(r)
+        let yard = loadSource(r)
         let repo = r.repo
-        let yard: Yard = source == "deck" ? .deck : .storage
         let standing = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
         func shipped(_ n: Int) -> Bool? { world.works.find(repo: repo, crate: n).map { r in r.stage.map { $0 >= .shipped } ?? true } }
         var launching = false
         if case .rocket(.launch, _, _) = r.command.kind { launching = world.works.records(repo: repo).contains { r in r.stage.map { $0 >= .shipped } ?? false } }
         let numbers = launching ? standing.filter { shipped($0) ?? true } : standing
         guard !numbers.isEmpty, r.isLaunching else { return }
-        openVortex(r, station: station, from: source, crates: numbers)
+        openVortex(r, station: station, from: yard, crates: numbers)
     }
 
     func refreshRockets() {
