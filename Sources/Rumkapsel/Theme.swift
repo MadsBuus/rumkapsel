@@ -96,7 +96,7 @@ struct Vocabulary {
     var qaWalk = "walking the rows on the deck"
     // Releases.
     var crate = "crate", crates = "crates", loadInto = "into the rocket", standingBy = "standing by on the pad"
-    var steaming = "loaded and steaming", liftingOff = "lifting off", launchedTo = "launched to", onThePad = "on the pad"
+    var steaming = "go for launch", liftingOff = "lifting off", launchedTo = "launched to", onThePad = "on the pad"
     var holding = "untested, holding on the pad", cleared = "cleared for launch"
     // The station log.
     var liftedOff = "lifted off", aboard = "aboard", passedInspection = "passed inspection"

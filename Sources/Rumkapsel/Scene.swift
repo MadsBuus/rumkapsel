@@ -331,6 +331,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
     var locks: [String: LockView] = [:]
     var fields: [String: HangarField] = [:]
+    var pods: [String: PodView] = [:]
+    /// The ring on the pad under each standing rocket, by "station|repo": its beacon.
+    var padRings: [String: SCNNode] = [:]
     var droneViews: [String: DroneView] = [:]
     var puffs: [Puff] = []
     private var lastHaulSchedule = 0.0
@@ -1309,6 +1312,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.stepDrones(dt: dt)
         drawShuttles(dt: dt)
         tickHangars()
+        tickPods(dt: dt)
         tickUndocking()
         updateBerths()
         tickHullLamps()

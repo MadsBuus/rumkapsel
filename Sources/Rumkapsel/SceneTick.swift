@@ -356,6 +356,7 @@ extension StationController {
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
         case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)
         case .rocketLoading, .liftOff, .steam, .rocketGone, .intoHold: play(rocket: cue)
+        case .podOut(let key, let crates): podOut(key: key, crates: crates)
         }
     }
 

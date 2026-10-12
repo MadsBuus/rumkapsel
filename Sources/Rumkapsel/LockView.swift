@@ -27,6 +27,8 @@ final class LockView {
     let window: SCNNode?, rack: SCNNode?
     /// The way through, deck to pad.
     let inward: SIMD2<Double>
+    /// Until when both doors stand open for a pod going through to its rocket.
+    var passUntil = 0.0
 
     init(node: SCNNode, window: SCNNode?, rack: SCNNode?, inward: SIMD2<Double>) {
         self.node = node; self.window = window; self.rack = rack; self.inward = inward
@@ -371,7 +373,11 @@ extension StationController {
     private func drawLock(_ job: LockJob?, lv: LockView, station: Station, dt: Double) {
         guard let lock = station.lock else { return }
         let phase = job?.phase ?? .rest
-        let doors = lock.doors(of: phase, at: clock)
+        var doors = lock.doors(of: phase, at: clock)
+        if clock < lv.passUntil {
+            let k = min(1, min(clock - (lv.passUntil - RocketJob.podSeconds), lv.passUntil - clock) / 0.5)
+            doors = (max(doors.inner, k), max(doors.outer, k))
+        }
         let rise = CargoLock.height * 0.92
         lv.innerDoor?.position.y = CGFloat(rise * doors.inner)
         lv.outerDoor?.position.y = CGFloat(rise * doors.outer)
@@ -488,7 +494,7 @@ extension StationController {
     }
 
     /// A crate as the rows draw it, for the lock to carry: its repository's colour, your straps, the light off.
-    private func lockCrate(_ crate: CrateRef) -> SCNNode {
+    func lockCrate(_ crate: CrateRef) -> SCNNode {
         let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
         let alien = row?.alien == true
         let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))

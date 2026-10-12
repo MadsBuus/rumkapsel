@@ -1,4 +1,4 @@
-// Everything that comes and goes on top of the floor: crates, cones, rockets, steam, power and beams.
+// Everything that comes and goes on top of the floor: crates, cones, rockets, power and beams.
 
 import AppKit
 import SceneKit
@@ -39,7 +39,7 @@ extension StationController {
             for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
         }
         // A rocket on its pad is walked round, never through: its hull is an obstacle, the hull alone,
-        // not the fins, the hold's ring or the steam, so its foot stays reachable for loading.
+        // not the fins or the hold's ring.
         for (key, r) in simulation.rockets {
             guard let st = fleet.stations[r.station] else { continue }
             let at = padPosition(station: st, slot: padSlot(station: st, key: key))
@@ -323,6 +323,7 @@ extension StationController {
             // the hands, for as long as the carry lasts.
             for area in ["storage", "deck", "decon"] where station.hasPad {
                 let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
+                if area == "deck" { rebuildPods(station, deck: layout) }
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
@@ -340,7 +341,7 @@ extension StationController {
                 }
                 for slot in layout {
                     let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "") + (slot.small ? " small" : "")
+                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (slot.mine ? " mine" : "")
                     // A crate already standing here keeps its node. It moves only if its slot did: down
                     // onto a freed level it settles over a beat; anywhere else it is put where the
                     // layout says, as a fresh node would have been.
@@ -365,15 +366,15 @@ extension StationController {
                     // Of unknown origin: grey wherever it stands, a bot's, not a repository's work, with a
                     // tint of the repository it came for, so a bump for ios still reads as ios.
                     let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    // In the yard the light is off, except green on a crate through the gate, and the
-                    // unscreened green of decon on what still waits there.
-                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight : NSColor(rgb: (0.3, 0.32, 0.38))
+                    // In storage the light is off. On the deck it is amber while the crate waits for QA and green once
+                    // tested; in decon it is the unscreened green of what still waits there.
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight
+                        : area == "deck" ? Props.gateIdle : NSColor(rgb: (0.3, 0.32, 0.38))
                     // In decon it is smaller and darker than a crate of ours, to take less of the eye; cleared
                     // into storage it grows to a crate's size, since a crate is what it is from then on.
                     let words = crateWords(repo: slot.repo, number: slot.number)
                     let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: slot.mine, number: slot.number,
                                             title: words.title, who: words.who)
-                    if slot.small { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
                     pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
                     pkg.eulerAngles.y = slot.yaw
                     pkg.name = name
@@ -450,10 +451,12 @@ extension StationController {
     }
 
 
-    /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it.
+    /// A hex pad on the floor at every spot a rocket can stand, in the repository's colour where one holds it. The
+    /// ring under a rocket is its beacon, lit by `signal` every frame.
     func rebuildPadHexes() {
         if padHexRoot.parent == nil { propRoot.addChildNode(padHexRoot) }
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
+        padRings = [:]
         for station in fleet.stations.values where station.hasPad {
             let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
                 world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
@@ -465,27 +468,9 @@ extension StationController {
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
                 pad.name = "pad:" + station.name
                 padHexRoot.addChildNode(pad)
+                if let repo = held[i] { padRings[station.name + "|" + repo] = pad }
             }
         }
-    }
-
-    /// Steam venting from a loaded rocket waiting for ignition.
-    func addSteam(to rocket: SCNNode) {
-        guard rocket.childNode(withName: "steam", recursively: false) == nil else { return }
-        let emitter = SCNNode(); emitter.name = "steam"
-        rocket.addChildNode(emitter)
-        let puff = SCNAction.run { [weak self] _ in
-            guard let self else { return }
-            enqueue {
-                let p = SCNNode(geometry: SCNBox(width: 2 * (0.08), height: 2 * (0.08), length: 2 * (0.08), chamferRadius: 0))
-                p.geometry!.firstMaterial = flat(NSColor(rgb: (0.85, 0.88, 0.95)))
-                p.opacity = 0.7
-                p.position = v3(Double.random(in: -0.25...0.25), 0.05, Double.random(in: -0.25...0.25))
-                emitter.addChildNode(p)
-                p.runAction(.sequence([.group([.moveBy(x: CGFloat(Double.random(in: -0.4...0.4)), y: 0.5, z: CGFloat(Double.random(in: -0.4...0.4)), duration: 1.6), .scale(to: 2.2, duration: 1.6), .fadeOut(duration: 1.6)]), .removeFromParentNode()]))
-            }
-        }
-        emitter.runAction(.repeatForever(.sequence([puff, .wait(duration: 0.25)])))
     }
 
     /// Something came through decon's hatch: the light over it flashes, and that is all the fuss it gets.

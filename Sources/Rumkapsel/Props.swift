@@ -566,47 +566,6 @@ enum Props {
         }
     }
 
-    /// The service tower stood beside a rocket: on the pad from the moment the rocket stands to the moment it
-    /// goes, the drones' mast for the tip's panels. The beacon is lit red while the rocket is held.
-    static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
-        let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.convertPosition(SCNVector3Zero, to: rocket).y) }
-        let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
-        deco.name = "hold"
-        rocket.addChildNode(deco)
-    }
-
-    static func holdDecoration(around center: SIMD3<Double>, tall: Bool, armAt: Double? = nil, held: Bool = true) -> SCNNode {
-        let n = SCNNode()
-        // The service tower: a steel column beside the rocket, a lift rail up its face on the rocket's side,
-        // a cap and a beacon on top.
-        let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
-        let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
-        let tower = SCNNode()
-        let w = 0.16
-        let column = SCNNode(geometry: SCNBox(width: w, height: h, length: w, chamferRadius: 0))
-        column.geometry!.firstMaterial = steel
-        column.position = v3(0, h / 2, 0)
-        tower.addChildNode(column)
-        let rail = SCNNode(geometry: SCNBox(width: 0.02, height: h - 0.1, length: 0.06, chamferRadius: 0))
-        rail.geometry!.firstMaterial = dark
-        rail.position = v3(-w / 2 - 0.005, (h - 0.1) / 2, 0)
-        tower.addChildNode(rail)
-        let cap = SCNNode(geometry: SCNBox(width: w + 0.04, height: 0.04, length: w + 0.04, chamferRadius: 0))
-        cap.geometry!.firstMaterial = dark
-        cap.position = v3(0, h + 0.02, 0)
-        tower.addChildNode(cap)
-        // A beacon on top: lit red while the rocket is held, dark once it is cleared.
-        let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
-        beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark
-        beacon.name = "beacon"
-        beacon.setValue(true, forKey: "beacon")   // found by this, whatever the rocket names its nodes
-        beacon.position = v3(0, h + 0.065, 0)
-        tower.addChildNode(beacon)
-        tower.position = v3(center.x + 0.44, 0, center.z + 0.02)
-        tower.name = "tower"
-        n.addChildNode(tower)
-        return n
-    }
 
 }
 

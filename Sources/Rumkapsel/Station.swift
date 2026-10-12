@@ -358,13 +358,6 @@ final class Station {
     var padCenter: SIMD2<Double> { yardCenter(2) }
     /// How big a crate is once it is through the lock: packed for flight, beside its rocket.
     static let testedScale = 0.5
-    /// Where a rocket's tested crates stand, from the rocket's spot: by its foot, on the side away from its
-    /// tower, clear of the drones working its hatch.
-    static let testedStackOffset = SIMD2(-0.42, 0.55)
-    /// The tested stack's columns, two by two, a small crate's width and a little apart.
-    static var testedPitch: Double { 0.42 * testedScale * 1.1 }
-    /// From the middle of the tested stack out to its sides.
-    static var testedStackHalf: Double { testedPitch / 2 + 0.42 * testedScale / 2 }
 
     /// The gate: the doorway from the deck onto the pad, each pair as its deck cell and its pad cell.
     var gateDoorway: [(deck: Cell, pad: Cell)] {

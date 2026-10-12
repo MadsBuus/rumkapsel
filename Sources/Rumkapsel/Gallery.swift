@@ -671,7 +671,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             scene.rootNode.addChildNode(small)
             let tall = Looks.current.rocket(color: teal, tall: true, cargo: 8)
             tall.position = v3(spots[1].x, 0, spots[1].y)
-            if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) } else { Props.attachTower(to: tall, tall: true, held: true) }
+            if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) }
             scene.rootNode.addChildNode(tall)
         }
         // The way work arrives: the shuttle, coming down with a crate and going back up.

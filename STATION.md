@@ -21,8 +21,9 @@ colour until the crate on it has been carried in. The arm runs straight into the
 door, so hallway and hangar read as one straight way out. Everyone who arrives steps off a shuttle
 there, and everyone who leaves boards one. Nobody goes to the bay for any other reason. Spacewalks, visits
 to other stations and other ships docking are its future. The **yard** along the west side is three
-blocks: **storage** (merged work waiting for a release), the **deck** (work on staging, tested on the
-row nearest the pad, untested on the far row) and the **pad** (rockets), which is outside the hull. The
+blocks: **storage** (merged work not yet on staging, or waiting for a release where there is no staging),
+the **deck** (work on staging: untested on the far row, tested in its repository's **pod** on the row
+nearest the pad) and the **pad** (rockets), which is outside the hull. The
 deck and the pad are joined only by the **cargo lock**, with a **window** beside it onto the pad.
 Blocks connect by doorways and
 have aisles down the middle; crates stack against the far walls, aisles stay clear. Nobody stands on a
@@ -67,8 +68,9 @@ lock, and the cargo lock is the hand-off: on the deck side a person is still nee
 - cube: a piece of work (a commit); ghost cubes are uncommitted work
 - square strapped crate: a pull request. The plate on its side is a light: blinking while checks run,
   red when they fail, green when all is well; the whole crate turns red when the PR is closed unmerged.
-  In storage and on the deck the light is off; a tested crate on the deck shows green and a sticker on
-  the lid, put on as it comes off the row rather than when it is set down again. A crate of your own
+  In storage the light is off. On the deck an untested crate's is amber, waiting for QA; a tested one
+  shows green and a sticker on the lid, put on as it comes off the row rather than when it is set down
+  again, and is carried into its pod. A crate of your own
   work is strapped in white, so yours pick out of a row of everyone's. Storage looks a little
   unorganised, the deck ordered.
 - pyramid: the message a session is working on, one per session, on the cell nearest the door. Messages
@@ -77,12 +79,18 @@ lock, and the cargo lock is the hand-off: on the deck side a person is still nee
 - drone: a machine at work outside the hull; it is none of the shapes above, and never carries a
   repository's colour
 - pallet: a staging release being assembled
+- pod: what a repository will ship, on the deck: its tested crates, standing apart from what still waits
+  for QA. Its lid stands open while anything it would ship is untested and closes, glass, lit green, once
+  all of it is: sealed. A late rider or a follow-up lands on the untested row and the lid opens again.
+  Nothing leaves the pod until the release merges; then the whole pod goes out through the cargo lock to
+  its rocket in one move.
 - rocket: a release on its way down to production, the planet below, where the users live. It comes in
   two pieces. The tip is the staging release, welded on the pad by drones while staging deploys. The
   **kick stage** is the production release: when one opens, drones fly it out and set it under the tip,
-  and it is the burn that takes the tip down. The service tower stands beside it from the moment it is on
-  the pad until it goes, its beacon red while the release is untested and dark once cleared; drones
-  carry the cargo to the hatch high on the payload section; venting means loaded and waiting
+  and it is the burn that takes the tip down. The ring on the pad under it is its beacon: pulsing red while
+  what it would ship is untested, flashing amber while its tip is welded, its repository's colour otherwise.
+  It vents only when it is fuelled and go: its kick stage under it and its pod sealed, waiting only for the
+  merge. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
 - nothing is round; everything has flat sides
 
 ## Things are heavy
@@ -104,7 +112,9 @@ lock, and the cargo lock is the hand-off: on the deck side a person is still nee
   draws its own way in, out in space — a high swing round, a low sweep past the hull, a dive, a long
   shallow final — but every one threads the bay's mouth and comes through the field, which ripples where
   it passes, and goes out the same way. Its nose follows the line it is flying the whole way.
-- A rocket is loaded through the cargo lock. The carrier sets the crate inside on the deck side and
+- A rocket whose release goes through staging takes its pod at the merge, whole, through the cargo
+  lock: both doors open for it, and it is mounted through the hatch. One that ships from storage is
+  loaded crate by crate through the cargo lock at the merge. The carrier sets the crate inside on the deck side and
   goes; the inner door shuts, the air goes while a scan sweeps the crate, the outer door opens, and a
   drone takes the crate, flies it to the hatch and holds it there while the hatch takes it in, the
   crate shrinking as it goes since the rocket is far too small for it. The rocket grows a little with
@@ -237,7 +247,7 @@ lock, and the cargo lock is the hand-off: on the deck side a person is still nee
   pace, a stroll a third; getting up from bed is slow, then quicker.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
 - Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
-- When a rocket stands loaded and venting, the idle drift to the window to watch.
+- When a rocket stands venting, the idle drift to the window to watch.
 - Nobody goes onto the pad. A carrier's walk toward a rocket ends at the cargo lock.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,

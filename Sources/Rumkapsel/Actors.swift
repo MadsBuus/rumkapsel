@@ -1,6 +1,6 @@
 // The shuttles and the rockets as the scene draws them: a ship node per flight, placed where the
 // simulation's `Flight` says; a rocket node per `RocketJob`, sized to its pile while it stands by,
-// lifting off with flame and steam when the simulation says so. Nothing here decides anything.
+// venting while it is go and undocking when the simulation says so. Nothing here decides anything.
 
 import AppKit
 import SceneKit
@@ -23,8 +23,6 @@ final class RocketView {
     var untestedShown: Bool
     /// The tip's panels drawn so far.
     var panelsShown: Int
-    /// Whether the kick stage was docked under the tip when the tower was stood, which sets its height.
-    var towerLifter: Bool
     /// On the station clock, like everything else that moves: when it came, and the panels in the air and
     /// when each set off.
     var bornAt: Double
@@ -35,10 +33,8 @@ final class RocketView {
     var weldedShown = 0
     var hot: [Int: Double] = [:]
     var stripping: [Int: Double] = [:]
-    /// The tower's beacon and its light as the rocket's own state has it, put back once the weld is over.
-    var beaconRest: (beacon: SCNNode, material: SCNMaterial?)?
-    init(node: SCNNode, untested: Bool, panels: Int, lifter: Bool, at clock: Double) {
-        self.node = node; untestedShown = untested; panelsShown = panels; towerLifter = lifter; bornAt = clock
+    init(node: SCNNode, untested: Bool, panels: Int, at clock: Double) {
+        self.node = node; untestedShown = untested; panelsShown = panels; bornAt = clock
     }
 }
 
@@ -59,7 +55,7 @@ enum Hull {
     static let hot = NSColor(rgb: (1.0, 0.52, 0.14))
     static let glow = NSColor(rgb: (0.95, 0.38, 0.06))
     static let cooling = 2.5
-    /// How long a new panel takes to fly from the tower onto its place.
+    /// How long a new panel takes to fly from the welding drone onto its place.
     static let flight = 0.6
     static let sparkShape: SCNGeometry = {
         let g = SCNBox(width: 0.016, height: 0.016, length: 0.016, chamferRadius: 0)
@@ -168,14 +164,9 @@ extension StationController {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
         Props.shape(n, lifter: r.kick == .docked, panels: r.panels)
-        // A look with a hold of its own shows it while the rocket is held; the classic pad stands its service
-        // tower beside the rocket the whole time, the beacon lit while held.
-        let docked = r.kick == .docked
-        if let own = Looks.current.hold(tall: docked) {
-            if r.untested { own.name = "hold"; n.addChildNode(own) }
-        } else {
-            Props.attachTower(to: n, tall: docked, held: r.untested)
-        }
+        // A look with a hold of its own shows it while the rocket is held; the classic pad says so with the ring
+        // round the rocket instead.
+        if r.untested, let own = Looks.current.hold(tall: r.kick == .docked) { own.name = "hold"; n.addChildNode(own) }
         n.position = padPosition(station: station, slot: slot)
         n.name = r.label
         n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
@@ -186,13 +177,13 @@ extension StationController {
 
     /// Every rocket on a pad, drawn for what the simulation says it is: a new one gets a node on the
     /// next slot; one standing by grows with what it will carry and stands where the pad is now; once
-    /// it is loading it keeps the size it had, and the steam and the flame stay where they are.
+    /// it is loading it keeps the size it had.
     func drawRockets() {
         for (key, r) in simulation.rockets {
             guard let st = fleet.stations[r.station] else { continue }
             let slot = padSlot(station: st, key: key)
             guard let v = rocketViews[key] else {
-                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), untested: r.untested, panels: r.panels, lifter: r.kick == .docked, at: clock)
+                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), untested: r.untested, panels: r.panels, at: clock)
                 continue
             }
             // A rocket that was already standing there when the station came up fades in where it stands;
@@ -202,12 +193,10 @@ extension StationController {
             paintHull(r, v)
             signal(r, v)
             placeKick(r, v, station: st)
+            vent(r, v)
             guard r.stage.rank < 3, !v.node.hasActions else { continue }
-            let docked = r.kick == .docked
-            // The tower was stood for the rocket as it was; once the stage has come or gone it is stood again,
-            // as tall as the rocket now is.
-            if r.untested != v.untestedShown || ((docked || r.kick == .none) && v.towerLifter != docked) {
-                v.towerLifter = docked
+            // A look's own hold goes on and comes off with the rocket's clearance.
+            if r.untested != v.untestedShown {
                 let position = v.node.position
                 v.node.removeFromParentNode()
                 v.node = rocketNode(station: st, r, slot: slot)
@@ -216,7 +205,6 @@ extension StationController {
                 v.node.position = position
                 v.untestedShown = r.untested
                 v.panelsShown = r.panels
-                if r.stage.rank == 2 { addSteam(to: v.node) }   // redrawn mid-wait: it was venting, and still is
             } else if v.node.name != r.label {
                 v.node.name = r.label
                 v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
@@ -227,8 +215,8 @@ extension StationController {
         }
     }
 
-    /// The tip as it is built: each new panel flies across from the top of the tower onto its place, and
-    /// the nose and the hatch go on with the last.
+    /// The tip as it is built: each new panel flies across from the drone welding it onto its place, and the
+    /// nose and the hatch go on with the last.
     private func weld(_ r: RocketJob, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip") else { return }
         func piece(_ name: String) -> SCNNode? { tip.childNodes.first { ($0.value(forKey: "part") as? String) == name } }
@@ -239,14 +227,17 @@ extension StationController {
             v.flying = [:]
         }
         v.panelsShown = r.panels
-        // In the air: from the top of the tower, over and down onto its place.
+        // In the air: from the drone welding the tip, over and onto its place; with no drone at it, from overhead.
         let flight = Hull.flight
+        let welder = simulation.drones[r.station]?.first { $0.task == .weld(r.key) }
+        let source = welder.map { tip.convertPosition(v3($0.pos.x, $0.pos.y, $0.pos.z), from: nil) }
         for (i, at) in v.flying {
             guard let panel = piece("panel\(i)"), let rest = panel.value(forKey: "rest") as? SCNVector3 ?? {
                 let p = panel.position; panel.setValue(p, forKey: "rest"); return p }() else { continue }
             let t = (clock - at) / flight
             panel.isHidden = t < 0
-            let from = SIMD3(0.44, 1.8 - Double(tip.position.y), 0.02), to = SIMD3(Double(rest.x), Double(rest.y), Double(rest.z))
+            let from = source.map { SIMD3(Double($0.x), Double($0.y), Double($0.z)) } ?? SIMD3(0, 1.8 - Double(tip.position.y), 0)
+            let to = SIMD3(Double(rest.x), Double(rest.y), Double(rest.z))
             let k = min(1, max(0, t)), e = k * k * (3 - 2 * k)
             let p = from + (to - from) * e + SIMD3(0, sin(k * .pi) * 0.15, 0)
             panel.position = v3(p.x, p.y, p.z)
@@ -307,41 +298,38 @@ extension StationController {
         }
     }
 
-    /// The tower's beacon while the tip is welded: a turning amber light, flashing as it comes round. After,
-    /// it is what the rocket's own state makes it.
+    /// The ring on the pad round a rocket is its beacon: a slow red pulse while what it would ship is untested, a
+    /// turning amber flash while its tip is welded, its repository's colour otherwise.
     private func signal(_ r: RocketJob, _ v: RocketView) {
-        var found: SCNNode?
-        v.node.childNode(withName: "hold", recursively: false)?.enumerateChildNodes { c, stop in
-            if c.value(forKey: "beacon") != nil { found = c; stop.pointee = true }
+        guard let ring = padRings[r.key] else { return }
+        let color = NSColor(fleet.color(forRepo: r.repo))
+        if r.welding {
+            let flash = pow(max(0, cos((clock / 0.9).truncatingRemainder(dividingBy: 1) * 2 * .pi)), 4)
+            ring.geometry?.firstMaterial?.diffuse.contents = Props.palletAmberOff.blended(withFraction: CGFloat(0.3 + 0.7 * flash), of: Props.palletAmber)
+            ring.opacity = 0.95
+        } else if r.untested {
+            let k = 0.5 + 0.5 * sin(clock * 2.2)
+            ring.geometry?.firstMaterial?.diffuse.contents = Props.scanRed.blended(withFraction: CGFloat(0.3 * (1 - k)), of: .black)
+            ring.opacity = CGFloat(0.55 + 0.4 * k)
+        } else {
+            ring.geometry?.firstMaterial?.diffuse.contents = color
+            ring.opacity = 0.75
         }
-        guard let beacon = found else { return }
-        let lamp = beacon.childNode(withName: "beaconLight", recursively: false)
-        guard r.welding else {
-            if let rest = v.beaconRest, rest.beacon === beacon { beacon.geometry?.firstMaterial = rest.material }
-            v.beaconRest = nil
-            lamp?.removeFromParentNode()
-            return
+    }
+
+    /// A fuelled rocket that is go vents boil-off from two ports at the top of its kick stage: thin jets out into
+    /// space that spread and are gone, now and then a bigger burst.
+    private func vent(_ r: RocketJob, _ v: RocketView) {
+        guard r.isVenting, Double.random(in: 0...1) < 0.3 else { return }
+        let p = v.node.presentation.worldPosition
+        let side = Bool.random() ? 1.0 : -1.0
+        let out = SIMD3(0, 0, side)
+        let at = SIMD3(Double(p.x), Double(p.y) + RocketGeometry.hullBase - 0.06, Double(p.z)) + out * (RocketGeometry.radius + 0.02)
+        let burst = Double.random(in: 0...1) < 0.06 ? 4 : 1
+        for _ in 0..<burst {
+            let spread = SIMD3(Double.random(in: -0.15...0.15), Double.random(in: -0.05...0.2), 0)
+            emitPuff(at: at, vel: (out + spread) * Double.random(in: 0.5...0.9), life: 0.7, grow: 3)
         }
-        if v.beaconRest?.beacon !== beacon {
-            v.beaconRest = (beacon, beacon.geometry?.firstMaterial)
-            beacon.geometry?.firstMaterial = flat(Props.palletAmber)
-        }
-        let turn = (clock / 0.9).truncatingRemainder(dividingBy: 1)
-        let flash = max(0, cos(turn * 2 * .pi))
-        let bright = pow(flash, 6)
-        beacon.geometry?.firstMaterial?.diffuse.contents = Props.palletAmberOff.blended(withFraction: CGFloat(0.4 + 0.6 * flash), of: Props.palletAmber)
-        beacon.geometry?.firstMaterial?.emission.contents = NSColor.black.blended(withFraction: CGFloat(bright), of: Props.palletAmber)
-        let l = lamp ?? {
-            let l = SCNNode()
-            l.name = "beaconLight"
-            l.light = SCNLight()
-            l.light!.type = .omni
-            l.light!.color = Props.palletAmber
-            l.light!.attenuationEndDistance = 1.4
-            beacon.addChildNode(l)
-            return l
-        }()
-        l.light?.intensity = CGFloat(60 + 900 * bright)
     }
 
     /// A shower of sparks off the seam the torch is on: thrown out from the hull, falling, bouncing once off
@@ -398,30 +386,20 @@ extension StationController {
         Props.part(v.node, "cradle")?.isHidden = r.kick == .docked
     }
 
-    /// The simulation's word on a rocket, shown once: the hold's tape comes down, the flame goes on,
-    /// the steam starts, the node goes with the rocket, or a crate goes in through the hatch.
+    /// The simulation's word on a rocket, shown once: a look's hold comes down, it undocks, the node goes
+    /// with the rocket, or a crate goes in through the hatch.
     func play(rocket cue: Cue) {
         switch cue {
         case .rocketLoading(let key):
-            // Cleared: a look's own hold comes down; the tower stays to load, its beacon goes dark.
-            if let hold = rocketViews[key]?.node.childNode(withName: "hold", recursively: false) {
-                if let beacon = hold.childNode(withName: "beacon", recursively: true) {
-                    beacon.geometry?.firstMaterial = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
-                } else { hold.removeFromParentNode() }
-            }
+            // Cleared: a look's own hold comes down.
+            rocketViews[key]?.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
         case .liftOff(let key):
             if let node = rocketViews[key]?.node {
-                // The tower is let go of the rocket a moment before the climb and stays on the pad.
-                if let hold = node.childNode(withName: "hold", recursively: false) {
-                    hold.removeFromParentNode()
-                    hold.position = node.position
-                    rocketRoot.addChildNode(hold)
-                    hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
-                }
+                node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
                 liftOff(node, repo: String(key.split(separator: "|", maxSplits: 1).last ?? ""))
             }
-        case .steam(let key):
-            if let node = rocketViews[key]?.node { addSteam(to: node) }
+        case .steam:
+            break   // the vent is drawn from the rocket's state, every frame
         case .rocketGone(let key):
             rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
         case .intoHold(let key, let command):

@@ -78,6 +78,8 @@ enum Cue {
     case steam(key: String)
     case rocketGone(key: String)
     case intoHold(key: String, command: Int)
+    /// A rocket's pod goes out through the lock to it, these crates in it.
+    case podOut(key: String, crates: [CrateRef])
 }
 
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
@@ -627,7 +629,7 @@ final class Simulation<B: Body> {
     /// where other roamers are headed; at the window onto the pad when a loaded rocket vents, where company is fine.
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
-        let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
+        let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isVenting || $0.isLaunching) }
         let window = station.windowWatch
         // The gate is glass and a lock, not a way through: the window's own doorway is somewhere to stand.
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })

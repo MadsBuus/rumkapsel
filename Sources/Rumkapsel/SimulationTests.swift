@@ -213,7 +213,7 @@ enum SimulationTests {
             expect(m.wonderUntil > sim.clock, "a beat, head up, before it goes")
         }
 
-        test("a loading rocket whose release is no longer cleared stands by, calls off its carries and orders no more") {
+        test("a cleared rocket's cargo: from the deck it waits sealed in its pod, from storage it is carried aboard; either way losing clearance stops it") {
             let (sim, station, m) = fixture()
             let deck = sim.world.stagingIsDeck(station: "work", repo: "web")   // the row a rocket loads from
             station.ledger.adopt(Ledger.Word(storage: deck ? [] : [440, 441], deck: deck ? [440, 441] : []), repo: "web")
@@ -223,10 +223,17 @@ enum SimulationTests {
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.load(2), station: "work", repo: "web"))
             sim.assignOrders()
-            expect(!intoRocket().isEmpty && m.current.map { id in intoRocket().contains(id.id) } == true, "loading: \(m.words)")
+            if deck {
+                for _ in 0..<4 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
+                expect(intoRocket().isEmpty, "nothing carried aboard before launch: \(intoRocket().count)")
+                expect(sim.podSealed(station: "work", repo: "web") && sim.rockets["work|web"]?.isSteaming == true, "the pod sealed, the rocket waiting")
+            } else {
+                expect(!intoRocket().isEmpty && m.current.map { id in intoRocket().contains(id.id) } == true, "loading: \(m.words)")
+            }
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.standBy, station: "work", repo: "web"))
             expect(sim.rockets["work|web"]?.stage == .standBy, "standing by again")
+            expect(!sim.podSealed(station: "work", repo: "web"), "the pod open again")
             for _ in 0..<20 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
             expect(intoRocket().isEmpty, "no carry into the rocket while it stands by: \(intoRocket().count)")
         }

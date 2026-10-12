@@ -4,7 +4,7 @@
 // the lock; it welds a tip while its staging deploy runs, circling the hull ring by ring as the weld climbs; and
 // two of them fly a kick stage in under a tip when a production release opens, and out again if it closes.
 // Between jobs the drones wait in their rack by the lock. They fly on puffs of thrust: up off the pad, across,
-// down onto the work, over the rockets and their towers when those are in the way. No SceneKit: the scene
+// down onto the work, over the rockets when those are in the way. No SceneKit: the scene
 // draws them where this has them, on the station clock.
 
 import Foundation
@@ -68,7 +68,7 @@ enum DroneFlight {
     static let count = 3
     /// Top speed and how hard the thrusters push, in tiles.
     static let speed = 1.3, accel = 2.0
-    /// The height they cross the pad at: over the stacks, or over the rockets and their towers.
+    /// The height they cross the pad at: low, or over the rockets.
     static let low = 0.85, high = 2.3
     /// How far below the drone's middle a crate in its grip hangs: its top just under the claws.
     static let hang = 0.07
@@ -162,7 +162,7 @@ extension Simulation {
     // MARK: flying
 
     /// Straight there if it is close; otherwise up to its cruise, across, and down. It crosses high where a
-    /// rocket or its tower stands in the way, low over the stacks where nothing does.
+    /// rocket stands in the way, low where nothing does.
     private func plan(_ d: PadDrone, to: SIMD3<Double>, station: Station) -> [SIMD3<Double>] {
         let from = d.pos
         let flat = SIMD2(to.x - from.x, to.z - from.z)
@@ -172,7 +172,7 @@ extension Simulation {
         return [SIMD3(from.x, up, from.z), SIMD3(to.x, up, to.z), to]
     }
 
-    /// Whether the way across the pad from one point to another passes a standing rocket or its tower.
+    /// Whether the way across the pad from one point to another passes a standing rocket.
     private func crossesRocket(_ a: SIMD3<Double>, _ b: SIMD3<Double>, station: Station) -> Bool {
         let p = SIMD2(a.x - station.offset.x, a.z - station.offset.y), q = SIMD2(b.x - station.offset.x, b.z - station.offset.y)
         func distance(to c: SIMD2<Double>) -> Double {
@@ -182,7 +182,7 @@ extension Simulation {
         }
         return rockets.values.contains { r in
             guard r.station == station.name, let at = rocketSpot(station: station, repo: r.repo) else { return false }
-            return distance(to: at) < 0.42 || distance(to: at + SIMD2(0.44, 0.02)) < 0.3
+            return distance(to: at) < 0.42
         }
     }
 
@@ -324,13 +324,12 @@ extension Simulation {
         cue(.redraw)
     }
 
-    /// At a tip with the torch: in front of the panel the weld is on, ring by ring up the hull. The side of the
-    /// hull with the hatch has the tower in front of it, so that panel is worked from the side beside it, and the
-    /// way from side to side goes round the back, never past the tower.
+    /// At a tip with the torch: in front of the panel the weld is on, ring by ring up the hull. The way from side
+    /// to side goes round the hull, past each side between.
     private func weld(_ d: PadDrone, _ r: RocketJob, at spot: SIMD2<Double>, station: Station) {
         let panel = min(RocketGeometry.panels - 1, Int(r.welded))
         let ring = panel / 6, k = panel % 6
-        let side = k == 0 ? 1 : k
+        let side = k
         let height = RocketGeometry.ringMiddle(ring, lift: r.lift)
         func point(_ s: Int) -> SIMD3<Double> {
             let f = RocketGeometry.facing(side: s) * (RocketGeometry.apothem + DroneFlight.standOff)
@@ -373,15 +372,13 @@ extension Simulation {
         return SIMD3(station.offset.x + p.x, 2.6, station.offset.y + p.y)
     }
 
-    /// The way a kick stage comes in under its tip: from the side with the most room round it, never the tower's,
-    /// clear of the other rockets, their towers and the stacks.
+    /// The way a kick stage comes in under its tip: from the side with the most room round it, clear of the other
+    /// rockets.
     private func kickSide(_ station: Station, at spot: SIMD2<Double>, key: String) -> SIMD2<Double> {
         var others: [SIMD2<Double>] = []
         for r in rockets.values where r.station == station.name && r.key != key {
-            if let at = rocketSpot(station: station, repo: r.repo) { others += [at, at + SIMD2(0.44, 0.02)] }
-            if let stack = world.testedStack(station: station, repo: r.repo) { others.append(stack) }
+            if let at = rocketSpot(station: station, repo: r.repo) { others.append(at) }
         }
-        if let mine = world.testedStack(station: station, repo: String(key.split(separator: "|", maxSplits: 1).last ?? "")) { others.append(mine) }
         let pad = Set(station.padCells)
         let ways = [SIMD2(-1.0, 0), SIMD2(0, 1), SIMD2(0, -1), SIMD2(-0.7, 0.7), SIMD2(-0.7, -0.7)]
         func room(_ w: SIMD2<Double>) -> Double {

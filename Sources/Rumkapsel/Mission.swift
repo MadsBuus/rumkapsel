@@ -192,13 +192,7 @@ extension StationController {
         // The pad's own rocket is the one that flies: seen from the station it lifts off the pad and climbs
         // out of sight, and the pad stands empty while the flight is on. The camera riding it never sees it.
         rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
-            // The tower is let go of first and stays on the pad, as it does when a rocket lifts off on its own.
-            if let hold = $0.childNode(withName: "hold", recursively: false) {
-                hold.removeFromParentNode()
-                hold.position = $0.position
-                rocketRoot.addChildNode(hold)
-                hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
-            }
+            $0.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
             let leaving = $0.clone()
             leaving.name = nil
             leaving.opacity = 1

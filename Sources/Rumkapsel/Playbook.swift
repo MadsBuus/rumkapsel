@@ -56,10 +56,8 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { $0.area == .pad } }
     /// Bodies spawned: the seed's scan has come back.
     static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
-    /// Web's rocket has its place on the pad, so web's tested crates stand on their stack beside it.
-    static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in
-        c.fleet.stations.values.contains { c.world.testedStack(station: $0, repo: "web") != nil }
-    }
+    /// Web's rocket has its place on the pad.
+    static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.world.padKeys().contains { $0.hasSuffix("|web") } }
     /// Somebody standing on the deck.
     static let bodyOnDeck = PlaybookWait.until("somebody on the deck") { c in
         c.minions.values.contains { m in c.fleet.stations[m.station]?.deckCells.contains(m.cell) ?? false }
