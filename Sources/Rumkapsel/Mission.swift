@@ -103,8 +103,10 @@ struct Mission {
     /// seconds after that.
     static let separation = 0.5
     static let correction = 1.2..<2.7
-    /// Seconds from liftoff to separation.
+    /// Seconds from undocking to separation, and how many of them it coasts clear of the station on its
+    /// thrusters before the kick stage lights.
     static let liftoff = 12.0
+    static let undock = 3.5
     /// When the picture leaves the camera on the rocket for the long lens on the station, as a share of the way to
     /// separation, so the lens sees it. And how far into the landing (seconds after the deploy went live) it cuts
     /// to the colony's.
@@ -202,8 +204,9 @@ extension StationController {
             leaving.opacity = 1
             leaving.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.launching }
             Props.shape(leaving, lifter: true, panels: RocketGeometry.panels)
-            leaving.childNode(withName: "flame", recursively: false)?.opacity = 1
+            leaving.childNode(withName: "flame", recursively: false)?.opacity = 0
             rocketRoot.addChildNode(leaving)
+            undocking.append((leaving, clock))
             leaving.runAction(.sequence([Looks.current.launch(leaving), .removeFromParentNode()]))
             drone.sweep(up: true)
             $0.isHidden = true
@@ -225,9 +228,9 @@ extension StationController {
             missionCamera.camera = cam
             scene.rootNode.addChildNode(missionCamera)
         }
+        // The clamps let go with a breath of gas: there is no blast, nothing burns on the pad.
         let pad = missionPad(mission!)
-        scorch(at: v3(pad.x, 0, pad.z))
-        puff(at: pad, up: SIMD3(0, 1, 0), color: NSColor(rgb: (0.78, 0.8, 0.84)), count: 900, spread: 88, speed: 0.9, life: 4.5, size: 0.22)
+        puff(at: pad + SIMD3(0, 0.3, 0), up: SIMD3(0, 1, 0), color: NSColor(white: 0.95, alpha: 1), count: 80, spread: 80, speed: 0.4, life: 1.2, size: 0.03)
         stepMission()
         DispatchQueue.main.async { [self] in openMissionScreen() }
     }
@@ -426,8 +429,11 @@ extension StationController {
         let since = separated ? clock - (mission?.separatedAt ?? clock) : -1
         // The tip lights a moment after separation and burns all the way out to the planet.
         let tipBurns = m.ended == nil ? since >= Mission.correction.lowerBound : burning
+        // Easing clear of the station on its thrusters first: the kick stage lights once it is well away.
+        let coasting = m.ended == nil && clock - m.started < Mission.undock
+        if coasting { fireThrusters(often: true) }
         if let air = missionCraft.childNode(withName: "lifter plume", recursively: true) {
-            air.isHidden = !burning || separated
+            air.isHidden = !burning || separated || coasting
             FlightCraft.air(air, thin: s / Mission.space)
         }
         missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns

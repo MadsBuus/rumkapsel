@@ -293,11 +293,15 @@ enum Classic {
     }
 
     /// A flicker on the pad, then a slow climb out of the frame, fading as it goes.
+    /// The undock: the station has no weight to fight. The clamps let go, the thrusters ease it up off the pad
+    /// and clear of the station, slowly; only well away does the kick stage light, and it goes, faster and faster.
     static func launch() -> SCNAction {
-        let rise = SCNAction.moveBy(x: 0, y: 40, z: 0, duration: 12)
-        rise.timingMode = .easeIn
-        let flicker = SCNAction.repeat(.sequence([.scale(to: 1.04, duration: 0.08), .scale(to: 0.98, duration: 0.08)]), count: 8)
-        return .sequence([flicker, .group([rise, .sequence([.wait(duration: 9), .fadeOut(duration: 3)])])])
+        let clear = SCNAction.moveBy(x: -0.5, y: 2.2, z: -0.4, duration: 5)
+        clear.timingMode = .easeInEaseOut
+        let light = SCNAction.run { $0.childNode(withName: "flame", recursively: false)?.opacity = 1 }
+        let burn = SCNAction.moveBy(x: -5, y: 36, z: -4, duration: 10)
+        burn.timingMode = .easeIn
+        return .sequence([.wait(duration: 0.8), clear, light, .group([burn, .sequence([.wait(duration: 7), .fadeOut(duration: 3)])])])
     }
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {

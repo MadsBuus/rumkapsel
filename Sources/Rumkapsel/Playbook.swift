@@ -200,7 +200,7 @@ enum Playbook {
         PlaybookEntry("release", "QA approves a crate", "set in the cargo lock, cycled out small, flown to its stack by a drone",
                       [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .inGrip(tested)), ("1x", .onStack(tested))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Production PR opened", "the lifter rises under the tip and a drone flies the approved crate into its hatch",
+        PlaybookEntry("release", "Production PR opened", "two drones fly the kick stage in under the tip as the cradle raises it",
                       [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),

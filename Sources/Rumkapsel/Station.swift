@@ -229,11 +229,13 @@ final class Station {
     var monolithCell: Cell { plan.monolith }
     /// Where a body stands when sent to the monolith: the tile south of it.
     var coreCenter: Cell { Cell(x: plan.monolith.x, y: plan.monolith.y + 1) }
-    /// The passage to the bay: one wide, carrying the south arm's line on to the hangar under the hull. A door
-    /// at the hallway end, a hatch at the bay end; both open for whoever walks up to them.
+    /// The way into the bay: one tile at the south arm's end, a door on its hallway side and a hatch on its bay
+    /// side, both opening for whoever walks up to them. The hangar is indoors, so nothing stands between.
     var airlockCells: [Cell] { blocks.airlock }
-    /// How many tiles the passage runs, so the bay stands off the station rather than against it.
-    static let airlockLength = 5
+    /// How many tiles the way into the bay runs: just its doorway.
+    static let airlockLength = 1
+    /// How much room the hull leans into where it meets the floor, round the bay and along the pad.
+    static let hullDepth = 5.0
     private func makeAirlockCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
         return (1...Station.airlockLength).map { Cell(x: end.x, y: end.y + $0) }
@@ -248,7 +250,7 @@ final class Station {
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
-        let y = end.y + Station.airlockLength + 1   // past the airlock's hatch
+        let y = end.y + Station.airlockLength + 1   // past the hatch
         return (-3...3).flatMap { dx in (0..<4).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
     /// The bay's mouth: its far edge, open to space behind the field, and the height ships cross it at.
@@ -1139,7 +1141,7 @@ final class Fleet {
         let dir = AppSupport.root
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v23.json")
+        return dir.appendingPathComponent("fleet-v24.json")
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {

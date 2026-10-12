@@ -21,16 +21,14 @@ final class ShuttleView {
 final class RocketView {
     var node: SCNNode
     var untestedShown: Bool
-    /// The tip's panels drawn so far, and whether the lifter is under it.
+    /// The tip's panels drawn so far.
     var panelsShown: Int
-    var lifterShown: Bool
-    /// Whether the lifter was under the tip when the tower was stood, which sets its arm's height.
+    /// Whether the kick stage was docked under the tip when the tower was stood, which sets its height.
     var towerLifter: Bool
-    /// On the station clock, like everything else that moves: when it came, the panels in the air and
-    /// when each set off, and the lifter coming up or going down.
+    /// On the station clock, like everything else that moves: when it came, and the panels in the air and
+    /// when each set off.
     var bornAt: Double
     var flying: [Int: Double] = [:]
-    var rise: (up: Bool, since: Double)?
     /// The hull's paint: the node it was put on, how far the weld had come, the panels glowing from the
     /// torch and since when, and those stripped bare for a weld afresh and when.
     var paintedNode: SCNNode?
@@ -40,7 +38,7 @@ final class RocketView {
     /// The tower's beacon and its light as the rocket's own state has it, put back once the weld is over.
     var beaconRest: (beacon: SCNNode, material: SCNMaterial?)?
     init(node: SCNNode, untested: Bool, panels: Int, lifter: Bool, at clock: Double) {
-        self.node = node; untestedShown = untested; panelsShown = panels; lifterShown = lifter; towerLifter = lifter; bornAt = clock
+        self.node = node; untestedShown = untested; panelsShown = panels; towerLifter = lifter; bornAt = clock
     }
 }
 
@@ -169,13 +167,14 @@ extension StationController {
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
-        Props.shape(n, lifter: r.tall, panels: r.panels)
+        Props.shape(n, lifter: r.kick == .docked, panels: r.panels)
         // A look with a hold of its own shows it while the rocket is held; the classic pad stands its service
         // tower beside the rocket the whole time, the beacon lit while held.
-        if let own = Looks.current.hold(tall: r.tall) {
+        let docked = r.kick == .docked
+        if let own = Looks.current.hold(tall: docked) {
             if r.untested { own.name = "hold"; n.addChildNode(own) }
         } else {
-            Props.attachTower(to: n, tall: r.tall, held: r.untested)
+            Props.attachTower(to: n, tall: docked, held: r.untested)
         }
         n.position = padPosition(station: station, slot: slot)
         n.name = r.label
@@ -193,7 +192,7 @@ extension StationController {
             guard let st = fleet.stations[r.station] else { continue }
             let slot = padSlot(station: st, key: key)
             guard let v = rocketViews[key] else {
-                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), untested: r.untested, panels: r.panels, lifter: r.tall, at: clock)
+                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), untested: r.untested, panels: r.panels, lifter: r.kick == .docked, at: clock)
                 continue
             }
             // A rocket that was already standing there when the station came up fades in where it stands;
@@ -202,20 +201,13 @@ extension StationController {
             weld(r, v)
             paintHull(r, v)
             signal(r, v)
-            stepLifter(v)
-            // Going up from the cradle, with no time for the lifter to rise: it is simply there.
-            if r.stage.rank >= 3, !v.lifterShown { v.lifterShown = true; Props.shape(v.node, lifter: true, panels: RocketGeometry.panels) }
+            placeKick(r, v, station: st)
             guard r.stage.rank < 3, !v.node.hasActions else { continue }
-            if r.tall != v.lifterShown, v.rise == nil {
-                v.lifterShown = r.tall
-                v.rise = (r.tall, clock)
-                continue
-            }
-            let moving = v.rise != nil
-            // The tower was stood for the rocket as it was; once the lifter has come or gone its arm is
-            // put back at the hatch.
-            if r.untested != v.untestedShown || (!moving && v.towerLifter != v.lifterShown) {
-                v.towerLifter = v.lifterShown
+            let docked = r.kick == .docked
+            // The tower was stood for the rocket as it was; once the stage has come or gone it is stood again,
+            // as tall as the rocket now is.
+            if r.untested != v.untestedShown || ((docked || r.kick == .none) && v.towerLifter != docked) {
+                v.towerLifter = docked
                 let position = v.node.position
                 v.node.removeFromParentNode()
                 v.node = rocketNode(station: st, r, slot: slot)
@@ -243,7 +235,7 @@ extension StationController {
         if r.panels > v.panelsShown {
             for i in v.panelsShown..<r.panels { v.flying[i] = clock + Double(i - v.panelsShown) * 0.15 }
         } else if r.panels < v.panelsShown {
-            Props.shape(v.node, lifter: v.lifterShown, panels: r.panels)
+            Props.shape(v.node, lifter: r.kick == .docked, panels: r.panels)
             v.flying = [:]
         }
         v.panelsShown = r.panels
@@ -388,31 +380,22 @@ extension StationController {
         return seam.convertPosition(SCNVector3Zero, to: propRoot)
     }
 
-    /// A production release opened: the lifter comes up out of the pad under the tip and lifts it off
-    /// its cradle, which folds away. Closed again, it goes back down and the tip settles on the cradle.
-    private func stepLifter(_ v: RocketView) {
-        guard let rise = v.rise else { return }
-        guard let tip = Props.part(v.node, "tip"), let lifter = Props.part(v.node, "lifter") else { v.rise = nil; return }
-        let base = (tip.value(forKey: "base") as? Double) ?? 0
-        let low = RocketGeometry.cradleTop - base, deep = -(base + 0.2)
-        let cradle = Props.part(v.node, "cradle")
-        func ease(_ t: Double) -> Double { let k = min(1, max(0, t)); return k * k * (3 - 2 * k) }
-        let t = (clock - rise.since) / 3.5
-        // Up: the lifter climbs out of the pad; half way it meets the tip and carries it up to its place.
-        // Down: the same the other way round.
-        let k = rise.up ? t : 1 - t
-        let lifterY = deep + (0 - deep) * ease(k)
-        let tipY = low + (0 - low) * ease((k - 0.45) / 0.55)
-        lifter.isHidden = false
-        lifter.position.y = CGFloat(lifterY)
-        tip.position.y = CGFloat(tipY)
-        cradle?.isHidden = false
-        cradle?.opacity = CGFloat(1 - ease((k - 0.6) / 0.3))
-        guard t >= 1 else { return }
-        v.rise = nil
-        cradle?.opacity = 1
-        lifter.position.y = 0
-        Props.shape(v.node, lifter: rise.up, panels: v.panelsShown)
+    /// The kick stage where the drones have it, coming out of the dark past the pad or going back into it, and the
+    /// tip as high as its cradle has raised it.
+    private func placeKick(_ r: RocketJob, _ v: RocketView, station: Station) {
+        guard let tip = Props.part(v.node, "tip"), let stage = Props.part(v.node, "lifter") else { return }
+        stage.isHidden = r.kick == .none
+        if let foot = r.kickAt {
+            let p = v.node.convertPosition(v3(foot.x, foot.y, foot.z), from: v.node.parent)
+            stage.position = p
+            let out = simd_distance(foot, simulation.kickDepot(station))
+            stage.opacity = CGFloat(min(1, out / 1.5))
+        } else {
+            stage.position = SCNVector3Zero
+            stage.opacity = 1
+        }
+        tip.position.y = CGFloat(RocketGeometry.tipDrop(lift: r.lift))
+        Props.part(v.node, "cradle")?.isHidden = r.kick == .docked
     }
 
     /// The simulation's word on a rocket, shown once: the hold's tape comes down, the flame goes on,
@@ -466,10 +449,9 @@ extension StationController {
         }
     }
 
-    /// Flame on, a slow climb that carries the rocket out of the frame, then gone. A rocket whose flight is
-    /// already on screen is that flight: it leaves the pad quietly rather than lifting off a second time.
+    /// The undock, then gone: the look's own way of leaving, with puffs from the thrusters while it eases clear. A
+    /// rocket whose flight is already on screen is that flight: it leaves the pad quietly rather than a second time.
     func liftOff(_ node: SCNNode, repo: String) {
-        scorch(at: node.position)
         let flying = (mission.map { $0.repo == repo && $0.ended == nil } ?? false) || queuedMissions.contains { $0.repo == repo && $0.ended == nil }
         if flying {
             node.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
@@ -477,33 +459,22 @@ extension StationController {
         }
         drone.sweep(up: true)
         node.opacity = 1
-        node.childNode(withName: "flame", recursively: false)?.opacity = 1
+        node.childNode(withName: "flame", recursively: false)?.opacity = 0
+        undocking.append((node, clock))
         node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
     }
 
-    /// The blast's soot on the pad where a rocket stood: dark for a good while, then fading out.
-    func scorch(at p: SCNVector3) {
-        let key = "\(Int((p.x * 10).rounded())),\(Int((p.z * 10).rounded()))"
-        if let fresh = scorches[key], fresh.value(forKey: "at") as? Double ?? 0 > clock - 30 { return }   // this launch's, already down
-        scorches.removeValue(forKey: key)?.removeFromParentNode()
-        let size = Station.hexRadius * 2.6
-        let mark = SCNNode(geometry: SCNPlane(width: size, height: size))
-        let m = SCNMaterial()
-        m.lightingModel = .constant
-        m.diffuse.contents = Props.scorchImage(seed: UInt64(clock * 1000))
-        m.writesToDepthBuffer = false
-        m.isDoubleSided = false
-        mark.geometry!.firstMaterial = m
-        mark.eulerAngles.x = -.pi / 2
-        mark.eulerAngles.y = CGFloat(Double.random(in: 0..<(2 * .pi)))
-        mark.position = SCNVector3(p.x, 0.007, p.z)
-        mark.renderingOrder = 2
-        mark.opacity = 0
-        mark.setValue(clock, forKey: "at")
-        propRoot.addChildNode(mark)
-        scorches[key] = mark
-        mark.runAction(.sequence([.wait(duration: 0.6), .fadeIn(duration: 1.2), .wait(duration: 600), .fadeOut(duration: 600),
-                                  .run { [weak self] n in if self?.scorches[key] === n { self?.scorches[key] = nil } }, .removeFromParentNode()]))
+    /// Rockets easing off their pads: a puff from a thruster pod now and then, either side, for as long as it
+    /// coasts clear, before its kick stage lights.
+    func tickUndocking() {
+        undocking.removeAll { clock - $0.since > 6 || $0.node.parent == nil }
+        for u in undocking where Double.random(in: 0...1) < 0.35 {
+            let side = Double.random(in: 0..<(2 * .pi))
+            let out = SIMD3(sin(side), Double.random(in: -0.6 ... -0.1), cos(side))
+            let p = u.node.presentation.worldPosition
+            let at = SIMD3(Double(p.x), Double(p.y), Double(p.z)) + SIMD3(out.x * 0.2, 0.9 + Double.random(in: 0...0.5), out.z * 0.2)
+            emitPuff(at: at, vel: out * 0.8, life: 0.5, grow: 2.4)
+        }
     }
 
     /// Pads whose release is gone lose their rocket, the ones standing by are resized, and the pad's hexagons redrawn.

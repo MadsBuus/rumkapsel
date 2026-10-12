@@ -211,10 +211,12 @@ enum RocketGeometry {
     static let cradleTop = 0.3
     /// The loading hatch's middle, in the tip's own frame: on the side facing +x, high on the payload section.
     static var hatchInTip: SIMD3<Double> { SIMD3(apothem + 0.01, 0.12 + height * 0.6, 0) }
-    /// The hatch from the rocket's spot on the pad, with the tip up on the lifter or down on its cradle.
-    static func hatch(lifter: Bool) -> SIMD3<Double> {
-        hatchInTip + SIMD3(0, lifter ? 0 : cradleTop - hullBase, 0)
-    }
+    /// How far the tip stands below its place on the kick stage, `lift` of the way up from its cradle.
+    static func tipDrop(lift: Double) -> Double { (cradleTop - hullBase) * (1 - min(1, max(0, lift))) }
+    /// The hatch from the rocket's spot on the pad, the tip `lift` of the way up from its cradle.
+    static func hatch(lift: Double) -> SIMD3<Double> { hatchInTip + SIMD3(0, tipDrop(lift: lift), 0) }
+    /// How high a kick stage's middle is held while drones carry it, by its sides.
+    static var kickGrip: Double { hullBase * 0.55 }
     /// How much of the hull one copy of its plating covers, along and up.
     static let platingSpan = 0.7
     /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
@@ -237,8 +239,8 @@ enum RocketGeometry {
     static var rings: Int { panels / 6 }
     static var ringHeight: Double { hullHeight / Double(rings) }
     /// How high off the pad the middle of a ring is: the tip on its cradle, or up on the lifter.
-    static func ringMiddle(_ ring: Int, lifter: Bool) -> Double {
-        (lifter ? hullBase : cradleTop) + ringHeight * (Double(ring) + 0.5)
+    static func ringMiddle(_ ring: Int, lift: Double) -> Double {
+        hullBase + tipDrop(lift: lift) + ringHeight * (Double(ring) + 0.5)
     }
 }
 
@@ -251,8 +253,19 @@ final class RocketJob {
     var until = 0.0
     var label = ""
     var untested = false
-    /// A production rocket is the tall one.
+    /// A production rocket is the tall one: its release is open, and it wants its kick stage.
     var tall = true
+    /// The kick stage under the tip, the burn that takes it down to production: none, on its way in or out in
+    /// two drones' hands, or docked. `lift` is how far the cradle has raised the tip for it, 0 down on the
+    /// cradle to 1 up where the stage holds it; `kickAt` is where the stage's foot is while it is carried, in
+    /// world coordinates, and `kickSince` when the carrying began, or -1 while the drones gather round it.
+    var kick = Kick.none
+    var kickSince = -1.0
+    var kickAt: SIMD3<Double>?
+    /// The side of the pad the stage comes in from or goes out by, fixed for the whole of one carry.
+    var kickWay: SIMD2<Double>?
+    var lift = 0.0
+    enum Kick: Equatable { case none, coming, docked, going }
     /// How much cargo waits for it, for the size the scene draws it at while standing by.
     var cargo = 0
     /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
@@ -503,6 +516,8 @@ extension Simulation {
         }
         let r = RocketJob(station: station, repo: repo, command: command)
         r.label = label; r.untested = untested; r.tall = tall; r.cargo = cargo
+        // Standing tall when it is first seen: the stage was put under it before anyone was looking.
+        if tall { r.kick = .docked; r.lift = 1 }
         // New while its release is on its way to staging: the tip is built as the deploy runs.
         if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
             r.panels = 0

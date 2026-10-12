@@ -8,7 +8,7 @@ import simd
 struct StationHull {
     /// How far the hull leans in from where it meets the floor, and how high its crown stands: the same
     /// section as the pieces of it at the airlock and the pad, so the three are one surface.
-    static let section = Classic.hullSection(depth: Double(Station.airlockLength))
+    static let section = Classic.hullSection(depth: Station.hullDepth)
     /// How high a doorway through it is cut.
     static let doorTop = 1.0
 
@@ -26,7 +26,8 @@ struct StationHull {
     init(_ st: Station) {
         let b = st.bounds
         let pad = Set(st.padCells), bay = Set(st.hangarCells)
-        let beyond = st.airlockCells.map(\.y).max() ?? Int.max
+        // As far south as the station's own floor reaches, the bay apart: the bay hangs on past that.
+        let beyond = st.walkable.subtracting(bay).subtracting(pad).map(\.y).max() ?? Int.max
         var inside = bay
         for x in b.min.x...b.max.x {
             for y in b.min.y...b.max.y where y <= beyond && !pad.contains(Cell(x: x, y: y)) { inside.insert(Cell(x: x, y: y)) }

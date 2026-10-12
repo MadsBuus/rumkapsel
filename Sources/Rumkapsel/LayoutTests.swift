@@ -360,7 +360,7 @@ enum LayoutTests {
                 let a = fresh()
                 for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
                 let lock = Set(a.airlockCells), bay = Set(a.hangarCells)
-                expect(lock.count == Station.airlockLength, "the passage is \(lock.count) tiles")
+                expect(lock.count == Station.airlockLength, "the way into the bay is \(lock.count) tiles")
                 var inside = Set(a.corridorCells + a.coreCells + a.padCells + a.deckCells + a.storageCells + a.deconCells)
                 for r in a.rooms.values { inside.formUnion(r.cells) }
                 expect(lock.isDisjoint(with: inside), "nothing else stands in the airlock: \(cells(Array(lock.intersection(inside))))")

@@ -277,7 +277,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Sparks off a welder's torch, in the air.
     var sparks: [Spark] = []
     /// The soot a rocket left on its pad slot, by where it stood: the next launch there burns over it.
-    var scorches: [String: SCNNode] = [:]
+    /// Rockets easing off their pads, and when each let go.
+    var undocking: [(node: SCNNode, since: Double)] = []
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
     /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
     var palletViews: [String: PalletView] = [:]
@@ -1308,6 +1309,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.stepDrones(dt: dt)
         drawShuttles(dt: dt)
         tickHangars()
+        tickUndocking()
         updateBerths()
         tickHullLamps()
         drawRockets()
