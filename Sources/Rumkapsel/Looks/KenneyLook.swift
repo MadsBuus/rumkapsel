@@ -349,22 +349,6 @@ struct KenneyLook: Look {
         return props
     }
 
-    /// The Cape's own pieces where the classic station's read as another era: a console of the kit's own,
-    /// a shipping container for a crate, a service barrier round a release that is held, and a powered
-    /// flatbed for the pallet.
-    func console(color: NSColor) -> SCNNode? {
-        guard let desk = Kit.prop("desk_computer", scale: 0.7, yaw: .pi, color: color) else { return nil }
-        let n = SCNNode()
-        desk.position = v3(0, -0.5, 0.12)
-        n.addChildNode(desk)
-        let screen = SCNNode(geometry: SCNBox(width: 0.26, height: 0.18, length: 0.02, chamferRadius: 0.01))
-        screen.geometry!.firstMaterial = flat(color)
-        screen.name = "panel"
-        screen.position = v3(0, 0.02, 0.02)
-        n.addChildNode(screen)
-        return n
-    }
-
     /// A shipping container: corrugated sides, a painted end in the repo's colour, and corner castings.
     func crate(color: NSColor) -> SCNNode? {
         let n = SCNNode()
@@ -412,29 +396,6 @@ struct KenneyLook: Look {
                 n.addChildNode(rail)
             }
         }
-        return n
-    }
-
-    /// A powered flatbed: a plated deck on a chassis with a light bar, its bed where the classic one's is.
-    func pallet(color: NSColor) -> SCNNode? {
-        let n = SCNNode()
-        let deck = SCNNode(geometry: SCNBox(width: Props.palletWidth, height: 0.05, length: Props.palletDepth, chamferRadius: 0.01))
-        deck.geometry!.firstMaterial = lit(NSColor(rgb: (0.62, 0.65, 0.7)))
-        n.addChildNode(deck)
-        let chassis = SCNNode(geometry: SCNBox(width: Props.palletWidth - 0.14, height: 0.07, length: Props.palletDepth - 0.14, chamferRadius: 0))
-        chassis.geometry!.firstMaterial = lit(NSColor(rgb: (0.32, 0.35, 0.42)))
-        chassis.position = v3(0, -0.06, 0)
-        n.addChildNode(chassis)
-        for side in [-1.0, 1.0] {
-            let stripe = SCNNode(geometry: SCNBox(width: Props.palletWidth - 0.06, height: 0.02, length: 0.04, chamferRadius: 0))
-            stripe.geometry!.firstMaterial = flat(color)
-            stripe.position = v3(0, 0.03, side * (Props.palletDepth / 2 - 0.03))
-            n.addChildNode(stripe)
-        }
-        let bar = SCNNode(geometry: SCNBox(width: 0.2, height: 0.03, length: 0.05, chamferRadius: 0))
-        bar.geometry!.firstMaterial = flat(NSColor(rgb: (0.98, 0.76, 0.2)))
-        bar.position = v3(Props.palletWidth / 2 - 0.14, 0.05, 0)
-        n.addChildNode(bar)
         return n
     }
 

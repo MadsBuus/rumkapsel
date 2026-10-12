@@ -45,7 +45,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     static func inStorage(_ n: Int) -> PlaybookWait { crate(n, "in storage") { $0.stands(in: .storage) } }
     /// Set down on the deck's untested row, or on its stack by the rocket, by where it was put down last.
     static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
-    static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on its stack by the rocket") { $0.area == .tested && !$0.inTransit } }
+    static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on the cleared rows") { $0.area == .tested && !$0.inTransit } }
     /// Picked up: on somebody's arms.
     static func pickedUp(_ n: Int) -> PlaybookWait {
         .until("#\(n) picked up") { c in c.minions.values.contains { m in
@@ -58,13 +58,20 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
     /// Web's rocket has its place on the pad.
     static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.world.padKeys().contains { $0.hasSuffix("|web") } }
-    /// Somebody standing on the deck.
-    static let bodyOnDeck = PlaybookWait.until("somebody on the deck") { c in
-        c.minions.values.contains { m in c.fleet.stations[m.station]?.deckCells.contains(m.cell) ?? false }
+    /// Somebody standing in the hall.
+    static let bodyOnDeck = PlaybookWait.until("somebody in the hall") { c in
+        c.minions.values.contains { m in c.fleet.stations[m.station]?.hallCells.contains(m.cell) ?? false }
     }
-    /// The pallet out and loaded, and gone again once emptied.
-    static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
-    static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
+    /// Web's crates on their way from storage to the staged rows, and all of them down there.
+    static let toStaged = PlaybookWait.until("web's crates going to the staged rows") { c in
+        c.fleet.stations.values.contains { $0.ledger.crates(of: "web").contains { $0.heading == .deck } }
+    }
+    static let stagedDown = PlaybookWait.until("web's crates down on the staged rows") { c in
+        c.fleet.stations.values.contains { st in
+            let web = st.ledger.crates(of: "web")
+            return web.contains { $0.placed == .deck && !$0.cleared } && !web.contains { $0.heading == .deck || $0.placed == .storage }
+        }
+    }
     /// A drone at a repository's tip with its torch lit.
     static func welderUp(_ repo: String) -> PlaybookWait {
         .until("\(repo)'s tip under the torch") { c in c.simulation.drones.values.joined().contains { d in
@@ -72,17 +79,11 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
             return false
         } }
     }
-    /// Through the lock and in a drone's grip.
-    static func inGrip(_ n: Int) -> PlaybookWait {
-        .until("#\(n) in a drone's grip") { c in c.simulation.drones.values.joined().contains { $0.holding?.number == n } }
-    }
     /// A repository's tip being welded, all but the last panel done, which waits for staging to be live.
     static func weldAlmost(_ repo: String) -> PlaybookWait {
         .until("\(repo)'s weld nearly done") { c in c.simulation.rockets.values.contains {
             $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } }
     }
-    /// Across on the deck, still loaded, waiting for staging.
-    static let palletStaged = PlaybookWait.until("the pallet on the deck") { c in c.world.truth.pallets.values.contains { $0.state == .staged } }
     /// The flight most of the way to its planet.
     static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
 }
@@ -178,38 +179,37 @@ enum Playbook {
 
         // The release, start to finish, one moment each in the order a release has them: web's crates
         // already stand in storage and on the deck.
-        PlaybookEntry("release", "Staging PR opened", "the pallet loads crates from storage", [("1x", 0.5), ("Release: Staging opens", .palletLoaded)],
-                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging PR merged", "the pallet is pushed to the deck and waits there loaded",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged)],
-                      camera: .area("deck", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy running", "web's tip is welded over ring by ring by a drone circling the hull, beside its tested stack",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
-                       ("Deploy: Staging starts", .welderUp("web")), ("1x", .weldAlmost("web")), ("Deploy: Staging goes live", .palletGone)],
+        PlaybookEntry("release", "Staging PR merged", "web's crates are carried from storage to the staged rows, the back row by a toss",
+                      [("16x", 0.5), ("Release: Staging opens", 0.25), ("1x", 0.25), ("Release: Staging merges", .toStaged), ("1x", .stagedDown)],
+                      camera: .area("hall", 2.4), tail: 6, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Staging deploy running", "web's tip is welded over ring by ring by a drone circling the hull",
+                      [("16x", 0.5), ("Release: Staging opens", 0.25), ("Release: Staging merges", 0.25),
+                       ("Deploy: Staging starts", .welderUp("web")), ("1x", .weldAlmost("web")), ("Deploy: Staging goes live", 4)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Staging deploy running, new rocket", "the tip is welded together panel by panel by a drone circling the hull (api's first release)",
-                      [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
-                       ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", .welderUp("api")), ("1x", .weldAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
+                      [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", 0.25), ("Release: Staging merges", 0.25),
+                       ("Deploy: Staging starts", 0.5), ("GitHub: Poll", .welderUp("api")), ("1x", .weldAlmost("api")), ("Deploy: Staging goes live", 4)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy live", "the pallet is unloaded onto the deck",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
-                       ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
+        PlaybookEntry("release", "Staging deploy live", "the staged crates' lights turn from blue to amber: ready for a tester",
+                      [("16x", 0.5), ("Release: Staging opens", 0.25), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .stagedDown),
+                       ("1x", 1), ("Deploy: Staging goes live", 4)],
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA approves a crate", "set in the cargo lock, cycled out small, flown to its stack by a drone",
-                      [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .inGrip(tested)), ("1x", .onStack(tested))],
+        PlaybookEntry("release", "QA approves a crate", "carried from the staged rows across the aisle to the cleared rows",
+                      [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
         PlaybookEntry("release", "Production PR opened", "two drones fly the kick stage in under the tip as the cradle raises it",
-                      [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
-                      camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
+                      [("1x", 0.5), ("Release: Production opens", 12)],
+                      camera: .area("pad", 3), tail: 4, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Production PR merged", "the drones form a ring at the field and the vortex pulls web's cleared crates through it, spiralling them into the rocket",
+                      [("16x", 0.5), ("Release: Production opens", 2), ("1x", 0.5), ("Release: Production merges", .loaded(approved))],
+                      camera: .area("yard", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                            ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
 
         // When a release goes another way.
-        PlaybookEntry("detours", "Staging PR closed unmerged", "the pallet unloads back into storage", [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging closes", .palletGone)],
-                      camera: .area("storage", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("detours", "Staging deploy fails", "the waiting pallet's light turns red; it stays loaded",
-                      [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
+        PlaybookEntry("detours", "Staging deploy fails", "the staged crates' lights turn red",
+                      [("16x", 0.5), ("Release: Staging opens", 0.25), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .stagedDown),
                        ("1x", 1), ("Deploy: Staging fails", 6)],
                       camera: .area("deck", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("detours", "Production deploy fails", "the flight loses signal", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),

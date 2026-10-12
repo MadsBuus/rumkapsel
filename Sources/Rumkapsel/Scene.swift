@@ -45,6 +45,13 @@ enum Palette {
     static let void = NSColor(rgb: (0.055, 0.067, 0.125))
     static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))   // #7E665A, the game's hallway floor
     static let core = NSColor(rgb: (0.13, 0.14, 0.18))
+    /// The yard's floors, steel greys with no green in them: the pad graphite under open space, the hall's
+    /// storage darker than its lab, the walkway and aisles between, decon darkest.
+    static let padFloor = NSColor(rgb: (0.169, 0.184, 0.220))     // #2B2F38
+    static let labFloor = NSColor(rgb: (0.365, 0.400, 0.467))     // #5D6677
+    static let storageFloor = NSColor(rgb: (0.247, 0.275, 0.337)) // #3F4656
+    static let walkFloor = NSColor(rgb: (0.290, 0.320, 0.384))    // #4A5262
+    static let deconFloor = NSColor(rgb: (0.204, 0.208, 0.243))   // #34353E
     static let minion = NSColor(rgb: (0.96, 0.96, 0.94))
     static let pyramid = NSColor(rgb: (0.98, 0.85, 0.35))
     static let debris = NSColor(rgb: (0.55, 0.6, 0.7))
@@ -280,12 +287,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     /// Rockets easing off their pads, and when each let go.
     var undocking: [(node: SCNNode, since: Double)] = []
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
-    /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
-    var palletViews: [String: PalletView] = [:]
-    /// The panel on the wall by each storage doorway, so an order can make it blink.
-    var consolePanels: [String: SCNNode] = [:]
-    /// Props on their way out, fading on the station's clock rather than on an action.
-    var fadingProps: [(node: SCNNode, at: Double)] = []
     var lastBoxCount: [String: Int] = [:]
     /// What each marker was last drawn as, by node name: an office's boxes by everything that shapes
     /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
@@ -328,10 +329,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
-    /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
-    var locks: [String: LockView] = [:]
+    /// The drones' rack on each station's pad.
+    var droneRacks: [String: SCNNode] = [:]
     var fields: [String: HangarField] = [:]
-    var pods: [String: PodView] = [:]
+    /// The field across each hall's pad wall, and the releases being pulled out through it.
+    var padFields: [String: HangarField] = [:]
+    var vortexViews: [String: VortexView] = [:]
     /// The ring on the pad under each standing rocket, by "station|repo": its beacon.
     var padRings: [String: SCNNode] = [:]
     var droneViews: [String: DroneView] = [:]
@@ -1182,22 +1185,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crewActivity(let a):
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
-            simulation.orderPallet(station: station, repo: repo, number: number)
+            simulation.stagingOpened(station: stationName, repo: repo, number: number)
         case .stagingMerged(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) merged")
-            simulation.palletMerged(station: station, repo: repo)
+            simulation.stagingMerged(station: stationName, repo: repo, number: number)
+            // What it took to staging is carried across to the staged rows, board or no board.
+            if let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .stagingClosed(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) closed, not merged")
-            simulation.palletClosed(station: station, repo: repo)
+            simulation.stagingClosed(station: stationName, repo: repo, number: number)
         case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
             break    // the rocket command that comes with it is the cue; the log line came as a .log
         case .releaseMerged(let stationName, let repo, _, _, _, false):
-            // A staging release without a board and without a pallet: nothing else would move the crates.
-            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName],
-               world.truth.pallets[stationName]?.repo != repo { stageCargo(station: st, repo: repo) }
+            // A staging release without a board: nothing else would move the crates.
+            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
             simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
@@ -1307,20 +1308,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             simulation.replanBlockedWalks()
         }
         simulation.stepShuttles()
-        simulation.stepPallets(dt: dt)
-        simulation.stepLocks(dt: dt)
+        simulation.stepTips(dt: dt)
+        simulation.stepVortices()
         simulation.stepDrones(dt: dt)
         drawShuttles(dt: dt)
         tickHangars()
-        tickPods(dt: dt)
         tickUndocking()
         updateBerths()
         tickHullLamps()
         drawRockets()
         tickSparks(dt: dt)
-        drawPallets()
         turnPlanets(dt: dt)
-        tickGates(dt: dt)
+        drawDrones(dt: dt)
+        tickPuffs(dt: dt)
+        drawVortices()
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: World.peerQuiet) { dropPeer(name) }

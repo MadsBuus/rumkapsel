@@ -55,7 +55,7 @@ class Body {
     /// A carrier, deliverer or pusher walks at one pace whoever it is.
     var isHauling: Bool {
         switch current?.kind {
-        case .carry, .deliverOffice, .pushPallet, .loadPallet, .unloadPallet: return true
+        case .carry, .deliverOffice: return true
         default: return false
         }
     }
@@ -222,6 +222,9 @@ class Body {
     enum Posture { case none, crouch, waist, reach, jump }
     /// The level the hands are working at: 0 on the floor, 1 waist height, 2 and up a reach.
     var handsAt = 0
+    /// The crate goes over the near row: tossed onto the row behind it from the aisle, or pulled off it. In the
+    /// yard's low gravity it drifts across rather than flies.
+    var floating = false
     var posture: Posture {
         switch current?.kind {
         case .pack, .stow: if phaseKind == .act { return .crouch }   // on the knees over the package or the cube

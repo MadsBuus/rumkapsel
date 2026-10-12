@@ -121,7 +121,9 @@ extension StationController {
         m.node.addChildNode(node)
         node.position = m.node.convertPosition(at, from: nil)
         node.eulerAngles.y = CGFloat(Double(node.eulerAngles.y) - m.smoothFacing)   // keeps its own turn, now on the arms
-        moveCrate(node, legs: Routines.liftLegs(from: Double(node.position.y), handsAt: m.handsAt, headHeight: m.headHeight))
+        let from = SIMD3(Double(node.position.x), Double(node.position.y), Double(node.position.z))
+        moveCrate(node, legs: m.floating ? Routines.floatLegs(from: from, to: .zero, headHeight: m.headHeight, toss: false)
+                                         : Routines.liftLegs(from: from.y, handsAt: m.handsAt, headHeight: m.headHeight))
         m.carried = node
     }
 
@@ -131,7 +133,8 @@ extension StationController {
     func setDown(_ m: Minion, _ node: SCNNode, to pos: SIMD3<Double>, yaw: Double, level: Int) {
         let t = m.node.convertPosition(v3(pos.x, pos.y, pos.z), from: nil)
         let target = SIMD3(Double(t.x), Double(t.y), Double(t.z))
-        moveCrate(node, legs: Routines.setDownLegs(to: target, level: level, headHeight: m.headHeight),
+        moveCrate(node, legs: m.floating ? Routines.floatLegs(from: .zero, to: target, headHeight: m.headHeight, toss: true)
+                                         : Routines.setDownLegs(to: target, level: level, headHeight: m.headHeight),
                   yawTo: yaw - m.smoothFacing)
     }
 
@@ -166,8 +169,7 @@ extension StationController {
     }
 
     /// The approach lights on the hull, either side of the outer door: amber while a ship is on its way in,
-    /// dark the moment it is down. Half a second on, half off, off the station's own clock, so they keep the
-    /// pallet's beat — the two lights mean the same thing, that something is coming.
+    /// dark the moment it is down. Half a second on, half off, off the station's own clock.
     func tickHullLamps() {
         let inbound = Set(simulation.flights.filter { $0.phaseKind == .approach || $0.phaseKind == .descend }.map(\.station))
         let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
@@ -180,16 +182,11 @@ extension StationController {
         }
     }
 
-    /// Every worker, once a frame. The simulation walks it and runs its commands; the scene runs the
-    /// pallet errands, whose pallet is still a node, keeps the crate on the arms in step with the body's
-    /// load, and draws the pose the body says it holds.
-    /// What a body is wearing this frame. The pallet errand is the one prop the body cannot work
-    /// out for itself, so it is handed in; everything else follows from the body.
-    func kit(_ m: Minion) -> Routines.Outfit {
-        let p = simulation.pallets[m.station]
-        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
-    }
+    /// What a body is wearing this frame.
+    func kit(_ m: Minion) -> Routines.Outfit { Routines.outfit(m, at: clock) }
 
+    /// Every worker, once a frame. The simulation walks it and runs its commands; the scene keeps the
+    /// crate on the arms in step with the body's load, and draws the pose the body says it holds.
     func tickMinions(dt: Double) {
         if !headless { tickAirlockDoors(dt: dt) }   // the panes only ever open for the eye
         for m in Array(minions.values) {
@@ -213,9 +210,6 @@ extension StationController {
                 }
             }
             mirrorLoad(m)
-            if simulation.palletErrand(of: m) != nil, case .pushPallet = m.current?.kind, m.path.isEmpty {
-                drawPusher(m, station: station)
-            }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
             m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
@@ -347,16 +341,11 @@ extension StationController {
                 moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
             } else { markersDirty = true }
         case .redraw: markersDirty = true
-        case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
-        case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
-        case .lockCycled(let station, let inbound, let passed): lockCycled(station: station, inbound: inbound, passed: passed)
-        case .lockHandoff(let station, let crate, let from, let collect): lockHandoff(station: station, crate: crate, from: from, collect: collect)
         case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
         case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)
         case .rocketLoading, .liftOff, .steam, .rocketGone, .intoHold: play(rocket: cue)
-        case .podOut(let key, let crates): podOut(key: key, crates: crates)
         }
     }
 

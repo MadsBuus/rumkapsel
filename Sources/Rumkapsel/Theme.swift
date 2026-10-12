@@ -50,14 +50,15 @@ enum Theme: String, CaseIterable, Identifiable {
         var v = Vocabulary()
         guard self == .kingdom else { return v }
         v.bay = "caravans"; v.airlock = "gate"; v.pad = "harbour"; v.storage = "granary"; v.deck = "market"; v.decon = "customs"
+        v.zoneWaiting = "stored"; v.zoneTesting = "tasting"; v.zoneCleared = "sealed"
         v.dorm = "inn"; v.lounge = "tavern"; v.bath = "bathhouse"; v.gym = "training yard"; v.monolith = "keep"
         v.theBay = "the caravan gate"; v.theAirlock = "the gate"; v.thePad = "the harbour"; v.theRocket = "the ship"
-        v.inStorage = "the granary"; v.theDeck = "the market"; v.testedRow = "the quay, past the harbour gate"; v.theLock = "the harbour gate"; v.testDeck = "market"
+        v.inStorage = "the granary"; v.theDeck = "the market"; v.testedRow = "the sealed stores"; v.testDeck = "market"
         v.inDecon = "customs"; v.theMonolith = "the keep"; v.theDorm = "the inn"; v.theCouch = "the tavern bench"
         v.theBath = "the bathhouse"; v.theGym = "the training yard"
         v.lookRound = "taking a stroll through the castle"; v.leaving = "leaving the castle through the gate"
         v.inbound = "a caravan on the road with"; v.stow = "stacking a sheaf for the commit"; v.pack = "loading a crate for the pull request"
-        v.asleep = "asleep at the inn"; v.console = "off to the granary ledger with a quill"; v.pallet = "the handcart"
+        v.asleep = "asleep at the inn";
         v.qaWalk = "inspecting the stalls at the market"
         v.crate = "barrel"; v.crates = "barrels"; v.loadInto = "aboard the ship"; v.standingBy = "moored at the quay"
         v.steaming = "loaded and made fast"; v.liftingOff = "casting off"; v.launchedTo = "sailed for"; v.onThePad = "at the harbour"
@@ -84,15 +85,17 @@ enum Theme: String, CaseIterable, Identifiable {
 struct Vocabulary {
     // Floor signs.
     var bay = "bay", airlock = "airlock", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
+    /// The hall's three zones, painted on the walkway beside each, back to front.
+    var zoneWaiting = "waiting", zoneTesting = "testing", zoneCleared = "cleared"
     var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", monolith = "monolith"
     // Places, as said in a sentence.
     var theBay = "the bay", theAirlock = "the airlock", thePad = "the pad", theRocket = "the rocket"
-    var inStorage = "storage", theDeck = "the deck", testedRow = "the pad, through the lock", theLock = "the lock", testDeck = "test deck", inDecon = "decon"
+    var inStorage = "storage", theDeck = "the deck", testedRow = "the cleared rows", testDeck = "test deck", inDecon = "decon"
     var theMonolith = "the monolith", theDorm = "the dorm", theCouch = "the couch", theBath = "the bath", theGym = "the gym"
     // What minions are doing.
     var lookRound = "having a look round the station", leaving = "off the station on the next shuttle"
     var inbound = "shuttle inbound with", stow = "stowing a cube for the commit", pack = "packing a crate for the pull request"
-    var asleep = "asleep in the dorm", console = "off to the storage console with the tablet", pallet = "the pallet"
+    var asleep = "asleep in the dorm"
     var qaWalk = "walking the rows on the deck"
     // Releases.
     var crate = "crate", crates = "crates", loadInto = "into the rocket", standingBy = "standing by on the pad"

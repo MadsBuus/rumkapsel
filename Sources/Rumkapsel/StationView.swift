@@ -306,12 +306,13 @@ extension StationController {
         enqueue { [self] in
             guard let station = fleet.stations[stationName] else { return }
             let areas: [String: [Cell]] = ["bay": station.hangarCells, "pad": station.padCells, "deck": station.deckCells,
-                                           "yard": station.deckCells + station.padCells,
+                                           "hall": station.hallCells, "yard": station.hallCells + station.padCells,
                                            "storage": station.storageCells, "decon": station.deconCells]
-            // The gate: its opening, a step toward the pad so the deck side and the rocket's foot are both in.
-            if roomName == "gate", let g = station.gate {
+            // The field: a step out onto the pad from its middle, so the cleared rows and the rocket's foot are both in.
+            if roomName == "gate", let field = station.padField {
                 focused = nil
-                userPan = SIMD2(g.center.x + g.inward.x * 0.6 + station.offset.x, g.center.y + g.inward.y * 0.6 + station.offset.y) - targetFocus
+                let mid = (field.from + field.to) / 2 + station.offset
+                userPan = SIMD2(mid.x, mid.y - 0.6) - targetFocus
                 userZoom = zoom
                 userZoomChanged = true
                 return

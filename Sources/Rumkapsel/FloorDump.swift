@@ -45,7 +45,7 @@ enum FloorDump {
         out.append("\"monolith\":[\(plan.monolith.x),\(plan.monolith.y)]")
         out.append("\"west\":[\(list(plan.west))]")
         out.append("\"south\":[\(list(plan.south))]")
-        for (name, cells) in [("storage", s.storageCells), ("deck", s.deckCells), ("pad", s.padCells),
+        for (name, cells) in [("hall", s.hallCells), ("pad", s.padCells),
                               ("decon", s.deconCells), ("airlock", s.airlockCells), ("hangar", s.hangarCells)] {
             out.append("\"\(name)\":[\(list(cells))]")
         }

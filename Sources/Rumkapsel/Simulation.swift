@@ -19,12 +19,6 @@ struct Cargo {
     var hurry = false
     /// Who gave this carry up: passed over for it while anyone else is free.
     var gaveUp: Set<String> = []
-    /// Waiting for its crate to come through the cargo lock before anyone can take it.
-    var inLock = false
-    /// Through the lock already, or never indoors: bound for its place outside, not the lock again.
-    var pastLock = false
-    /// Outside the hull: a drone's carry, never a minion's.
-    var byDrone = false
     /// When it went up on the board.
     var postedAt = 0.0
     /// The hands it goes to first when they are free.
@@ -58,13 +52,6 @@ enum Cue {
     case packed(String)
     /// The rows are drawn again.
     case redraw
-    /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
-    case palletLift(station: String, crate: CrateRef)
-    case palletLanded(station: String, crate: CrateRef, aboard: Bool)
-    /// The lock has cycled a crate: out and passed or refused, or in.
-    case lockCycled(station: String, inbound: Bool, passed: Bool)
-    /// A crate out of the lock onto one of its trays; `collect` is the carry already waiting for it, if any.
-    case lockHandoff(station: String, crate: CrateRef, from: Spot, collect: Int?)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
@@ -78,8 +65,6 @@ enum Cue {
     case steam(key: String)
     case rocketGone(key: String)
     case intoHold(key: String, command: Int)
-    /// A rocket's pod goes out through the lock to it, these crates in it.
-    case podOut(key: String, crates: [CrateRef])
 }
 
 /// Everything a crate does between two slots is timed from here. Every crate that moves by hand — a
@@ -108,6 +93,11 @@ enum Hands {
     /// How long a crate takes to settle down a level when the one under it is taken away: low gravity
     /// in the yard, so it takes its time coming down.
     static let settleSeconds = 2.0
+    /// How far from a crate on the row behind the near one a carrier stands: in the aisle, across the near row.
+    static let toss = 1.7
+    /// How long a crate drifts across the near row, tossed or pulled, in the yard's low gravity.
+    static let floatSeconds = 1.6
+    static var tossSeconds: Double { setDownFirst + floatSeconds + setDownSettle }
 }
 
 final class Simulation<B: Body> {
@@ -120,15 +110,14 @@ final class Simulation<B: Body> {
     var hooks: SimHooks?
     /// Crates under way, by command id.
     var cargo: [Int: Cargo] = [:]
-    /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
-    /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
-    var pallets: [String: PalletJob] = [:]
-    /// Each station's cargo lock, and the drones working its pad.
-    var locks: [String: LockJob] = [:]
+    /// Each repository's staging release as far as the station has heard, by "station|repo".
+    var staging: [String: StagingBatch] = [:]
+    /// The releases being pulled out through the field, by "station|repo".
+    var vortices: [String: Vortex] = [:]
+    /// The drones working each station's pad.
     var drones: [String: [PadDrone]] = [:]
     /// Orders kept for one body, by command id: a message, packing or stowing at its office, a reaction.
     var ownOrders: [Int: OwnOrder] = [:]
-    var palletWishes: [String: Bool] = [:]
     /// The chance behind what a body does when its order ends and the board is empty.
     var idleRoll: () -> Double = { Double.random(in: 0..<1) }
     /// Hallway no room needs any more, by station, and since when it has been spare.
@@ -152,6 +141,7 @@ final class Simulation<B: Body> {
         self.world = world
         // What the world cannot see for itself: a rocket mid-load, which keeps the yard's crates where they are.
         world.rocketBusy = { [weak self] key in self?.rockets[key]?.isBusy ?? false }
+        world.stagingUnderway = { [weak self] key in self?.staging[key].map { $0.merged && $0.deploy != .live } ?? false }
     }
 
     func cue(_ c: Cue) { cues.append(c) }
@@ -159,7 +149,7 @@ final class Simulation<B: Body> {
 
     // MARK: commands
 
-    /// A command that has run its course hands over to its successor: the pallet's push to its unload.
+    /// A command that has run its course hands over to its successor.
     /// Not a new order cutting in, so the interruptible rule does not apply.
     func handOver(_ m: B, _ c: Command, announce: Bool = false) {
         m.current = nil
@@ -261,7 +251,7 @@ final class Simulation<B: Body> {
     /// was when the order went out. The order keeps its id; only its destination moves.
     func reaim(_ id: Int) {
         guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard, pastLock: job.pastLock), fresh.pos != job.aim.pos else { return }
+              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
         cargo[id]?.aim = fresh
     }
 
@@ -398,30 +388,7 @@ final class Simulation<B: Body> {
                 if hypot(p.x - at.x, p.y - at.y) < Station.bayKeepOff { out.insert(sub) }
             } }
         }
-        // The hover pallet where it stands this instant. It is read here rather than from the obstacle
-        // grid because it slides while it is pushed, and that grid is only rebuilt when the markers are.
-        // Its pusher, hands on it while it moves, stands at its edge and is not kept off it.
-        if let p = pallets[m.station], !(p.pushing && p.hand == m.id) { out.formUnion(palletFootprint(p)) }
         return out
-    }
-
-    /// The sub-cells a pallet covers where it floats right now, a body's shoulders allowed for, so a
-    /// walk planned round it keeps clear of the slab rather than clipping its corner.
-    func palletFootprint(_ p: PalletJob) -> Set<Cell> {
-        var out: Set<Cell> = []
-        let f = Double(Station.fine)
-        let hx = PalletGeometry.width / 2 + 0.2, hy = PalletGeometry.depth / 2 + 0.2
-        for sx in Int(((p.spot.x - hx) * f).rounded())...Int(((p.spot.x + hx) * f).rounded()) {
-            for sy in Int(((p.spot.y - hy) * f).rounded())...Int(((p.spot.y + hy) * f).rounded()) {
-                out.insert(Cell(x: sx, y: sy))
-            }
-        }
-        return out
-    }
-
-    /// True where a body would be standing in a pallet: the slab's own footprint, a shoulder's width out.
-    func insidePallet(_ p: PalletJob, _ at: SIMD2<Double>) -> Bool {
-        abs(at.x - p.spot.x) < PalletGeometry.width / 2 + 0.2 && abs(at.y - p.spot.y) < PalletGeometry.depth / 2 + 0.2
     }
 
     /// A walk for a body: round the props and round everyone else. When the only way through is
@@ -440,21 +407,13 @@ final class Simulation<B: Body> {
         return back + (clear.isEmpty ? station.path(from: from, to: cell) : clear)
     }
 
-    /// The floor changed under a walk, a crate or a pallet arrived in the way: the walk is planned again
+    /// The floor changed under a walk, a crate arrived in the way: the walk is planned again
     /// from where the body stands to where it was going.
     func replanBlockedWalks() {
         for m in bodies.values where !m.path.isEmpty {
             guard let station = fleet.stations[m.station] else { continue }
-            var blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
-            // A pallet is met between waypoints as often as on one, and it moves: the line itself is
-            // walked, a step at a time, rather than only the corners of it.
-            var inside = false
-            if let p = pallets[m.station], !(p.pushing && p.hand == m.id) {
-                inside = insidePallet(p, m.pos)
-                blocked = blocked || inside || crosses(p, from: m.pos, along: m.path)
-            }
-            // Standing in it already: round it now, whatever the last plan cost.
-            guard blocked, inside || clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
+            let blocked = m.path.contains { station.obstacles.contains(Station.sub($0)) }
+            guard blocked, clock - m.lastReplanAt >= 1, let last = m.path.last else { continue }
             m.lastReplanAt = clock
             m.path = route(m, to: Cell(x: Int(last.x.rounded()), y: Int(last.y.rounded())))
         }
@@ -495,20 +454,6 @@ final class Simulation<B: Body> {
         return false
     }
 
-    /// Whether a walk's line runs through a pallet, walked leg by leg a fifth of a tile at a time.
-    private func crosses(_ p: PalletJob, from: SIMD2<Double>, along path: [SIMD2<Double>]) -> Bool {
-        var at = from
-        for leg in path {
-            let d = leg - at
-            let len = (d.x * d.x + d.y * d.y).squareRoot()
-            if len > 1e-6 {
-                for step in 1...max(1, Int(len / 0.2)) where insidePallet(p, at + d * (Double(step) * 0.2 / len)) { return true }
-            }
-            at = leg
-        }
-        return false
-    }
-
     // MARK: hands
 
     /// Stands an arm's length from what it is about to work on, facing it. True once it stands right. `square`
@@ -540,10 +485,13 @@ final class Simulation<B: Body> {
             m.pos += (want - m.pos) * min(1, dt * 6)
             return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
         }
-        guard dist < Hands.near || dist > Hands.far else { return true }
+        // A crate on the row behind the near one is worked from the aisle, a toss away; anything else at arm's length.
+        let toss = fleet.stations[m.station].flatMap { tossFrom($0, to: Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded()))) } != nil
+        let reach = toss ? Hands.toss : Hands.arm
+        guard dist < reach - (Hands.arm - Hands.near) || dist > reach + (Hands.far - Hands.arm) else { return true }
         // Right on top of the slot: a step back the way it is facing, so the crate goes down in front.
         let dir = dist > 0.001 ? to / dist : SIMD2(sin(m.facing), cos(m.facing))
-        let want = spot - dir * Hands.arm
+        let want = spot - dir * reach
         m.pos += (want - m.pos) * min(1, dt * 6)
         return (want - m.pos).x.magnitude + (want - m.pos).y.magnitude <= 0.02
     }
@@ -558,8 +506,9 @@ final class Simulation<B: Body> {
             }
             return n
         }
-        // A crate row is never stood on, however empty the spot: two repositories share a row cell as two
-        // columns half a tile apart, and a body between them would be inside one of them.
+        // The row behind the near one: from the near tile when nothing stands on it, from the aisle across it when something does.
+        if let back = st.backRow(cell) { return tossFrom(st, to: cell) ?? back.over }
+        // Otherwise a crate row is never stood on, however empty the tile: a crate may be set down on it any moment.
         let rows = st.crateRows
         if blocked(cell) == 0, st.walkable.contains(cell), !rows.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
@@ -568,14 +517,25 @@ final class Simulation<B: Body> {
         return (aisle.isEmpty ? options : aisle).min { blocked($0) < blocked($1) } ?? st.nearestFloor(to: SIMD2(Double(cell.x), Double(cell.y))) ?? cell
     }
 
-    /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock.
-    func startLift(_ m: B, height: Double) {
-        m.handsAt = max(0, Int((height / Hands.level).rounded()))
-        m.phaseUntil = clock + Hands.liftSeconds
+    /// Where a carrier tosses from to reach a tile on the row behind the near one: the aisle, when a crate stands on
+    /// the near tile in front of it. Nil when the way to it is clear, and the carrier steps onto the near tile instead.
+    func tossFrom(_ st: Station, to cell: Cell) -> Cell? {
+        guard let back = st.backRow(cell) else { return nil }
+        let f = Station.fine
+        let taken = (-1...1).contains { dx in (-1...1).contains { dy in st.obstacles.contains(Cell(x: back.over.x * f + dx, y: back.over.y * f + dy)) } }
+        return taken ? back.aisle : nil
+    }
+
+    /// Crouching to a crate: how high it stands decides the posture, and the lift decides the clock. One on the
+    /// row behind the near one is pulled across it instead, the arms up, and drifts in.
+    func startLift(_ m: B, height: Double, far: Bool = false) {
+        m.floating = far
+        m.handsAt = far ? 2 : max(0, Int((height / Hands.level).rounded()))
+        m.phaseUntil = clock + (far ? Hands.liftCrouch + Hands.floatSeconds : Hands.liftSeconds)
     }
 
     /// True once the crouch is over and the hands should be on the crate.
-    func liftDue(_ m: B) -> Bool { clock >= m.phaseUntil - Hands.liftArc }
+    func liftDue(_ m: B) -> Bool { clock >= m.phaseUntil - (m.floating ? Hands.floatSeconds : Hands.liftArc) }
 
     // MARK: the idle life
 
@@ -631,11 +591,10 @@ final class Simulation<B: Body> {
     func startRoam(_ m: B, station: Station) -> Bool {
         let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isVenting || $0.isLaunching) }
         let window = station.windowWatch
-        // The gate is glass and a lock, not a way through: the window's own doorway is somewhere to stand.
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
             .subtracting(window)
-        let clear = (rocketReady && !window.isEmpty ? window : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
-            .filter { !doorways.contains($0) && !station.lockFootprint.contains($0) }
+        let clear = (rocketReady && !window.isEmpty ? window : station.corridorCells + station.aisleCells + station.walkwayCells)   // never the bay: that is outside
+            .filter { !doorways.contains($0) }
             .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
         let others = bodies.values.filter { $0.id != m.id && $0.station == m.station }
         let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
@@ -765,12 +724,11 @@ final class Simulation<B: Body> {
         return m.path.isEmpty ? .there : .wondering
     }
 
-    /// One frame of a body with nowhere to walk: a pallet errand (`Pallet.swift`), a crate seen to
+    /// One frame of a body with nowhere to walk: a crate seen to
     /// (`Carries.swift`), a reaction's time, the arrival that turns a walk into being there, and the settled
     /// life — QA's rows, the bath and gym rules, the idle clock, the visits, the wander — or the way
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
-        if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.

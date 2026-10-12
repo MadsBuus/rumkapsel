@@ -237,75 +237,6 @@ enum Props {
         return n
     }
 
-    /// The hover pallet: a flat two-tier slab that floats a hand's breadth off the floor, with a
-    /// glowing rim and a cushion of light under it. Its slots are `PalletGeometry`'s, so the plate is
-    /// marked out wherever a crate can stand.
-    static let palletWidth = PalletGeometry.width, palletDepth = PalletGeometry.depth, palletLift = PalletGeometry.lift
-
-    static func pallet(color: NSColor) -> SCNNode {
-        let n = SCNNode()
-        let deckColor = NSColor(rgb: (0.34, 0.37, 0.46))
-        let top = SCNNode(geometry: SCNBox(width: palletWidth, height: 0.05, length: palletDepth, chamferRadius: 0))
-        top.geometry!.materials = [flat(deckColor), flat(deckColor.darker(0.1)), flat(deckColor), flat(deckColor.darker(0.1)),
-                                   flat(deckColor.lighter(0.1)), flat(deckColor.darker(0.14))]
-        n.addChildNode(top)
-        // A narrower plate under it, so the silhouette is cut rather than a plain brick.
-        let under = SCNNode(geometry: SCNBox(width: palletWidth - 0.16, height: 0.05, length: palletDepth - 0.16, chamferRadius: 0))
-        under.geometry!.firstMaterial = lit(deckColor.darker(0.18))
-        under.position = v3(0, -0.05, 0)
-        n.addChildNode(under)
-        // The rim strip: the only thing that says it is under power.
-        for side in [-1.0, 1.0] {
-            let strip = SCNNode(geometry: SCNBox(width: palletWidth - 0.1, height: 0.014, length: 0.03, chamferRadius: 0))
-            strip.geometry!.firstMaterial = flat(color.lighter(0.2))
-            strip.position = v3(0, 0.02, side * (palletDepth / 2 - 0.02))
-            n.addChildNode(strip)
-        }
-        // A shallow field sunk into the plate per crate slot, so the deck is not a blank sheet.
-        for row in 0..<PalletGeometry.rows {
-            for column in 0..<PalletGeometry.columns {
-                let field = SCNNode(geometry: SCNBox(width: 0.36, height: 0.014, length: 0.36, chamferRadius: 0))
-                field.geometry!.firstMaterial = flat(deckColor.darker(0.26))
-                let at = palletOffset(row: row, column: column, level: 0)
-                field.position = v3(at.x, 0.029, at.z)   // proud of the plate's own face, or the two fight
-                n.addChildNode(field)
-            }
-        }
-        // Rivets along the rim: tiny cubes, evenly spaced, standing proud of the plate.
-        func rivet(_ x: Double, _ z: Double) {
-            let r = SCNNode(geometry: SCNBox(width: 0.036, height: 0.036, length: 0.036, chamferRadius: 0))
-            r.geometry!.firstMaterial = lit(deckColor.lighter(0.28))
-            r.position = v3(x, 0.042, z)
-            n.addChildNode(r)
-        }
-        for i in 0..<8 {
-            let x = -palletWidth / 2 + 0.09 + Double(i) * (palletWidth - 0.18) / 7
-            rivet(x, -palletDepth / 2 + 0.05)
-            if x < palletWidth / 2 - 0.2 { rivet(x, palletDepth / 2 - 0.05) }   // room for the light on that corner
-        }
-        for i in 0..<4 {
-            let z = -palletDepth / 2 + 0.09 + Double(i) * (palletDepth - 0.18) / 3
-            rivet(-palletWidth / 2 + 0.05, z)
-            if z < palletDepth / 2 - 0.2 { rivet(palletWidth / 2 - 0.05, z) }
-        }
-        // The warning light on the near corner. The tick blinks it, so it blinks headless too.
-        let beacon = SCNNode(geometry: SCNBox(width: 0.09, height: 0.09, length: 0.09, chamferRadius: 0))
-        let lamp = flat(palletAmber)
-        lamp.emission.contents = palletAmber
-        beacon.geometry!.firstMaterial = lamp
-        beacon.position = v3(palletWidth / 2 - 0.08, 0.07, palletDepth / 2 - 0.08)
-        beacon.name = "beacon"
-        n.addChildNode(beacon)
-        // The cushion of light it rides on.
-        let glow = SCNNode(geometry: SCNPlane(width: palletWidth - 0.1, height: palletDepth - 0.1))
-        glow.geometry!.firstMaterial = flat(color)
-        glow.opacity = 0.22
-        glow.eulerAngles.x = -.pi / 2
-        glow.position = v3(0, -palletLift + 0.01, 0)
-        n.addChildNode(glow)
-        return n
-    }
-
     /// An unlit berth, the colour the bay and the pad are marked out in: space black, so an empty berth is
     /// an outline scored into the floor rather than a ring drawn on top of it.
     static let berthIdle = NSColor(rgb: (0.05, 0.06, 0.09))
@@ -327,51 +258,13 @@ enum Props {
     /// cools, and the colour the bay's apron is laid in, so the two read as one piece of station.
     static let hullPlate = (0.28, 0.33, 0.43)
 
-    /// The approach lights either side of the airlock's outer door, on and off. They burn the same amber as
-    /// the pallet's corner light, because they mean the same thing: something is on its way in.
+    /// The approach lights either side of the airlock's outer door, on and off: something is on its way in.
     static let hullLamp = NSColor(rgb: (1.0, 0.56, 0.12))
     static let hullLampOff = NSColor(rgb: (0.26, 0.30, 0.40))
 
-    /// The corner light's colour, on and off.
-    static let palletAmber = NSColor(rgb: (1.0, 0.56, 0.12))
-    static let palletAmberOff = NSColor(rgb: (0.42, 0.24, 0.08))
-
-    /// The dark patch the pallet throws on the floor. It does not bob with the slab: it tightens and
-    /// darkens as the pallet sinks, as if the light stood close overhead.
-    static func palletShadow() -> SCNNode {
-        let s = SCNNode(geometry: SCNPlane(width: palletWidth, height: palletDepth))
-        let m = flat(NSColor(rgb: (0.05, 0.05, 0.08)))
-        m.transparency = 0.34   // the darkness lives in the material, so the node's opacity is free to fade
-        s.geometry!.firstMaterial = m
-        s.eulerAngles.x = -.pi / 2
-        return s
-    }
-
-    /// Where crate `index` stands on a pallet: four across, two rows back, stacked past eight.
-    static func palletSlot(_ index: Int) -> (row: Int, column: Int, level: Int) { PalletGeometry.slot(index) }
-
-    /// That slot's place on the pallet's own top plate.
-    static func palletOffset(row: Int, column: Int, level: Int) -> SIMD3<Double> { PalletGeometry.offset(row: row, column: column, level: level) }
-
-    /// A small wall panel: the storage console, where a pallet is ordered.
-    static func console(color: NSColor) -> SCNNode {
-        let n = SCNNode()
-        let shell = SCNNode(geometry: SCNBox(width: 0.34, height: 0.26, length: 0.09, chamferRadius: 0))
-        shell.geometry!.firstMaterial = lit(NSColor(rgb: (0.26, 0.28, 0.34)))
-        n.addChildNode(shell)
-        let panel = SCNNode(geometry: SCNBox(width: 0.24, height: 0.16, length: 0.02, chamferRadius: 0))
-        panel.geometry!.firstMaterial = flat(color)
-        panel.position = v3(0, 0.02, 0.055)
-        panel.name = "panel"
-        n.addChildNode(panel)
-        for k in 0..<3 {
-            let key = SCNNode(geometry: SCNBox(width: 0.05, height: 0.03, length: 0.02, chamferRadius: 0))
-            key.geometry!.firstMaterial = flat(NSColor(rgb: (0.5, 0.53, 0.6)))
-            key.position = v3(-0.07 + Double(k) * 0.07, -0.09, 0.05)
-            n.addChildNode(key)
-        }
-        return n
-    }
+    /// The amber of a lamp that says something is under way, lit and dark.
+    static let amberLamp = NSColor(rgb: (1.0, 0.56, 0.12))
+    static let amberLampOff = NSColor(rgb: (0.42, 0.24, 0.08))
 
     /// A rocket in two parts: the tip, which is what stands on staging, and the lifter under it, which a
     /// production release adds. Without the lifter the tip stands on a cradle on the pad. The tip's hull is

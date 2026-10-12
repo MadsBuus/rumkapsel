@@ -8,9 +8,10 @@ every step, because an office only ever adds a run that touches what is there.
 The base — the plaza, the fixed arms, the runs to the yard and the bay, and the quarters — is lit before
 a single office opens, so the station is whole from the start.
 """
-import json, math, sys
+import json, math, os, sys
 from collections import deque
-ns = {}; exec(open('/tmp/claude-502/floor/floorplan.py').read(), ns)
+HERE = os.path.dirname(os.path.abspath(__file__))
+ns = {'__file__': os.path.join(HERE, 'floorplan.py')}; exec(open(os.path.join(HERE, 'floorplan.py')).read(), ns)
 
 def bake(theme, seed):
     hall, slots, quarters, fixed, mono, ring = ns['plan'](theme, seed)
@@ -90,6 +91,23 @@ def bake(theme, seed):
             "fixed": {k: sorted(v) for k, v in fixed.items()},
             "base": sorted(lit - {p for o in out for p in o["hall"]}), "offices": out}
 
+def write(plans):
+    """BakedPlans.swift, its header kept, a plan per seed in the order picked."""
+    path = os.path.join(HERE, '..', 'Sources', 'Rumkapsel', 'BakedPlans.swift')
+    src = open(path).read()
+    head = src[:src.index('enum BakedPlans {')]
+    def cs(cells): return ';'.join(f'{x},{y}' for x, y in sorted(map(tuple, cells)))
+    def block(p):
+        q = '|'.join(f'{k}:{cs(v)}' for k, v in sorted(p['quarters'].items()))
+        offices = '|'.join(f"{cs(o['cells'])}/{cs(o['hall'])}/{o['ring']}" for o in p['offices'])
+        return f'        """\n        seed={p["seed"]}\n        quarters={q}\n        base={cs(p["base"])}\n        offices={offices}\n        """'
+    by = {}
+    for p in plans: by.setdefault(p['theme'], []).append(block(p))
+    open(path, 'w').write(head + 'enum BakedPlans {\n    static func forTheme(_ theme: Theme) -> [String] {\n        switch theme {\n'
+        + "        // The Kingdom turns no knob the plan can see, so it is laid out on Classic's.\n"
+        + '        case .classic, .kingdom: return [\n' + ',\n'.join(by['classic']) + '\n        ]\n'
+        + '        case .kenney: return [\n' + ',\n'.join(by['kenney']) + '\n        ]\n        }\n    }\n}\n')
+
 def check(p):
     """Light them one at a time and prove the floor is whole at every step."""
     lit = set(map(tuple, p["base"]))
@@ -111,9 +129,9 @@ def check(p):
 
 if __name__ == "__main__":
     plans = []
-    picked = json.load(open('/tmp/claude-502/floor/picked.json'))
+    picked = json.load(open(os.path.join(HERE, 'picked.json')))
     for theme, seeds in picked.items():
         for seed in seeds:
             p = bake(theme, seed); n = check(p); plans.append(p)
             print(f"{theme} {seed}: {len(p['offices'])} offices, base {len(p['base'])} hall, {n} lit at full")
-    json.dump(plans, open('/tmp/claude-502/floor/plans.json', 'w'))
+    write(plans)

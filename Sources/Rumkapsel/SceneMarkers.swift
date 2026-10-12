@@ -49,18 +49,6 @@ extension StationController {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
-        // The lock is walked round: its chamber and the tray before its inner door.
-        for name in locks.keys {
-            guard let st = fleet.stations[name], let lock = st.lock else { continue }
-            let f = Double(Station.fine)
-            func block(_ p: SIMD2<Double>, _ r: Double) {
-                for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
-                    for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
-                }
-            }
-            let a = SIMD2(lock.inner.x - st.offset.x, lock.inner.z - st.offset.y), b = SIMD2(lock.chamber.x - st.offset.x, lock.chamber.z - st.offset.y)
-            for k in 0...6 { block(a + (b - a) * Double(k) / 6, 0.3) }
-        }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile, and only on that
         // room's own floor. A mark lying flat on it, like the frame round an office not yet built, is walked
         // over. Built once per static redraw and read from there: nothing on the static root moves between redraws.
@@ -91,8 +79,6 @@ extension StationController {
                 blocked[stationName, default: []].insert(Cell(x: Int((p.x * f).rounded()), y: Int((p.y * f).rounded())))
             }
         }
-        // A hover pallet is not here: it slides while it is pushed, and this set is only as fresh as the
-        // last redraw of the markers. The simulation blocks its footprint where it stands now, in `crowd`.
         for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
     }
 
@@ -150,8 +136,7 @@ extension StationController {
             }
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }
-        // Every tick, for the stage changes waiting on the floor: a crate not down in storage yet, a pallet
-        // still out.
+        // Every tick, for the stage changes waiting on the floor: a crate not down in storage yet.
         for e in world.stationEvents() { handle(e) }
         for station in fleet.stations.values where station.hasPad {
             // A storage-to-deck carry whose crate the board has since put back in storage is off.
@@ -323,7 +308,6 @@ extension StationController {
             // the hands, for as long as the carry lasts.
             for area in ["storage", "deck", "decon"] where station.hasPad {
                 let layout = world.yardLayout(station: station, area: area).filter { !$0.carried }   // held slots are not drawn
-                if area == "deck" { rebuildPods(station, deck: layout) }
                 let prefix = "\(area):\(station.name)|"
                 var standing: [String: [SCNNode]] = [:]
                 for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }

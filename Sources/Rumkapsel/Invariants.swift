@@ -59,7 +59,6 @@ final class Invariants {
         if c.clock - slowAt >= Invariants.slowEvery {
             slowAt = c.clock
             crates(c)
-            palletsClear(c)
         }
     }
 
@@ -92,41 +91,6 @@ final class Invariants {
         return out
     }
 
-    /// A hover pallet floats where nothing else stands. It comes out in a yard's aisle, and the rows
-    /// keep its lane through the doorway clear, so this holds while it is being pushed as well as while
-    /// it loads: no crate on the rows and no body on the floor is ever inside its footprint.
-    private func palletsClear(_ c: StationController) {
-        guard !c.simulation.pallets.isEmpty else { return }
-        let all = standing(c)
-        for (name, p) in c.simulation.pallets {
-            guard let station = c.fleet.stations[name] else { continue }
-            let at = SIMD2(station.offset.x + p.spot.x, station.offset.y + p.spot.y)
-            let hx = PalletGeometry.width / 2, hy = PalletGeometry.depth / 2
-            /// How deep a thing of that width, standing there, reaches into the plate. Negative is clear.
-            func into(_ x: Double, _ z: Double, _ half: Double) -> Double {
-                -max(abs(x - at.x) - (hx + half), abs(z - at.y) - (hy + half))
-            }
-            for s in all where s.station == name {
-                // Its own crate in the air is above the plate, not in it; the ones aboard are the plate's.
-                if p.flight?.crate.number == s.number { continue }
-                let deep = into(s.pos.x, s.pos.z, s.half)
-                if deep > 0.02 {
-                    flag("a pallet floats clear of what stands round it", "\(name)|\(p.repo)",
-                         String(format: "%@ is %.2f inside its footprint", s.name, deep))
-                }
-            }
-            // The pusher has its hands on it and leans into it: its place is at the edge, and in it.
-            for m in c.minions.values where m.station == name && m.id != p.hand {
-                let deep = into(Double(m.node.position.x), Double(m.node.position.z), 0.28)
-                if deep > 0.05 {
-                    let state = c.world.truth.pallets[name]?.state.rawValue ?? "?"
-                    flag("a pallet floats clear of what stands round it", "\(name)|\(p.repo)",
-                         String(format: "%@ is %.2f inside its footprint while it is %@", m.id, deep, state))
-                }
-            }
-        }
-    }
-
     /// A crate is a merged pull request: storage holds merged work waiting for a release, the deck work
     /// on staging. A pull request that closed without merging is not work and never becomes a crate.
     private func merged(_ c: StationController) {
@@ -157,9 +121,8 @@ final class Invariants {
         for s in all where counts[s.name] == 1 && !s.name.hasPrefix("decon:") {
             live.insert(s.name)
             let crate = CrateRef(station: s.station, repo: s.repo, number: s.number)
-            // On someone's arms, on the pallet or in the air: it is allowed to move.
+            // On someone's arms or in the air: it is allowed to move.
             if c.world.crate(crate)?.inTransit == true { resting[s.name] = nil; continue }
-            if c.simulation.pallets[s.station]?.flight != nil { continue }
             // Its tick taken back on the board: the one move nobody carries, straight to the untested row.
             let tested = c.world.crate(crate)?.cleared ?? false
             defer { restingTested[s.name] = tested }
@@ -252,8 +215,7 @@ final class Invariants {
         cells.formUnion(station.hangarCells)
         cells.formUnion(station.airlockCells)
         cells.formUnion(station.padCells)
-        cells.formUnion(station.storageCells)
-        cells.formUnion(station.deckCells)
+        cells.formUnion(station.hallCells)
         cells.formUnion(station.deconCells)
         cells.formUnion(station.corridorCells)
         for room in station.rooms.values { cells.formUnion(room.cells) }
@@ -405,9 +367,6 @@ final class Invariants {
     private func phases(_ c: StationController) {
         for m in c.minions.values {
             guard let cur = m.current else { lastPhase[m.id] = nil; continue }
-            // The pallet push is legs, not phases: each corner sends the pusher back to walking
-            // round to the new back side, on the same command. Nothing else may rewind.
-            if case .pushPallet = cur.kind { lastPhase["minion " + m.id] = nil; continue }
             step("minion " + m.id, id: cur.id, phase: m.phase)
         }
         for s in c.simulation.flights { step("shuttle " + s.station + " \(s.command.id)", id: s.command.id, phase: s.phase) }

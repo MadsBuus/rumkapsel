@@ -58,7 +58,7 @@ protocol Look {
     // MARK: the output: decon, storage, the deck and the pad
 
     /// Decon, storage, the deck and the pad drawn whole, in world coordinates, or nil for tiles. The scene
-    /// keeps the decon hatch, the storage console and every crate's spot where they are.
+    /// keeps the decon hatch and every crate's spot where they are.
     func output(_ station: Station, deckInUse: Bool) -> SetPiece?
     /// The decon hatch's frame for a hatch facing along `facing`, and the height its light hangs at.
     func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
@@ -114,8 +114,6 @@ protocol Look {
     func pose(figure: SCNNode, height: Double, torso: Double)
     /// Props for a station, in the station's own cells, in spots nobody stands on.
     func dress(station: Station) -> [SCNNode]
-    /// The panel a pallet is ordered at, or nil for the classic console.
-    func console(color: NSColor) -> SCNNode?
     /// A crate of work, or nil for the classic crate. It is set down on a floor tile and stacked on its own
     /// kind, so it should be about a tile wide and stand on the origin.
     func crate(color: NSColor) -> SCNNode?
@@ -125,9 +123,6 @@ protocol Look {
     /// the classic one. Its origin sits at the middle of the body's back, facing -z; the scene stretches and
     /// flickers the children named "flame" with the thrust.
     func jetpack(height: Double, depth: Double) -> SCNNode?
-    /// The float that carries crates between the store and the deck, or nil for the classic pallet. The
-    /// scene sets crates into it by `Props.palletSlot`, so its bed must stay where the classic one's is.
-    func pallet(color: NSColor) -> SCNNode?
     /// A drone that works the pad, or nil for the classic one: its middle at the origin, nose to +z. The scene
     /// closes the children named "clawL" and "clawR" on a crate, blinks "strobe", shows "torch" while it welds
     /// and puffs gas from each "nozzle".
@@ -194,11 +189,9 @@ extension Look {
     func figure(id: String, crew: Bool, height: Double) -> SCNNode? { nil }
     func pose(figure: SCNNode, height: Double, torso: Double) {}
     func dress(station: Station) -> [SCNNode] { [] }
-    func console(color: NSColor) -> SCNNode? { nil }
     func crate(color: NSColor) -> SCNNode? { nil }
     func hold(tall: Bool) -> SCNNode? { nil }
     func jetpack(height: Double, depth: Double) -> SCNNode? { nil }
-    func pallet(color: NSColor) -> SCNNode? { nil }
     func padDrone() -> SCNNode? { nil }
     var writesOnFloor: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }

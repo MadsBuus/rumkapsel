@@ -1,13 +1,14 @@
 from PIL import Image, ImageDraw
 import sys
-ns={}; exec(open('/tmp/claude-502/floor/floorplan.py').read(), ns)
+import os; HERE = os.path.dirname(os.path.abspath(__file__))
+ns={'__file__': os.path.join(HERE, 'floorplan.py')}; exec(open(os.path.join(HERE, 'floorplan.py')).read(), ns)
 # The game's own palette, sampled off its screens (LAYOUT.md).
 BG   = (0x0E,0x11,0x17)   # space
 CORR = (0x81,0x65,0x5B)   # hallway floor
 DARK = (0x43,0x42,0x42)   # a room that is not lit yet
 EDGE = (0x2A,0x29,0x29)   # wall strips and tile borders
 FIX  = {"plaza":CORR, "west":CORR, "south":CORR,
-        "storage":(0x4E,0xA9,0xA0), "deck":(0x7C,0xA8,0x2E), "pad":(0xD3,0x6B,0x25),
+        "hall":(0x5D,0x66,0x77), "lock":(0xD3,0x9B,0x25), "pad":(0xD3,0x6B,0x25),
         "decon":(0xB5,0x53,0x83), "airlock":(0x43,0x42,0x42), "hangar":(0x2A,0x29,0x29)}
 Q    = (0xE0,0xA1,0x1C)   # the quarters
 ROOM = [(0x2C,0x76,0xB4),(0xD3,0x6B,0x25),(0xE0,0xA1,0x1C),(0xB5,0x53,0x83),(0x7C,0xA8,0x2E),(0x4E,0xA9,0xA0)]
@@ -36,5 +37,5 @@ imgs=[draw(s) for s in seeds]
 w=max(i.width for i in imgs);h=max(i.height for i in imgs)
 sheet=Image.new('RGB',(w*2+24,h*2+24),(8,10,18))
 for k,im in enumerate(imgs[:4]): sheet.paste(im,((k%2)*(w+24),(k//2)*(h+24)))
-sheet.save('/tmp/claude-502/floor/station.png')
+sheet.save(os.path.join(HERE, 'station.png'))
 print("ok")

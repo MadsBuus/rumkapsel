@@ -533,9 +533,9 @@ extension StationController {
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let walk = st.walkable
             let outside = Set(st.padCells)
-            // The gate onto the pad holds the cargo lock and the window, and the bay's mouth holds the field: no wall
+            // The hall's pad wall and the bay's mouth both hold a field: no wall
             // stands in either.
-            let gate = Set(st.gateDoorway.map { [$0.deck.x, $0.deck.y, $0.pad.x, $0.pad.y] })
+            let gate = Set(st.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
             let mouthRow = st.hangarCells.map(\.y).max()
             func unwalled(_ c: Cell, _ n: Cell) -> Bool {
                 gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))

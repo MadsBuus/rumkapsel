@@ -18,7 +18,7 @@ enum Yard: String, Codable {
     init?(area: Spot.Area) {
         switch area {
         case .storage: self = .storage
-        case .deck, .tested, .lock: self = .deck
+        case .deck, .tested: self = .deck
         case .pad: self = .pad
         case .decon: self = .decon
         default: return nil
@@ -40,13 +40,11 @@ enum Yard: String, Codable {
 /// that crate, however fresh the poll. A source with no times of its own (git history) is believed
 /// again the moment it agrees with what the station did.
 struct Ledger: Codable {
-    /// Where the station physically has a crate: on a slot, on someone's arms, or on the pallet.
+    /// Where the station physically has a crate: on a slot, or on someone's arms.
     enum Placement: Codable, Equatable {
         case slot(area: Spot.Area, cell: Cell, level: Int)
         /// On the arms, or spoken for by a carry that has not found its carrier yet (an empty name).
         case carried(by: String)
-        /// On the pallet: two rows of four, stacked when there are more than eight.
-        case pallet(row: Int, column: Int, level: Int)
     }
 
     /// A crate's place in a yard: which group of rows (the deck's tested or untested), which column,
@@ -62,9 +60,9 @@ struct Ledger: Codable {
         var wantedAt: Date?
         /// The tested sticker, the source's word too.
         var cleared = false
-        /// The station's word: the yard it stands in, or belongs to while on someone's arms or the pallet.
+        /// The station's word: the yard it stands in, or belongs to while on someone's arms.
         var placed: Yard?
-        /// When the station last moved it, a minion, the pallet or the hatch setting it down; cleared once
+        /// When the station last moved it, a minion or the hatch setting it down; cleared once
         /// the source has said something newer. While set, the station's word stands over the source's.
         var movedAt: Date?
         /// Where a carry under way is taking it: its slot there is spoken for from the order.
@@ -114,22 +112,20 @@ struct Ledger: Codable {
         }
 
         var key: String { "\(repo)|\(number)" }
-        /// On someone's arms, spoken for, or on the pallet: not standing on its row.
+        /// On someone's arms or spoken for: not standing on its row.
         var inTransit: Bool {
             switch at {
-            case .carried, .pallet: return true
-            case .slot(.lock, _, _): return true   // on the lock's trays or in it: not on any row
+            case .carried: return true
             default: return false
             }
         }
         var isCarried: Bool { if case .carried = at { return true }; return false }
-        var isOnPallet: Bool { if case .pallet = at { return true }; return false }
         var carrier: String? { if case .carried(let who) = at { return who }; return nil }
         /// The area it was last set down in, by hand.
         var area: Spot.Area? { if case .slot(let area, _, _) = at { return area }; return nil }
         /// A row with nothing left to say is dropped.
         var isEmpty: Bool { placed == nil && wanted == nil && heading == nil && at == nil }
-        /// Standing in a yard's rows: belonging there and not on the arms or the pallet.
+        /// Standing in a yard's rows: belonging there and not on the arms.
         func stands(in yard: Yard) -> Bool { placed == yard && !inTransit }
         /// Where the rows draw it or hold a slot for it: the yard it belongs to, or the one it is bound for.
         func belongs(to yard: Yard) -> Bool { placed == yard || heading == yard }
@@ -148,8 +144,8 @@ struct Ledger: Codable {
     func crates(of repo: String) -> [Crate] { crates.values.filter { $0.repo == repo }.sorted { $0.number < $1.number } }
     var allCrates: [Crate] { Array(crates.values) }
 
-    /// The crates a yard holds of a repository, or holds a slot for: standing, on the arms, on the
-    /// pallet, or on their way in.
+    /// The crates a yard holds of a repository, or holds a slot for: standing, on the arms, or on their
+    /// way in.
     func holds(_ yard: Yard, repo: String) -> [Crate] { crates(of: repo).filter { $0.belongs(to: yard) } }
 
     /// How many crates of each repository belong to a yard.
@@ -273,7 +269,6 @@ struct Ledger: Codable {
     }
     mutating func pickedUp(repo: String, number: Int, by minion: String) { place(repo, number, .carried(by: minion)) }
     mutating func setDown(repo: String, number: Int, at spot: Spot) { place(repo, number, .slot(area: spot.area, cell: spot.cell, level: spot.level)) }
-    mutating func onPallet(repo: String, number: Int, row: Int, column: Int, level: Int) { place(repo, number, .pallet(row: row, column: column, level: level)) }
     /// Nowhere in particular any more: the rows draw it where the ledger says it belongs.
     mutating func forgetPlacement(repo: String, number: Int) { place(repo, number, nil) }
     /// Whatever this minion was holding is no longer on anyone's arms.
@@ -298,7 +293,7 @@ struct Ledger: Codable {
     mutating func clearPad(repo: String) {
         for c in crates.values where c.repo == repo && c.area == .pad { place(c.repo, c.number, nil) }
     }
-    /// After a relaunch nothing is on anyone's arms or on a pallet, and nothing is bound anywhere:
+    /// After a relaunch nothing is on anyone's arms, and nothing is bound anywhere:
     /// what was is standing somewhere, and asks for its place again.
     mutating func forgetTransit() {
         for var c in crates.values where c.inTransit || c.bound != nil || c.heading != nil || c.movedAt != nil {
@@ -351,19 +346,22 @@ struct Ledger: Codable {
         c.bound = slot; crates[c.key] = c
     }
 
-    /// A place in a yard for one more crate, among the places already held there: the lowest free
-    /// rank on one of the repository's own columns, else the lowest column nobody holds, else the
-    /// repository's shortest column, never one tower. `avoiding` is a column it may not go back to.
-    /// `tall` lets a repository pile up in one column: decon, where nobody stacks with care.
+    /// A place in a yard for one more crate, among the places already held there. A column is one stack: the first
+    /// for each tile, then a second beside it on each (`cap` is both). The crates stand alone first, each on the
+    /// lowest column nobody holds, so every number reads from above and a tile takes a second crate only once
+    /// every tile holds one; past that they stack on the repository's own shortest column, three high at most,
+    /// and past that on its shortest. `avoiding` is a column it may not go back to. `tall` lets a
+    /// repository pile up in one column first: decon, where nobody stacks with care.
     static func place(repo: String, in yard: Yard, group: Int, among held: [(repo: String, slot: Slot)], cap: Int, avoiding: Int? = nil, tall: Bool = false) -> Slot {
         let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
         func height(_ column: Int) -> Int { here.filter { $0.slot.column == column }.count }
         func next(_ column: Int) -> Slot { Slot(yard: yard, group: group, column: column, order: (here.filter { $0.slot.column == column }.map(\.slot.order).max() ?? -1) + 1) }
-        let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted()
-        for column in mine where column != avoiding && height(column) < (tall ? 12 : 3) { return next(column) }
+        let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted().filter { $0 != avoiding }
+        if tall, let column = mine.first(where: { height($0) < 12 }) { return next(column) }
         let owned = Set(here.map(\.slot.column))
         if let free = (0..<max(cap, 1)).first(where: { !owned.contains($0) && $0 != avoiding }) { return next(free) }
-        if let column = mine.filter({ $0 != avoiding }).min(by: { height($0) < height($1) }) { return next(column) }
+        if let column = mine.filter({ height($0) < 3 }).min(by: { height($0) < height($1) }) { return next(column) }
+        if let column = mine.min(by: { height($0) < height($1) }) { return next(column) }
         return next(0)
     }
 

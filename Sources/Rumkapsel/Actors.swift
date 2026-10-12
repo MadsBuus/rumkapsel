@@ -305,7 +305,7 @@ extension StationController {
         let color = NSColor(fleet.color(forRepo: r.repo))
         if r.welding {
             let flash = pow(max(0, cos((clock / 0.9).truncatingRemainder(dividingBy: 1) * 2 * .pi)), 4)
-            ring.geometry?.firstMaterial?.diffuse.contents = Props.palletAmberOff.blended(withFraction: CGFloat(0.3 + 0.7 * flash), of: Props.palletAmber)
+            ring.geometry?.firstMaterial?.diffuse.contents = Props.amberLampOff.blended(withFraction: CGFloat(0.3 + 0.7 * flash), of: Props.amberLamp)
             ring.opacity = 0.95
         } else if r.untested {
             let k = 0.5 + 0.5 * sin(clock * 2.2)

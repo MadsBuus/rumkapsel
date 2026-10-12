@@ -3,3 +3,6 @@ build/
 *.xcodeproj
 .DS_Store
 Package.resolved
+floor/classic.json
+floor/kenney.json
+floor/*.png

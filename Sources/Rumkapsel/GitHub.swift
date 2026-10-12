@@ -43,7 +43,7 @@ struct ReleasePR: Equatable {
     var production: Bool? = nil
     var staging: Bool? = nil
     var isProduction: Bool { production ?? (base == ConfigStore.shared.current.productionBranch) }
-    /// A release into the staging branch: what the pallet carries crates for.
+    /// A release into the staging branch: what puts crates in the staged rows.
     var isStaging: Bool {
         if let staging { return staging }
         let name = ConfigStore.shared.current.stagingBranch

@@ -44,11 +44,11 @@ enum WorldEvent {
     case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
     /// A release pull request merged. A production one ships; a staging one moves the yard.
     case releaseMerged(station: String, repo: String, number: Int, base: String, title: String, isProduction: Bool)
-    /// A staging release opened: a pallet is ordered for that repository's crates in storage.
+    /// A staging release opened: the station knows the batch, its crates still in storage.
     case stagingOpened(station: String, repo: String, number: Int)
-    /// A staging release merged: the loaded pallet is pushed across to the deck.
+    /// A staging release merged: its deploy is on its way, and its crates go to the staged rows.
     case stagingMerged(station: String, repo: String, number: Int)
-    /// A staging release closed unmerged: the pallet unloads back into storage.
+    /// A staging release closed unmerged: nothing went to staging.
     case stagingClosed(station: String, repo: String, number: Int)
     /// What a repository's rocket should be doing now, as a command for it to run.
     case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command)

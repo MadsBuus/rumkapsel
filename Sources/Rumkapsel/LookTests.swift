@@ -27,12 +27,12 @@ enum LookTests {
     }
 
     private static let claims: [Theme: Claim] = [
-        .classic: Claim(classic: ["input", "output", "console", "crate", "hold", "pallet", "tool", "message",
+        .classic: Claim(classic: ["input", "output", "crate", "hold", "tool", "message",
                                   "office", "station", "figure", "drone", "jetpack"]),
-        .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold", "pallet"],
+        .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold"],
                        classic: ["tool", "message", "drone", "jetpack"], rims: false),
-        .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold",
-                                "pallet", "tool", "message"],
+        .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold",
+                                "tool", "message"],
                         classic: ["drone", "jetpack"], letters: false, rims: false),
     ]
 
@@ -81,11 +81,9 @@ enum LookTests {
         return [
             "input": look.input(station) != nil,
             "output": look.output(station, deckInUse: true) != nil,
-            "console": look.console(color: .white) != nil,
             "crate": look.crate(color: .white) != nil,
             "hold": look.hold(tall: true) != nil,
             "jetpack": look.jetpack(height: 0.5, depth: 0.11) != nil,
-            "pallet": look.pallet(color: .white) != nil,
             "drone": look.padDrone() != nil,
             "tool": look.tool(.hammer, height: 0.5, depth: 0.3) != nil,
             "message": look.message(color: .white, floor: .white) != nil,

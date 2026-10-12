@@ -645,20 +645,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             }
         }
         // What an office and a yard are made of.
-        add("crate / console / pallet", height: 1.4) { [self] p in
-            let spots = spread(p, 3, gap: 0.85)
-            let cart = Looks.current.pallet(color: amber) ?? Props.pallet(color: amber)
-            cart.scale = SCNVector3(0.8, 0.8, 0.8)
-            cart.position = v3(spots[0].x, 0.22, spots[0].y)
-            scene.rootNode.addChildNode(cart)
-            let desk = Looks.current.console(color: teal) ?? Props.console(color: teal)
-            desk.scale = SCNVector3(1.1, 1.1, 1.1)
-            desk.position = v3(spots[1].x, 0.55, spots[1].y)
-            scene.rootNode.addChildNode(desk)
+        add("crates: a stack", height: 1.4) { [self] p in
             for (k, c) in [pink, teal, amber].enumerated() {
                 let box = Looks.current.crate(color: c) ?? Props.crate(color: c)
                 box.scale = SCNVector3(0.85, 0.85, 0.85)
-                box.position = v3(spots[2].x + Double(k) * 0.05, 0.004 + Double(k) * 0.26, spots[2].y - Double(k) * 0.05)
+                box.position = v3(p.x + Double(k) * 0.05, 0.004 + Double(k) * 0.26, p.y - Double(k) * 0.05)
                 scene.rootNode.addChildNode(box)
             }
         }

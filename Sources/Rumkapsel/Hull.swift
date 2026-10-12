@@ -33,7 +33,7 @@ struct StationHull {
             for y in b.min.y...b.max.y where y <= beyond && !pad.contains(Cell(x: x, y: y)) { inside.insert(Cell(x: x, y: y)) }
         }
         var doors = Set<[Int]>()
-        for (deck, padCell) in st.gateDoorway { doors.insert([deck.x, deck.y, padCell.x, padCell.y]) }
+        for (hall, out) in st.padWall { doors.insert([hall.x, hall.y, out.x, out.y]) }
         if let mouth = st.hangarCells.map(\.y).max() {
             for c in st.hangarCells where c.y == mouth { doors.insert([c.x, c.y, c.x, c.y + 1]) }
         }

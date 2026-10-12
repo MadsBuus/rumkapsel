@@ -8,7 +8,7 @@
 // check agrees, and the invariant checker found nothing.
 //
 //     --scenarios              every scenario
-//     --scenarios pallet       only the ones whose name contains "pallet"
+//     --scenarios staging      only the ones whose name contains "staging"
 //     --scenarios-verbose      print each scenario's whole log
 //
 // Exits non-zero if anything failed. Every wait is in station seconds: "press, wait 40, judge".
@@ -114,20 +114,6 @@ struct Expect {
     static func rocket(_ stage: Command.RocketStage, _ repo: String) -> Expect {
         command("rocket \(stage) \(repo)", by: "rocket") {
             if case .rocket(let s, _, let r) = $0 { return s.rank == stage.rank && r == repo }; return false
-        }
-    }
-    static func dispatch(_ repo: String) -> Expect {
-        command("dispatch \(repo)") { if case .dispatch(_, let r, _) = $0 { return r == repo }; return false }
-    }
-    static func loadPallet(_ repo: String) -> Expect {
-        command("loadPallet \(repo)") { if case .loadPallet(_, let r) = $0 { return r == repo }; return false }
-    }
-    static func pushPallet(_ repo: String) -> Expect {
-        command("pushPallet \(repo)") { if case .pushPallet(_, let r) = $0 { return r == repo }; return false }
-    }
-    static func unloadPallet(_ repo: String, back: Bool) -> Expect {
-        command("unloadPallet \(repo)\(back ? " back" : "")") {
-            if case .unloadPallet(_, let r, let b) = $0 { return r == repo && b == back }; return false
         }
     }
     static func stow(by who: String) -> Expect {
@@ -236,37 +222,32 @@ enum Scenarios {
             return left.isEmpty ? nil : "crates left on the bay floor: \(left.sorted().joined(separator: ", "))"
         }),
 
-        Scenario("staging release opens, merges: the pallet crosses", [
+        Scenario("staging release opens, merges: the crates are carried to the staged rows", [
             ("Target: web#455", 4.8),
             ("Release: Staging opens", 80),
             ("Release: Staging merges", 4.8),
         ], tail: 160, expects: [
             .stagingOpened("web"),
-            .dispatch("web"),
-            .loadPallet("web"),
             .stagingMerged("web"),
-            .pushPallet("web"),
-            .unloadPallet("web", back: false),
+            .carry(to: .deck),
         ], floor: { sim in
             Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
-        Scenario("staging release closes: the pallet unloads back", [
+        Scenario("staging release closes: the crates stay in storage", [
             ("Target: web#455", 4.8),
             ("Release: Staging opens", 80),
             ("Release: Staging closes", 4.8),
         ], tail: 160, expects: [
             .stagingOpened("web"),
-            .loadPallet("web"),
             .stagingClosed("web"),
-            .unloadPallet("web", back: true),
         ], floor: { sim in
             // Two web crates stood on the deck from the start, one untested and one approved; nothing new
             // may have joined them.
             let deck = Scenario.crates(sim, "deck", "web")
             if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
             let storage = Scenario.crates(sim, "storage", "web")
-            return storage >= 2 ? nil : "only \(storage) web crates back in storage"
+            return storage >= 2 ? nil : "only \(storage) web crates in storage"
         }),
 
         Scenario("a repository whose merges deploy: the merged crate goes straight up in a rocket of its own", [
@@ -640,7 +621,7 @@ final class ScenarioRunner {
                 }
             }
             for r in sim.station.simulation.rockets.values {
-                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · assigned \(r.assigned.count), pending \(r.pending.count), aboard \(sim.station.world.aboard(station: r.station, repo: r.repo))")
+                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · vortex \(sim.station.simulation.vortices[r.key] != nil), aboard \(sim.station.world.aboard(station: r.station, repo: r.repo))")
             }
             // Every body at the end, for the failures the records do not explain.
             for m in sim.station.minions.values.sorted(by: { $0.home.name < $1.home.name }) {

@@ -55,11 +55,13 @@ extension Simulation {
     }
 
     /// Standing over the slot: the level it goes onto decides the posture, the set-down the clock, and
-    /// the scene draws the arc onto the spot from here.
-    func startSetDown(_ m: B, on spot: Spot) {
-        m.handsAt = spot.level
+    /// the scene draws the arc onto the spot from here. A slot on the row behind the near one takes a toss
+    /// from the aisle, arms up, and the crate drifts over.
+    func startSetDown(_ m: B, on spot: Spot, far: Bool = false) {
+        m.floating = far
+        m.handsAt = far ? 2 : spot.level
         m.settingDownOn = spot
-        m.phaseUntil = clock + Hands.setDownSeconds
+        m.phaseUntil = clock + (far ? Hands.tossSeconds : Hands.setDownSeconds)
     }
 
     /// A body leaves the station: what it held goes down where it stands, and its carries wait for
@@ -74,17 +76,14 @@ extension Simulation {
     // MARK: carries
 
     /// Takes a carry command. The crate is spoken for from here on, so nothing else is told to move it
-    /// and the yard layout leaves its spot alone. False when the yard has no place for it. A crate standing
-    /// outside is a drone's to move and never goes back through the lock on its way.
+    /// and the yard layout leaves its spot alone. False when the yard has no place for it.
     @discardableResult
-    func carry(_ command: Command, roomKey: String = "", pastLock: Bool = false, onDone: @escaping () -> Void) -> Bool {
-        guard let crate = command.crate, case .carry(_, let from, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
+    func carry(_ command: Command, roomKey: String = "", onDone: @escaping () -> Void) -> Bool {
+        guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        let outside = station.isOutside(from)
-        guard let aim = world.slotNow(for: crate, toward: yard, pastLock: pastLock || outside) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim,
-                                  pastLock: pastLock || outside, byDrone: outside, postedAt: clock)
+        guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, postedAt: clock)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
@@ -118,15 +117,6 @@ extension Simulation {
     /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
     func cancelCarry(_ id: Int, backTo from: Spot) {
         guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
-        if let who = job.carrier, drone(holding: crate)?.id == who {
-            // In a drone's grip: the same carry, aimed back, and the drone takes it there, through the lock if
-            // where it came from is indoors.
-            cargo[id]?.command = job.command.aimed(at: yard)
-            cargo[id]?.aim = from
-            world.unorder(crate)
-            onEvent(.log("\(crate.words): back where it was, the board changed its mind"))
-            return
-        }
         if let who = job.carrier, let m = bodies[who], m.load == .crate(crate) {
             // The same carry, aimed back: the crate on the arms goes where it came from.
             let back = job.command.aimed(at: yard)
@@ -287,11 +277,10 @@ extension Simulation {
             case .walk:
                 advance(m); return .spent
             case .approach:
-                // Stand an arm's length from the crate, facing it, before taking hold: off the lock's tray from in
-                // front of its door.
-                guard atArmsLength(m, of: boxAt, from: from.area == .lock ? station.lock.map { -$0.inward } : nil, dt: dt) else { return .spent }
+                // Stand an arm's length from the crate, facing it, before taking hold.
+                guard atArmsLength(m, of: boxAt, dt: dt) else { return .spent }
                 advance(m)
-                startLift(m, height: from.pos.y)
+                startLift(m, height: from.pos.y, far: tossFrom(station, to: from.cell) != nil)
                 return .spent
             case .lift:
                 // Take hold at the crate's own height, bring it up and over the head.
@@ -316,8 +305,8 @@ extension Simulation {
                 let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
                     // A step back from the spot so the crate goes down in front, not underfoot.
-                    guard atArmsLength(m, of: spot, from: to.area == .lock ? station.lock.map { -$0.inward } : nil, dt: dt) else { return .spent }
-                    startSetDown(m, on: to)
+                    guard atArmsLength(m, of: spot, dt: dt) else { return .spent }
+                    startSetDown(m, on: to, far: tossFrom(station, to: to.cell) != nil)
                     return .spent
                 }
                 let toSpot = spot - m.pos
@@ -325,20 +314,6 @@ extension Simulation {
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
                 world.setDown(crate, at: to)
-                if to.area == .lock, let lock = station.lock {
-                    // On the lock's tray: the minion's part is done. The lock takes the crate through on its own, and
-                    // the same order waits on the far tray for a drone, so whatever was counting on it still is.
-                    lockReceived(crate)
-                    let outer = lockEnd(station, lock, outer: true, crate: crate)
-                    cargo[id]?.command = job.command.from(outer)
-                    cargo[id]?.carrier = nil
-                    cargo[id]?.inLock = true
-                    cargo[id]?.pastLock = true
-                    cargo[id]?.byDrone = true
-                    reaim(id)
-                    finish(m)
-                    return .spent
-                }
                 cargo[id] = nil
                 cue(.landed(job))
                 finish(m)

@@ -266,10 +266,6 @@ final class RocketJob {
     var kickWay: SIMD2<Double>?
     var lift = 0.0
     enum Kick: Equatable { case none, coming, docked, going }
-    /// When its pod went out through the lock to it, for a rocket that loads from the deck; the climb waits
-    /// for the pod to be aboard.
-    var podOutAt: Double?
-    static let podSeconds = 4.6
     /// How much cargo waits for it, for the size the scene draws it at while standing by.
     var cargo = 0
     /// The tip's hull, panel by panel. Whole, unless the tip is new and being built while its staging
@@ -285,13 +281,6 @@ final class RocketJob {
     var seam = 0
     /// Whether the staging deploy was running last frame, so a new one is seen to start.
     var deployRunning = false
-    /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
-    /// them have been set down on the pad and not one moment before: a rocket never launches empty.
-    var assigned: Set<String> = []
-    /// The carries ordered aboard that have not set their crate down yet, by command id.
-    var pending: Set<Int> = []
-    /// Carries ordered aboard and called off when the release lost its clearance: they set nothing down here.
-    var calledOff: Set<Int> = []
 
     init(station: String, repo: String, command: Command) {
         self.station = station; self.repo = repo; self.command = command
@@ -505,14 +494,8 @@ extension Simulation {
             // otherwise would be the floor telling you something the release will not honour. Once it is
             // climbing nothing changes what went up.
             if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested; r.tall = tall }
-            // Not cleared any more before it lit: loading or steaming, it stands by again, and the carries it
-            // ordered aboard are called off. The rows already took back what it held.
+            // Not cleared any more before it lit: it stands by again. Its crates never left the rows.
             if stage == .standBy, (1...2).contains(r.stage.rank) {
-                for id in r.pending {
-                    guard let job = self.cargo[id], case .carry(_, let from, _) = job.command.kind else { continue }
-                    r.calledOff.insert(id)
-                    cancelCarry(id, backTo: from)
-                }
                 take(r, command)
                 return
             }
@@ -525,7 +508,7 @@ extension Simulation {
         // Standing tall when it is first seen: the stage was put under it before anyone was looking.
         if tall { r.kick = .docked; r.lift = 1 }
         // New while its release is on its way to staging: the tip is built as the deploy runs.
-        if let p = pallets[station], p.repo == repo, p.deploy != .live, world.truth.pallets[station]?.state != .unloading {
+        if let b = staging[key], b.deploy != .live {
             r.panels = 0
             r.welded = 0
             r.fresh = true
@@ -547,8 +530,6 @@ extension Simulation {
     private func take(_ r: RocketJob, _ command: Command) {
         r.command = command
         r.phase = 0
-        r.assigned = []   // a new stage orders its own cargo; what is already aboard stays aboard
-        r.pending = []
         // Nothing left to load: everything is aboard already, and the rocket goes straight on to steam.
         var empty = false
         if case .rocket(.load(0), _, _) = command.kind { empty = true }
@@ -575,29 +556,17 @@ extension Simulation {
     /// One pass over every rocket: loading watches station truth, the climb watches the clock.
     func stepRockets() {
         for r in Array(rockets.values) {
-            // Loaded and waiting is not finished loading. A production release stays open while staging
-            // keeps moving, and work merged there after the rocket filled up rides the same release, so
-            // the doors stay open until it lights.
-            if r.stage.rank == 2, world.productionOpen(station: r.station, repo: r.repo) { loadCrates(r) }
             switch r.phaseKind {
             case .load:
-                loadCrates(r)
-                // Its cargo waits in its pod on the deck: cleared, the pod is sealed and the rocket goes straight to
-                // waiting; launching, the pod goes out to it whole, and the climb waits until it is aboard.
-                if shipsInPod(r) {
-                    if !r.isLaunching { advanceRocket(r); continue }
-                    if let at = r.podOutAt, clock - at < RocketJob.podSeconds { continue }
+                // Not merged yet: the rows keep the release where everyone can see what ships, and the rocket
+                // waits. Merged: the drones' vortex pulls it out, and the climb follows the last crate in.
+                guard r.isLaunching else { advanceRocket(r); continue }
+                if let v = vortices[r.key] {
+                    if v.closedAt != nil { advanceRocket(r) }
+                    continue
                 }
-                // A rocket never launches empty. The load is over when every crate this rocket was
-                // given a carry for stands on the pad, and nothing of the repository is left on the
-                // rows or on anyone's arms. A release with no cargo at all — nothing was ever
-                // assigned — goes as soon as the rows are clear.
-                // Unnumbered crates of a repository share one truth key, so the count aboard can
-                // read short of what is really on the pad: the carries themselves are the second,
-                // exact witness, and both have to agree before the rocket may go.
-                let short = r.assigned.count - world.aboard(station: r.station, repo: r.repo)
-                guard padClear(r), r.pending.isEmpty, short <= 0 else { continue }
-                advanceRocket(r)
+                loadCrates(r)
+                if vortices[r.key] == nil { advanceRocket(r) }   // nothing to pull out: it goes at once
             case .climb:
                 if clock >= r.until {
                     rockets[r.key] = nil
@@ -626,23 +595,8 @@ extension Simulation {
     /// Which row a rocket loads from: the deck when releases go through staging, storage otherwise.
     private func loadSource(_ r: RocketJob) -> String { world.stagingIsDeck(station: r.station, repo: r.repo) ? "deck" : "storage" }
 
-    /// Whether a rocket's cargo waits for it in a pod on the deck: everything that goes through staging.
-    func shipsInPod(_ r: RocketJob) -> Bool { loadSource(r) == "deck" }
-
-    /// Whether a repository's pod on the deck is sealed: everything it would ship is tested.
-    func podSealed(station: String, repo: String) -> Bool {
-        guard let r = rockets[station + "|" + repo], shipsInPod(r) else { return false }
-        return (1...2).contains(r.stage.rank) || (r.isLaunching && r.podOutAt == nil)
-    }
-
-    private func padClear(_ r: RocketJob) -> Bool {
-        let yard: Yard = loadSource(r) == "deck" ? .deck : .storage
-        let left = fleet.stations[r.station]?.ledger.crates(of: r.repo).contains { $0.placed == yard } ?? false
-        return !left && world.carriedCount(station: r.station, repo: r.repo) == 0
-    }
-
-    /// Hands out a carry for every crate of the repository still standing on its row. A crate already
-    /// spoken for is off the floor, so this can run every pass without doubling up.
+    /// Opens the vortex for every crate of the repository still standing on its rows: the cleared rows, or
+    /// storage for a repository with no staging.
     private func loadCrates(_ r: RocketJob) {
         guard let station = fleet.stations[r.station] else { return }
         let source = loadSource(r)
@@ -655,37 +609,8 @@ extension Simulation {
         var launching = false   // asked of the record: a crate aboard is off the rows before the rocket goes
         if case .rocket(.launch, _, _) = r.command.kind { launching = world.works.records(repo: repo).contains { r in r.stage.map { $0 >= .shipped } ?? false } }
         let numbers = launching ? standing.filter { shipped($0) ?? true } : standing
-        guard !numbers.isEmpty else { return }
-        if source == "deck" {
-            // In its pod until launch; launching, the pod goes out through the lock whole, every crate in it aboard
-            // from that moment.
-            guard r.isLaunching, r.podOutAt == nil else { return }
-            var crates: [CrateRef] = []
-            for n in numbers {
-                world.landed(station: station, repo: repo, number: n, in: .pad, at: now)
-                r.assigned.insert(CrateRef(station: station.name, repo: repo, number: n).key)
-                crates.append(CrateRef(station: station.name, repo: repo, number: n))
-            }
-            r.podOutAt = clock
-            cue(.podOut(key: r.key, crates: crates))
-            fleet.save()
-            return
-        }
-        for command in world.carryToPad(station: station, repo: repo, from: source, numbers: numbers) {
-            guard let crate = command.crate else { continue }
-            let id = command.id
-            let carried = carry(command) { [weak self, weak r] in
-                guard let self, r?.calledOff.remove(id) == nil else { return }
-                r?.pending.remove(id)
-                // Aboard by hand: the rows may not draw it again until the board says it has shipped.
-                world.landed(station: station, repo: repo, number: crate.number, in: .pad, at: now)
-                cue(.intoHold(key: r?.key ?? "", command: id))
-                fleet.save()
-            }
-            guard carried else { world.unorder(crate); continue }
-            r.assigned.insert(crate.key)   // ordered aboard: the launch waits for it
-            r.pending.insert(id)
-        }
+        guard !numbers.isEmpty, r.isLaunching else { return }
+        openVortex(r, station: station, from: source, crates: numbers)
     }
 
     /// Pads whose release is gone lose their rocket; one standing by is sized to the pile.

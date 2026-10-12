@@ -117,7 +117,7 @@ enum Routines {
     /// That is the whole point of it. Props used to be switched on where an activity began and
     /// switched off where that activity was thought to end — and an activity has more ways to end
     /// than the one that was thought of, so the leftovers were worn into the next one: the bath's
-    /// pixels over an office desk, a towel long after the drying, the pallet's rod at a console.
+    /// pixels over an office desk, a towel long after the drying.
     /// Nothing is carried over now, because nothing persists: the kit is worked out again from what
     /// the body is doing on every frame, and there is nothing left to forget to take off.
     struct Outfit: Equatable {
@@ -131,31 +131,18 @@ enum Routines {
         var jetpack: Double?
     }
 
-    /// The kit for what this body is doing now. `pallet` is what the station's hover pallet is up
-    /// to, which only the simulation can say; everything else the body knows for itself.
-    static func outfit(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Outfit {
+    /// The kit for what this body is doing now: everything the body knows for itself.
+    static func outfit(_ m: Minion, at clock: Double) -> Outfit {
         var kit = Outfit()
         kit.pixels = m.bathing && m.phaseKind == .act && m.path.isEmpty
         kit.towel = m.drying
-        kit.tool = hands(m, at: clock, pallet: pallet)
+        kit.tool = hands(m, at: clock)
         return kit
     }
 
-    /// What the hands hold, in the order the floor settles it: the errand's own step first, then
-    /// the cone's rota, then a fixture, then the day's work, then a book on the couch, and nothing
-    /// otherwise.
-    ///
-    /// The errand is a chain of steps, and each step holds what that step needs rather than what
-    /// the errand as a whole is for: walking to the terminal and working it is a tablet, and the
-    /// wand only comes out once there is a pallet standing there to load.
-    private static func hands(_ m: Minion, at clock: Double, pallet: (repo: String, pushing: Bool)?) -> Minion.Tool? {
-        switch m.current?.kind {
-        // Out when it is there and at it, away the moment it leaves.
-        case .dispatch: return m.phaseKind == .act ? .tablet : nil
-        case .loadPallet, .unloadPallet: return m.phaseKind == .act ? .telekinesis : nil
-        case .pushPallet: return pallet?.pushing == true ? .hands : nil
-        default: break
-        }
+    /// What the hands hold, in the order the floor settles it: the cone's rota, then a fixture, then
+    /// the day's work, then a book on the couch, and nothing otherwise.
+    private static func hands(_ m: Minion, at clock: Double) -> Minion.Tool? {
         let resting = m.path.isEmpty && m.state == .settled
         let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             && !m.exercising && !m.bathing && !m.onJob
@@ -197,6 +184,19 @@ enum Routines {
         }
         return [MotionLeg(to: via, seconds: Hands.setDownFirst),
                 MotionLeg(to: target, seconds: Hands.setDownSecond, ease: level == 0 ? .easeIn : .easeOut)]
+    }
+
+    /// A crate drifting over the near row in the yard's low gravity, between the hands held up and its slot on
+    /// the row behind: up, a slow arc well clear of the stacks in between, and down. `from` and `to` in the
+    /// body's own space; a toss first raises it overhead.
+    static func floatLegs(from: SIMD3<Double>, to: SIMD3<Double>, headHeight: Double, toss: Bool) -> [MotionLeg] {
+        let overhead = SIMD3(0, headHeight + 0.25, 0.1)
+        let start = toss ? overhead : from
+        let end = toss ? to : SIMD3(0, headHeight + 0.14, 0)
+        let apex = SIMD3((start.x + end.x) / 2, max(start.y, end.y, 1.0) + 0.45, (start.z + end.z) / 2)
+        let drift = [MotionLeg(to: apex, seconds: Hands.floatSeconds * 0.5, ease: .easeOut),
+                     MotionLeg(to: end, seconds: Hands.floatSeconds * 0.5, ease: .easeInOut)]
+        return toss ? [MotionLeg(to: overhead, seconds: Hands.setDownFirst, ease: .easeOut)] + drift : drift
     }
 
     /// How a body is held over a crate at a level, as `Body.Posture` names it.

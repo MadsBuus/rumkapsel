@@ -284,8 +284,8 @@ extension StationController {
 
     /// Takes a carry command and the crate it moves. The simulation speaks for the crate from here on;
     /// the node is what the scene lifts when the carrier's body says the crate is on its arms.
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", pastLock: Bool = false, onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, pastLock: pastLock, onDone: onDone) else { return }
+    func carry(_ command: Command, node: SCNNode, roomKey: String = "", onDone: @escaping () -> Void) {
+        guard simulation.carry(command, roomKey: roomKey, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
     }
@@ -313,7 +313,6 @@ extension StationController {
             world.unorder(crate)
             world.landed(station: station, repo: repo, number: number, in: .storage, at: now)
             rebuildMarkers(); refreshRockets()
-            simulation.palletLatecomer(station: station, repo: repo, number: number)
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
             return
         }
@@ -325,7 +324,6 @@ extension StationController {
             // Down in storage it is a crate: the rows draw it at a crate's size, and it grows into that over a beat.
             if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
             refreshRockets()
-            simulation.palletLatecomer(station: station, repo: repo, number: number)
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }
     }
@@ -348,7 +346,6 @@ extension StationController {
             pkg.removeFromParentNode()
             rebuildMarkers()
             refreshRockets()
-            simulation.palletLatecomer(station: station, repo: repo, number: number)
             // Every merge ships: the crate goes up at once, in a rocket of its own.
             if world.shipsOnMerge(station: station.name, repo: repo) { simulation.launchOnMerge(station: station, repo: repo) }
         }

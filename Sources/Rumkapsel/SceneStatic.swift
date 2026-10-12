@@ -16,8 +16,7 @@ extension StationController {
         for c in station.coreCells { m[c] = "corridor" }
         for c in station.deconCells { m[c] = "kind:decon" }
         for c in station.padCells { m[c] = "kind:pad" }
-        if world.deckInUse(station: station.name) { for c in station.deckCells { m[c] = "kind:deck" } }
-        for c in station.storageCells { m[c] = "kind:storage" }
+        for c in station.hallCells { m[c] = "kind:hall" }
         for c in station.airlockCells { m[c] = "kind:airlock" }
         for c in station.hangarCells { m[c] = "kind:hangar" }
         owners[station.name] = m
@@ -331,7 +330,7 @@ extension StationController {
             }
             if station.hasHangar, input == nil { buildHangar(station) }
             for c in station.padCells where output == nil {
-                addTile(station: station, cell: c, owner: "kind:pad", color: NSColor(rgb: (0.24, 0.26, 0.32)), name: "pad:" + station.name)
+                addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name)
             }
             // The pad's east edge, where the pad gives onto open space: the same hull as round the bay, turned a
             // quarter so it leans east, away from the pad and over the station.
@@ -344,19 +343,20 @@ extension StationController {
                 hull.name = "hull:" + station.name
                 staticRoot.addChildNode(hull)
             }
-            for c in station.storageCells where output == nil {
-                addTile(station: station, cell: c, owner: "kind:storage", color: NSColor(rgb: (0.20, 0.22, 0.30)), name: "storage:" + station.name)
-            }
-            if output == nil, world.deckInUse(station: station.name) {
-                for c in station.deckCells {
-                    addTile(station: station, cell: c, owner: "kind:deck", color: NSColor(rgb: (0.22, 0.27, 0.30)), name: "deck:" + station.name)
+            if output == nil {
+                // One room, its zones told apart by the floor: storage darker, the lab light, the walk between.
+                let lab = world.deckInUse(station: station.name)
+                let storage = Set(station.storageCells), deck = Set(station.deckCells)
+                for c in station.hallCells {
+                    let color = storage.contains(c) || (!lab && deck.contains(c)) ? Palette.storageFloor : deck.contains(c) ? Palette.labFloor : Palette.walkFloor
+                    addTile(station: station, cell: c, owner: "kind:hall", color: color, name: (deck.contains(c) && lab ? "deck:" : "storage:") + station.name)
                 }
             }
             if station.hasPad {
                 // Decon: a darker floor at the back of storage, and the hatch in the back wall that
                 // everything from outside comes through, with its light over it.
                 for c in station.deconCells where output == nil {
-                    addTile(station: station, cell: c, owner: "kind:decon", color: NSColor(rgb: (0.17, 0.24, 0.24)), name: "decon:" + station.name)
+                    addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name)
                 }
                 let (hp, facing) = station.deconHatch
                 let hatch = SCNNode()
@@ -375,17 +375,7 @@ extension StationController {
                 hatch.name = "decon:" + station.name
                 staticRoot.addChildNode(hatch)
             }
-            if station.hasPad, !station.storageCells.isEmpty {
-                // The storage console: a small panel on the wall by the doorway, where a pallet is ordered.
-                let (cell, facing) = station.storageConsole
-                let console = Looks.current.console(color: NSColor(rgb: (0.4, 0.72, 0.9))) ?? Props.console(color: NSColor(rgb: (0.4, 0.72, 0.9)))
-                console.position = v3(station.offset.x + Double(cell.x) + facing.x * 0.46, 0.5, station.offset.y + Double(cell.y) + facing.y * 0.46)
-                console.eulerAngles.y = atan2(-facing.x, -facing.y)   // hung on the wall, face turned into the room
-                console.name = "storage:" + station.name
-                staticRoot.addChildNode(console)
-                consolePanels[station.name] = console.childNode(withName: "panel", recursively: false)
-            }
-            buildGate(station)
+            buildPadWall(station)
             for prop in Looks.current.dress(station: station) {
                 prop.position.x += station.offset.x; prop.position.z += station.offset.y
                 prop.name = "station:" + station.name
@@ -606,18 +596,19 @@ extension StationController {
         for station in fleet.stations.values {
             let ox = station.offset.x, oz = station.offset.y
             if station.hasPad {
+                // Each zone's word on the walkway beside it, reading toward the pad: the crates never stand on it.
+                var zones: [(String, [Cell])] = [(Words.current.zoneWaiting, station.storageCells)]
                 if world.deckInUse(station: station.name) {
-                    let deckLabel = floorSign(Words.current.deck, color: NSColor(rgb: (0.42, 0.52, 0.58)), size: 0.24)
-                    deckLabel.node.position.y = 0.012
-                    let dc = station.deckCells
-                    let dcorner = SIMD2(Double(dc.map(\.x).max()!) + 0.42 - deckLabel.width / 2, Double(dc.map(\.y).max()!) + 0.42 - deckLabel.height / 2)
-                    add(deckLabel.node, yaw: 0, center: dcorner + SIMD2(ox, oz))
+                    zones += [(Words.current.zoneTesting, station.stagedCells), (Words.current.zoneCleared, station.clearedCells)]
                 }
-                let storeLabel = floorSign(Words.current.storage, color: NSColor(rgb: (0.40, 0.44, 0.56)), size: 0.24)
-                storeLabel.node.position.y = 0.012
-                let sc = station.storageCells
-                let scorner = SIMD2(Double(sc.map(\.x).max()!) + 0.42 - storeLabel.width / 2, Double(sc.map(\.y).max()!) + 0.42 - storeLabel.height / 2)
-                add(storeLabel.node, yaw: 0, center: scorner + SIMD2(ox, oz))
+                if let walkway = station.walkwayCells.first?.x {
+                    for (word, cells) in zones where !cells.isEmpty {
+                        let label = floorSign(word, color: NSColor(rgb: (0.62, 0.66, 0.76)), size: 0.22)
+                        label.node.position.y = 0.012
+                        let middle = Double(cells.map(\.y).reduce(0, +)) / Double(cells.count)
+                        add(label.node, yaw: .pi / 2, center: SIMD2(Double(walkway), middle) + SIMD2(ox, oz))
+                    }
+                }
                 let deconLabel = floorSign(Words.current.decon, color: NSColor(rgb: (0.36, 0.52, 0.48)), size: 0.22)
                 deconLabel.node.position.y = 0.012
                 let qc = station.deconCells
@@ -641,8 +632,8 @@ extension StationController {
                 }
             }
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.airlockCells.contains(c) || station.padCells.contains(c) || station.storageCells.contains(c)
-                    || station.deckCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.airlockCells.contains(c) || station.padCells.contains(c)
+                    || station.hallCells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
             func collides(_ lo: SIMD2<Double>, _ hi: SIMD2<Double>) -> Bool {

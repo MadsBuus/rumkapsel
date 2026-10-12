@@ -1124,31 +1124,6 @@ struct KingdomLook: Look {
         return n
     }
 
-    /// The pallet is ordered at a writing lectern with a ledger open on it, not a lit panel.
-    func console(color: NSColor) -> SCNNode? {
-        let n = SCNNode()
-        let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.5, length: 0.08, chamferRadius: 0))
-        post.geometry!.firstMaterial = lit(Self.wood)
-        post.position = v3(0, -0.25, 0)
-        n.addChildNode(post)
-        let desk = SCNNode(geometry: SCNBox(width: 0.34, height: 0.05, length: 0.26, chamferRadius: 0.01))
-        desk.geometry!.firstMaterial = lit(Self.wood.lighter(0.1))
-        desk.eulerAngles.x = -0.5
-        n.addChildNode(desk)
-        let book = SCNNode(geometry: SCNBox(width: 0.24, height: 0.035, length: 0.18, chamferRadius: 0))
-        book.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.9, 0.82)))
-        book.eulerAngles.x = -0.5
-        book.position = v3(0, 0.05, 0.02)
-        book.name = "panel"
-        n.addChildNode(book)
-        let quill = SCNNode(geometry: SCNBox(width: 0.02, height: 0.22, length: 0.02, chamferRadius: 0))
-        quill.geometry!.firstMaterial = lit(NSColor(rgb: (0.95, 0.95, 0.92)))
-        quill.eulerAngles.z = 0.4
-        quill.position = v3(0.14, 0.11, 0.02)
-        n.addChildNode(quill)
-        return n
-    }
-
     /// A crate of work as a bound chest: boards, iron straps and a lid painted in the house's colour. No
     /// lamps on it — a castle has none to put there.
     func crate(color: NSColor) -> SCNNode? {
@@ -1171,37 +1146,6 @@ struct KingdomLook: Look {
         lock.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.62, 0.3)))
         lock.position = v3(0, 0.19, 0.18)
         n.addChildNode(lock)
-        return n
-    }
-
-    /// The handcart the goods ride on: a plank bed on two wheels with a pair of shafts, in the house's
-    /// colour. Its bed stands where the classic pallet's does, so the crates set into it still land right.
-    func pallet(color: NSColor) -> SCNNode? {
-        let n = SCNNode()
-        let bed = SCNNode(geometry: SCNBox(width: Props.palletWidth, height: 0.05, length: Props.palletDepth, chamferRadius: 0.01))
-        bed.geometry!.firstMaterial = lit(Self.planks)
-        n.addChildNode(bed)
-        let frame = SCNNode(geometry: SCNBox(width: Props.palletWidth - 0.12, height: 0.06, length: Props.palletDepth - 0.12, chamferRadius: 0))
-        frame.geometry!.firstMaterial = lit(Self.wood)
-        frame.position = v3(0, -0.05, 0)
-        n.addChildNode(frame)
-        for side in [-1.0, 1.0] {
-            let rail = SCNNode(geometry: SCNBox(width: Props.palletWidth, height: 0.05, length: 0.05, chamferRadius: 0))
-            rail.geometry!.firstMaterial = lit(color.mixed(with: Self.wood, 0.45))
-            rail.position = v3(0, 0.04, side * (Props.palletDepth / 2 - 0.02))
-            n.addChildNode(rail)
-            let wheel = SCNNode(geometry: faceted(SCNCylinder(radius: 0.17, height: 0.05), 8))
-            wheel.geometry!.firstMaterial = lit(Self.wood.darker(0.2))
-            wheel.eulerAngles.x = .pi / 2
-            wheel.position = v3(0, -0.1, side * (Props.palletDepth / 2 - 0.04))
-            n.addChildNode(wheel)
-        }
-        for side in [-1.0, 1.0] {
-            let shaft = SCNNode(geometry: SCNBox(width: 0.34, height: 0.035, length: 0.035, chamferRadius: 0))
-            shaft.geometry!.firstMaterial = lit(Self.wood)
-            shaft.position = v3(Props.palletWidth / 2 + 0.15, -0.02, side * 0.12)
-            n.addChildNode(shaft)
-        }
         return n
     }
 

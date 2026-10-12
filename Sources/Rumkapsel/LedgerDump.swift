@@ -40,9 +40,7 @@ extension StationController {
                     let pipeline = github.pipeline(repoRoot: root)
                     let launching = github.hasPendingLaunch(repoRoot: root)
                         || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
-                    let held = world.truth.pallets[station.name]?.repo == name
-                        || world.truth.palletQueue[station.name]?.contains(where: { $0.repo == name }) == true
-                    say("    rules: shipsOnMerge \(pipeline.shipsOnMerge) · launching \(launching) · pallet holds it \(held)")
+                    say("    rules: shipsOnMerge \(pipeline.shipsOnMerge) · launching \(launching)")
                 }
                 let crates = station.ledger.crates(of: name)
                 if crates.isEmpty { say("    ledger: empty"); continue }

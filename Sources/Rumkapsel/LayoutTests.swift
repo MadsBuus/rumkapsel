@@ -204,9 +204,12 @@ enum LayoutTests {
             expect(order.allSatisfy { kept.rooms[$0]?.cells == before.rooms[$0]?.cells }, "and without a relayout every office keeps its cells")
         }
 
-        test("Classic's pad stands right north of the deck, as it always has") {
+        test("Classic's pad stands right beyond the hall's field, the whole width of it") {
             let a = fresh()
-            expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
+            let top = a.hallCells.map(\.y).min()!
+            let field = Set(a.hallCells.filter { $0.y == top }.map { Cell(x: $0.x, y: top - 1) })
+            expect(field.isSubset(of: Set(a.padCells)), "the pad runs along the field: \(cells(a.padCells))")
+            expect(a.padCells.allSatisfy { $0.y < top }, "the pad is all beyond the glass")
         }
 
         test("the hull is over everything but the pad, the bay's hangar included, meets the floor where its pieces stand, and lets you through its doorways") {
@@ -215,9 +218,9 @@ enum LayoutTests {
             let hull = StationHull(a)
             let out = a.padCells.filter { hull.inside.contains($0) }
             expect(out.isEmpty, "the pad is under open space: \(cells(out))")
-            let indoors = a.storageCells + a.deckCells + a.deconCells + a.airlockCells + a.coreCells + a.hangarCells
+            let indoors = a.hallCells + a.deconCells + a.airlockCells + a.coreCells + a.hangarCells
             let missed = indoors.filter { !hull.inside.contains($0) }
-            expect(missed.isEmpty, "storage, the deck, decon, the passage, the bay and the hallway are indoors: \(cells(missed))")
+            expect(missed.isEmpty, "the hall, decon, the passage, the bay and the hallway are indoors: \(cells(missed))")
             // Where the station's view draws its pieces: across the bay's mouth, and along the pad's east side.
             for c in a.hangarCells where c.y == a.hangarCells.map(\.y).max() {
                 let foot = SIMD2(Double(c.x), Double(c.y) + 0.5)
@@ -227,10 +230,10 @@ enum LayoutTests {
                 let foot = SIMD2(Double(east) + 0.5, Double(y) + 0.5)
                 expect(hull.reach(foot).distance < 0.01, "the hull meets the floor along the pad's east side")
             }
-            for (deck, pad) in a.gateDoorway {
-                let through = (SIMD2(Double(deck.x), Double(deck.y)) + SIMD2(Double(pad.x), Double(pad.y))) / 2
-                let roof = hull.roof(over: through + SIMD2(0, Double(deck.y - pad.y)) * 0.01, top: 0.5) ?? .infinity
-                expect(roof > 0.5, "a body walks through the gate under the hull: roof \(roof)")
+            for (hall, out) in a.padWall {
+                let through = (SIMD2(Double(hall.x), Double(hall.y)) + SIMD2(Double(out.x), Double(out.y))) / 2
+                let roof = hull.roof(over: through + SIMD2(0, Double(hall.y - out.y)) * 0.01, top: 0.5) ?? .infinity
+                expect(roof > 0.5, "the hall's pad wall stands under the hull: roof \(roof)")
             }
             let crown = StationHull.height(atDistance: 99)
             expect(abs(crown - StationHull.section.rise) < 1e-9 && StationHull.height(atDistance: 0) == 0,
@@ -302,29 +305,30 @@ enum LayoutTests {
             }
         }
 
-        test("the yard has room for a pallet: a lane through its doorway, and a body's width of aisle past each end") {
+        test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {
             let a = fresh()
-            let rows = Set(a.storageCells.map(\.y)).sorted()
-            expect(Set(a.storageCells.map(\.x)).count == Station.yardWide && rows.count == 4,
-                   "storage is \(Station.yardWide) wide and four deep: \(cells(a.storageCells))")
-            // The lane is two columns of the crate rows either side of the aisle the pallet floats in.
-            let lane = a.palletLane
-            expect(lane.count == 4, "the lane is four cells: \(cells(Array(lane)))")
-            expect(lane.allSatisfy { a.storageCells.contains($0) }, "all of it storage floor")
-            expect(Set(lane.map(\.y)) == [a.storageNearRow, a.storageAisleRow + 1], "on the rows either side of the aisle")
-            // The doorway to the deck takes the lane and a column either side, so a body can walk past a
-            // pallet standing in it.
-            let gate = Set(a.yardDoorways.filter { a.storageCells.contains($0.0) && a.deckCells.contains($0.1)
-                                                || a.storageCells.contains($0.1) && a.deckCells.contains($0.0) }
-                .flatMap { [$0.0.x, $0.1.x] })
-            expect(Set(a.palletLaneColumns).isSubset(of: gate) && gate.count == Set(a.palletLaneColumns).count + 2,
-                   "the doorway is the lane with a column either side: \(gate.sorted())")
-            // And the aisle it stands in is wide enough to get round: a body needs a third of a tile.
-            let xs = a.storageCells.map { Double($0.x) }
-            let home = Double(a.palletLaneColumns.reduce(0, +)) / 2
-            let past = (xs.max()! + 0.5) - (home + PalletGeometry.width / 2 + 0.2)
-            expect(past >= 0.34 && abs(past - ((home - PalletGeometry.width / 2 - 0.2) - (xs.min()! - 0.5))) < 0.01,
-                   "\(past) of clear aisle at each end of it")
+            expect(a.hallCells.count == Station.hallWide * Station.hallDeep, "the hall is \(Station.hallWide) by \(Station.hallDeep): \(cells(a.hallCells))")
+            for (name, zone) in [("cleared", a.clearedCells), ("staged", a.stagedCells), ("storage", a.storageCells)] {
+                expect(zone.count == 8 && Set(zone).count == 8, "\(name) is eight tiles: \(cells(zone))")
+                expect(zone.allSatisfy(a.hallCells.contains), "\(name) is in the hall")
+                // Every tile is on an aisle, or behind one that is: a carrier reaches it, or tosses to it.
+                let reach = Set(a.aisleCells + a.walkwayCells)
+                for c in zone {
+                    let near = c.neighbours.contains(where: reach.contains)
+                    let behind = c.neighbours.contains { n in zone.contains(n) && n.neighbours.contains(where: reach.contains) }
+                    expect(near || behind, "\(name) tile \(c) is reached from an aisle")
+                }
+            }
+            let zones = Set(a.clearedCells + a.stagedCells + a.storageCells)
+            expect(zones.isDisjoint(with: a.aisleCells) && zones.isDisjoint(with: a.walkwayCells), "nothing stands on the aisles or the walkway")
+            expect(Set(a.hallCells) == zones.union(a.aisleCells).union(a.walkwayCells), "the hall is the zones, the aisles and the walkway")
+            // In from the west arm onto the walkway; the cleared rows by the pad, storage at the back.
+            if let arm = a.plan.west.last {
+                expect(a.walkwayCells.contains(Cell(x: arm.x - 1, y: arm.y)), "the west arm comes onto the walkway")
+            }
+            let top = a.hallCells.map(\.y).min()!, bottom = a.hallCells.map(\.y).max()!
+            expect(a.clearedCells.allSatisfy { $0.y <= top + 1 } && a.storageCells.allSatisfy { $0.y >= bottom - 1 },
+                   "cleared at the pad end, storage at the back")
         }
 
         for theme in Theme.allCases {
@@ -332,7 +336,7 @@ enum LayoutTests {
             test("\(theme.title): forty rooms keep off the yard, and no hallway is dug through it") {
                 let a = fresh()
                 for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
-                let yard = Set(a.padCells + a.deckCells + a.storageCells + a.deconCells)
+                let yard = Set(a.padCells + a.hallCells + a.deconCells)
                 for (k, r) in a.rooms { expect(!r.cells.contains(where: yard.contains), "\(k) keeps off the yard") }
                 expect(yard.isDisjoint(with: a.corridorCells), "the hallway keeps off the yard")
             }
