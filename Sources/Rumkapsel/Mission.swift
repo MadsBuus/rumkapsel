@@ -570,7 +570,7 @@ extension StationController {
         }
         let st = fleet.stations[m.station] ?? fleet.ordered.first
         guard let st else { return .zero }
-        let taken = Set(world.padOrder(station: st).compactMap { world.padSlotOf[$0] })
+        let taken = Set(world.padOrder(station: st).compactMap { world.releases.padSlotOf[$0] })
         let slots = world.padSlots(station: st)
         let free = (0..<slots.count).first { !taken.contains($0) } ?? 0
         let p = padPosition(station: st, slot: free)

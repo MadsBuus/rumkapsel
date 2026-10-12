@@ -129,7 +129,7 @@ extension StationController {
         let pc = slots[slot % slots.count]
         return v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
     }
-    func padSlot(station: Station, key: String) -> Int { world.padSlotOf[key] ?? 0 }
+    func padSlot(station: Station, key: String) -> Int { world.releases.padSlotOf[key] ?? 0 }
 
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
@@ -172,7 +172,7 @@ extension StationController {
                 v.node.name = r.label
                 v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
             }
-            if world.padSlotOf[key] != nil { v.node.position = padPosition(station: st, slot: slot) }
+            if world.releases.padSlotOf[key] != nil { v.node.position = padPosition(station: st, slot: slot) }
         }
     }
 

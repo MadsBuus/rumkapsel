@@ -108,7 +108,7 @@ extension Simulation {
     func launchOnMerge(station: Station, repo: String) {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }
-        world.mergeLaunches.insert(key)
+        world.releases.mergeLaunches.insert(key)
         rocket(station: station.name, repo: repo, label: "rocket:\(world.waitingURL(repo: repo))|\(repo) · deployed on merge", untested: false, tall: true, cargo: 1,
                command: .rocket(.launch, station: station.name, repo: repo))
     }
@@ -129,7 +129,7 @@ extension Simulation {
             loadCrates(r)
         case .climb:
             world.clearPad(station: r.station, repo: r.repo)
-            if world.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
+            if world.releases.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
             cue(.liftOff(key: r.key))
             r.until = clock + 15
             fleet.save()
@@ -153,7 +153,7 @@ extension Simulation {
                 if clock >= r.until {
                     rockets[r.key] = nil
                     cue(.rocketGone(key: r.key))
-                    if world.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
+                    if world.releases.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
                        st.ledger.crates(of: r.repo).contains(where: { $0.placed == .storage }) {
                         launchOnMerge(station: st, repo: r.repo)
                     }
@@ -201,7 +201,7 @@ extension Simulation {
     }
 
     func rocketSpot(station: Station, repo: String) -> SIMD2<Double>? {
-        guard let slot = world.padSlotOf[station.name + "|" + repo], !station.hall.padSlots.isEmpty else { return nil }
+        guard let slot = world.releases.padSlotOf[station.name + "|" + repo], !station.hall.padSlots.isEmpty else { return nil }
         return station.hall.padSlots[slot % station.hall.padSlots.count]
     }
 

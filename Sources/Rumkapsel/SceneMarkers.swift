@@ -376,7 +376,7 @@ extension StationController {
         padRings = [:]
         for station in fleet.stations.values where station.hasPad {
             let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
-                world.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
+                world.releases.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
             })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Hall.padRadius - 0.06, outerRadius: Hall.padRadius, height: 0.008)))
