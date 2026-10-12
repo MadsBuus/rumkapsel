@@ -18,7 +18,7 @@ struct CrateRef: Hashable {
 
 /// Somewhere on the floor a crate can stand, and enough to walk there.
 struct Spot {
-    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, decon, floor, gate }
+    enum Area: String, Codable { case office, bay, storage, deck, tested, pad, decon, floor, lock = "gate" }
     var area: Area
     var station: String
     /// The room key of an office, the repository of a yard row; empty elsewhere.
@@ -39,7 +39,7 @@ struct Spot {
         case .storage: return Words.current.inStorage
         case .deck: return Words.current.theDeck
         case .tested: return Words.current.testedRow
-        case .gate: return Words.current.theGate
+        case .lock: return Words.current.theLock
         case .pad: return Words.current.theRocket
         case .decon: return Words.current.inDecon
         case .floor: return "the floor"
@@ -91,8 +91,6 @@ struct Command {
         case pushPallet(station: String, repo: String)
         /// Floating the crates off again: onto the deck, or back into storage when the release closed.
         case unloadPallet(station: String, repo: String, back: Bool)
-        /// Welding a rocket's tip while its staging deploy runs, at one side of the hull.
-        case weld(station: String, repo: String, side: Int)
     }
 
     enum Bath { case shower, quick }
@@ -183,7 +181,6 @@ struct Command {
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .pushPallet: return [.walk, .approach, .haul]
         case .dispatch, .loadPallet, .unloadPallet: return [.walk, .act]
-        case .weld: return [.walk, .approach, .act]
         case .bath, .exercise, .pack, .stow: return [.walk, .act]   // a visit lasts its whole time; so does packing
         case .rocket(let stage, _, _):
             switch stage {
@@ -199,7 +196,7 @@ struct Command {
     var isJob: Bool {
         switch kind {
         case .carry, .deliverOffice, .leave: return true
-        case .dispatch, .loadPallet, .pushPallet, .unloadPallet, .weld: return true
+        case .dispatch, .loadPallet, .pushPallet, .unloadPallet: return true
         default: return false
         }
     }
@@ -327,9 +324,6 @@ struct Command {
         Command(kind: .pushPallet(station: station, repo: repo), words: "pushing \(Words.current.pallet) to \(Words.current.theDeck)")
     }
 
-    static func weld(station: String, repo: String, side: Int) -> Command {
-        Command(kind: .weld(station: station, repo: repo, side: side), words: "welding \(repo)'s rocket")
-    }
 
     static func unloadPallet(station: String, repo: String, back: Bool) -> Command {
         Command(kind: .unloadPallet(station: station, repo: repo, back: back),

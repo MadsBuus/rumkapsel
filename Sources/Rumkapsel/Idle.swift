@@ -76,8 +76,8 @@ enum IdlePick: Equatable {
 }
 
 /// Where a look round the station may stand: a clear tile out of every doorway, apart from where
-/// others stand and where other roamers are headed; beside the pad when a loaded rocket steams,
-/// where company is fine.
+/// others stand and where other roamers are headed; at the window onto the pad when a loaded rocket
+/// vents, where company is fine.
 enum RoamSpots {
     static func choose(clear: [Cell], taken: [Cell], company: Bool, random: ([Cell]) -> Cell? = { $0.randomElement() }) -> Cell? {
         let apart = clear.filter { c in !taken.contains { abs($0.x - c.x) + abs($0.y - c.y) < 3 } }

@@ -125,20 +125,17 @@ protocol Look {
     func crate(color: NSColor) -> SCNNode?
     /// What stands round a release that is up but not cleared to go, or nil for the classic tape barrier.
     func hold(tall: Bool) -> SCNNode?
-    /// The jetpack a welder flies on, worn on the back of a body `height` tall and `depth` deep, or nil for
+    /// The jetpack a minion flies on, worn on the back of a body `height` tall and `depth` deep, or nil for
     /// the classic one. Its origin sits at the middle of the body's back, facing -z; the scene stretches and
     /// flickers the children named "flame" with the thrust.
     func jetpack(height: Double, depth: Double) -> SCNNode?
     /// The float that carries crates between the store and the deck, or nil for the classic pallet. The
     /// scene sets crates into it by `Props.palletSlot`, so its bed must stay where the classic one's is.
     func pallet(color: NSColor) -> SCNNode?
-    /// The security fence in the doorway from the deck onto the pad, or nil for the classic laser fence.
-    /// It spans `width` along its x, standing on the origin, and leaves `gap` open for the X-ray's tunnel.
-    /// The scene switches off the children named "beam" on the side a checked body passes.
-    func gate(width: Double, gap: ClosedRange<Double>) -> SCNNode?
-    /// The security unit that keeps the gate, or nil for the classic one: facing +z, standing on the
-    /// origin at its hover height; a child named "eye" is lit with each scan.
-    func securityUnit() -> SCNNode?
+    /// A drone that works the pad, or nil for the classic one: its middle at the origin, nose to +z. The scene
+    /// closes the children named "clawL" and "clawR" on a crate, blinks "strobe", shows "torch" while it welds
+    /// and puffs gas from each "nozzle".
+    func padDrone() -> SCNNode?
     /// Whether the station's names are written on its floor. A look that says no carries them itself: the
     /// Kingdom writes an office's on its banner instead.
     var writesOnFloor: Bool { get }
@@ -207,8 +204,7 @@ extension Look {
     func hold(tall: Bool) -> SCNNode? { nil }
     func jetpack(height: Double, depth: Double) -> SCNNode? { nil }
     func pallet(color: NSColor) -> SCNNode? { nil }
-    func gate(width: Double, gap: ClosedRange<Double>) -> SCNNode? { nil }
-    func securityUnit() -> SCNNode? { nil }
+    func padDrone() -> SCNNode? { nil }
     var writesOnFloor: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
     var workSparks: Bool { true }

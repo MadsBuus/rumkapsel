@@ -438,42 +438,30 @@ extension StationController {
                 liftOff(node, repo: String(key.split(separator: "|", maxSplits: 1).last ?? ""))
             }
         case .steam(let key):
-            if let node = rocketViews[key]?.node {
-                addSteam(to: node)
-                // Loaded and ready: the swing arm comes off the hatch and folds back along the tower.
-                node.childNode(withName: "arm", recursively: true)?.runAction(.rotateBy(x: 0, y: .pi / 2, z: 0, duration: 2))
-            }
+            if let node = rocketViews[key]?.node { addSteam(to: node) }
         case .rocketGone(let key):
             rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
         case .intoHold(let key, let command):
-            // Through the hatch into the hold: up off the floor, in toward the hull, shrinking as it
-            // goes, since the rocket is far too small for it. The hatch opens for it and closes after.
+            // Through the hatch into the hold, from the drone holding it there: in toward the hull, shrinking as
+            // it goes, since the rocket is far too small for it. The hatch opens for it and closes after.
             guard let b = cargoNodes[command] else { return }
+            cargoNodes[command] = nil
             let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
             guard let rocket = rocketViews[key]?.node, let hatch = rocket.childNode(withName: "hatch", recursively: true) else {
-                moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z), seconds: 0.3, ease: .easeOut),
-                                    MotionLeg(to: SIMD3(at.x, at.y + 0.22, at.z - 0.45), seconds: 0.6, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
+                moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x - 0.2, at.y, at.z), seconds: 0.5, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
                 return
             }
-            // Up the tower and in through the hatch, shrinking as it goes: the rocket is far too small for it.
-            let base = SIMD3(Double(rocket.position.x), Double(rocket.position.y), Double(rocket.position.z))
-            let towerX = rocket.childNode(withName: "tower", recursively: true).map { Double($0.position.x) } ?? 0.44
-            let hatchAt = SIMD3(Double(hatch.position.x), Double(hatch.position.y), Double(hatch.position.z))
-            let foot = SIMD3(base.x + towerX - 0.1, at.y + 0.1, base.z + 0.02)
-            let top = SIMD3(foot.x, base.y + hatchAt.y - 0.06, foot.z)
-            let door = base + hatchAt
-            // The door opens on the hold's black as the crate reaches it, and closes white behind it.
-            if let door = hatch.childNode(withName: "door", recursively: false) {
-                let shut = door.geometry?.firstMaterial
+            let p = hatch.convertPosition(SCNVector3Zero, to: nil)
+            let door = SIMD3(Double(p.x), Double(p.y), Double(p.z))
+            if let shutter = hatch.childNode(withName: "door", recursively: false) {
+                let shut = shutter.geometry?.firstMaterial
                 let open = flat(NSColor(rgb: (0.04, 0.04, 0.05)))
-                door.runAction(.sequence([.wait(duration: 1.2), .run { $0.geometry?.firstMaterial = open },
-                                          .wait(duration: 0.9), .run { $0.geometry?.firstMaterial = shut }]))
+                shutter.geometry?.firstMaterial = open
+                shutter.runAction(.sequence([.wait(duration: 0.9), .run { $0.geometry?.firstMaterial = shut }]))
             } else {
-                hatch.runAction(.sequence([.wait(duration: 1.3), .scale(to: 0.05, duration: 0.2), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
+                hatch.runAction(.sequence([.scale(to: 0.05, duration: 0.15), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
             }
-            moveCrate(b, legs: [MotionLeg(to: foot, seconds: 0.4, ease: .easeOut, scale: 0.3),
-                                MotionLeg(to: top, seconds: 0.9, ease: .easeInOut, scale: 0.3),
-                                MotionLeg(to: door, seconds: 0.6, ease: .linear, scale: 0.05)]) { b.removeFromParentNode() }
+            moveCrate(b, legs: [MotionLeg(to: SIMD3(door.x, at.y, door.z), seconds: 0.6, ease: .easeIn, scale: 0.05)]) { b.removeFromParentNode() }
         default: break
         }
     }

@@ -198,6 +198,12 @@ enum RocketGeometry {
     static var hullHeight: Double { height * 0.4 }
     /// How high the cradle holds a tip with no lifter under it.
     static let cradleTop = 0.3
+    /// The loading hatch's middle, in the tip's own frame: on the side facing +x, high on the payload section.
+    static var hatchInTip: SIMD3<Double> { SIMD3(apothem + 0.01, 0.12 + height * 0.6, 0) }
+    /// The hatch from the rocket's spot on the pad, with the tip up on the lifter or down on its cradle.
+    static func hatch(lifter: Bool) -> SIMD3<Double> {
+        hatchInTip + SIMD3(0, lifter ? 0 : cradleTop - hullBase, 0)
+    }
     /// How much of the hull one copy of its plating covers, along and up.
     static let platingSpan = 0.7
     /// The way a side of the hull faces, on the station's own axes: side 0 faces +x, where the hatch is.
@@ -225,14 +231,6 @@ enum RocketGeometry {
     }
 }
 
-/// The jetpack a welder works the tip on: up off the pad, ring by ring up the hull.
-enum Jetpack {
-    /// How quickly it climbs and comes down.
-    static let speed = 0.25
-    /// Room a hovering welder wants round it, from its middle out.
-    static let half = 0.16
-}
-
 final class RocketJob {
     let station: String
     let repo: String
@@ -253,15 +251,12 @@ final class RocketJob {
     /// How far the weld has come, in panels, ring by ring from the bottom: a new tip's panels go on as it
     /// creeps up, and a whole tip's are welded over afresh for each staging deploy. The rest are bare.
     var welded = Double(RocketGeometry.panels)
-    /// The tip wants welding: its staging deploy is under way, and whoever takes the weld off the board
-    /// works it on a jetpack. `seam` is the panel the torch is on.
+    /// The tip wants welding: its staging deploy is under way, and a drone works it. `seam` is the panel its
+    /// torch is on.
     var welding = false
     var seam = 0
-    var seamAt = 0.0
     /// Whether the staging deploy was running last frame, so a new one is seen to start.
     var deployRunning = false
-    /// How high off the pad the welder hovers on its jetpack.
-    var hover = 0.0
     /// Every crate handed a carry into this rocket, by `CrateRef.key`. The load is over when all of
     /// them have been set down on the pad and not one moment before: a rocket never launches empty.
     var assigned: Set<String> = []

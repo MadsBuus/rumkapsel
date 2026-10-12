@@ -19,13 +19,15 @@ struct Cargo {
     var hurry = false
     /// Who gave this carry up: passed over for it while anyone else is free.
     var gaveUp: Set<String> = []
-    /// On the X-ray's belt: the carrier waits at its far end for the verdict.
-    var onBelt = false
-    /// Through the X-ray and passed: bound for its stack by the rocket, not the belt again.
-    var pastGate = false
+    /// Waiting for its crate to come through the cargo lock before anyone can take it.
+    var inLock = false
+    /// Through the lock already, or never indoors: bound for its place outside, not the lock again.
+    var pastLock = false
+    /// Outside the hull: a drone's carry, never a minion's.
+    var byDrone = false
     /// When it went up on the board.
     var postedAt = 0.0
-    /// The hands it goes to first when they are free: whoever set the crate on the belt collects it.
+    /// The hands it goes to first when they are free.
     var prefer: String?
 }
 
@@ -59,10 +61,10 @@ enum Cue {
     /// A crate leaves the ground for the pallet, or the pallet for a yard; and it came down.
     case palletLift(station: String, crate: CrateRef)
     case palletLanded(station: String, crate: CrateRef, aboard: Bool)
-    /// The X-ray's verdict: passed or not.
-    case gateScan(station: String, passed: Bool)
-    /// A crate off the belt at one of its ends; `collect` is the carry already waiting for it, if any.
-    case gateHandoff(station: String, crate: CrateRef, from: Spot, passed: Bool, collect: Int?)
+    /// The lock has cycled a crate: out and passed or refused, or in.
+    case lockCycled(station: String, inbound: Bool, passed: Bool)
+    /// A crate out of the lock onto one of its trays; `collect` is the carry already waiting for it, if any.
+    case lockHandoff(station: String, crate: CrateRef, from: Spot, collect: Int?)
     /// A carry was ordered: the scene finds the crate's node for the arms.
     case carryOrdered(id: Int, crate: CrateRef)
     /// A shuttle is inbound, or a rocket goes up: the drone's sweep.
@@ -119,8 +121,9 @@ final class Simulation<B: Body> {
     /// The one hover pallet a station may have out, by station name, and the wishes for pallets not
     /// out yet: true pushes it to the deck once loaded, false empties it back into storage.
     var pallets: [String: PalletJob] = [:]
-    /// Each station's X-ray.
-    var gates: [String: GateJob] = [:]
+    /// Each station's cargo lock, and the drones working its pad.
+    var locks: [String: LockJob] = [:]
+    var drones: [String: [PadDrone]] = [:]
     /// Orders kept for one body, by command id: a message, packing or stowing at its office, a reaction.
     var ownOrders: [Int: OwnOrder] = [:]
     var palletWishes: [String: Bool] = [:]
@@ -256,7 +259,7 @@ final class Simulation<B: Body> {
     /// was when the order went out. The order keeps its id; only its destination moves.
     func reaim(_ id: Int) {
         guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard, pastGate: job.pastGate), fresh.pos != job.aim.pos else { return }
+              let fresh = world.slotNow(for: crate, toward: yard, pastLock: job.pastLock), fresh.pos != job.aim.pos else { return }
         cargo[id]?.aim = fresh
     }
 
@@ -624,14 +627,16 @@ final class Simulation<B: Body> {
     }
 
     /// A look round the station: a clear spot out of every doorway, apart from where others stand and
-    /// where other roamers are headed; beside the pad when a loaded rocket steams, where company is fine.
+    /// where other roamers are headed; at the window onto the pad when a loaded rocket vents, where company is fine.
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
         let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isSteaming || $0.isLaunching) }
-        let padSide = station.deckCells.filter { $0.y == (station.deckCells.map(\.y).min() ?? 0) + 1 }
+        let window = station.windowWatch
+        // The gate is glass and a lock, not a way through: the window's own doorway is somewhere to stand.
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
-        let clear = (rocketReady && !padSide.isEmpty ? padSide : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
-            .filter { !doorways.contains($0) }
+            .subtracting(window)
+        let clear = (rocketReady && !window.isEmpty ? window : station.corridorCells + station.storageCells + station.deckCells)   // never the bay: that is outside
+            .filter { !doorways.contains($0) && !station.lockFootprint.contains($0) }
             .filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !station.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
         let others = bodies.values.filter { $0.id != m.id && $0.station == m.station }
         let taken = others.map(\.cell) + others.compactMap { o -> Cell? in if case .chore(let spot, _) = o.current?.kind { return spot }; return nil }
@@ -721,21 +726,6 @@ final class Simulation<B: Body> {
 
     /// One frame of one body's walk: the wake from a bed or a shuttle, then a step along the path,
     /// passing whoever is in the way (`Walk`).
-    /// A body about to step across the fence between the deck and the pad, not yet checked for this
-    /// crossing: near the line on one side, its way going on to the other.
-    private func atSecurityFence(_ m: B, station: Station) -> Bool {
-        guard let g = station.gate, !m.path.isEmpty else { return false }
-        func side(_ p: SIMD2<Double>) -> Double { (p.x - g.center.x) * g.inward.x + (p.y - g.center.y) * g.inward.y }
-        let here = side(m.pos)
-        if abs(here) > SecurityCheck.clearAt { m.checkedCrossing = false }
-        guard !m.checkedCrossing, abs(here) < SecurityCheck.stopAt else { return false }
-        let along = SIMD2(-g.inward.y, g.inward.x)
-        let across = (m.pos.x - g.center.x) * along.x + (m.pos.y - g.center.y) * along.y
-        guard abs(across) <= g.width / 2 + 0.3 else { return false }   // beside the doorway, not in it
-        // Crossing: the way ahead ends up on the other side of the line.
-        return m.path.contains { side($0) * here < 0 && abs(side($0)) > 0.05 } && abs(here) > 0.05
-    }
-
     func stepWalk(_ m: B, station: Station, dt: Double) -> Stride {
         m.waitingOn = nil
         // Pace by the task, not by who: a loaded body is the slowest thing on the station, below
@@ -762,12 +752,6 @@ final class Simulation<B: Body> {
             if clock < m.wakeUntil { return .waking }
             m.wakeUntil = 0
         }
-        if clock < m.checkUntil { m.waitingOn = "the security check"; return .wondering }
-        if !m.path.isEmpty, atSecurityFence(m, station: station) {
-            m.checkUntil = clock + SecurityCheck.seconds
-            m.checkedCrossing = true
-            return .wondering
-        }
         if !m.path.isEmpty, clock >= m.wonderUntil {
             // One rule for meeting anyone: drift a third of a tile to the side, pass, drift back onto
             // the line. The other does the same, so two head-on pass without either stopping or
@@ -788,7 +772,6 @@ final class Simulation<B: Body> {
     /// out through the airlock.
     func stepThere(_ m: B, station: Station, dt: Double) -> Outcome {
         if let pallet = stepPallet(m, station: station, dt: dt) { return pallet }
-        if let weld = stepWeld(m, station: station, dt: dt) { return weld }
         if let crate = stepCrate(m, station: station, dt: dt) { return crate }
         if case .react(_, _, let seconds) = m.current?.kind {
             // There: work at it for its span of station time, then back to the quarters.

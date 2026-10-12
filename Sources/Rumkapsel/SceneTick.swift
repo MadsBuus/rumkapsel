@@ -187,15 +187,7 @@ extension StationController {
     /// out for itself, so it is handed in; everything else follows from the body.
     func kit(_ m: Minion) -> Routines.Outfit {
         let p = simulation.pallets[m.station]
-        var kit = Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
-        if simulation.weldRocket(of: m) != nil { kit.jetpack = simulation.hover(m) > 0.002 ? 1 : 0 }
-        return kit
-    }
-
-    /// How high a body hovers off the floor this frame: a welder on its jetpack bobs a little in the air.
-    func hover(_ m: Minion) -> Double {
-        let h = simulation.hover(m)
-        return h + sin(clock * 2.6 + m.bobPhase) * 0.015 * min(1, h / 0.05)
+        return Routines.outfit(m, at: clock, pallet: p.map { ($0.repo, $0.pushing) })
     }
 
     func tickMinions(dt: Double) {
@@ -210,7 +202,7 @@ extension StationController {
             case .waking:
                 // Held still while it gets to its feet: nothing else runs, since the furniture must not
                 // draw it anywhere while it rises. The mirror below still runs.
-                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: hover(m))
+                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)
                 continue
             case .walking, .wondering: break
             case .there:
@@ -225,7 +217,7 @@ extension StationController {
                 drawPusher(m, station: station)
             }
             if posed { simulation.stepRest(m, station: station, dt: dt) }
-            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: hover(m))   // the picture catches up whatever else this frame skipped
+            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)   // the picture catches up whatever else this frame skipped
             guard posed else { continue }
             pose(m, station: station, dt: dt)
         }
@@ -357,8 +349,8 @@ extension StationController {
         case .redraw: markersDirty = true
         case .palletLift(let station, let crate): palletLift(station: station, crate: crate)
         case .palletLanded(let station, let crate, let aboard): palletLanded(station: station, crate: crate, aboard: aboard)
-        case .gateScan(let station, let passed): gateScanned(station: station, passed: passed)
-        case .gateHandoff(let station, let crate, let from, let passed, let collect): gateHandoff(station: station, crate: crate, from: from, passed: passed, collect: collect)
+        case .lockCycled(let station, let inbound, let passed): lockCycled(station: station, inbound: inbound, passed: passed)
+        case .lockHandoff(let station, let crate, let from, let collect): lockHandoff(station: station, crate: crate, from: from, collect: collect)
         case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
@@ -402,14 +394,7 @@ extension StationController {
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
                 : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)   // idle faces you; at work, its work
-            // At a rocket with the torch: the tip it is welding, and the seam the torch is on.
-            let welding: (rocket: RocketJob, point: SIMD2<Double>)? = {
-                guard simulation.isWelding(m), case .weld(_, let repo, let side)? = m.current?.kind,
-                      let r = simulation.rockets[station.name + "|" + repo],
-                      let point = simulation.weldPoint(station: station, repo: repo, side: side) else { return nil }
-                return (r, point)
-            }()
-            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) && welding == nil {
+            if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
                 m.smoothFacing += delta * min(1, dt * 12)
@@ -431,18 +416,11 @@ extension StationController {
                 let toCone = conePos - m.pos
                 m.smoothFacing = atan2(toCone.x, toCone.y)
             }
-            if let w = welding {
-                // Facing the hull, where the simulation stood it: the body is not moved here.
-                let toHull = w.point - m.pos
-                m.smoothFacing = atan2(toHull.x, toHull.y)
-            }
-            if atCone || welding != nil {
-                // Welding at a rocket is the cone's welding, torch on the seam.
-                let slot = welding != nil ? 0 : m.toolSlot(at: clock)
+            if atCone {
+                let slot = m.toolSlot(at: clock)
                 let cone = m.pyramids.last
                 let r = Routines.cone(slot: slot, t: t, struck: &m.hammerUp)
                 tilt = r.tilt; roll = r.roll; spin = r.spin; lean = r.lean
-                if welding != nil { tilt *= 0.35 }   // flown up to the seam, it is at its hands: no bending over to it
                 if let pitch = r.hammerPitch { m.hammerPivot?.eulerAngles.x = CGFloat(pitch) }
                 if let aim = r.aim { m.lightPivot?.eulerAngles = aim }
                 switch r.flash {
@@ -452,12 +430,7 @@ extension StationController {
                         propRoot.addChildNode(l)
                         m.weldLight = l
                     }
-                    if let l = m.weldLight, let w = welding, let seam = seamPoint(w.rocket) {
-                        l.position = seam
-                        l.light?.intensity = intensity
-                        l.opacity = on ? 1 : 0
-                        if on, let rocket = rocketViews[w.rocket.key]?.node { throwSparks(at: seam, from: rocket, count: Int.random(in: 0...2)) }
-                    } else if let l = m.weldLight, let cone {
+                    if let l = m.weldLight, let cone {
                         l.position = v3(cone.position.x + CGFloat(station.offset.x), 0.25, cone.position.z + CGFloat(station.offset.y))
                         l.light?.intensity = intensity
                         l.opacity = on ? 1 : 0
@@ -468,7 +441,7 @@ extension StationController {
                 default: break
                 }
             }
-            if welding == nil, !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
+            if !atCone || m.toolSlot(at: clock) != 0, let l = m.weldLight { l.removeFromParentNode(); m.weldLight = nil }
             var lift: Double?   // the body up off the floor for a hop or a run, applied after the posture
             if m.place == .lounge, resting, let lounge = station.rooms["kind:lounge"] {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)

@@ -28,12 +28,12 @@ enum LookTests {
 
     private static let claims: [Theme: Claim] = [
         .classic: Claim(classic: ["input", "output", "console", "crate", "hold", "pallet", "tool", "message",
-                                  "office", "station", "figure", "gate", "security unit", "jetpack"]),
+                                  "office", "station", "figure", "drone", "jetpack"]),
         .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold", "pallet"],
-                       classic: ["tool", "message", "gate", "security unit", "jetpack"], rims: false),
+                       classic: ["tool", "message", "drone", "jetpack"], rims: false),
         .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold",
                                 "pallet", "tool", "message"],
-                        classic: ["gate", "security unit", "jetpack"], letters: false, rims: false),
+                        classic: ["drone", "jetpack"], letters: false, rims: false),
     ]
 
     static func run() -> Never {
@@ -86,8 +86,7 @@ enum LookTests {
             "hold": look.hold(tall: true) != nil,
             "jetpack": look.jetpack(height: 0.5, depth: 0.11) != nil,
             "pallet": look.pallet(color: .white) != nil,
-            "gate": look.gate(width: 4, gap: -0.33...0.33) != nil,
-            "security unit": look.securityUnit() != nil,
+            "drone": look.padDrone() != nil,
             "tool": look.tool(.hammer, height: 0.5, depth: 0.3) != nil,
             "message": look.message(color: .white, floor: .white) != nil,
             "office": office.flatMap { look.dress(office: $0, in: station, sign: sign) } != nil,

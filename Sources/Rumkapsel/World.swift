@@ -1290,7 +1290,7 @@ final class World {
         /// Not standing here: on its way in, its place spoken for. The rows do not draw it and nothing
         /// else is put there.
         var carried = false
-        /// Through the gate and beside its rocket: drawn at `Station.testedScale`.
+        /// Through the lock and beside its rocket: drawn at `Station.testedScale`.
         var small = false
     }
 
@@ -1311,16 +1311,16 @@ final class World {
         guard !station.deckCells.isEmpty, station.gate != nil, let slot = padSlotOf[station.name + "|" + repo] else { return nil }
         let slots = station.padSlots
         let at = slots[slot % slots.count]
-        // Beside the rocket on the side away from the X-ray's belt, so the belt never hems it in.
+        // Beside the rocket on the side away from the lock, so the drones' way in from it stays clear.
         let off = Station.testedStackOffset
-        let away = station.belt.map { ($0.exit.x - station.offset.x) > at.x } ?? true
+        let away = station.lock.map { ($0.outer.x - station.offset.x) > at.x } ?? true
         return at + SIMD2(away ? off.x : -off.x, off.y)
     }
 
     /// Where every crate stands in storage or on the deck, from the ledger's rows, so a carrier can be
     /// sent to the exact spot a crate will occupy and nothing jumps when the layout is redrawn.
     /// Every other row holds crates with aisles between; the deck keeps untested crates on the far row, and
-    /// tested ones through the gate, small, beside their rocket (on the row nearest the pad while it has
+    /// tested ones through the lock, small, beside their rocket (on the row nearest the pad while it has
     /// none); within a row, crates group by repository in stacks of three.
     /// A crate keeps the place its row records until it leaves; a crate bound for the yard holds the
     /// place spoken for ahead of it and comes back `carried`. A crate with no place yet is given one
@@ -1329,7 +1329,7 @@ final class World {
     /// ("repo#number") to give a fresh place away from the column they stand in.
     func yardLayout(station: Station, area: String, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
         // The deck's rows keep off the X-ray's floor.
-        let cells = area == "deck" ? station.deckCells.filter { !station.gateFootprint.contains($0) } : area == "decon" ? station.deconCells : station.storageCells
+        let cells = area == "deck" ? station.deckCells.filter { !station.lockFootprint.contains($0) } : area == "decon" ? station.deconCells : station.storageCells
         let neat = area != "storage"
         let yard: Yard = area == "deck" ? .deck : area == "decon" ? .decon : .storage
         guard !cells.isEmpty else { return [] }
@@ -1489,8 +1489,9 @@ final class World {
     // MARK: places, asked for
 
     /// The place a crate bound for a yard will land on, asked for now: the row holds it from the
-    /// first ask. Storage or the deck by the rows; the rocket by its hatch.
-    func slotNow(for crate: CrateRef, toward yard: Yard, pastGate: Bool = false) -> Spot? {
+    /// first ask. Storage or the deck by the rows; the rocket by its hatch. A crate indoors bound for a place
+    /// outside goes to the cargo lock first, unless it has been through (`pastLock`).
+    func slotNow(for crate: CrateRef, toward yard: Yard, pastLock: Bool = false) -> Spot? {
         guard let station = fleet.stations[crate.station] else { return nil }
         switch yard {
         case .storage, .deck, .decon:
@@ -1501,10 +1502,11 @@ final class World {
                 return floorSpot(plain, station: station, repo: crate.repo,
                                  cell: (yard == .deck ? station.deckCells : yard == .decon ? station.deconCells : station.storageCells).first ?? Cell(x: 0, y: 0))
             }
-            // Bound for its stack beside the rocket: set on the X-ray's belt first, unless it has been through.
-            if s.small, !pastGate, let inbox = gateSpot(station: station, crate: crate) { return inbox }
-            return yardSpot(s.cleared ? .tested : plain, station: station, repo: crate.repo, slot: grounded(s, in: layout))
+            let spot = yardSpot(s.cleared ? .tested : plain, station: station, repo: crate.repo, slot: grounded(s, in: layout))
+            if !pastLock, station.isOutside(spot), let inbox = lockSpot(station: station, crate: crate) { return inbox }
+            return spot
         case .pad:
+            if !pastLock, let inbox = lockSpot(station: station, crate: crate) { return inbox }
             return padSpot(station: station, repo: crate.repo)
         }
     }
@@ -1697,31 +1699,29 @@ final class World {
         return out
     }
 
-    /// The places by the gate, per crate that holds one: four squares on the deck cell by the unit's post,
-    /// stacked when more wait. A crate keeps its place until the unit takes it.
-    private var gateSlots: [String: Int] = [:]
+    /// The places on the lock's inner tray, per crate that holds one, stacked when more wait. A crate keeps its
+    /// place until the chamber takes it.
+    private var lockSlots: [String: Int] = [:]
 
-    /// Where a crate waits by the gate for the security unit, when the station has a gate with a post.
-    func gateSpot(station: Station, crate: CrateRef) -> Spot? {
-        guard deckInUse(station: station.name), let belt = station.belt, let first = station.gateInbox.first else { return nil }
+    /// Where a crate waits on the lock's inner tray, when the station has a lock.
+    func lockSpot(station: Station, crate: CrateRef) -> Spot? {
+        guard let lock = station.lock, let first = station.lockInbox.first else { return nil }
         let prefix = station.name + "|"
-        let index = gateSlots[crate.key] ?? {
-            let taken = Set(gateSlots.filter { $0.key.hasPrefix(prefix) }.values)
+        let index = lockSlots[crate.key] ?? {
+            let taken = Set(lockSlots.filter { $0.key.hasPrefix(prefix) }.values)
             let free = (0...).first { !taken.contains($0) }!
-            gateSlots[crate.key] = free
+            lockSlots[crate.key] = free
             return free
         }()
-        // On the belt's deck end; more wait stacked there, the belt taking them in turn.
-        return Spot(area: .gate, station: station.name, owner: crate.repo, label: crate.repo, cell: station.gateStand ?? first,
-                    pos: SIMD3(belt.start.x, Belt.top + Double(index) * 0.34, belt.start.z), level: index, yaw: 0)
+        return Spot(area: .lock, station: station.name, owner: crate.repo, label: crate.repo, cell: station.lockStand ?? first,
+                    pos: SIMD3(lock.inner.x, CargoLock.top + Double(index) * 0.34, lock.inner.z), level: index, yaw: 0)
     }
 
-    /// The unit has taken it: its place by the gate is free.
-    func freeGateSlot(_ crate: CrateRef) { gateSlots[crate.key] = nil }
+    /// The chamber has taken it: its place on the tray is free.
+    func freeLockSlot(_ crate: CrateRef) { lockSlots[crate.key] = nil }
 
-
-    /// Off the X-ray's belt: from its end to its stack by the rocket, or to the untested row.
-    func carryFromGate(station: Station, crate: CrateRef, from spot: Spot) -> Command {
+    /// Out of the lock: from its tray to its stack by the rocket, or to the untested row.
+    func carryFromLock(station: Station, crate: CrateRef, from spot: Spot) -> Command {
         station.ledger.order(repo: crate.repo, number: crate.number, to: .deck)
         return .carry(crate, from: spot, to: .deck)
     }

@@ -8,13 +8,9 @@ and deliberately not started.
 
 ### Air and weight
 STATION.md's "Air and weight": the hull is the line between air and none. Minions work inside, drones outside,
-and crossing the hull is the hand-off from people to machines. Built in this order:
+and crossing the hull is the hand-off from people to machines. The cargo lock, the window and the pad's drones stand;
+still to build, in this order:
 
-- **The cargo lock and the window.** The X-ray, its belt, the laser fence and the robot operator give way to a
-  lock between the deck and the pad, which cycles a crate out with a scan, and a window beside it where the idle
-  watch a loaded rocket.
-- **Drones on the pad.** They take crates from the lock, load the rocket, weld the tip, and wait in a rack when
-  the pad is quiet. No minion on the pad.
 - **The bay as a hangar.** Under the hull, open to space behind the field; shuttles thread the mouth and ripple
   the field; the people airlock goes; leavers board a shuttle.
 - **Undocking, and the kick stage.** A production release opening brings a kick stage that drones set under the
@@ -63,11 +59,10 @@ F walks the hallways at eye height; a click on a minion rides along behind it on
 ## Bugs and loose ends
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.
-- **A ghost crate on the conveyor**, seen once in the real station. Waiting to see it again; a playbook entry with
-  two crates queued at the belt may show it.
-- **Gate placements typed in by hand** (belt ends, operator and monitor offsets, the tested stack, rocket foot and
-  tower) should be measured from the things they belong to, like the welder now is.
-- **The security robot** at the gate does not work the right way; a separate thread was started for it.
+- **Pad placements typed in by hand** (the tested stack's offset from its rocket, the tower's) should be measured
+  from the things they belong to, like the lock and the hatch now are.
+- **"Production PR opened" in the playbook** says the approved crate goes aboard, but the release it opens holds
+  untested work (#430 in QA), so the rocket only stands by. The same on main before the drones.
 - **Frame cost**, from 0.41: the session scan (89 ms in one frame) and `gh.crew` (44 ms worst) on the main thread.
 
 ## Ideas

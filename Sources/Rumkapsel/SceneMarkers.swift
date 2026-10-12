@@ -49,19 +49,17 @@ extension StationController {
                 for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
             }
         }
-        // The X-ray is walked round: the belt and its tunnel the length of their half of the arch, and the
-        // operator with its monitor.
-        for name in gates.keys {
-            guard let st = fleet.stations[name], let belt = st.belt else { continue }
+        // The lock is walked round: its chamber and the tray before its inner door.
+        for name in locks.keys {
+            guard let st = fleet.stations[name], let lock = st.lock else { continue }
             let f = Double(Station.fine)
             func block(_ p: SIMD2<Double>, _ r: Double) {
                 for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
                     for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { blocked[name, default: []].insert(Cell(x: sx, y: sy)) }
                 }
             }
-            let a = SIMD2(belt.start.x - st.offset.x, belt.start.z - st.offset.y), b = SIMD2(belt.exit.x - st.offset.x, belt.exit.z - st.offset.y)
-            for k in 0...8 { block(a + (b - a) * Double(k) / 8, 0.3) }
-            for p in [st.operatorSpot, st.monitorSpot].compactMap({ $0 }) { block(p, 0.3) }
+            let a = SIMD2(lock.inner.x - st.offset.x, lock.inner.z - st.offset.y), b = SIMD2(lock.chamber.x - st.offset.x, lock.chamber.z - st.offset.y)
+            for k in 0...6 { block(a + (b - a) * Double(k) / 6, 0.3) }
         }
         // Furniture and fixtures: anything standing on a room's floor that is not a tile, and only on that
         // room's own floor. A mark lying flat on it, like the frame round an office not yet built, is walked

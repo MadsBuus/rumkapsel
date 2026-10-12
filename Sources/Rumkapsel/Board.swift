@@ -67,8 +67,6 @@ struct Opening {
         case carry(Int)
         /// The next step a station's pallet is at, or ordering one.
         case pallet(station: String, step: PalletStep)
-        /// Welding a repository's rocket tip.
-        case weld(station: String, repo: String)
         /// Fetching a new office's crate from the bay, by its delivery order.
         case delivery(Int)
         /// Walking a station's untested rows.
@@ -105,7 +103,7 @@ extension Simulation {
             guard let m = bodies[o.body] else { continue }
             out.append(Opening(work: .own(id), rank: o.rank, station: m.station, at: o.at, postedAt: o.postedAt, only: o.body))
         }
-        for (id, job) in cargo where job.carrier == nil {
+        for (id, job) in cargo where job.carrier == nil && !job.byDrone && !job.inLock {
             guard case .carry(let crate, let from, _) = job.command.kind else { continue }
             // Crates stacked above this one are still on their way: it waits for them.
             guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
@@ -137,12 +135,6 @@ extension Simulation {
             } else if world.truth.nextPallet(station: name) != nil,
                       !onIt({ if case .dispatch(let s, _, _) = $0 { return s == name }; return false }) {
                 out.append(Opening(work: .pallet(station: name, step: .order), rank: .yard, station: name, at: station.storageConsole.cell, postedAt: 0))
-            }
-            for r in rockets.values where r.station == name && r.welding {
-                guard !onIt({ if case .weld(let s, let repo, _) = $0 { return s == name && repo == r.repo }; return false }),
-                      let at = rocketSpot(station: station, repo: r.repo) else { continue }
-                out.append(Opening(work: .weld(station: name, repo: r.repo), rank: .release, station: name,
-                                   at: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded())), postedAt: 0))
             }
         }
         return out.sorted { $0.rank != $1.rank ? $0.rank > $1.rank : $0.postedAt < $1.postedAt }
@@ -182,10 +174,9 @@ extension Simulation {
         case .carry(_, let from, let to):
             // Part of a release going out: into the rocket, off its stack, through the gate.
             let job = cargo[c.id]
-            if to == .pad || from.area == .tested || from.area == .gate || job?.onBelt == true || job?.aim.area == .gate { return .release }
+            if to == .pad || from.area == .tested || from.area == .lock || job?.aim.area == .lock { return .release }
             return .yard
         case .unloadPallet(_, _, let back): return back ? .yard : .release
-        case .weld: return .release
         case .deliverOffice, .pack, .stow, .dispatch, .loadPallet, .pushPallet: return .yard
         case .qa: return .qa
         case .work: return .desk
@@ -203,8 +194,6 @@ extension Simulation {
         case .dispatch: return m.phaseKind == .walk
         case .loadPallet(let s, _), .unloadPallet(let s, _, _): return m.phaseKind == .walk || pallets[s]?.flight == nil
         case .pushPallet(let s, _): return pallets[s]?.pushing == false
-        // Never taken off a weld in the air: it lands first.
-        case .weld(let s, let repo, _): return m.phaseKind != .act || (rockets[s + "|" + repo]?.hover ?? 0) <= 0
         case .qa, .work, .react: return true
         // Idle is what a body does while the board has nothing for it: any order takes it from there.
         case .bath, .exercise, .chore, .goTo, .sleep: return true
@@ -335,8 +324,8 @@ extension Simulation {
             start(m, job.command, announce: true)
             guard m.current?.id == job.command.id else { return false }
             cargo[id]?.carrier = m.id
-            // Off the belt from beside it; anything else from the floor beside the crate.
-            if from.area == .gate, let belt = station.belt { walk(m, to: besideBelt(station, belt, at: from.pos)) }
+            // Off the lock's tray from in front of its door; anything else from the floor beside the crate.
+            if from.area == .lock, let lock = station.lock { walk(m, to: besideLock(station, lock)) }
             else { m.path = route(m, to: standCell(station, near: from.cell)) }
         case .pallet(_, .order):
             guard let want = world.truth.nextPallet(station: station.name) else { return false }
@@ -378,11 +367,6 @@ extension Simulation {
             start(m, .qa(deck: station.name))
             guard m.isQA else { return false }
             onEvent(.log("staging ready for QA · \(m.home.name) walks the rows"))
-        case .weld(_, let repo):
-            guard let side = weldSide(station: station, repo: repo) else { return false }
-            start(m, .weld(station: station.name, repo: repo, side: side), announce: true)
-            guard case .weld = m.current?.kind else { return false }
-            m.path = []   // the weld walks it round to its side of the hull from here
         }
         m.bed = nil
         m.couch = nil   // off the couch: the seat is free for someone else

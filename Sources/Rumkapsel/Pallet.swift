@@ -368,77 +368,10 @@ extension Simulation {
         return station.padSlots[slot % station.padSlots.count]
     }
 
-    /// The side of a rocket's hull a welder works at: of the sides with room to hover, the one facing the
-    /// gate, where it comes from and where anyone watching is. Never the hatch's, where the tower stands, nor
-    /// one whose welder would hang over the tested stack or off the pad.
-    func weldSide(station: Station, repo: String) -> Int? {
-        guard let at = rocketSpot(station: station, repo: repo), let g = station.gate else { return nil }
-        let stack = world.testedStack(station: station, repo: repo)
-        let pad = Set(station.padCells)
-        let roomy = (1..<6).filter { k in
-            let spot = at + RocketGeometry.facing(side: k) * (RocketGeometry.apothem + Hands.arm)
-            guard pad.contains(Cell(x: Int(spot.x.rounded()), y: Int(spot.y.rounded()))) else { return false }
-            guard let stack else { return true }
-            let d = spot - stack
-            return max(abs(d.x), abs(d.y)) > Station.testedStackHalf + Jetpack.half
-        }
-        return RocketGeometry.side(facing: -g.inward + SIMD2(-0.5, 0), among: roomy.isEmpty ? Array(1..<6) : roomy)
-    }
-
-    /// The middle of that side of the hull, on the floor plan: what the welder stands an arm's length from.
-    func weldPoint(station: Station, repo: String, side: Int) -> SIMD2<Double>? {
-        rocketSpot(station: station, repo: repo).map { $0 + RocketGeometry.facing(side: side) * RocketGeometry.apothem }
-    }
-
-    /// Welding, torch to the hull: stepped up and at it.
-    func isWelding(_ m: B) -> Bool {
-        if case .weld = m.current?.kind { return m.phaseKind == .act }
-        return false
-    }
-
-    /// The rocket a body is welding, torch to the hull, if it is.
-    func weldRocket(of m: B) -> RocketJob? {
-        guard isWelding(m), case .weld(let station, let repo, _)? = m.current?.kind else { return nil }
-        return rockets[station + "|" + repo]
-    }
-
-    /// How high off the floor a body hovers: a welder on its jetpack, else not at all.
-    func hover(_ m: B) -> Double { weldRocket(of: m)?.hover ?? 0 }
-
-    /// A welder up on its jetpack wanted for something that outranks the weld: a message, or leaving.
-    private func calledAway(_ m: B) -> Bool {
-        ownOrders.values.contains { $0.body == m.id && !$0.held && $0.rank > .release }
-    }
-
-    /// One frame of a weld: walked round to its side of the hull, stepped up to an arm's length, and at it
-    /// on the jetpack until the tip needs no more welding or the welder is called away; it lands before it
-    /// goes. Nil when the command in hand is not a weld.
-    func stepWeld(_ m: B, station: Station, dt: Double) -> Outcome? {
-        guard case .weld(_, let repo, let side)? = m.current?.kind else { return nil }
-        let r = rockets[station.name + "|" + repo]
-        guard let r, let point = weldPoint(station: station, repo: repo, side: side), r.welding || m.phaseKind == .act else {
-            finish(m)
-            return .spent
-        }
-        switch m.phaseKind {
-        case .walk:
-            advance(m)
-            return .spent
-        case .approach:
-            guard atArmsLength(m, of: point, from: RocketGeometry.facing(side: side), square: true, dt: dt) else { return .spent }
-            advance(m)
-            return .spent
-        default:
-            if (!r.welding || calledAway(m)) && r.hover <= 0 { finish(m); return .spent }
-            return .posed   // at it: the scene draws the welding
-        }
-    }
-
     /// Every tip wanting welding while its staging deploy runs. The weld creeps up the hull ring by ring at
     /// the pace the repository's deploys usually take, the last panel held back until the deploy is live: a
     /// new tip gains its panels as it goes, a whole one is welded over afresh from the bottom ring. A tip
-    /// whose pallet has gone is whole. The welder flies up with the ring being welded, and lands when the
-    /// weld is over or it is called away.
+    /// whose pallet has gone is whole. A drone does the welding (`Drones.swift`) and says where its torch is.
     private func stepTips(dt: Double) {
         let full = Double(RocketGeometry.panels)
         for r in rockets.values {
@@ -456,17 +389,6 @@ extension Simulation {
             if r.welded >= full { r.fresh = false }
             r.panels = r.fresh ? Int(r.welded) : RocketGeometry.panels
             r.welding = p != nil && (running || (live && r.welded < full))
-            let welder = bodies.values.first { weldRocket(of: $0) === r }
-            let ring = min(RocketGeometry.rings - 1, Int(r.welded) / 6)
-            let up = r.welding && welder.map { !calledAway($0) } == true
-            let target = up ? max(0, RocketGeometry.ringMiddle(ring, lifter: r.tall) - Hands.reach) : 0
-            r.hover = welder == nil ? 0 : r.hover + max(-Jetpack.speed * dt, min(Jetpack.speed * dt, target - r.hover))
-            let working: Int? = { if case .weld(_, _, let side)? = welder?.current?.kind { return side }; return nil }()
-            guard r.welding, clock >= r.seamAt, let station = fleet.stations[r.station],
-                  let side = working ?? weldSide(station: station, repo: r.repo) else { continue }
-            // The torch on the ring being welded, on the panel in front of the welder.
-            r.seam = ring * 6 + side
-            r.seamAt = clock + 0.9
         }
     }
 
@@ -761,9 +683,9 @@ extension Simulation {
 
     /// A crate landed: on the pallet, or down in a yard by hand, the station's word on where it stands.
     private func land(_ f: PalletJob.Flight, _ p: PalletJob, station: Station) {
-        if let slot = f.slot, slot.area == .gate {
+        if let slot = f.slot, slot.area == .lock {
             world.setDown(f.crate, at: slot)
-            gateReceived(f.crate, at: slot)   // cleared already: it waits by the gate for the unit
+            lockReceived(f.crate)   // cleared already: it waits on the lock's tray to go through
         } else if let slot = f.slot, let yard = f.yard {
             world.setDown(f.crate, at: slot)
             world.landed(station: station, repo: f.crate.repo, number: f.crate.number, in: yard, at: now)

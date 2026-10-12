@@ -284,8 +284,8 @@ extension StationController {
 
     /// Takes a carry command and the crate it moves. The simulation speaks for the crate from here on;
     /// the node is what the scene lifts when the carrier's body says the crate is on its arms.
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, pastGate: pastGate, onDone: onDone) else { return }
+    func carry(_ command: Command, node: SCNNode, roomKey: String = "", pastLock: Bool = false, onDone: @escaping () -> Void) {
+        guard simulation.carry(command, roomKey: roomKey, pastLock: pastLock, onDone: onDone) else { return }
         node.name = "haul"
         cargoNodes[command.id] = node
     }

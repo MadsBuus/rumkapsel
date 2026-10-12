@@ -466,7 +466,8 @@ enum Props {
             hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
             hatch.addChildNode(hinge)
         }
-        hatch.position = v3(apothem + 0.01, 0.12 + h * 0.6, 0)
+        let at = RocketGeometry.hatchInTip
+        hatch.position = v3(at.x, at.y, at.z)
         hatch.eulerAngles.y = .pi / 2
         tip.addChildNode(hatch)
         for k in 0..<3 {
@@ -573,8 +574,8 @@ enum Props {
         }
     }
 
-    /// The service tower stood beside a rocket, its conveyor at the hatch: on the pad from the moment the
-    /// rocket stands to the moment it goes. The beacon is lit red while the rocket is held.
+    /// The service tower stood beside a rocket: on the pad from the moment the rocket stands to the moment it
+    /// goes, the drones' mast for the tip's panels. The beacon is lit red while the rocket is held.
     static func attachTower(to rocket: SCNNode, tall: Bool, held: Bool) {
         let hatchY = rocket.childNode(withName: "hatch", recursively: true).map { Double($0.convertPosition(SCNVector3Zero, to: rocket).y) }
         let deco = holdDecoration(around: SIMD3(0, 0, 0), tall: tall, armAt: hatchY, held: held)
@@ -587,7 +588,6 @@ enum Props {
         // The service tower: a steel column beside the rocket, a lift rail up its face on the rocket's side,
         // a cap and a beacon on top.
         let h = max(tall ? 1.7 : 1.1, (armAt ?? 0) + 0.25)
-        let armY = armAt ?? h - 0.12
         let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
         let tower = SCNNode()
         let w = 0.16
@@ -603,29 +603,6 @@ enum Props {
         cap.geometry!.firstMaterial = dark
         cap.position = v3(0, h + 0.02, 0)
         tower.addChildNode(cap)
-        // The conveyor from the tower to the hatch: a belt with rollers and a rail each side, hinged at the
-        // tower's face so it swings back along the tower once the rocket is loaded.
-        let armLen = 0.3
-        let hinge = SCNNode()
-        hinge.name = "arm"
-        hinge.position = v3(-w / 2 + 0.02, armY - 0.1, 0)
-        let belt = SCNNode(geometry: SCNBox(width: armLen, height: 0.03, length: 0.1, chamferRadius: 0))
-        belt.geometry!.firstMaterial = lit(NSColor(rgb: (0.22, 0.23, 0.27)))
-        belt.position = v3(-armLen / 2, 0, 0)
-        hinge.addChildNode(belt)
-        for k in 0..<5 {
-            let roller = SCNNode(geometry: SCNBox(width: 0.012, height: 0.006, length: 0.09, chamferRadius: 0))
-            roller.geometry!.firstMaterial = steel
-            roller.position = v3(-armLen * (0.1 + 0.2 * Double(k)), 0.018, 0)
-            hinge.addChildNode(roller)
-        }
-        for dz in [-0.055, 0.055] {
-            let side = SCNNode(geometry: SCNBox(width: armLen, height: 0.04, length: 0.012, chamferRadius: 0))
-            side.geometry!.firstMaterial = steel
-            side.position = v3(-armLen / 2, 0.01, dz)
-            hinge.addChildNode(side)
-        }
-        tower.addChildNode(hinge)
         // A beacon on top: lit red while the rocket is held, dark once it is cleared.
         let beacon = SCNNode(geometry: SCNBox(width: 0.04, height: 0.05, length: 0.04, chamferRadius: 0))
         beacon.geometry!.firstMaterial = held ? flat(NSColor(rgb: (0.95, 0.25, 0.2))) : dark

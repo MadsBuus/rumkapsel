@@ -74,14 +74,17 @@ extension Simulation {
     // MARK: carries
 
     /// Takes a carry command. The crate is spoken for from here on, so nothing else is told to move it
-    /// and the yard layout leaves its spot alone. False when the yard has no place for it.
+    /// and the yard layout leaves its spot alone. False when the yard has no place for it. A crate standing
+    /// outside is a drone's to move and never goes back through the lock on its way.
     @discardableResult
-    func carry(_ command: Command, roomKey: String = "", pastGate: Bool = false, onDone: @escaping () -> Void) -> Bool {
-        guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
+    func carry(_ command: Command, roomKey: String = "", pastLock: Bool = false, onDone: @escaping () -> Void) -> Bool {
+        guard let crate = command.crate, case .carry(_, let from, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
         world.claim(crate)
         station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        guard let aim = world.slotNow(for: crate, toward: yard, pastGate: pastGate) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, pastGate: pastGate, postedAt: clock)
+        let outside = station.isOutside(from)
+        guard let aim = world.slotNow(for: crate, toward: yard, pastLock: pastLock || outside) else { return false }
+        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim,
+                                  pastLock: pastLock || outside, byDrone: outside, postedAt: clock)
         cue(.carryOrdered(id: command.id, crate: crate))
         return true
     }
@@ -115,6 +118,15 @@ extension Simulation {
     /// the arms already, it goes back to the slot it came from; not lifted yet, it simply stays.
     func cancelCarry(_ id: Int, backTo from: Spot) {
         guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
+        if let who = job.carrier, drone(holding: crate)?.id == who {
+            // In a drone's grip: the same carry, aimed back, and the drone takes it there, through the lock if
+            // where it came from is indoors.
+            cargo[id]?.command = job.command.aimed(at: yard)
+            cargo[id]?.aim = from
+            world.unorder(crate)
+            onEvent(.log("\(crate.words): back where it was, the board changed its mind"))
+            return
+        }
         if let who = job.carrier, let m = bodies[who], m.load == .crate(crate) {
             // The same carry, aimed back: the crate on the arms goes where it came from.
             let back = job.command.aimed(at: yard)
@@ -275,17 +287,9 @@ extension Simulation {
             case .walk:
                 advance(m); return .spent
             case .approach:
-                // At the X-ray's far end, facing the tunnel, until the belt brings the crate out.
-                if job.onBelt {
-                    m.waitingOn = "the crate through the X-ray"
-                    if let belt = station.belt {
-                        let d = SIMD2(belt.tunnel.x - station.offset.x, belt.tunnel.z - station.offset.y) - m.pos
-                        m.facing = atan2(d.x, d.y)
-                    }
-                    return .spent
-                }
-                // Stand an arm's length from the crate, facing it, before taking hold: off the belt from beside it.
-                guard atArmsLength(m, of: boxAt, from: from.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
+                // Stand an arm's length from the crate, facing it, before taking hold: off the lock's tray from in
+                // front of its door.
+                guard atArmsLength(m, of: boxAt, from: from.area == .lock ? station.lock.map { -$0.inward } : nil, dt: dt) else { return .spent }
                 advance(m)
                 startLift(m, height: from.pos.y)
                 return .spent
@@ -312,7 +316,7 @@ extension Simulation {
                 let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
                     // A step back from the spot so the crate goes down in front, not underfoot.
-                    guard atArmsLength(m, of: spot, from: to.area == .gate ? station.belt?.side : nil, dt: dt) else { return .spent }
+                    guard atArmsLength(m, of: spot, from: to.area == .lock ? station.lock.map { -$0.inward } : nil, dt: dt) else { return .spent }
                     startSetDown(m, on: to)
                     return .spent
                 }
@@ -321,17 +325,17 @@ extension Simulation {
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: to)
                 world.setDown(crate, at: to)
-                if to.area == .gate, let belt = station.belt, case .carry(_, _, let yard) = job.command.kind {
-                    // On the belt: this carry is done. Taking the crate off once it has been looked at is a
-                    // carry of its own, on the board for the same hands first. It waits at the deck end, on
-                    // this side of the fence, until the verdict says which end the crate comes out of.
-                    gateReceived(crate, at: to)
-                    cargo[id] = nil
-                    let collect = Command.carry(crate, from: beltEnd(station, belt, passed: false, crate: crate), to: yard)
-                    if carry(collect, onDone: job.onDone) {
-                        cargo[collect.id]?.onBelt = true
-                        cargo[collect.id]?.prefer = m.id
-                    }
+                if to.area == .lock, let lock = station.lock {
+                    // On the lock's tray: the minion's part is done. The lock takes the crate through on its own, and
+                    // the same order waits on the far tray for a drone, so whatever was counting on it still is.
+                    lockReceived(crate)
+                    let outer = lockEnd(station, lock, outer: true, crate: crate)
+                    cargo[id]?.command = job.command.from(outer)
+                    cargo[id]?.carrier = nil
+                    cargo[id]?.inLock = true
+                    cargo[id]?.pastLock = true
+                    cargo[id]?.byDrone = true
+                    reaim(id)
                     finish(m)
                     return .spent
                 }

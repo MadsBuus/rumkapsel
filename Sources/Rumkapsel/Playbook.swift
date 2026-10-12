@@ -67,9 +67,16 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     /// The pallet out and loaded, and gone again once emptied.
     static let palletLoaded = PlaybookWait.until("the pallet loaded") { c in c.world.truth.pallets.values.contains { $0.state == .loaded } }
     static let palletGone = PlaybookWait.until("the pallet emptied") { c in c.world.truth.pallets.isEmpty }
-    /// Somebody in the air at a repository's tip, welding.
+    /// A drone at a repository's tip with its torch lit.
     static func welderUp(_ repo: String) -> PlaybookWait {
-        .until("\(repo)'s welder in the air") { c in c.simulation.rockets.values.contains { $0.repo == repo && $0.hover > 0 } }
+        .until("\(repo)'s tip under the torch") { c in c.simulation.drones.values.joined().contains { d in
+            if case .weld(let key) = d.task { return d.torch && key.hasSuffix("|" + repo) }
+            return false
+        } }
+    }
+    /// Through the lock and in a drone's grip.
+    static func inGrip(_ n: Int) -> PlaybookWait {
+        .until("#\(n) in a drone's grip") { c in c.simulation.drones.values.joined().contains { $0.holding?.number == n } }
     }
     /// A repository's tip being welded, all but the last panel done, which waits for staging to be live.
     static func weldAlmost(_ repo: String) -> PlaybookWait {
@@ -178,11 +185,11 @@ enum Playbook {
         PlaybookEntry("release", "Staging PR merged", "the pallet is pushed to the deck and waits there loaded",
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("1x", 0.5), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged)],
                       camera: .area("deck", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy running", "web's tip is welded over ring by ring by a welder on a jetpack, beside its tested stack",
+        PlaybookEntry("release", "Staging deploy running", "web's tip is welded over ring by ring by a drone circling the hull, beside its tested stack",
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
                        ("Deploy: Staging starts", .welderUp("web")), ("1x", .weldAlmost("web")), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "Staging deploy running, new rocket", "the tip is welded together panel by panel by a welder on a jetpack (api's first release)",
+        PlaybookEntry("release", "Staging deploy running, new rocket", "the tip is welded together panel by panel by a drone circling the hull (api's first release)",
                       [("Target: api#5158", 0.4), ("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25),
                        ("Deploy: Staging starts", .palletStaged), ("GitHub: Poll", .welderUp("api")), ("1x", .weldAlmost("api")), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("pad", 3), tail: 6, yard: true, rooms: [], crowd: true),
@@ -190,9 +197,10 @@ enum Playbook {
                       [("16x", 0.5), ("Release: Staging opens", .palletLoaded), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .palletStaged),
                        ("1x", 1), ("Deploy: Staging goes live", .palletGone)],
                       camera: .area("deck", 2.6), tail: 6, yard: true, rooms: [], crowd: true),
-        PlaybookEntry("release", "QA approves a crate", "through the X-ray, out small on the pad, carried to its rocket", [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
+        PlaybookEntry("release", "QA approves a crate", "set in the cargo lock, cycled out small, flown to its stack by a drone",
+                      [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .inGrip(tested)), ("1x", .onStack(tested))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Production PR opened", "the lifter rises under the tip and the approved crate goes aboard",
+        PlaybookEntry("release", "Production PR opened", "the lifter rises under the tip and a drone flies the approved crate into its hatch",
                       [("1x", 0.5), ("Release: Production opens", .loaded(approved))],
                       camera: .area("pad", 3), tail: 10, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),

@@ -328,7 +328,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
     var cargoNodes: [Int: SCNNode] = [:]
     /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
-    var gates: [String: GateView] = [:]
+    var locks: [String: LockView] = [:]
+    var droneViews: [String: DroneView] = [:]
+    var puffs: [Puff] = []
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
@@ -1301,7 +1303,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         simulation.stepShuttles()
         simulation.stepPallets(dt: dt)
-        simulation.stepGates(dt: dt)
+        simulation.stepLocks(dt: dt)
+        simulation.stepDrones(dt: dt)
         drawShuttles(dt: dt)
         updateBerths()
         tickHullLamps()
