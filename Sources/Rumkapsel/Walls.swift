@@ -163,7 +163,7 @@ enum Bulkhead {
             node.position = v3(0, y, 0)
             n.addChildNode(node)
         }
-        return n
+        return n.flattenedClone()   // one node with its own geometry: placed by its position, also once the walls are flattened
     }
 
     /// A pilaster where a wall turns or ends: a steel shaft, broader at its foot and its head. Now and then it
@@ -191,7 +191,7 @@ enum Bulkhead {
                 }
             }
         }
-        return n
+        return n.flattenedClone()
     }
 
     // MARK: the skin
