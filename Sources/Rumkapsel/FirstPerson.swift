@@ -532,7 +532,14 @@ extension StationController {
         railPost.firstMaterial = Bulkhead.steel
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let walk = st.walkable
-            let outside = Set(st.hangarCells + st.padCells)
+            let outside = Set(st.padCells)
+            // The gate onto the pad holds the cargo lock and the window, and the bay's mouth holds the field: no wall
+            // stands in either.
+            let gate = Set(st.gateDoorway.map { [$0.deck.x, $0.deck.y, $0.pad.x, $0.pad.y] })
+            let mouthRow = st.hangarCells.map(\.y).max()
+            func unwalled(_ c: Cell, _ n: Cell) -> Bool {
+                gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))
+            }
             let styles = Bulkhead.styles(of: st)
             let root = SCNNode()
             var corners: [Cell: [Bool]] = [:], railCorners: [Cell: [Bool]] = [:]
@@ -544,7 +551,7 @@ extension StationController {
                     let n = Cell(x: c.x + dx, y: c.y + dy)
                     let floored = walk.contains(n)
                     if floored && (dx < 0 || dy < 0 || st.canStep(from: c, to: n)) { continue }
-                    if n == st.plan.monolith { continue }
+                    if n == st.plan.monolith || unwalled(c, n) { continue }
                     stretches.append((c, dx, dy))
                 }
             }
