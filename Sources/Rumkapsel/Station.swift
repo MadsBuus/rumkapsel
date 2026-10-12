@@ -342,9 +342,6 @@ final class Station {
     var storageCells: [Cell] { hasPad ? zoneRow(hallTop + 7) + zoneRow(hallTop + 6) : [] }
     /// The lab: the staged and cleared zones, where the deck's crates stand.
     var deckCells: [Cell] { clearedCells + stagedCells }
-    var storageCenter: SIMD2<Double> { SIMD2(Double(hallX0) - 2.5, Double(hallTop) + 6.5) }
-    /// The hall's middle, on the floor.
-    var hallCenter: SIMD2<Double> { SIMD2(Double(hallX0) - 2, Double(hallTop) + 3.5) }
     var padCells: [Cell] { blocks.pad }
     /// The pad: six wide and four deep beyond the field, and the row along the field with it. On the ground
     /// it stands a causeway's length further out, the causeway running from the field.
@@ -418,7 +415,6 @@ final class Station {
         guard hasPad else { return [] }
         return (0..<2).flatMap { d in (0..<Station.hallWide).map { x in Cell(x: hallX0 - x, y: hallTop + Station.hallDeep + d) } }
     }
-    var deconCenter: SIMD2<Double> { SIMD2(Double(hallX0) - 2, Double(hallTop + Station.hallDeep) + 0.5) }
     /// The hatch in decon's back wall, and which way it faces: into the chamber.
     var deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>) {
         (SIMD2(Double(hallX0) - 2, Double(hallTop + Station.hallDeep) + 1.46), SIMD2(0, -1))

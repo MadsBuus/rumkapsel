@@ -402,27 +402,6 @@ extension StationController {
             break   // the vent is drawn from the rocket's state, every frame
         case .rocketGone(let key):
             rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
-        case .intoHold(let key, let command):
-            // Through the hatch into the hold, from the drone holding it there: in toward the hull, shrinking as
-            // it goes, since the rocket is far too small for it. The hatch opens for it and closes after.
-            guard let b = cargoNodes[command] else { return }
-            cargoNodes[command] = nil
-            let at = SIMD3(Double(b.position.x), Double(b.position.y), Double(b.position.z))
-            guard let rocket = rocketViews[key]?.node, let hatch = rocket.childNode(withName: "hatch", recursively: true) else {
-                moveCrate(b, legs: [MotionLeg(to: SIMD3(at.x - 0.2, at.y, at.z), seconds: 0.5, ease: .easeIn, scale: 0.02)]) { b.removeFromParentNode() }
-                return
-            }
-            let p = hatch.convertPosition(SCNVector3Zero, to: nil)
-            let door = SIMD3(Double(p.x), Double(p.y), Double(p.z))
-            if let shutter = hatch.childNode(withName: "door", recursively: false) {
-                let shut = shutter.geometry?.firstMaterial
-                let open = flat(NSColor(rgb: (0.04, 0.04, 0.05)))
-                shutter.geometry?.firstMaterial = open
-                shutter.runAction(.sequence([.wait(duration: 0.9), .run { $0.geometry?.firstMaterial = shut }]))
-            } else {
-                hatch.runAction(.sequence([.scale(to: 0.05, duration: 0.15), .wait(duration: 0.6), .scale(to: 1, duration: 0.2)]))
-            }
-            moveCrate(b, legs: [MotionLeg(to: SIMD3(door.x, at.y, door.z), seconds: 0.6, ease: .easeIn, scale: 0.05)]) { b.removeFromParentNode() }
         default: break
         }
     }

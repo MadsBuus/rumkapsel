@@ -22,20 +22,6 @@ final class StagingBatch {
     init(number: Int) { self.number = number }
 }
 
-/// What a crate's light says about where it is in the line.
-enum CrateLight {
-    /// In storage: not on staging yet.
-    case off
-    /// Staged while its staging deploy runs: not testable yet.
-    case deploying
-    /// Staged and live on staging, waiting for a tester.
-    case waiting
-    /// Tested.
-    case passed
-    /// Staged while its staging deploy has failed.
-    case failed
-}
-
 extension Simulation {
     /// A staging release opened: the station knows the batch from now, its crates still in storage.
     func stagingOpened(station: String, repo: String, number: Int) {
@@ -76,19 +62,6 @@ extension Simulation {
         default: batch.deploy = .failed
         }
         if let outcome { onLog("\(repo): staging deploy \(outcome == .live ? "is live" : "\(outcome)")") }
-    }
-
-    /// The light on a crate standing in the yard.
-    func light(of crate: Ledger.Crate, station: String) -> CrateLight {
-        guard crate.placed == .deck || crate.heading == .deck else { return .off }
-        if crate.cleared { return .passed }
-        switch staging[station + "|" + crate.repo]?.deploy {
-        case .running?: return .deploying
-        case .failed?: return .failed
-        case .unheard? where (staging[station + "|" + crate.repo]?.merged ?? false)
-            && clock - (staging[station + "|" + crate.repo]?.mergedAt ?? 0) < Deployments.findWithin: return .deploying
-        default: return .waiting
-        }
     }
 
     /// Where a repository's rocket stands on the pad, in the station's own coordinates.

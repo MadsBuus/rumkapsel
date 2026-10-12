@@ -134,7 +134,7 @@ extension Simulation {
         case .carry(_, let from, let to):
             // Part of a release going out: into the rocket, off its stack, through the gate.
             let job = cargo[c.id]
-            if to == .pad || from.area == .tested || job?.aim.area == .tested { return .release }
+            if from.area == .tested || job?.aim.area == .tested { return .release }
             return .yard
         case .deliverOffice, .pack, .stow: return .yard
         case .qa: return .qa

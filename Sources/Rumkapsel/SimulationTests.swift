@@ -222,47 +222,37 @@ enum SimulationTests {
 
         test("the board: a release carry takes a body off a yard carry it has not lifted yet, which goes back on the board") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")
+            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: [], cleared: [441]), repo: "web")
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             let both = sim.world.carryToDeck(station: station, repo: "web", numbers: [440, 441])
-            guard let yard = both.first(where: { $0.after.isEmpty }), let other = both.first(where: { $0.id != yard.id }),
+            guard let yard = both.first(where: { $0.crate?.number == 440 }), let other = both.first(where: { $0.crate?.number == 441 }),
                   case .carry(let crate, let spot, _) = other.kind else { return expect(false, "two carries: \(both.count)") }
             sim.carry(yard, onDone: {})
             sim.assignOrders()
             expect(m.current?.id == yard.id && sim.rank(of: yard) == .yard, "the yard carry is taken: \(m.words)")
             sim.world.unorder(crate)
-            let release = Command.carry(crate, from: spot, to: .pad)
+            let release = Command.carry(crate, from: spot, to: .deck)
             sim.carry(release, onDone: {})
-            expect(sim.rank(of: release) == .release, "a carry into the rocket is release work")
+            expect(sim.rank(of: release) == .release, "a carry into the cleared rows is release work")
             sim.assignOrders()
             expect(m.current?.id == release.id, "taken off the yard carry for the release: \(m.words)")
             expect(sim.cargo[yard.id]?.carrier == nil, "the yard carry is back on the board, nobody on it")
             expect(m.wonderUntil > sim.clock, "a beat, head up, before it goes")
         }
 
-        test("a cleared rocket's cargo: from the deck it waits in the cleared rows, from storage it is carried aboard; either way losing clearance stops it") {
-            let (sim, station, m) = fixture()
-            let deck = sim.world.stagingIsDeck(station: "work", repo: "web")   // the row a rocket loads from
-            station.ledger.adopt(Ledger.Word(storage: deck ? [] : [440, 441], deck: deck ? [440, 441] : []), repo: "web")
-            func intoRocket() -> [Int] {
-                sim.cargo.compactMap { id, job in if case .carry(_, _, .pad) = job.command.kind { return id }; return nil }
-            }
+        test("a cleared rocket waits with its crates on their rows, and standing it down takes nothing back") {
+            let (sim, station, _) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [], deck: [440, 441], cleared: [440, 441]), repo: "web")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.load(2), station: "work", repo: "web"))
-            sim.assignOrders()
-            if deck {
-                for _ in 0..<4 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
-                expect(intoRocket().isEmpty, "nothing carried aboard before launch: \(intoRocket().count)")
-                expect(sim.rockets["work|web"]?.isSteaming == true, "the rocket waiting for the merge")
-            } else {
-                expect(!intoRocket().isEmpty && m.current.map { id in intoRocket().contains(id.id) } == true, "loading: \(m.words)")
-            }
+            for _ in 0..<4 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
+            expect(sim.rockets["work|web"]?.isSteaming == true, "the rocket waiting for the merge")
+            expect(sim.cargo.isEmpty && sim.vortices.isEmpty, "nothing moves before the merge")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.standBy, station: "work", repo: "web"))
             expect(sim.rockets["work|web"]?.stage == .standBy, "standing by again")
-            for _ in 0..<20 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
-            expect(intoRocket().isEmpty, "no carry into the rocket while it stands by: \(intoRocket().count)")
+            expect(station.ledger.crates(of: "web").allSatisfy { $0.placed == .deck }, "the crates still on their rows")
         }
 
         test("the board: a body with a crate on its arms is not taken off its carry") {

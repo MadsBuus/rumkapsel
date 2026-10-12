@@ -697,21 +697,6 @@ final class World {
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
-    /// Whether a repository's merges to staging are deployed by a workflow the station has seen run.
-    func deploysStaging(station: String, repo: String) -> Bool {
-        repoRoots.contains { root, info in
-            info.station == station && info.repo == repo && github.deploys(repoRoot: root).contains { !$0.production && $0.newest != nil }
-        }
-    }
-
-    /// Whether a production release stands open for this repository. While it does, staging keeps
-    /// moving: anything merged there afterwards is carried by that same release, so a rocket already
-    /// loaded for it is not finished loading.
-    func productionOpen(station: String, repo: String) -> Bool {
-        repoRoots.contains { $0.value.station == station && $0.value.repo == repo
-            && (github.openReleases(repoRoot: $0.key)?.contains(where: \.isProduction) ?? false) }
-    }
-
     /// The release pull request whose rocket a repository's pad should hold, if any.
     private func padRelease(root: String) -> ReleasePR? {
         guard let open = github.openReleases(repoRoot: root) else { return nil }
@@ -1287,8 +1272,6 @@ final class World {
 
     /// What the yard reconciliation decided for one repository.
     enum YardChange {
-        /// Crates the board says reached staging: one carry each, from storage across to the deck.
-        case carryToDeck([Command])
         /// Nothing to carry: the counts were redrawn where they stand.
         case snapped
         /// Not now: carriers are still on their way.
@@ -1592,14 +1575,6 @@ final class World {
             out.append(command)
         }
         return out
-    }
-
-    /// Where one crate stands in storage right now, if it is on the rows and not on anyone's arms.
-    /// The rows are re-laid every time a crate leaves them, so a place asked for earlier goes stale.
-    func storageSpot(station: Station, crate: CrateRef) -> Spot? {
-        guard let s = yardLayout(station: station, area: "storage")
-            .first(where: { $0.repo == crate.repo && $0.number == crate.number && !$0.carried }) else { return nil }
-        return standingSpot(s, area: "storage", station: station)
     }
 
     /// A merged office's package, from the office door to storage. Storage holds a place for it from

@@ -130,9 +130,7 @@ extension StationController {
         for station in fleet.stations.values where station.hasPad {
             let before = (station.stored, station.staged)
             for (root, info) in world.repoRoots where info.station == station.name {
-                if let c = github.cargo(repoRoot: root), case .carryToDeck(let commands) = world.reconcile(station: station, repo: info.repo, root: root, cargo: c) {
-                    handle(.carryToDeck(station: station.name, repo: info.repo, commands: commands))
-                }
+                if let c = github.cargo(repoRoot: root) { world.reconcile(station: station, repo: info.repo, root: root, cargo: c) }
             }
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }

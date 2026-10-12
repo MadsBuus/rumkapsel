@@ -345,7 +345,7 @@ extension StationController {
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
         case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)
-        case .rocketLoading, .liftOff, .steam, .rocketGone, .intoHold: play(rocket: cue)
+        case .rocketLoading, .liftOff, .steam, .rocketGone: play(rocket: cue)
         }
     }
 

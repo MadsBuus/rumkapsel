@@ -259,7 +259,6 @@ enum Scenarios {
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .rocket(.launch, "ios"),
-            .carry(298, to: .pad),
         ], floor: { sim in
             let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
             return row?.placed == nil ? nil : "#298 is still placed in \(String(describing: row?.placed)) after the launch"
@@ -277,7 +276,6 @@ enum Scenarios {
             .rocket(.standBy, "ios"),           // work is waiting on the board: a rocket stands before any release
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
-            .carry(to: .pad),
             .releaseMerged("ios", production: true),
             .rocket(.launch, "ios"),
         ], floor: { sim in
@@ -295,7 +293,6 @@ enum Scenarios {
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .rocket(.launch, "ios"),
-            .carry(298, to: .pad),
         ], floor: { sim in
             // Whatever stood for the seed's work before the switch, nothing stands for ios's work after it.
             let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
@@ -316,7 +313,6 @@ enum Scenarios {
             .carry(298, to: .storage),
         ], forbids: [
             .rocket(.launch, "ios"),
-            .carry(298, to: .pad),
         ], floor: { sim in
             let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
                 + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
@@ -338,7 +334,6 @@ enum Scenarios {
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
             .rocket(.launch, "ios"),
-            .carry(298, to: .pad),
         ], floor: { sim in
             // ios#280 was on the board in QA, never said shipped: it stays behind.
             let stored = Scenario.crates(sim, "storage", "ios")
@@ -359,7 +354,6 @@ enum Scenarios {
             .carry(298, to: .deck),
             .crateCleared("ios"),
             .rocket(.launch, "ios"),
-            .carry(298, to: .pad),
         ], floor: { sim in
             let deck = Scenario.crates(sim, "deck", "ios")
             return deck == 1 ? nil : "\(deck) ios crates left on the deck; #280 alone should be"
@@ -375,16 +369,10 @@ enum Scenarios {
             .releaseOpened("web", untested: true),
             .rocket(.load(1), "web"),
             .crateCleared("web"),
-            .carry(to: .pad),
             .rocket(.steam, "web"),
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),
         ], floor: { sim in
-            // Two crates of web were on the deck, one untested and one approved; each goes aboard once. A
-            // board still saying "ready to ship" after a crate is in the hold must not put it back on the
-            // deck to be carried again.
-            let loads = Scenario.count(sim, .carry(to: .pad))
-            if loads != 2 { return "\(loads) carries into the rocket for two crates" }
             let deck = Scenario.crates(sim, "deck", "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
