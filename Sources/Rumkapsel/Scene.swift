@@ -346,6 +346,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.hooks = newValue }
     }
     var headless = false
+    var simStep = 1.0 / 30
     var now: Date { simulation.now }
     var demoClock = 0.0
     var demoMerged = false
@@ -1115,7 +1116,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         lastTick = now
         var budget = dt * (sim == nil ? liveTimeScale : 1)
         while budget > 1e-9 {
-            let step = min(budget, 1.0 / 30.0)
+            let step = min(budget, simStep)
             budget -= step
             stepStation(dt: step)
         }
@@ -1158,19 +1159,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.stepTips(dt: dt)
         simulation.stepVortices()
         simulation.stepDrones(dt: dt)
-        drawShuttles(dt: dt)
-        tickHangars()
-        tickUndocking()
-        updateBerths()
-        tickHullLamps()
-        drawRockets()
-        tickPadLifts(dt: dt)
-        tickSparks(dt: dt)
-        turnPlanets(dt: dt)
-        drawDrones(dt: dt)
-        tickPuffs(dt: dt)
-        tickPadFields()
-        drawVortices()
+        if !headless {
+            drawShuttles(dt: dt)
+            tickHangars()
+            tickUndocking()
+            updateBerths()
+            tickHullLamps()
+            drawRockets()
+            tickPadLifts(dt: dt)
+            tickSparks(dt: dt)
+            turnPlanets(dt: dt)
+            drawDrones(dt: dt)
+            tickPuffs(dt: dt)
+            tickPadFields()
+            drawVortices()
+        }
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: World.peerQuiet) { dropPeer(name) }

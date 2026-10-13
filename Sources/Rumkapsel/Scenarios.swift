@@ -1,4 +1,5 @@
 import AppKit
+import SceneKit
 import simd
 
 struct Expect {
@@ -115,13 +116,15 @@ struct Scenario {
     let forbids: [Expect]
     var allowSkips = false
     var allowGiveUp = false
+    let hold: Double
     let floor: (@MainActor (SimulatorController) -> String?)?
 
-    init(_ name: String, _ steps: [(String, Double)], tail: Double, expects: [Expect], forbids: [Expect] = [],
+    init(_ name: String, _ steps: [(String, Double)], tail: Double, hold: Double? = nil, expects: [Expect], forbids: [Expect] = [],
          allowSkips: Bool = false, allowGiveUp: Bool = false, floor: (@MainActor (SimulatorController) -> String?)? = nil) {
         self.name = name
         self.steps = steps.map { (press: $0.0, wait: $0.1) }
         self.tail = tail
+        self.hold = hold ?? (forbids.isEmpty ? 20 : 60)
         self.expects = expects
         self.forbids = forbids
         self.allowSkips = allowSkips
@@ -129,8 +132,8 @@ struct Scenario {
         self.floor = floor
     }
 
-    @MainActor static func crates(_ sim: SimulatorController, _ area: String, _ repo: String) -> Int {
-        sim.station.markerRoot.childNodes.filter { ($0.name ?? "").hasPrefix("\(area):work|\(repo)|") }.count
+    @MainActor static func crates(_ sim: SimulatorController, _ yard: Yard, _ repo: String) -> Int {
+        sim.station.world.fleet.stations["work"]?.ledger.crates(of: repo).filter { $0.stands(in: yard) }.count ?? 0
     }
 
     @MainActor static func commands(_ sim: SimulatorController) -> [(command: Command, by: String)] {
@@ -147,7 +150,7 @@ struct Scenario {
 enum Scenarios {
     @MainActor static let all: [Scenario] = [
         Scenario("own PR opens, merges, crate reaches storage", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Open PR", 32),
             ("Merge PR", 4.8),
         ], tail: 192, expects: [
@@ -155,16 +158,16 @@ enum Scenarios {
             .officeMerged("task:ios#298"),
             .carry(298, to: .storage),
         ], floor: { sim in
-            Scenario.crates(sim, "storage", "ios") > 0 ? nil : "no ios crate stands in storage"
+            Scenario.crates(sim, .storage, "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
 
         Scenario("a branch with no issue: opened, merged and prompted again, still one office", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("New branch, no issue", 48),
             ("Open PR", 32),
             ("Merge PR", 4.8),
             ("Prompt", 4.8),
-        ], tail: 192, expects: [
+        ], tail: 192, hold: 60, expects: [
             .carry(to: .storage),
         ], floor: { sim in
             let reopened = Scenario.count(sim, .officeOpened("task:ios/claude/", .appear), after: "Merge PR")
@@ -175,7 +178,7 @@ enum Scenarios {
         }),
 
         Scenario("a hotfix goes up in its own rocket and leaves the release standing with its cargo", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Release: Production opens", 16),
             ("Release: Hotfix opens", 48),
             ("Release: Hotfix merges", 4.8),
@@ -195,10 +198,10 @@ enum Scenarios {
         }),
 
         Scenario("teammate branch then PR: one shuttle, one crate", [
-            ("Target: api#5158", 4.8),
+            ("Target: api#5158", 0),
             ("Teammate: New branch", 48),
             ("Teammate: Open PR", 4.8),
-        ], tail: 192, expects: [
+        ], tail: 192, hold: 60, expects: [
             .officeOpened("task:api#", .shuttle, board: "leo"),
             .crewActivity("leo", "branch_create"),
             .flight,
@@ -210,7 +213,7 @@ enum Scenarios {
         }),
 
         Scenario("a late carrier: the crate waits on the bay floor and is still fetched", [
-            ("Target: api#5158", 4.8),
+            ("Target: api#5158", 0),
             ("Teammate: New branch", 40),
             ("Peer: New office", 40),
             ("New branch in repo", 4.8),
@@ -224,7 +227,7 @@ enum Scenarios {
         }),
 
         Scenario("staging release opens, merges: the crates are carried to the staged rows", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Release: Staging opens", 80),
             ("Release: Staging merges", 4.8),
         ], tail: 160, expects: [
@@ -232,34 +235,34 @@ enum Scenarios {
             .stagingMerged("web"),
             .carry(to: .deck),
         ], floor: { sim in
-            Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
+            Scenario.crates(sim, .deck, "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
         Scenario("the board moves storage to QA and the yard sees it first: the crates are still carried", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Board: Catch up (yard first)", 4.8),
         ], tail: 160, expects: [
             .carry(to: .deck),
         ], floor: { sim in
-            Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
+            Scenario.crates(sim, .deck, "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
         Scenario("staging release closes: the crates stay in storage", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Release: Staging opens", 80),
             ("Release: Staging closes", 4.8),
-        ], tail: 160, expects: [
+        ], tail: 160, hold: 60, expects: [
             .stagingOpened("web"),
             .stagingClosed("web"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, "deck", "web")
+            let deck = Scenario.crates(sim, .deck, "web")
             if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
-            let storage = Scenario.crates(sim, "storage", "web")
+            let storage = Scenario.crates(sim, .storage, "web")
             return storage >= 2 ? nil : "only \(storage) web crates in storage"
         }),
 
         Scenario("a repository whose merges deploy: the merged crate goes straight up in a rocket of its own", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Repo: Ships on merge", 4.8),
             ("Open PR", 32),
             ("Merge PR", 4.8),
@@ -273,7 +276,7 @@ enum Scenarios {
         }),
 
         Scenario("a repository without staging: merged work waits in storage and the rocket loads from there", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Repo: No staging", 4.8),
             ("Open PR", 32),
             ("Merge PR", 128),
@@ -287,12 +290,12 @@ enum Scenarios {
             .releaseMerged("ios", production: true),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let stored = Scenario.crates(sim, "storage", "ios")
+            let stored = Scenario.crates(sim, .storage, "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
         }),
 
         Scenario("a repository that ships on tags: merged work waits in storage with no rocket, and the tag sends it up", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Repo: Ships on tags", 4.8),
             ("Open PR", 32),
             ("Merge PR", 128),
@@ -306,12 +309,12 @@ enum Scenarios {
                 + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
                 - Scenario.count(sim, .rocket(.load(0), "ios"), after: "Release: Tag")
             if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times before any tag" }
-            let stored = Scenario.crates(sim, "storage", "ios")
+            let stored = Scenario.crates(sim, .storage, "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after the tag"
         }),
 
         Scenario("a repository that ships on tags, said shipped with no tag seen: nothing goes up, the crate just goes", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Repo: Ships on tags", 4.8),
             ("Open PR", 32),
             ("Stage: stored", 128),
@@ -329,7 +332,7 @@ enum Scenarios {
         }),
 
         Scenario("the stage panel alone: said stored, cleared and shipped, the crate goes from storage up", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Repo: No staging", 4.8),
             ("Open PR", 32),
             ("Stage: stored", 128),
@@ -340,12 +343,12 @@ enum Scenarios {
             .carry(298, to: .storage),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let stored = Scenario.crates(sim, "storage", "ios")
+            let stored = Scenario.crates(sim, .storage, "ios")
             return stored == 1 ? nil : "\(stored) ios crates left in storage; #280 alone should be"
         }),
 
         Scenario("the stage panel with a staging area: to the deck beside another repository's crate, across it, and up", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Open PR", 32),
             ("Stage: stored", 128),
             ("Stage: QA", 128),
@@ -358,12 +361,12 @@ enum Scenarios {
             .crateCleared("ios"),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, "deck", "ios")
+            let deck = Scenario.crates(sim, .deck, "ios")
             return deck == 1 ? nil : "\(deck) ios crates left on the deck; #280 alone should be"
         }),
 
         Scenario("production release: mark tested, merge, the rocket lifts", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Release: Production opens", 48),
             ("Release: Mark tested", 96),
             ("Release: Production merges", 4.8),
@@ -376,12 +379,12 @@ enum Scenarios {
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, "deck", "web")
+            let deck = Scenario.crates(sim, .deck, "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
 
         Scenario("ready to ship moved back to QA: nothing carried, the crate stands untested", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)", 32),
         ], tail: 16, expects: [
             .press("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)"),
@@ -401,7 +404,7 @@ enum Scenarios {
         }),
 
         Scenario("PR closed unmerged: red, nothing carried", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Open PR", 32),
             ("Close PR", 4.8),
         ], tail: 144, expects: [
@@ -412,7 +415,7 @@ enum Scenarios {
         ]),
 
         Scenario("a teammate's pull request closed unmerged: red, then the office clears", [
-            ("Target: api#5140", 4.8),
+            ("Target: api#5140", 0),
             ("Teammate: Close PR", 200),
             ("Scan: again", 200),
             ("Scan: again", 200),
@@ -426,7 +429,7 @@ enum Scenarios {
         ]),
 
         Scenario("a bot's pull request: an object in decon, merged, cleared into storage", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Bot: Open PR", 32),
             ("Bot: Merge PR", 4.8),
         ], tail: 192, expects: [
@@ -438,14 +441,14 @@ enum Scenarios {
             .officeOpened("task:ios#", .shuttle),
         ], floor: { sim in
             let st = sim.station.world.fleet.stations["work"]!
-            if Scenario.crates(sim, "decon", "ios") > 0 { return "an object is still in decon" }
+            if Scenario.crates(sim, .decon, "ios") > 0 { return "an object is still in decon" }
             guard let row = st.ledger.crates(of: "ios").first(where: \.alien) else { return "the cleared object left the ledger" }
             if row.placed != .storage || row.heading != nil { return "the object is \(String(describing: row.placed)), not in storage" }
-            return Scenario.crates(sim, "storage", "ios") > 0 ? nil : "no ios crate stands in storage"
+            return Scenario.crates(sim, .storage, "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
 
         Scenario("a bot's pull request closed unmerged: ejected from decon, nothing carried", [
-            ("Target: web#455", 4.8),
+            ("Target: web#455", 0),
             ("Bot: Open PR", 32),
             ("Bot: Close PR", 4.8),
         ], tail: 64, expects: [
@@ -456,7 +459,7 @@ enum Scenarios {
             .deconCleared("web"),
         ], floor: { sim in
             let st = sim.station.world.fleet.stations["work"]!
-            if Scenario.crates(sim, "decon", "web") > 0 { return "an object is still in decon" }
+            if Scenario.crates(sim, .decon, "web") > 0 { return "an object is still in decon" }
             return st.ledger.crates(of: "web").contains(where: \.alien) ? "the ejected object is still in the ledger" : nil
         }),
 
@@ -478,7 +481,7 @@ enum Scenarios {
             ("Peer: Leave", 64),
             ("Peer: Arrive", 96),
             ("Peer: Leave", 4.8),
-        ], tail: 96, expects: [
+        ], tail: 96, hold: 60, expects: [
             .officeOpened("task:web#460", .fade, peer: "kim"),
             .peerLeft("kim"),
             .peerArrived("kim"),
@@ -489,7 +492,7 @@ enum Scenarios {
         }),
 
         Scenario("peer office kicked", [
-            ("Target: web#460", 4.8),
+            ("Target: web#460", 0),
             ("Peer: Kick office", 4.8),
         ], tail: 128, expects: [
             .officeArchived("work|task:web#460", reason: "kicked"),
@@ -497,9 +500,9 @@ enum Scenarios {
         ]),
 
         Scenario("session ends: the office stays", [
-            ("Target: api#5158", 4.8),
+            ("Target: api#5158", 0),
             ("Session ends", 4.8),
-        ], tail: 160, expects: [
+        ], tail: 160, hold: 60, expects: [
             .press("Session ends"),
         ], floor: { sim in
             sim.station.world.fleet.stations["work"]?.rooms["task:api#5158"] != nil
@@ -519,7 +522,7 @@ enum Scenarios {
         ]),
 
         Scenario("a wedged carrier gives up: the crate goes back in the queue and another is sent for it", [
-            ("Target: ios#298", 4.8),
+            ("Target: ios#298", 0),
             ("Open PR", 32),
             ("Merge PR", 9.6),
             ("Wedge carrier", 4.8),
@@ -561,19 +564,22 @@ final class ScenarioRunner {
         guard !scenarios.isEmpty else { say("no scenarios matched"); NSApp.terminate(nil); return }
         say("running \(scenarios.count) scenario\(scenarios.count == 1 ? "" : "s"), station time stepped headless")
         begin()
-        while sim != nil { frame() }
+        while sim != nil { autoreleasepool { frame() } }
         finish()
     }
 
     // MARK: the run
 
     private var simTime = 0.0
+    private var lastPressAt = 0.0
 
     private func begin() {
         index += 1
         guard index < scenarios.count else { return finish() }
         sim = SimulatorController(frame: NSRect(x: 0, y: 0, width: 1060, height: 700))
         sim?.station.headless = true
+        sim?.station.simStep = ScenarioRunner.tick
+        sim?.model.quiet = true
         step = 0
         simTime = 0
         startedAt = CACurrentMediaTime()
@@ -582,26 +588,63 @@ final class ScenarioRunner {
     }
 
     static let settle = 16.0
+    static let tick = 0.1
 
     private func frame() {
         guard let sim else { return }
-        sim.station.stepSimulated(seconds: 1.0 / 30)
-        simTime += 1.0 / 30
+        sim.station.stepSimulated(seconds: ScenarioRunner.tick)
+        simTime += ScenarioRunner.tick
         let s = scenarios[index]
+        let second = Int(simTime) != Int(simTime - ScenarioRunner.tick)
+        if second, step == 0, quiet(sim.station) { nextPressAt = simTime }
         if step < s.steps.count, simTime >= nextPressAt {
             let it = s.steps[step]
             sim.model.press(it.press)
             step += 1
             nextPressAt = simTime + it.wait
-            if step == s.steps.count { endAt = simTime + s.tail }
+            if step == s.steps.count { endAt = simTime + s.tail; lastPressAt = simTime }
         }
-        if simTime >= endAt { judge() }
+        if second { SCNTransaction.flush() }
+        if simTime >= endAt {
+            judge(verdict(s, sim))
+        } else if second, step == s.steps.count, simTime - lastPressAt >= s.hold, verdict(s, sim) == nil {
+            judge(nil)
+        }
     }
 
-    private func judge() {
+    private func quiet(_ station: StationController) -> Bool {
+        !station.world.placementsLeft && station.world.truth.pendingOffices.isEmpty && station.world.truth.deliveries.isEmpty
+            && station.simulation.flights.isEmpty && station.simulation.cargo.isEmpty && station.minions.values.allSatisfy { $0.path.isEmpty }
+    }
+
+    private func verdict(_ s: Scenario, _ sim: SimulatorController) -> String? {
+        let records = sim.model.records
+        if !s.allowGiveUp, let gaveUp = records.lazy.compactMap({ r -> String? in
+            if case .event(.log(let t)) = r, t.contains(" gives up ") { return t }; return nil }).first {
+            return "a minion gave up · " + gaveUp
+        }
+        if !s.allowSkips, let skipped = records.lazy.compactMap({ if case .skipped(let why) = $0 { return why }; return nil }).first {
+            return "a press was refused · " + skipped
+        }
+        for bad in s.forbids {
+            if let hit = records.first(where: bad.matches) { return "saw \(bad.words) · \(hit.words)" }
+        }
+        var at = 0
+        for want in s.expects {
+            var hit = false
+            while at < records.count {
+                let r = records[at]
+                at += 1
+                if want.matches(r) { hit = true; break }
+            }
+            if !hit { return "never saw \(want.words)" }
+        }
+        return s.floor?(sim)
+    }
+
+    private func judge(_ reason: String?) {
         guard let sim else { return }
         let s = scenarios[index]
-        let records = sim.model.records
         let seconds = CACurrentMediaTime() - startedAt
         if verbose {
             say("--- \(s.name) ---")
@@ -619,37 +662,11 @@ final class ScenarioRunner {
                 say("    body  \(m.home.name): \(m.current?.words ?? "nothing") · \(m.phaseKind) at \(m.cell.x),\(m.cell.y) pos \(String(format: "%.2f,%.2f", m.pos.x, m.pos.y)) path \(m.path.count)\(spot)\(m.waitingOn.map { " waiting on \($0)" } ?? "")\(m.hasLoad ? " carrying" : "")")
             }
         }
-        var reason: String?
-        if !s.allowGiveUp, let gaveUp = records.lazy.compactMap({ r -> String? in
-            if case .event(.log(let t)) = r, t.contains(" gives up ") { return t }; return nil }).first {
-            reason = "a minion gave up · " + gaveUp
-        }
-        if reason == nil, !s.allowSkips, let skipped = records.lazy.compactMap({ if case .skipped(let why) = $0 { return why }; return nil }).first {
-            reason = "a press was refused · " + skipped
-        }
-        if reason == nil {
-            for bad in s.forbids {
-                if let hit = records.first(where: bad.matches) { reason = "saw \(bad.words) · \(hit.words)"; break }
-            }
-        }
-        if reason == nil {
-            var at = 0
-            for want in s.expects {
-                var hit = false
-                while at < records.count {
-                    let r = records[at]
-                    at += 1
-                    if want.matches(r) { hit = true; break }
-                }
-                if !hit { reason = "never saw \(want.words)"; break }
-            }
-        }
-        if reason == nil, let floor = s.floor { reason = floor(sim) }
         if let reason {
             failed += 1
-            say(String(format: "FAIL  %-52@  %@  (%.1fs)", s.name as NSString, reason as NSString, seconds))
+            say(String(format: "FAIL  %-52@  %@  (%.1fs, %.0f station-s)", s.name as NSString, reason as NSString, seconds, simTime))
         } else {
-            say(String(format: "PASS  %-52@  (%.1fs)", s.name as NSString, seconds))
+            say(String(format: "PASS  %-52@  (%.1fs, %.0f station-s)", s.name as NSString, seconds, simTime))
         }
         self.sim = nil
         begin()

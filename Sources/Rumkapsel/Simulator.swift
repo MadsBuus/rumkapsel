@@ -851,12 +851,17 @@ final class SimulatorModel: ObservableObject {
                         return note("skipped", "set-up did not take: " + why.words, .skipped(why.words))
                     }
                     run(name)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
+                    refreshSoon()
                 }
             }
         } else {
             note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
         }
+        refreshSoon()
+    }
+
+    private func refreshSoon() {
+        guard !quiet else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
     }
 
@@ -1213,9 +1218,11 @@ final class SimulatorModel: ObservableObject {
     // MARK: the log
 
     private let lines = SimLog()
+    var quiet: Bool { get { lines.quiet } set { lines.quiet = newValue } }
 
     nonisolated func note(_ kind: String, _ text: String, _ record: SimRecord? = nil) {
         lines.add(kind: kind, text: text, record: record)
+        guard !lines.quiet else { return }
         DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
@@ -1282,6 +1289,7 @@ final class SimLog: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
     private var typed: [SimRecord] = []
+    var quiet = false
     private static let stamp: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
     }()
@@ -1331,15 +1339,13 @@ final class SimHooks {
 enum SimNudge { case bath, breather(Place), chore, lounge, meet, night(Bool?), turnIn, wedge, workout }
 
 extension StationController {
-    private static var simStep: Double { 1.0 / 30.0 }
-
     func stepSimulated(seconds: Double) {
         guard let sim else { return }
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         for w in work { w() }
         var budget = seconds
         while budget > 0 {
-            let step = min(StationController.simStep, budget)
+            let step = min(simStep, budget)
             budget -= step
             sim.clock += step
             tick(now: sim.clock)
@@ -1350,10 +1356,10 @@ extension StationController {
         guard let sim else { return }
         let real = sim.lastReal == 0 ? 0 : min(0.25, max(0, time - sim.lastReal))
         sim.lastReal = time
-        var budget = sim.paused ? Double(sim.steps) * StationController.simStep : real * sim.timeScale
+        var budget = sim.paused ? Double(sim.steps) * simStep : real * sim.timeScale
         sim.steps = 0
         while budget > 0 {
-            let step = min(StationController.simStep, budget)
+            let step = min(simStep, budget)
             budget -= step
             sim.clock += step
             tick(now: sim.clock)

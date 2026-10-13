@@ -185,7 +185,7 @@ enum FlightCraft {
         plate.firstMaterial = skin
         pivot.addChildNode(SCNNode(geometry: plate))
         let pod = SCNNode(geometry: round(SCNCapsule(capRadius: shape.podRadius, height: shape.podLength)))
-        pod.geometry!.firstMaterial = Materials.plated(seed: 23, tint: paint(color))
+        pod.geometry!.firstMaterial = Materials.plated(seed: 41, tint: paint(color))
         pod.position = v3(shape.finReach, shape.podLength / 2, 0)
         pivot.addChildNode(pod)
         return pivot

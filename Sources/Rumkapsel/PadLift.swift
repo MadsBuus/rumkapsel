@@ -3,6 +3,7 @@ import SceneKit
 
 final class PadLiftView {
     let at: SIMD2<Double>
+    let offset: SIMD2<Double>
     let centre = SCNNode()
     let pivot = SCNNode()
     var blades: [(node: SCNNode, out: SIMD2<Double>)] = []
@@ -10,7 +11,7 @@ final class PadLiftView {
     let shaft = SCNNode()
     var iris = 0.0
     var deckY = -RocketGeometry.shaftDepth
-    init(at: SIMD2<Double>) { self.at = at }
+    init(at: SIMD2<Double>, offset: SIMD2<Double>) { self.at = at; self.offset = offset }
 }
 
 extension StationController {
@@ -68,7 +69,7 @@ extension StationController {
     }
 
     private func buildLift(_ station: Station, at slot: SIMD2<Double>) -> PadLiftView {
-        let v = PadLiftView(at: slot)
+        let v = PadLiftView(at: slot, offset: station.offset)
         let r = RocketGeometry.doorRadius, depth = RocketGeometry.shaftDepth
         let centre = v.centre
         centre.position = v3(station.offset.x + slot.x, 0, station.offset.y + slot.y)
@@ -145,8 +146,7 @@ extension StationController {
             for (i, slot) in slots.enumerated() {
                 let id = "\(station.name)|\(i)"
                 live.insert(id)
-                let world3 = v3(station.offset.x + slot.x, 0, station.offset.y + slot.y)
-                if let v = padLifts[id], v.at != slot || v.centre.position.x != world3.x || v.centre.position.z != world3.z {
+                if let v = padLifts[id], v.at != slot || v.offset != station.offset {
                     v.centre.removeFromParentNode()
                     padLifts[id] = nil
                 }
