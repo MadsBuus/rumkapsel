@@ -714,7 +714,16 @@ enum WallPanel {
     }()
 
     static let hullGlass: SCNMaterial = {
+        let n = 128
+        let image = Textures.draw(n, n) { ctx, w, h in
+            ctx.setFillColor(NSColor(rgb: (0.55, 0.68, 0.85), alpha: 0.03).cgColor)
+            ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            ctx.setStrokeColor(NSColor(rgb: (0.7, 0.74, 0.82), alpha: 0.28).cgColor)
+            ctx.setLineWidth(2)
+            ctx.stroke(CGRect(x: 0, y: 0, width: w, height: h))
+        }
         let m = glass.copy() as! SCNMaterial
+        m.diffuse.contents = image
         m.diffuse.wrapS = .repeat
         m.diffuse.wrapT = .repeat
         return m
