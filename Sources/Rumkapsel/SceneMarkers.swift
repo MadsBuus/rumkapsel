@@ -291,8 +291,8 @@ extension StationController {
                         continue
                     }
                     let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedLight
-                        : area == "deck" ? Props.gateIdle : NSColor(rgb: (0.3, 0.32, 0.38))
+                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedGreen
+                        : area == "deck" ? Props.waitingAmber : NSColor(rgb: (0.3, 0.32, 0.38))
                     let words = crateWords(repo: slot.repo, number: slot.number)
                     let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: mine(slot), number: slot.number,
                                             title: words.title, who: words.who)
@@ -458,3 +458,15 @@ extension StationController {
 }
 
 enum OfficeLight { case occupied, empty, dark }
+
+extension StationController {
+    func looseCrate(_ crate: CrateRef) -> SCNNode {
+        let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
+        let alien = row?.alien == true
+        let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))
+        let words = crateWords(repo: crate.repo, number: crate.number)
+        return Props.package(color: color, band: NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38,
+                             mine: !alien && world.isMine(repo: crate.repo, number: crate.number), number: crate.number,
+                             title: words.title, who: words.who)
+    }
+}

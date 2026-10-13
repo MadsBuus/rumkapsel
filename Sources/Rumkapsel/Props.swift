@@ -423,3 +423,33 @@ enum Props {
 
 extension Props {
 }
+
+extension Props {
+    static let passedGreen = NSColor(rgb: (0.45, 0.95, 0.5))
+    static let failRed = NSColor(rgb: (1.0, 0.22, 0.2))
+    static let droneEye = NSColor(rgb: (0.35, 0.75, 0.95))
+    static let waitingAmber = NSColor(rgb: (0.95, 0.7, 0.15))
+    static let hazard = NSColor(rgb: (0.95, 0.7, 0.15))
+
+    static func glowing(_ color: NSColor, alpha: CGFloat) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = color.withAlphaComponent(alpha)
+        m.blendMode = .add
+        m.writesToDepthBuffer = false
+        m.isDoubleSided = true
+        return m
+    }
+
+    static func glass(alpha: CGFloat = 0.22) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .blinn
+        m.diffuse.contents = NSColor(rgb: (0.55, 0.78, 0.95)).withAlphaComponent(alpha)
+        m.specular.contents = NSColor(white: 0.5, alpha: 1)
+        m.shininess = 0.9
+        m.transparencyMode = .dualLayer
+        m.writesToDepthBuffer = false
+        m.isDoubleSided = true
+        return m
+    }
+}

@@ -261,7 +261,7 @@ extension StationController {
             ring.opacity = 0.95
         } else if r.untested {
             let k = 0.5 + 0.5 * sin(clock * 2.2)
-            ring.geometry?.firstMaterial?.diffuse.contents = Props.scanRed.blended(withFraction: CGFloat(0.3 * (1 - k)), of: .black)
+            ring.geometry?.firstMaterial?.diffuse.contents = Props.failRed.blended(withFraction: CGFloat(0.3 * (1 - k)), of: .black)
             ring.opacity = CGFloat(0.55 + 0.4 * k)
         } else {
             ring.geometry?.firstMaterial?.diffuse.contents = color

@@ -1119,6 +1119,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         turnPlanets(dt: dt)
         drawDrones(dt: dt)
         tickPuffs(dt: dt)
+        tickPadFields()
         drawVortices()
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
