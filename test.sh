@@ -9,7 +9,7 @@ BIN=.build/debug/Rumkapsel
 export RUMKAPSEL_SUPPORT=${RUMKAPSEL_SUPPORT:-$(mktemp -d)}
 START=$SECONDS
 FAILED=0
-for suite in sim idle walk ledger work deploy pipeline layout spacelog look; do
+for suite in rule sim idle walk ledger work deploy pipeline layout spacelog look; do
   OUT=$($BIN --$suite-tests 2>&1) || FAILED=1
   echo "$OUT" | grep -E "not so|FAIL" || true
   echo "$OUT" | tail -1

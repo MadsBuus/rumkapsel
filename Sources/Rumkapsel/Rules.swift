@@ -1,0 +1,195 @@
+import Foundation
+
+struct WorkNews: Equatable {
+    var crate: CrateID
+    var office: String?
+    var stage: Stage
+    var closed = false
+    var quiet = false
+}
+
+enum StagingNews: Equatable { case opened(Int), merged(Int), closed(Int), deploy(StagingFact.Deploy) }
+
+enum Event: Equatable {
+    case policy(repo: String, RepoFacts)
+    case work(WorkNews)
+    case decon(repo: String, open: [Int])
+    case deconClosed(CrateID)
+    case staging(repo: String, StagingNews)
+    case launched(repo: String, hotfix: Int?)
+    case restack
+    case tick
+}
+
+enum Subject: Hashable { case crate(CrateID) }
+
+enum Effect: Equatable {
+    case log(String)
+    case quiet(Subject)
+    case hatch(repo: String)
+}
+
+enum Rules {
+    static let closedFor: TimeInterval = 600, launchedFor: TimeInterval = 600
+
+    static func apply(_ events: [Event], at now: Date, to f: inout Facts, yard g: YardGeometry) -> [Effect] {
+        var fx: [Effect] = []
+        var arrived: [String: [Zone: [Int]]] = [:]
+        for event in events {
+            switch event {
+            case .policy(let repo, let r):
+                f.repos[repo] = r
+                for id in f.crates.values.filter({ $0.id.repo == repo }).sorted(by: { $0.seq < $1.seq }).map(\.id) {
+                    guard let c = f.crates[id], let stage = c.stage else { continue }
+                    put(id, place(stage, r, office: nil, old: c.place), &f, g)
+                }
+            case .work(let news):
+                work(news, now, &f, g, &fx, &arrived)
+            case .decon(let repo, let open):
+                let new = Set(open).sorted().filter { f.crates[CrateID(repo: repo, number: $0)] == nil }
+                guard !new.isEmpty else { continue }
+                fx.append(.hatch(repo: repo))
+                for number in new {
+                    let id = CrateID(repo: repo, number: number)
+                    put(id, .decon, &f, g)
+                    f.crates[id]?.alien = true
+                    fx.append(.log("\(Words.current.unidentified) #\(number) in \(Words.current.inDecon)"))
+                }
+            case .deconClosed(let id):
+                guard f.crates[id]?.zone == .decon else { continue }
+                put(id, nil, &f, g)
+                fx.append(.log("#\(id.number) \(Words.current.ejected), never cleared"))
+            case .staging(let repo, let news):
+                staging(repo, news, &f)
+            case .launched(let repo, let hotfix):
+                let r = f.repo(repo)
+                let rocket = hotfix.map { "\(repo)|hotfix#\($0)" } ?? repo
+                let going = hotfix.map { [CrateID(repo: repo, number: $0)] }
+                    ?? f.crates.values.filter { $0.id.repo == repo && $0.zone.map(r.loadZones.contains) == true }.sorted { $0.seq > $1.seq }.map(\.id)
+                f.launches[rocket] = now
+                for id in going where f.crates[id] != nil { put(id, .aboard(rocket), &f, g) }
+            case .restack:
+                Layout.relayout(&f, yard: g)
+            case .tick:
+                break
+            }
+        }
+        for repo in arrived.keys.sorted() {
+            for zone in Zone.allCases {
+                guard let numbers = arrived[repo]?[zone] else { continue }
+                fx.append(.log("\(repo) \(numbers.map { "#\($0)" }.joined(separator: ", ")) to \(zone.words)"))
+            }
+        }
+        normalize(&f, at: now, yard: g)
+        return fx
+    }
+
+    static func place(_ stage: Stage, _ r: RepoFacts, office: String?, old: CrateFact.Place?) -> CrateFact.Place? {
+        if case .aboard? = old { return old }
+        switch stage {
+        case .inbound, .working: return nil
+        case .ready: return office.map(CrateFact.Place.office) ?? old
+        case .stored: return .waiting
+        case .qa: return r.hasStaging ? .testing : .waiting
+        case .cleared: return r.hasStaging ? .cleared : .waiting
+        case .shipped: return nil
+        }
+    }
+
+    static func normalize(_ f: inout Facts, at now: Date, yard g: YardGeometry) {
+        let expired = f.crates.values.filter { $0.closedAt.map { now.timeIntervalSince($0) >= closedFor } ?? false }.map(\.id)
+        for id in expired.sorted() { put(id, nil, &f, g) }
+        for (rocket, at) in f.launches.sorted(by: { $0.key < $1.key }) where now.timeIntervalSince(at) >= launchedFor {
+            f.launches[rocket] = nil
+            f.crates = f.crates.filter { $0.value.place != .aboard(rocket) }
+        }
+        let onRows = Set(f.crates.values.filter(\.onRow).map(\.id.repo))
+        for repo in f.homes.keys.sorted() where !onRows.contains(repo) { f.homes[repo] = nil }
+        var full: Set<Zone> = []
+        for c in f.crates.values.filter({ $0.zone != nil && $0.column == nil }).sorted(by: { $0.seq < $1.seq }) {
+            guard let zone = c.zone, !full.contains(zone) else { continue }
+            if zone.isRow, f.homes[c.id.repo] == nil { f.homes[c.id.repo] = Layout.newHome(c.id.repo, f) }
+            guard let column = Layout.pickColumn(c.id.repo, zone, f, g) else { full.insert(zone); continue }
+            let seq = f.take()
+            f.crates[c.id]?.seq = seq
+            f.crates[c.id]?.column = column
+        }
+        let strays = f.crates.values.filter { c in c.onRow && c.column.map { Layout.band($0) != f.homes[c.id.repo] } ?? false }
+        var noRoom: [Zone: Set<String>] = [:]
+        for c in strays.sorted(by: { $0.id < $1.id }) {
+            guard let zone = c.zone, noRoom[zone]?.contains(c.id.repo) != true else { continue }
+            guard let to = Layout.homeColumn(c.id.repo, zone, f) else { noRoom[zone, default: []].insert(c.id.repo); continue }
+            let seq = f.take()
+            f.crates[c.id]?.seq = seq
+            f.crates[c.id]?.column = to
+            break
+        }
+    }
+
+    private static func work(_ news: WorkNews, _ now: Date, _ f: inout Facts, _ g: YardGeometry, _ fx: inout [Effect],
+                             _ arrived: inout [String: [Zone: [Int]]]) {
+        let id = news.crate, r = f.repo(id.repo)
+        let old = f.crates[id]?.place
+        var to = place(news.stage, r, office: news.office, old: old)
+        if r.shipsOnMerge, to == .waiting, old != .waiting {
+            let rocket = "\(id.repo)|merge#\(f.nextSeq)"
+            f.launches[rocket] = now
+            to = .aboard(rocket)
+        }
+        let moved = put(id, to, &f, g)
+        guard f.crates[id] != nil else { return }
+        f.crates[id]?.stage = news.stage
+        let closedAt = f.crates[id]?.closedAt
+        f.crates[id]?.closedAt = news.closed ? closedAt ?? now : nil
+        guard moved else { return }
+        if news.quiet { fx.append(.quiet(.crate(id))) }
+        else if let zone = to?.zone { arrived[id.repo, default: [:]][zone, default: []].append(id.number) }
+    }
+
+    private static func staging(_ repo: String, _ news: StagingNews, _ f: inout Facts) {
+        switch news {
+        case .opened(let n):
+            f.staging[repo] = StagingFact(number: n)
+        case .merged(let n):
+            var s = f.staging[repo] ?? StagingFact(number: n)
+            s.number = n
+            s.merged = true
+            f.staging[repo] = s
+        case .closed(let n):
+            if f.staging[repo]?.number == n { f.staging[repo] = nil }
+        case .deploy(let d):
+            f.staging[repo]?.deploy = d
+        }
+    }
+
+    @discardableResult
+    private static func put(_ id: CrateID, _ to: CrateFact.Place?, _ f: inout Facts, _ g: YardGeometry) -> Bool {
+        let old = f.crates[id]
+        guard old?.place != to else { return false }
+        if let old, let zone = old.zone, let column = old.column { leave(old, zone, column, &f, g) }
+        guard let to else { f.crates[id] = nil; return true }
+        var c = old ?? CrateFact(id: id, place: to, seq: 0)
+        c.place = to
+        c.column = nil
+        c.seq = f.take()
+        f.crates[id] = c
+        guard let zone = to.zone else { return true }
+        if zone.isRow, f.homes[id.repo] == nil { f.homes[id.repo] = Layout.newHome(id.repo, f) }
+        let column = Layout.pickColumn(id.repo, zone, f, g)
+        f.crates[id]?.column = column
+        return true
+    }
+
+    private static func leave(_ c: CrateFact, _ zone: Zone, _ column: Int, _ f: inout Facts, _ g: YardGeometry) {
+        f.crates[c.id]?.column = nil
+        guard zone.isRow else { return }
+        let above = f.crates.values.filter { $0.zone == zone && $0.column == column && $0.seq > c.seq }.sorted { $0.seq > $1.seq }.map(\.id)
+        for id in above {
+            f.crates[id]?.column = nil
+            let to = Layout.pickColumn(id.repo, zone, f, g, avoiding: column) ?? column
+            let seq = f.take()
+            f.crates[id]?.seq = seq
+            f.crates[id]?.column = to
+        }
+    }
+}

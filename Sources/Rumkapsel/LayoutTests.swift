@@ -342,6 +342,30 @@ enum LayoutTests {
             }
         }
 
+        test("the facts' yard spots stand exactly where the ledger's yard draws the same columns") {
+            let a = fresh()
+            a.ledger.adopt(Ledger.Word(storage: Array(1...14), deck: [], cleared: []), repo: "web")
+            a.ledger.adopt(Ledger.Word(storage: [20, 21], deck: [30, 31, 32], cleared: [31]), repo: "api")
+            _ = a.ledger.adoptDecon(open: [40, 41, 42], repo: "bot")
+            var f = Facts()
+            var old: [CrateID: YardSlot] = [:]
+            for yard in [Yard.storage, .deck, .decon] {
+                for s in a.layout(of: yard) {
+                    let zone: Zone = yard == .storage ? .waiting : yard == .decon ? .decon : s.group == 0 ? .cleared : .testing
+                    let id = CrateID(repo: s.repo, number: s.number)
+                    f.crates[id] = CrateFact(id: id, place: CrateFact.Place(zone), seq: s.level * 1000 + f.crates.count, column: s.column)
+                    old[id] = s
+                }
+            }
+            let spots = Layout.spots(f, a.yard)
+            expect(spots.count == old.count && old.count == 22, "every crate drawn: \(spots.count) of \(old.count)")
+            for (id, s) in old {
+                guard let n = spots[id] else { continue }
+                expect(n.cell == s.cell && n.level == s.level && simd_distance(n.pos, s.pos) < 1e-9 && n.yaw == s.yaw,
+                       "\(id): \(n.cell) L\(n.level) \(n.pos) against \(s.cell) L\(s.level) \(s.pos)")
+            }
+        }
+
         test("restacked, a repository's untested crates stand in the column of its tested ones, whoever is in storage") {
             let a = fresh()
             for (repo, n) in [("api", 30), ("android", 31), ("bot", 32)] { a.ledger.adopt(Ledger.Word(storage: [n], deck: [], cleared: []), repo: repo) }

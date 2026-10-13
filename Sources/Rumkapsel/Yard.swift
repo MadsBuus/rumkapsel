@@ -60,7 +60,7 @@ extension Station {
             let tile = s.column / 2, width = grid[0].count
             let cell = grid[min(tile / width, grid.count - 1)][tile % width]
             let side = paired ? (s.column % 2 == 0 ? -0.25 : 0.25) : 0
-            let (jx, jz, yaw) = yard == .storage ? Station.jitter(repo: e.crate.repo, number: e.crate.number) : (0, 0, 0)
+            let (jx, jz, yaw) = yard == .storage ? Layout.jitter(repo: e.crate.repo, number: e.crate.number) : (0, 0, 0)
             let pos = SIMD3(offset.x + Double(cell.x) + side + jx, Double(level) * Hands.level, offset.y + Double(cell.y) + jz)
             return YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,
                             group: s.group, column: s.column, level: level, cell: cell, pos: pos, yaw: yaw, carried: e.carried)
@@ -208,11 +208,5 @@ extension Station {
         while level > 0 && !taken.contains(level - 1) { level -= 1 }
         while taken.contains(level) { level += 1 }
         return level == slot.level ? slot : slot.lowered(to: level)
-    }
-
-    private static func jitter(repo: String, number: Int) -> (Double, Double, Double) {
-        var seed = stableHash("\(repo)#\(number)") | 1
-        func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-        return ((rnd() - 0.5) * 0.22, (rnd() - 0.5) * 0.3, (rnd() - 0.5) * 0.7)
     }
 }

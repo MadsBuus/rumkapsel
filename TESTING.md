@@ -7,6 +7,7 @@ Every change runs all of it before it is committed; it takes half a minute.
 ```bash
 swift build --build-system native
 .build/debug/Rumkapsel --scenarios
+.build/debug/Rumkapsel --rule-tests
 .build/debug/Rumkapsel --sim-tests
 .build/debug/Rumkapsel --idle-tests
 .build/debug/Rumkapsel --walk-tests

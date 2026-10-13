@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
         if args.contains(where: { $0 == "--scenarios" || $0.hasSuffix("-tests") }) { Words.pinned = Vocabulary() }
         if args.contains("--ledger-tests") { LedgerTests.run() }
+        if args.contains("--rule-tests") { RuleTests.run() }
         if args.contains("--work-tests") { WorkTests.run() }
         if args.contains("--deploy-tests") { DeployTests.run() }
         if args.contains("--pipeline-tests") { PipelineTests.run() }
