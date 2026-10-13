@@ -4,21 +4,17 @@ enum ColorDump {
     static func run() -> Never {
         let fleet = Fleet()
         fleet.load(alone: false)
-        let repos = fleet.repoColors.keys.sorted()
-        print("\(repos.count) repositories over \(Colors.repos.count) palette slots")
+        let cfg = ConfigStore.shared.current
+        let repos = Set(fleet.stations.values.flatMap { $0.rooms.values.compactMap(\.repo) }).filter { !$0.isEmpty }.sorted()
+        print("\(repos.count) repositories on the floor, \(Colors.repos.count) palette slots")
+        func hex(_ c: RGB) -> String { String(format: "#%02X%02X%02X", Int(c.r * 255), Int(c.g * 255), Int(c.b * 255)) }
         for r in repos {
             let c = fleet.color(forRepo: r)
-            let hex = String(format: "#%02X%02X%02X", Int(c.r * 255), Int(c.g * 255), Int(c.b * 255))
-            print(String(format: "  slot %2d  %@  %@", fleet.repoColors[r] ?? -1, hex, r))
+            let from = cfg.repos[r]?.color != nil ? "settings" : fleet.repoColors[r].map { "slot \($0)" } ?? "?"
+            print("  \(from.padding(toLength: 9, withPad: " ", startingAt: 0))  \(hex(c))  \(r)")
         }
-        var used: [String: [String]] = [:]
-        for r in repos {
-            let c = fleet.color(forRepo: r)
-            used[String(format: "#%02X%02X%02X", Int(c.r * 255), Int(c.g * 255), Int(c.b * 255)), default: []].append(r)
-        }
-        let shared = used.filter { $0.value.count > 1 }
-        print(shared.isEmpty ? "every repository has a colour to itself"
-                             : "same colour: \(shared.map { "\($0.key) \($0.value.joined(separator: " and "))" }.joined(separator: ", "))")
+        let pairs = repos.enumerated().flatMap { i, a in repos[(i + 1)...].map { (a, $0, fleet.color(forRepo: a).distance(to: fleet.color(forRepo: $0))) } }
+        for (a, b, d) in pairs.sorted(by: { $0.2 < $1.2 }).prefix(3) { print(String(format: "  closest  %.3f  %@ and %@", d, a, b)) }
         exit(0)
     }
 }

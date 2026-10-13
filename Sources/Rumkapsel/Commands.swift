@@ -68,6 +68,14 @@ struct Command {
             case .mat: return "jumping jacks on the mat"
             }
         }
+        var doing: String {
+            switch self {
+            case .treadmill: return "running on the treadmill"
+            case .bench: return "pressing on the bench"
+            case .bag: return "boxing the bag"
+            case .mat: return "doing jumping jacks on the mat"
+            }
+        }
     }
 
     enum Flight: Equatable {
@@ -255,6 +263,14 @@ struct Command {
 }
 
 extension Place {
+    var hereWords: String {
+        switch self {
+        case .core: return "by " + Words.current.theMonolith
+        case .lounge: return "on " + Words.current.theCouch
+        default: return "in " + words
+        }
+    }
+
     var words: String {
         switch self {
         case .core: return Words.current.theMonolith

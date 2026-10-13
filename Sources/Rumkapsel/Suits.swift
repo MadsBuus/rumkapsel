@@ -2,29 +2,36 @@ import AppKit
 import SceneKit
 
 enum Suit {
-    private static var made: [Bool: [SCNMaterial]] = [:]
+    enum Kind: String, CaseIterable { case white, crew, neighbour }
+    private static var made: [Kind: [SCNMaterial]] = [:]
 
-    static func key(_ badge: NSColor, crew: Bool) -> String { WallPanel.key(badge) + (crew ? "|crew" : "") }
-    private static func base(crew: Bool) -> NSColor { crew ? NSColor(rgb: (0.62, 0.64, 0.7)) : NSColor(rgb: (0.8, 0.8, 0.78)) }
+    static func key(_ badge: NSColor, _ kind: Kind) -> String { WallPanel.key(badge) + "|" + kind.rawValue }
+    static func base(_ kind: Kind) -> NSColor {
+        switch kind {
+        case .white: return NSColor(rgb: (0.8, 0.8, 0.78))
+        case .crew: return NSColor(rgb: (0.62, 0.64, 0.7))
+        case .neighbour: return NSColor(rgb: (0.9, 0.5, 0.2))
+        }
+    }
 
     static let patch = (x0: 0.64, y0: 0.36, x1: 0.8, y1: 0.4)
 
-    static func materials(crew: Bool) -> [SCNMaterial] {
-        if let m = made[crew] { return m }
-        let base = base(crew: crew)
+    static func materials(_ kind: Kind) -> [SCNMaterial] {
+        if let m = made[kind] { return m }
+        let base = base(kind)
         func face(_ part: Part) -> SCNMaterial {
             let m = lit(base)
-            m.diffuse.contents = load(part, crew: crew) ?? draw(base, width: part == .side ? 96 : 192, part: part)
+            m.diffuse.contents = load(part, kind) ?? draw(base, width: part == .side ? 96 : 192, part: part)
             m.diffuse.mipFilter = .linear
             return m
         }
         let side = face(.side), top = lit(base)
         let out = [face(.front), side, face(.back), side, top, top]
-        made[crew] = out
+        made[kind] = out
         return out
     }
 
-    static func patchColor(_ badge: NSColor, crew: Bool) -> NSColor { base(crew: crew).blended(withFraction: 0.6, of: badge) ?? badge }
+    static func patchColor(_ badge: NSColor, _ kind: Kind) -> NSColor { base(kind).blended(withFraction: 0.6, of: badge) ?? badge }
 
     static let root: URL? = {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Suits"), FileManager.default.fileExists(atPath: r.path) { return r }
@@ -32,17 +39,17 @@ enum Suit {
     }()
     static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/Suits")
-    private static func file(_ part: Part, crew: Bool) -> String { "suit-\(crew ? "crew" : "white")-\(part).png" }
-    private static func load(_ part: Part, crew: Bool) -> NSImage? { root.flatMap { NSImage(contentsOf: $0.appendingPathComponent(file(part, crew: crew))) } }
+    private static func file(_ part: Part, _ kind: Kind) -> String { "suit-\(kind.rawValue)-\(part).png" }
+    private static func load(_ part: Part, _ kind: Kind) -> NSImage? { root.flatMap { NSImage(contentsOf: $0.appendingPathComponent(file(part, kind))) } }
 
     static func bake() -> Never {
         try? FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
-        for crew in [false, true] {
+        for kind in Kind.allCases {
             for part in [Part.front, .back, .side] {
-                let image = draw(base(crew: crew), width: part == .side ? 96 : 192, part: part)
+                let image = draw(base(kind), width: part == .side ? 96 : 192, part: part)
                 guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
                       let png = rep.representation(using: .png, properties: [:]) else { continue }
-                let url = sourceRoot.appendingPathComponent(file(part, crew: crew))
+                let url = sourceRoot.appendingPathComponent(file(part, kind))
                 try? png.write(to: url)
                 print("wrote \(url.path)")
             }

@@ -258,7 +258,7 @@ struct SettingsView: View {
     }
 
     private func swatch(_ repo: String) -> Color {
-        Color(nsColor: NSColor(model.config.repos[repo]?.color ?? Fleet.color(slot: Fleet.slot(for: repo))))
+        Color(nsColor: NSColor(model.config.repos[repo]?.color ?? Fleet.handedOut(repo: repo) ?? Colors.idle))
     }
 
     private func addRepository() {

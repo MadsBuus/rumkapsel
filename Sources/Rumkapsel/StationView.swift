@@ -158,6 +158,31 @@ extension StationController {
         NSMenu.popUpContextMenu(menu, with: event, for: view)
     }
 
+    func resetColors() {
+        enqueue { [self] in
+            fleet.resetColors()
+            fleet.save()
+            legendSignature = ""
+            handle([.layoutChanged, .markersChanged])
+            flushScene()
+        }
+    }
+
+    func resetOfficeLayout() {
+        let alert = NSAlert()
+        alert.messageText = "Lay out every office afresh?"
+        alert.informativeText = "Each office moves to where the station would put it today, in the order they opened. Offices a neighbour placed first go back where the neighbour has them."
+        alert.addButton(withTitle: "Lay Out Afresh")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        enqueue { [self] in
+            for station in fleet.stations.values { station.relayOffices() }
+            fleet.save()
+            handle([.layoutChanged])
+            flushScene()
+        }
+    }
+
     @objc private func kickOffice(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
         enqueue { [self] in

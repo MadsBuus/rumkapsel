@@ -90,6 +90,7 @@ final class SimulatorModel: ObservableObject {
     private var peerHere = false
     private var peerBeat: Timer?
     private var peerSharesTeammate = false
+    private var peerDoing: String?
     private var nextIssues: [String: Int] = ["web": 460, "api": 5160, "ios": 300]
     private func nextIssue(_ repo: String) -> Int { nextIssues[repo, default: 700] += 1; return nextIssues[repo]! }
     private var nextRelease = 9000
@@ -253,7 +254,7 @@ final class SimulatorModel: ObservableObject {
         }
         let asleep = station.sim?.night == true
         let office = peerSharesTeammate ? offices.first { $0.owner == .teammate }?.home.key : nil
-        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: office ?? $0.key, asleep: asleep, busy: !asleep) }
+        let ms = mine.prefix(1).map { PeerSnapshot.Minion(id: "kim-1", office: office ?? $0.key, asleep: asleep, busy: !asleep && peerDoing == nil, doing: peerDoing) }
         let snap = PeerSnapshot(version: PeerSnapshot.current, name: peerName, since: station.now.addingTimeInterval(-600),
                                 offices: mine, minions: Array(ms), github: nil, project: nil)
         station.simulate(peer: snap)
@@ -721,6 +722,7 @@ final class SimulatorModel: ObservableObject {
                 button("Merge PR", "…is merged", needsOpenPull),
                 button("Close PR", "…is closed unmerged", needsOpenPull),
                 button("New branch in repo", "A new office of mine in \(repo)"),
+                button("New branch, no issue", "A new office of mine in \(repo), on a branch with no issue in its name"),
             ]),
             Group(id: "Teammate (\(teammate))", note: "on the target office when it is \(teammate)'s, else on his newest branch in \(repo)", buttons: [
                 button("Teammate: New branch", "A new branch in \(repo)"),
@@ -741,6 +743,9 @@ final class SimulatorModel: ObservableObject {
                 button("Peer: Kick office", "You kick this office off the station",
                        o == nil ? .already("no office picked") : nil),
                 button("Peer: Same branch as teammate", "She is on leo's branch too"),
+                button("Peer: To the lounge", "Her minion takes a break on the sofa", peerOffice),
+                button("Peer: To the gym", "Her minion takes a turn in the gym", peerOffice),
+                button("Peer: Back to work", "Her minion goes back to her office", peerOffice),
                 button("Peer: Arrive", shown: false),
                 button("Peer: Leave", shown: false),
             ]),
@@ -909,6 +914,13 @@ final class SimulatorModel: ObservableObject {
             let o = addMine(repo: repo, number: n, slug: "sim-\(n)", branch: "gh-\(n)/new-work-\(n)",
                             title: "new work \(n)", activity: .coding("src"), commits: 2)
             board.append(item(repo, n, "new work \(n)", statuses.development, "me"))
+            target = o.uid
+            pushGitHub()
+            pushScan()
+        case "New branch, no issue":
+            let n = nextIssue(repo)
+            let o = addMine(repo: repo, number: n, slug: "sim-\(n)", branch: "claude/new-work-\(n)",
+                            title: "new work \(n)", activity: .coding("src"), commits: 2)
             target = o.uid
             pushGitHub()
             pushScan()
@@ -1132,6 +1144,9 @@ final class SimulatorModel: ObservableObject {
         case "Breather": station.simulate(.breather(.lounge))
         case "Everyone asleep": station.simulate(.turnIn)
         case "Peer: Same branch as teammate": peerSharesTeammate = true; pushPeer()
+        case "Peer: To the lounge": peerDoing = "lounge"; pushPeer()
+        case "Peer: To the gym": peerDoing = "gym"; pushPeer()
+        case "Peer: Back to work": peerDoing = nil; pushPeer()
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
         case "Meet in the hall": station.simulate(.meet)

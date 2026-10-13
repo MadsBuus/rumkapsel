@@ -66,6 +66,7 @@ extension StationController {
             guard let self, let button, let host = button.superview else { return }
             button.setFrameOrigin(NSPoint(x: host.bounds.width - 12 - button.frame.width, y: button.frame.minY))
             self.spaceLogCorner = button.frame.width + 12
+            self.neighboursButton?.onResize?()
         }
         let panel = SpaceLogPanel(frame: NSRect(x: w - 472, y: 40, width: 460, height: max(200, view.bounds.height - 110)))
         panel.autoresizingMask = [.minXMargin, .height]
@@ -81,6 +82,7 @@ extension StationController {
     func toggleSpaceLog() {
         guard let panel = spaceLogPanel else { return }
         if panel.isHidden {
+            if neighboursPanel?.isHidden == false { toggleNeighbours() }
             panel.isHidden = false
             spaceLogButton?.unread = 0
             refreshSpaceLog()
@@ -156,6 +158,8 @@ extension StationController {
 
     func spaceLogTakes(point p: NSPoint) -> Bool {
         if let b = spaceLogButton, b.frame.contains(p) { return true }
+        if let b = neighboursButton, !b.isHidden, b.frame.contains(p) { return true }
+        if let panel = neighboursPanel, !panel.isHidden, panel.frame.contains(p) { return true }
         if let panel = spaceLogPanel, !panel.isHidden, panel.frame.contains(p) { return true }
         return false
     }
@@ -265,7 +269,9 @@ final class SpaceLogButton: NSView {
 final class SpaceLogPanel: NSView {
     private let text = LinkedText()
     private let scroll = NSScrollView()
-    var onGo: ((SpaceLog.Target) -> Void)? { get { text.onGo } set { text.onGo = newValue } }
+    var onGo: ((SpaceLog.Target) -> Void)? {
+        didSet { text.onGo = { [weak self] t in if let t = t as? SpaceLog.Target { self?.onGo?(t) } } }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -404,9 +410,9 @@ final class SpaceLogPanel: NSView {
 
 final class LinkedText: NSTextView {
     static let target = NSAttributedString.Key("rumkapsel.spacelog.target")
-    var onGo: ((SpaceLog.Target) -> Void)?
+    var onGo: ((Any) -> Void)?
 
-    private func target(at event: NSEvent) -> SpaceLog.Target? {
+    private func target(at event: NSEvent) -> Any? {
         guard let lm = layoutManager, let tc = textContainer, let storage = textStorage, storage.length > 0 else { return nil }
         var p = convert(event.locationInWindow, from: nil)
         p.x -= textContainerOrigin.x; p.y -= textContainerOrigin.y
@@ -415,7 +421,7 @@ final class LinkedText: NSTextView {
         guard lm.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: tc).insetBy(dx: -4, dy: -2).contains(p) else { return nil }
         let i = lm.characterIndexForGlyph(at: glyph)
         guard i < storage.length else { return nil }
-        return storage.attribute(Self.target, at: i, effectiveRange: nil) as? SpaceLog.Target
+        return storage.attribute(Self.target, at: i, effectiveRange: nil)
     }
 
     override func updateTrackingAreas() {

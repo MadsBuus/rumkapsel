@@ -169,6 +169,21 @@ enum LayoutTests {
             draw(a, byRepo: true)
         }
 
+        test("laying the offices out afresh keeps every office, in the order they opened, on one hallway") {
+            let order = (0..<16).map { "task:repo\($0 % 4)#\(400 + $0)" }
+            let s = fresh()
+            for k in order { place(k, on: s) }
+            for k in order where k.hasSuffix("1") || k.hasSuffix("4") || k.hasSuffix("7") { s.removeRoom(key: k) }
+            for k in (0..<5).map({ "task:late#\(500 + $0)" }) { place(k, on: s) }
+            let before = Set(s.rooms.keys)
+            s.relayOffices()
+            expect(Set(s.rooms.keys) == before, "the same rooms stand: \(s.rooms.count) against \(before.count)")
+            expect(whole(s), "the hallway is one piece and every office has its door on it")
+            let again = fresh()
+            for k in s.rooms.values.filter({ !$0.key.hasPrefix("kind:") }).sorted(by: { ($0.openedAt, $0.key) < ($1.openedAt, $1.key) }) { place(k.key, on: again) }
+            expect(s.rooms.keys.allSatisfy { s.rooms[$0]?.cells == again.rooms[$0]?.cells }, "and stand where a station opening them afresh would put them")
+        }
+
         test("a station laid out afresh on load takes the placement it is set to, and keeps every office") {
             let order = (0..<24).map { "task:repo\($0 % 4)#\(300 + $0)" }
             let before = fresh()
@@ -236,11 +251,14 @@ enum LayoutTests {
                 return world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
             }
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
-            let merged = world.works.note(repo: "web", pull: 85, pullState: "MERGED")
+            world.hasPackage = { $0 == "work|task:web#85" }
+            let merged = world.works.note(repo: "web", branch: "feature/old", pull: 85, pullState: "MERGED")
+            world.works.report(merged, .ready, by: .pulls)
             world.works.report(merged, .stored, by: .pulls)
             let old = "task:web#85"
             _ = a.ensureRoom(key: old, name: "#85", repo: "web", color: Colors.repos[0], lastActive: now)
             a.rooms[old]?.worktree = cwd
+            a.rooms[old]?.branch = "feature/old"
             expect(world.stage(office: old, repo: "web") == .stored, "merged, waiting for its haul")
             _ = scan("feature/new")
             let again = scan("feature/new") + scan("feature/new")

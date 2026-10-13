@@ -273,6 +273,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
     let followLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
+    let bubbleName = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
     var bubbleIcons: [SKSpriteNode] = []
     var hatchLights: [String: SCNNode] = [:]
@@ -281,8 +282,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
     var bubbleCursor: CGPoint?
-    let shareDot = SKSpriteNode(color: NSColor(rgb: (0.35, 0.85, 0.5)), size: CGSize(width: 7, height: 7))
-    let shareLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     var legendNodes: [SKNode] = []
     var jobNodes: [SKNode] = []
     var hudClock = 0.0
@@ -309,6 +308,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var spaceLogOpen = false
     var spaceLogDrawnAt = 0.0
     var spaceLogCorner: CGFloat = 0
+    var neighboursButton: NeighboursButton?
+    var neighboursPanel: NeighboursPanel?
+    var neighboursOpen = false
     var hovered: String?
     var following: String?
     private var lastTick = 0.0
@@ -476,7 +478,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 following = nil
                 enqueue { self.walkEscape() }
                 if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
+                if neighboursPanel?.isHidden == false { toggleNeighbours() }
             case "l": toggleSpaceLog()
+            case "n": toggleNeighbours()
             case "g": refreshGitHub()
             default: return false
             }
@@ -489,7 +493,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
-        if !simulated && !demo { installSpaceLog() }
+        if !simulated && !demo { installSpaceLog(); installNeighbours() }
         if !simulated { Bulkhead.prepare() }
         if demo {
             seedDemo()
@@ -751,7 +755,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } else { peers.stop() }
     }
 
-    private func makeSnapshot(withGitHub: Bool) -> PeerSnapshot? {
+    func makeSnapshot(withGitHub: Bool) -> PeerSnapshot? {
         let cfg = ConfigStore.shared.current
         guard let station = fleet.stations["work"] else { return nil }
         var offices: [PeerSnapshot.Office] = []
@@ -767,7 +771,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
             PeerSnapshot.Minion(id: String(stableHash($0.id)), office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy,
-                                activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.pyramids.count + $0.queuedCones.count)
+                                activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.pyramids.count + $0.queuedCones.count,
+                                doing: doing($0), callsign: $0.callsign)
         }
         var knowledge: [GitHubResolver.Knowledge]?
         var board: GitHubResolver.ProjectKnowledge?
@@ -775,7 +780,19 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             knowledge = world.repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
             if let p = cfg.project { board = github.projectKnowledge(owner: p.owner, number: p.number) }
         }
-        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board, twoWay: true)
+        let colors = fleet.repoColors.filter { cfg.shared(repo: $0.key) && cfg.repos[$0.key]?.color == nil }
+        return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices.sorted { $0.key < $1.key },
+                            minions: ms.sorted { $0.id < $1.id }, github: knowledge, project: board, twoWay: true,
+                            colors: colors.isEmpty ? nil : colors)
+    }
+
+    private func doing(_ m: Minion) -> String? {
+        switch m.current?.kind {
+        case .exercise: return "gym"
+        case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
+        case .chore: return "roam"
+        default: return m.place == .lounge && m.activity != .sleeping ? "lounge" : nil
+        }
     }
 
     func receivePeer(_ snap: PeerSnapshot) {
@@ -796,10 +813,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 continue
             }
             let id = "peer:\(snap.name)/\(m.id)"
-            let home = Home(key: m.office, name: snap.name, repo: "", issue: nil)
+            let repo = snap.offices.first { $0.key == m.office }?.repo ?? station.rooms[m.office]?.repo ?? ""
+            let home = Home(key: m.office, name: snap.name, repo: repo, issue: nil)
             let figure: Minion
             if let existing = minions[id] {
                 figure = existing
+                figure.home = home
             } else {
                 let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
                 figure = Minion(id: id, station: station.name, home: home, cwd: "", toolCount: 0,
@@ -810,6 +829,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 minionRoot.addChildNode(figure.node)
                 minions[id] = figure
             }
+            figure.sharedCallsign = m.callsign
+            if !headless { figure.wearSuit(badge: NSColor(fleet.color(forRepo: repo))) }
             drive(figure, by: m, station: station)
         }
         let live = Set(snap.minions.map { "peer:\(snap.name)/\($0.id)" })
@@ -821,8 +842,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func drive(_ b: Minion, by m: PeerSnapshot.Minion, station: Station) {
         b.busy = m.busy && !m.asleep
         b.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
-        let want: Place = m.asleep ? restPlace(b) : (station.rooms[m.office] != nil ? .room(m.office) : .lounge)
-        if b.place != want || b.path.isEmpty && b.state == .arriving { send(b, to: want) }
+        func go(_ want: Place) {
+            if b.bathing || b.exercising || b.choring { simulation.finish(b, to: want); return }
+            if b.place != want || b.path.isEmpty && b.state == .arriving { send(b, to: want) }
+        }
+        switch m.asleep ? nil : m.doing {
+        case "gym":
+            if !b.exercising {
+                if b.bathing || b.choring { simulation.finish(b, to: .gym) }
+                if !(station.rooms["kind:gym"].map { takeTurnInGym(b, station: station, gym: $0) } ?? false) { go(.lounge) }
+            }
+        case "bath", "shower":
+            if !b.bathing {
+                if b.exercising || b.choring { simulation.finish(b, to: .bath) }
+                b.showering = m.doing == "shower"
+                if !visitBath(b, station: station) { go(.lounge) }
+            }
+        case "roam":
+            if !b.choring {
+                if b.bathing || b.exercising { simulation.finish(b, to: .lounge) }
+                if !startRoam(b, station: station) { go(.lounge) }
+            }
+        case "lounge":
+            go(.lounge)
+        default:
+            go(m.asleep ? restPlace(b) : (station.rooms[m.office] != nil ? .room(m.office) : .lounge))
+        }
         let cones = m.asleep ? 0 : (m.cones ?? 0)
         guard b.pyramids.count + b.queuedCones.count != cones else { return }
         clearPyramids(b)
@@ -1077,12 +1122,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     private var lastOffer: TimeInterval = 0
-    private var offers = 0
+    private var lastGitHubOffer: TimeInterval = -.infinity
     private func offerSnapshot(now: TimeInterval) {
-        guard peers.isRunning, now - lastOffer >= 3 else { return }
+        guard peers.isRunning, now - lastOffer >= 0.5 else { return }
         lastOffer = now
-        offers += 1
-        if let snap = makeSnapshot(withGitHub: offers % 10 == 1) { peers.offer(snap) }
+        let withGitHub = now - lastGitHubOffer >= 30
+        if withGitHub { lastGitHubOffer = now }
+        if let snap = makeSnapshot(withGitHub: withGitHub) { peers.offer(snap) }
     }
 
     private func stepStation(dt: Double) {

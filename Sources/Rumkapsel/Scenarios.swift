@@ -158,6 +158,22 @@ enum Scenarios {
             Scenario.crates(sim, "storage", "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
 
+        Scenario("a branch with no issue: opened, merged and prompted again, still one office", [
+            ("Target: ios#298", 4.8),
+            ("New branch, no issue", 48),
+            ("Open PR", 32),
+            ("Merge PR", 4.8),
+            ("Prompt", 4.8),
+        ], tail: 192, expects: [
+            .carry(to: .storage),
+        ], floor: { sim in
+            let reopened = Scenario.count(sim, .officeOpened("task:ios/claude/", .appear), after: "Merge PR")
+                + Scenario.count(sim, .officeOpened("task:ios/claude/", .shuttle), after: "Merge PR")
+            if reopened > 0 { return "an office opened for the branch after the merge" }
+            let rooms = sim.station.world.fleet.stations["work"]?.rooms.values.filter { $0.branch?.hasPrefix("claude/new-work-") == true } ?? []
+            return rooms.count == 1 && rooms[0].key.hasPrefix("task:ios#") ? nil : "offices for the branch: \(rooms.map(\.key).sorted())"
+        }),
+
         Scenario("teammate branch then PR: one shuttle, one crate", [
             ("Target: api#5158", 4.8),
             ("Teammate: New branch", 48),
@@ -422,6 +438,20 @@ enum Scenarios {
             let st = sim.station.world.fleet.stations["work"]!
             if Scenario.crates(sim, "decon", "web") > 0 { return "an object is still in decon" }
             return st.ledger.crates(of: "web").contains(where: \.alien) ? "the ejected object is still in the ledger" : nil
+        }),
+
+        Scenario("a neighbour's minion takes a turn in the gym, then goes back to its office", [
+            ("Peer: Arrive", 32),
+            ("Peer: To the gym", 64),
+            ("Peer: Back to work", 64),
+        ], tail: 32, expects: [
+            .press("Peer: To the gym"),
+            .command("exercise", by: "kim") { if case .exercise = $0 { return true }; return false },
+            .press("Peer: Back to work"),
+        ], floor: { sim in
+            guard let m = sim.station.minions["peer:kim/kim-1"] else { return "no figure for kim's minion" }
+            if m.exercising { return "still in the gym" }
+            return m.place == .room(m.home.key) ? nil : "at \(m.place.words), not in kim's office \(m.home.key)"
         }),
 
         Scenario("peer arrives and leaves: fade in, office held", [
