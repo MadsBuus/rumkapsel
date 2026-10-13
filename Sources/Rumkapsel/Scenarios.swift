@@ -334,8 +334,8 @@ enum Scenarios {
         ], tail: 192, expects: [
             .rocket(.standBy, "web"),
             .releaseOpened("web", untested: true),
-            .rocket(.load(1), "web"),
             .crateCleared("web"),
+            .rocket(.load(2), "web"),
             .rocket(.steam, "web"),
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),

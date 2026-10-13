@@ -155,9 +155,15 @@ extension World {
                                              untested: pr.untested, isProduction: pr.isProduction))
                 events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
-            let labelClears = !pr.untested && workflow(repo: info.repo).cleared?.contains(.pulls) == true
-            if labelClears { for r in waiting(repo: info.repo, station: station.name) { works.report(r, .cleared, by: .pulls) } }
-            let cleared = pr.isProduction && (labelClears || clearedToLoad(repo: info.repo, station: station.name))
+            let flow = workflow(repo: info.repo)
+            let boardClears = flow.cleared?.first == .board && flow.has(.qa)
+            let labelClears = !pr.untested && flow.cleared?.contains(.pulls) == true
+            if labelClears {
+                for r in waiting(repo: info.repo, station: station.name) where !boardClears || r.words[.board] == nil {
+                    works.report(r, .cleared, by: .pulls)
+                }
+            }
+            let cleared = pr.isProduction && ((labelClears && !boardClears) || clearedToLoad(repo: info.repo, station: station.name))
             if !cleared { events += standDown(station: station, repo: info.repo) }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr, cleared: cleared))

@@ -99,8 +99,9 @@ a release merged into staging or production, or when it ships on tags.
 | Trigger | Condition | Effect | Code |
 |---|---|---|---|
 | Work reaches Cleared (board cleared column) | | the crate's `cleared` flag | `Releases.swift`, `Ledger.swift` |
-| Work reaches Cleared | | carried to the cleared rows | `World.swift`, `Jobs.swift`, `Yard.swift` |
-| Open production release has no `untested` label | the repository's workflow clears on the release | the whole release counts as cleared: the rocket loads | `GitHub.swift`, `Releases.swift` |
+| Work reaches Cleared | | carried to the cleared rows; the releases are read again at once, so the rocket loads on the last card | `World.swift`, `Jobs.swift`, `Yard.swift` |
+| Open production release has no `untested` label | no board, or no QA | the whole release counts as cleared: the rocket loads | `GitHub.swift`, `Releases.swift` |
+| Open production release has no `untested` label | a board testing on the deck | work with no card counts as cleared; carded work waits for its card | `Releases.swift` |
 | Bot crate | always | cleared from the start | `Ledger.swift` |
 
 Without a board there is no Cleared per crate.
