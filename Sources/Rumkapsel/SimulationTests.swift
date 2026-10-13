@@ -462,8 +462,11 @@ enum SimulationTests {
 
         test("a crate a walk cannot get any closer to is reached with the last shuffle, not waited on for good") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440, 441, 442, 443, 444], deck: []), repo: "web")
-            _ = station.layout(of: .storage)
+            for (k, repo) in ["a", "b", "c", "d"].enumerated() {
+                station.ledger.adopt(Ledger.Word(storage: [300 + k], deck: []), repo: repo)
+                _ = station.layout(of: .storage)
+            }
+            station.ledger.adopt(Ledger.Word(storage: [444], deck: []), repo: "web")
             let crate = CrateRef(station: "work", repo: "web", number: 444)
             let commands = station.carryToDeck(repo: "web", numbers: [444])
             guard case .carry(_, let from, _)? = commands.first?.kind else { return expect(false, "a carry") }

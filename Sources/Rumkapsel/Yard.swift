@@ -55,10 +55,9 @@ extension Station {
             let s = e.slot!
             let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
             let row = rows(s.group)
-            let second = s.column >= row.count
-            let paired = second || held.contains { $0.slot.group == s.group && $0.slot.column == s.column + row.count }
-            let cell = row[s.column % row.count]
-            let side = paired ? (second ? 0.25 : -0.25) : 0
+            let paired = held.contains { $0.slot.group == s.group && $0.slot.column == s.column ^ 1 }
+            let cell = row[min(s.column / 2, row.count - 1)]
+            let side = paired ? (s.column % 2 == 0 ? -0.25 : 0.25) : 0
             let (jx, jz, yaw) = yard == .storage ? Station.jitter(repo: e.crate.repo, number: e.crate.number) : (0, 0, 0)
             let pos = SIMD3(offset.x + Double(cell.x) + side + jx, Double(level) * Hands.level, offset.y + Double(cell.y) + jz)
             return YardSlot(repo: e.crate.repo, number: e.crate.number, index: e.index, cleared: e.cleared, alien: e.crate.alien,

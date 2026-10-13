@@ -259,12 +259,15 @@ struct Ledger: Codable {
         let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
         func height(_ column: Int) -> Int { here.filter { $0.slot.column == column }.count }
         func next(_ column: Int) -> Slot { Slot(yard: yard, group: group, column: column, order: (here.filter { $0.slot.column == column }.map(\.slot.order).max() ?? -1) + 1) }
-        let mine = Set(here.filter { $0.repo == repo }.map(\.slot.column)).sorted().filter { $0 != avoiding }
-        if tall, let column = mine.first(where: { height($0) < 12 }) { return next(column) }
-        let owned = Set(here.map(\.slot.column))
-        if let free = (0..<max(cap, 1)).first(where: { !owned.contains($0) && $0 != avoiding }) { return next(free) }
-        if let column = mine.filter({ height($0) < 3 }).min(by: { height($0) < height($1) }) { return next(column) }
-        if let column = mine.min(by: { height($0) < height($1) }) { return next(column) }
+        let tiles = Set(here.filter { $0.repo == repo }.map { $0.slot.column / 2 })
+        let mine = tiles.flatMap { [$0 * 2, $0 * 2 + 1] }.filter { $0 < max(cap, 1) && $0 != avoiding }
+        func lowest(_ columns: [Int], under limit: Int) -> Int? {
+            columns.filter { height($0) < limit }.min { (height($0), $0) < (height($1), $1) }
+        }
+        if let column = lowest(mine, under: tall ? 12 : 3) { return next(column) }
+        let taken = Set(here.map { $0.slot.column / 2 })
+        if let tile = (0..<max(cap / 2, 1)).first(where: { !taken.contains($0) && $0 * 2 != avoiding }) { return next(tile * 2) }
+        if let column = lowest(mine, under: .max) { return next(column) }
         return next(0)
     }
 

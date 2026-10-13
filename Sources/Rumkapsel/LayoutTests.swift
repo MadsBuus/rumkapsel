@@ -284,7 +284,7 @@ enum LayoutTests {
             }
         }
 
-        test("a full yard: every crate on its own zone's tiles, none sharing a place, every stack built from the floor") {
+        test("a full yard: every crate on its own zone's tiles, a tile to a repository, none sharing a place, every stack built from the floor") {
             let a = fresh()
             for (k, repo) in ["web", "api", "ios", "android"].enumerated() {
                 let base = 100 * (k + 1)
@@ -296,6 +296,9 @@ enum LayoutTests {
                 for s in layout { expect(zones[s.group]?.contains(s.cell) == true, "\(yard) #\(s.number) stands in its zone, not on \(s.cell)") }
                 for (place, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)|\($0.level)" }) where here.count > 1 {
                     expect(false, "\(yard) \(place) holds \(here.count) crates")
+                }
+                for (tile, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
+                    expect(false, "\(yard) tile \(tile) mixes \(Set(here.map(\.repo)).sorted())")
                 }
                 for (column, stack) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)" }) {
                     expect(Set(stack.map(\.level)) == Set(0..<stack.count), "\(yard) column \(column) is built from the floor: \(stack.map(\.level).sorted())")
