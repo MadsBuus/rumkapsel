@@ -126,7 +126,7 @@ extension Look {
     func message(color: NSColor, floor: NSColor) -> SCNNode? { nil }
 }
 
-enum Floor { case hallway, room, fixed, yard, bay, airlock }
+enum Floor { case hallway, room, fixed, yard, pad, bay, airlock }
 
 struct Tile {
     let floor: Floor

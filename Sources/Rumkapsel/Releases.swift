@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 final class ReleaseBook {
     var announced: Set<String> = []
@@ -285,7 +286,8 @@ extension World {
         let pc = slots[slot % slots.count]
         let foot = SIMD2(pc.x, pc.y + 1.05)
         let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))
-        let cell = station.hall.padCells.contains(stand) ? stand : (station.hall.padCells.first ?? Cell(x: 0, y: 0))
+        func off(_ c: Cell) -> Double { simd_distance(SIMD2(Double(c.x), Double(c.y)), foot) }
+        let cell = station.hall.padCells.contains(stand) ? stand : (station.hall.padCells.min { off($0) < off($1) } ?? Cell(x: 0, y: 0))
         return Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
                     pos: SIMD3(station.offset.x + foot.x, 0, station.offset.y + foot.y))
     }

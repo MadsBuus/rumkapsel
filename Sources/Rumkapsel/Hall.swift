@@ -3,8 +3,8 @@ import simd
 
 struct Hall {
     static let wide = 5, deep = 8
-    static let padSlotOffsets = Station.honeycomb(front: [0, 1, -1], back: [0.5, -0.5, 1.5, -1.5], toward: 1)
-    static let padRadius = Station.hexRadius
+    static let padDeep = 3
+    static let padRadius = 0.62
     static let none = Hall()
 
     let cells: [Cell]
@@ -23,6 +23,7 @@ struct Hall {
     let padWall: [(hall: Cell, out: Cell)]
     let padField: (from: SIMD2<Double>, to: SIMD2<Double>)?
     let padCenter: SIMD2<Double>
+    let padSlots: [SIMD2<Double>]
     let droneRackCell: Cell?
     let deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>)
 
@@ -32,7 +33,7 @@ struct Hall {
         cells = []; walkwayCells = []; aisleCells = []; clearedCells = []; stagedCells = []; storageCells = []
         clearedGrid = []; stagedGrid = []; storageGrid = []
         padCells = []; deconCells = []; crateRows = []; windowWatch = []; padWall = []; padField = nil
-        padCenter = .zero; droneRackCell = nil; deconHatch = (.zero, SIMD2(0, -1))
+        padCenter = .zero; padSlots = []; droneRackCell = nil; deconHatch = (.zero, SIMD2(0, -1))
     }
 
     init(entrance: Cell, padGap: Int) {
@@ -54,22 +55,17 @@ struct Hall {
         let z = Double(top) - 0.5
         padField = (SIMD2(Double(x0) - 4.5, z), SIMD2(Double(x0) + 0.5, z))
         let far = top - 1 - padGap
-        var pad = (0..<6).flatMap { d in (1...4).map { r in Cell(x: x0 - d, y: far - r) } }
+        var pad = (0..<Hall.padDeep).flatMap { r in (0..<Hall.wide).map { x in Cell(x: x0 - x, y: far - r) } }
         if padGap > 0 {
-            for y in far...(top - 1) { for x in [x0 - 1, x0] { pad.append(Cell(x: x, y: y)) } }
-        } else {
-            pad += (0..<6).map { Cell(x: x0 - $0, y: top - 1) }
+            for y in (far + 1)...(top - 1) { for x in [x0 - 1, x0] { pad.append(Cell(x: x, y: y)) } }
         }
         padCells = pad
-        padCenter = SIMD2(Double(x0) - 2.5, Double(far) - 2.5)
+        let center = SIMD2(Double(x0) - 2, Double(far) - 1)
+        padCenter = center
+        let along = Hall.padRadius * 3.squareRoot() + 0.08, across = along * 3.squareRoot() / 2
+        padSlots = [(0.5, 0.5), (-0.5, 0.5), (0, -0.5), (1, -0.5), (-1, -0.5)].map { center + SIMD2($0.0 * along, $0.1 * across) }
         droneRackCell = Cell(x: x0, y: top - 1 - padGap)
         deconHatch = (SIMD2(Double(x0) - 2, Double(top + Hall.deep) + 1.46), SIMD2(0, -1))
-    }
-
-    var padSlots: [SIMD2<Double>] {
-        let c = padCenter, r = Hall.padRadius
-        let fits = Hall.padSlotOffsets.map { c + $0 }.filter { p in abs(p.x - c.x) + r <= 3 && abs(p.y - c.y) + r <= 2 }
-        return fits.isEmpty ? [padCenter] : fits
     }
 
     func backRow(_ cell: Cell) -> (over: Cell, aisle: Cell)? {

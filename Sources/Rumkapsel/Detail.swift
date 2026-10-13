@@ -16,12 +16,13 @@ enum Detail {
         return crates[Int(h % UInt64(crates.count))]
     }
 
-    static func kind(of floor: Floor) -> Kind {
+    static func kind(of floor: Floor) -> Kind? {
         switch floor {
         case .hallway: return .hallway
         case .room: return .office
         case .fixed: return .quarters
         case .yard: return .yard
+        case .pad: return nil
         case .bay: return .bay
         case .airlock: return .airlock
         }

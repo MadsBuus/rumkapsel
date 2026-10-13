@@ -26,7 +26,8 @@ extension StationController {
         case "corridor": return .hallway
         case "kind:hangar": return .bay
         case "kind:airlock": return .airlock
-        case "kind:pad", "kind:storage", "kind:deck", "kind:decon": return .yard
+        case "kind:pad": return .pad
+        case "kind:storage", "kind:deck", "kind:decon": return .yard
         case let k where k.hasPrefix("kind:"): return .fixed
         default: return .room
         }
@@ -63,7 +64,7 @@ extension StationController {
         func paint() -> SCNMaterial {
             let m = flat(tint)
             if !drawn { m.transparency = 0; m.writesToDepthBuffer = false }
-            else if look.detailsFloors { Detail.apply(Detail.kind(of: floor), to: m) }
+            else if look.detailsFloors, let kind = Detail.kind(of: floor) { Detail.apply(kind, to: m) }
             return m
         }
         if let id = swatch(tint) {

@@ -37,7 +37,7 @@ enum Palette {
     static let void = NSColor(rgb: (0.055, 0.067, 0.125))
     static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))
     static let core = NSColor(rgb: (0.13, 0.14, 0.18))
-    static let padFloor = NSColor(rgb: (0.169, 0.184, 0.220))
+    static let padFloor = NSColor(rgb: (0.105, 0.115, 0.140))
     static let labFloor = NSColor(rgb: (0.365, 0.400, 0.467))
     static let storageFloor = NSColor(rgb: (0.247, 0.275, 0.337))
     static let walkFloor = NSColor(rgb: (0.290, 0.320, 0.384))
