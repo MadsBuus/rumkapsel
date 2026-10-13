@@ -82,7 +82,7 @@ ledger tests already follow that shape; the scene is what is still mixed in.
   node for each and places it from those facts, and what it shows once comes back as a cue. Nothing the scene
   draws decides anything, and the simulation borrows nothing from the scene any more.
 - `--sim-tests` steps a bare `Simulation<Body>` through a send, a bath visit, a gym turn, a rest refused under
-  a visit, the idle clock, the airlock, a carry from storage to the deck with the ledger in step, a wedged
+  a visit, the idle clock, the walk out to the bay, a carry from storage to the deck with the ledger in step, a wedged
   carrier giving up, and a release pulled off its rows by the vortex.
 - Measured on 2026-09-14, the gate of sixteen scenarios: 17 s before the split, 12 s after it and after the
   station's fixed cells, the placement's neighbour distances and the furniture's obstacle cells stopped being

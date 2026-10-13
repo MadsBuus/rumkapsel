@@ -683,7 +683,6 @@ extension StationController {
             }
         }
         if st.hangarCells.contains(c) { return ("The bay", "where the shuttles land") }
-        if st.airlockCells.contains(c) { return ("The airlock", nil) }
         if st.hall.padCells.contains(c) { return ("The pad", "where releases lift off") }
         if st.hall.storageCells.contains(c) { return ("Storage", "merged work waiting for a release") }
         if st.hall.deconCells.contains(c) { return ("Decon", nil) }

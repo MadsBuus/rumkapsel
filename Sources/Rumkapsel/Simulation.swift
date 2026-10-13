@@ -173,13 +173,13 @@ final class Simulation<B: Body> {
 
     func dismiss(_ m: B) {
         m.state = .leaving
-        post(.leave, for: m, rank: .leaving, at: m.cell, place: .airlock)
+        post(.leave, for: m, rank: .leaving, at: m.cell, place: .hangar)
     }
 
     func walkOut(_ m: B) {
         m.couch = nil; m.bed = nil
         guard let station = fleet.stations[m.station], let slot = callShip(for: m) else { return }
-        m.place = .airlock
+        m.place = .hangar
         m.path = route(m, to: station.bayStand(slot: slot))
     }
 

@@ -137,11 +137,11 @@ extension StationController {
         m.carried = nil
     }
 
-    func tickAirlockDoors(dt: Double) {
-        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
-            let stationName = String(door.name!.dropFirst("airlockdoor:".count))
+    func tickGlassDoors(dt: Double) {
+        let half = 0.5
+        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("glassdoor:") {
+            let stationName = String(door.name!.dropFirst("glassdoor:".count))
             guard let st = fleet.stations[stationName], let pane = door.childNode(withName: "pane", recursively: false) else { continue }
-            let half = Double(st.airlockCells.map(\.x).max()! - st.airlockCells.map(\.x).min()! + 1) / 2
             let dx = Double(door.position.x) - st.offset.x, dz = Double(door.position.z) - st.offset.y
             let walker = minions.values.contains { m in
                 m.station == stationName && !m.path.isEmpty && clock >= m.wonderUntil
@@ -169,7 +169,7 @@ extension StationController {
     func kit(_ m: Minion) -> Routines.Outfit { Routines.outfit(m, at: clock) }
 
     func tickMinions(dt: Double) {
-        if !headless { tickAirlockDoors(dt: dt) }
+        if !headless { tickGlassDoors(dt: dt) }
         for m in Array(minions.values) {
             guard let station = fleet.stations[m.station] else { despawn(m); continue }
             if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }

@@ -350,7 +350,7 @@ enum SimulationTests {
             expect(m.current?.id == carry.id && m.state == .leaving, "it keeps the carry in hand: \(m.words)")
             expect(step(sim, seconds: 60, until: { m.current.map { if case .leave = $0.kind { return true }; return false } ?? false }), "then it leaves: \(m.words)")
             expect(!m.hasLoad && sim.world.crate(crate)?.area == .deck, "with the crate set down on the deck")
-            expect(m.place == .airlock && !m.path.isEmpty, "on its way out")
+            expect(m.place == .hangar && !m.path.isEmpty, "on its way out")
         }
 
         test("a wedged carrier gives up after ten seconds: the crate lies behind it and the carry is queued again") {

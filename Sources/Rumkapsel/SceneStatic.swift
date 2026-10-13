@@ -11,7 +11,6 @@ extension StationController {
         for c in station.hall.deconCells { m[c] = "kind:decon" }
         for c in station.hall.padCells { m[c] = "kind:pad" }
         for c in station.hall.cells { m[c] = "kind:hall" }
-        for c in station.airlockCells { m[c] = "kind:airlock" }
         for c in station.hangarCells { m[c] = "kind:hangar" }
         owners[station.name] = m
         return m[c]
@@ -25,7 +24,6 @@ extension StationController {
         switch key {
         case "corridor": return .hallway
         case "kind:hangar": return .bay
-        case "kind:airlock": return .airlock
         case "kind:pad": return .pad
         case "kind:storage", "kind:deck", "kind:decon": return .yard
         case let k where k.hasPrefix("kind:"): return .fixed
@@ -51,6 +49,28 @@ extension StationController {
     private func swatch(_ c: NSColor) -> String? {
         guard let s = c.usingColorSpace(.sRGB) else { return nil }
         return String(format: "%.4f/%.4f/%.4f/%.4f", s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent)
+    }
+
+    @discardableResult
+    private func addGlassDoor(_ station: Station, at p: SIMD2<Double>, facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+        let door = SCNNode()
+        let drawn = Looks.current.doorFrame(facing: facing)
+        door.addChildNode(drawn.node)
+        let pane = SCNNode(geometry: SCNBox(width: 0.92, height: 0.7, length: 0.03, chamferRadius: 0))
+        pane.geometry!.firstMaterial = Props.glass(alpha: 0.35)
+        pane.position = v3(0, 0.35, 0)
+        pane.name = "pane"
+        door.addChildNode(pane)
+        for side in [-0.5, 0.5] {
+            let post = SCNNode()
+            post.position = v3(side, 0, 0)
+            post.name = "post"
+            door.addChildNode(post)
+        }
+        door.position = v3(station.offset.x + p.x, 0, station.offset.y + p.y)
+        door.name = "glassdoor:" + station.name
+        staticRoot.addChildNode(door)
+        return (door, drawn.lightHeight)
     }
 
     private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into parent: SCNNode? = nil) -> SCNNode {
@@ -250,40 +270,11 @@ extension StationController {
                 for c in station.hangarCells {
                     addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(rgb: Props.hullPlate), name: "hangar:" + station.name)
                 }
-                for c in station.airlockCells {
-                    addTile(station: station, cell: c, owner: "kind:airlock", color: NSColor(rgb: (0.30, 0.34, 0.42)), name: "airlock:" + station.name)
-                }
             }
             let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
             if let output { addSetPiece(output, station) }
-            if station.hasHangar, !station.airlockCells.isEmpty {
-                let xs = station.airlockCells.map(\.x), ys = station.airlockCells.map(\.y)
-                let cx = station.offset.x + Double(xs.min()! + xs.max()!) / 2
-                let width = Double(xs.max()! - xs.min()! + 1) - 0.1
-                for (edge, tint) in [(Double(ys.min()!) - 0.46, NSColor(rgb: (0.55, 0.6, 0.72))),
-                                     (Double(ys.max()!) + 0.46, NSColor(rgb: (0.75, 0.62, 0.25)))] {
-                    let door = SCNNode()
-                    let frame = lit(tint)
-                    let spans = (xs.min()!...xs.max()!).map { station.offset.x + Double($0) - cx }
-                    let drawn = Looks.current.airlockFrame(width: width, spans: spans, tint: tint)
-                    for side in [-1.0, 1.0] {
-                        let post = SCNNode(geometry: SCNBox(width: 0.08, height: 0.7, length: 0.08, chamferRadius: 0))
-                        post.geometry!.firstMaterial = frame
-                        post.position = v3(side * width / 2, 0.35, 0)
-                        post.name = "post"
-                        post.isHidden = !drawn.showsPosts
-                        door.addChildNode(post)
-                    }
-                    door.addChildNode(drawn.node)
-                    let pane = SCNNode(geometry: SCNBox(width: width - 0.08, height: 0.7, length: 0.03, chamferRadius: 0))
-                    pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
-                    pane.position = v3(0, 0.35, 0)
-                    pane.name = "pane"
-                    door.addChildNode(pane)
-                    door.position = v3(cx, 0, station.offset.y + edge)
-                    door.name = "airlockdoor:" + station.name
-                    staticRoot.addChildNode(door)
-                }
+            if let door = station.bayDoor {
+                addGlassDoor(station, at: SIMD2(Double(door.inside.x), Double(door.inside.y) + 0.5), facing: SIMD2(0, 1))
             }
             if station.hasHangar, input == nil { buildHangar(station) }
             for c in station.hall.padCells where output == nil {
@@ -310,21 +301,12 @@ extension StationController {
                     addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name)
                 }
                 let (hp, facing) = station.hall.deconHatch
-                let hatch = SCNNode()
-                let drawn = Looks.current.hatchFrame(facing: facing)
-                hatch.addChildNode(drawn.node)
-                let pane = SCNNode(geometry: SCNBox(width: 0.92, height: 0.7, length: 0.03, chamferRadius: 0))
-                pane.geometry!.firstMaterial = flat(NSColor(rgb: (0.12, 0.14, 0.2)))
-                pane.position = v3(0, 0.35, 0)
-                hatch.addChildNode(pane)
+                let (hatch, lightHeight) = addGlassDoor(station, at: hp, facing: facing)
                 let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
                 light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
-                light.position = v3(0, drawn.lightHeight, facing.y * 0.05)
+                light.position = v3(0, lightHeight, facing.y * 0.05)
                 hatch.addChildNode(light)
                 hatchLights[station.name] = light
-                hatch.position = v3(station.offset.x + hp.x, 0, station.offset.y + hp.y)
-                hatch.name = "decon:" + station.name
-                staticRoot.addChildNode(hatch)
             }
             buildPadWall(station)
             for prop in Looks.current.dress(station: station) {
@@ -472,7 +454,6 @@ extension StationController {
         case "kind:quarters": return Words.current.dorm
         case "kind:lounge": return Words.current.lounge
         case "kind:bath": return Words.current.bath
-        case "kind:airlock": return Words.current.airlock
         default: return room.name
         }
     }
@@ -553,14 +534,9 @@ extension StationController {
                 hangarLabel.node.position.y = 0.012
                 add(hangarLabel.node, yaw: 0, center: corner(of: station.hangarCells, width: hangarLabel.width, height: hangarLabel.height,
                                                              station: station, clearOf: ["bay:" + station.name]))
-                let airlockLabel = floorSign(Words.current.airlock, color: NSColor(rgb: (0.55, 0.6, 0.72)), size: 0.22)
-                airlockLabel.node.position.y = 0.012
-                if let a = station.airlockInner.first {
-                    add(airlockLabel.node, yaw: 0, center: SIMD2(ox + Double(a.x), oz + Double(a.y)))
-                }
             }
             let occupied: (Cell) -> Bool = { c in
-                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.airlockCells.contains(c) || station.hall.padCells.contains(c)
+                station.coreCells.contains(c) || station.hangarCells.contains(c) || station.hall.padCells.contains(c)
                     || station.hall.cells.contains(c) || station.isCorridor(c) || station.room(at: c) != nil
             }
             var placed: [(min: SIMD2<Double>, max: SIMD2<Double>)] = []
