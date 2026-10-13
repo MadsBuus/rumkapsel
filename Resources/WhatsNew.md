@@ -1,4 +1,38 @@
-## What's new in 0.63
+## What's new in 0.64
 
-- A workspace that moved on from its merged office gets an office of its own beside it, once
-- The walk rebuilds its walls and dome only when the floor changes, not on every redraw of the station
+- The bay sits at the end of the south hallway behind one glass door
+- A crate due a QA carry is carried even when the yard sees the board first
+- The design docs describe the hall, the vortex and the carries as built
+- Reconcile drops a guard that could never hold
+- A repository's untested crates find the column its tested ones took
+- The pad is the hall's width with five slots in a honeycomb
+- STATION.md describes the yard that is built
+- Develop > Restack the Yard
+- Each repository piles in its own column of the hall
+- Each scene file draws one thing
+- Calling off a carry the board took back is the carries' rule
+- A demo world never reads or writes the saved layout
+- A rocket's tip stands on its own legs
+- A tile belongs to one repository
+- A crate landing in storage launches a ship-on-merge rocket, in one place
+- Releases and the pad have their own file and their own book
+- The invariants watchdog goes; what mattered is a model test
+- A carry carries its own rank
+- Comments out of the rest of the codebase
+- Comments out of World, Station, Ledger, Simulation, Jobs, SceneMarkers and Invariants
+- Where crates stand is the station's, in Yard
+- The hall is a value of its own
+- Shuttles and rockets apart; a rocket's tip welds in Rockets
+- Comments out of the yard's newest files
+- A carry writes its own landing
+- Dead code from the pallet, pod and lock era goes
+- The yard as one hall, its release pulled out by the drones' vortex
+- STATION.md: the yard as one hall worked by a crane, with testers, one-tile pods, a walkway and no pallet
+- The payload pod: tested crates wait in their repository's pod on the deck, sealed once all is tested, and go out whole at the merge
+- Walking, the gate's lock and window and the bay's mouth stand open in the walls
+- A kick stage flown in under the tip, and an undock in place of a lift-off; the bay's long passage goes
+- The bay is a hangar under the hull, its mouth held by a field the ships fly through
+- The cargo lock and the pad's drones: crates cross the hull through a lock, drones work the pad
+- Air and weight: the hull is the line between minions and drones; the bay is a hangar behind a field, the pad is outside
+- Wall caps and corner posts stand on the walls again, not piled up in front of the gate robot
+- The release label clears what the board has no card for, and a cleared card loads the rocket at once
