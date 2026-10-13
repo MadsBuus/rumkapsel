@@ -8,7 +8,7 @@ and deliberately not started.
 
 ### Air and weight
 STATION.md's "Air and weight": the hull is the line between air and none. Minions work inside, drones outside,
-and crossing the hull is the hand-off from people to machines. The cargo lock, the window, the pad's drones, the bay
+and crossing the hull is the hand-off from people to machines. The window, the pad's field, the drones' vortex, the bay
 as a hangar behind its field, the kick stage and the undock stand. Still open:
 
 - **The flight's opening shot.** The flight now coasts clear on its thrusters before the kick stage lights, but
@@ -56,8 +56,6 @@ F walks the hallways at eye height; a click on a minion rides along behind it on
 ## Bugs and loose ends
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.
-- **Pad placements typed in by hand** (the tested stack's offset from its rocket, the tower's) should be measured
-  from the things they belong to, like the lock and the hatch now are.
 - **"Production PR opened" in the playbook** says the approved crate goes aboard, but the release it opens holds
   untested work (#430 in QA), so the rocket only stands by. The same on main before the drones.
 - **Frame cost**, from 0.41: the session scan (89 ms in one frame) and `gh.crew` (44 ms worst) on the main thread.

@@ -20,10 +20,11 @@ them what it likes on screen (`Vocabulary`), but underneath they are these.
 | **cube** | a commit; a ghost cube is uncommitted work |
 | **crate** | a pull request |
 | **storage** | where merged crates wait for a release |
-| **pallet** | carries crates from storage to the staging area |
-| **staging area** | where crates are tested (was "the deck") |
+| **staging area** | where crates are tested; `deck` in code |
 | **launchpad** | where the rocket waits |
 | **rocket** | a release to production |
+| **drone** | one of three on the pad: welds a rocket's tip, ferries its kick stage |
+| **vortex** | at a production release, pulls its crates off their rows into the rocket |
 | **decon** | where pull requests from outside wait to be screened |
 
 ## Stages
@@ -36,9 +37,9 @@ In order. Work only moves forward, except where a stage says how it goes back.
 | **Working** | a minion hammering, cones, cubes piling up | |
 | **Ready** | a crate packed in the office; its light shows checks, its straps the review | |
 | **Stored** | the crate carried to storage | |
-| **QA** | the pallet takes it to the staging area, where it is tested | yes: no staging, no QA |
+| **QA** | carried from storage to the staging area, where it is tested | yes: no staging, no QA |
 | **Cleared** | a green sticker: tested, ready to ship | yes: nothing to clear it, no Cleared |
-| **Shipped** | loaded onto the rocket and launched; the office is archived | |
+| **Shipped** | pulled aboard the rocket and launched; the office is archived | |
 
 A repository without QA goes from Stored to Shipped. One without Cleared never waits for it: the
 rocket does not hold for a sticker nobody can give.
@@ -61,7 +62,7 @@ has pull requests and nothing else gets a whole station.
 |---|---|---|---|
 | **Local sessions** (Claude Code, Conductor; other agents later) | minions and cones; an office for every checkout; whose office is whose | Inbound, Working | at once: the transcripts are watched, and read every 5 s besides |
 | **Git** (the checkout: branches, history, tags) | cubes and ghost cubes; unpushed work; what is merged and not yet released; the trunk, staging and production branches; a tag as a release | Working, Stored, QA, Shipped | a minute or so; local, but tied to the release read |
-| **GitHub pull requests** (essential) | the crate, its light and straps; teammates' offices; the merge that sends a crate to storage; release pull requests as the pallet and the rocket; outside work | Inbound, Ready, Stored, QA, Shipped, outside | the activity feed once a minute as a doorbell, a pull request asked at once when rung, everything again every 5 min |
+| **GitHub pull requests** (essential) | the crate, its light and straps; teammates' offices; the merge that sends a crate to storage; a staging release that carries storage to the staging area; a production release as the rocket; outside work | Inbound, Ready, Stored, QA, Shipped, outside | the activity feed once a minute as a doorbell, a pull request asked at once when rung, everything again every 5 min |
 | **GitHub issues** (optional) | one identity for a branch, its pull request and its issue: `gh-N/…` names the office after the issue, `closes #N` ties the crate to it; assignees as teammates | identity; Inbound | with the pull request |
 | **GitHub Projects** (optional) | Cleared per crate, the one signal nothing else gives; a doorbell that rings within seconds; a source for Stored and QA where a team moves cards faster than it merges | Cleared; doorbell; Stored, QA by choice | what moved, every 20 s; the whole board every 5 min |
 | **GitHub Actions deploys** (optional) | flights: a deploy started, and how it ended (live, failed, cancelled), with how long the repository's deploys usually take. A deploy is a run of a workflow that runs on a push to the staging or production branch (the trunk where every merge deploys) and is named for deploying or deploys in its file: a GitHub environment or a deploy tool | none yet: the flight is shown, not tracked | with the releases every 5 min; every 10 s after a release merges and while a deploy runs |
@@ -159,7 +160,7 @@ Shipped. What decides each stage today, and what the board is actually for:
 | Working | session, commits | same | nothing |
 | Ready | pull request open | same | nothing |
 | Stored | the merge for the haul; the board's column for the counts | git `staging..trunk` for the counts, the same set | seconds instead of minutes; the crate numbered by issue instead of pull request |
-| QA | the staging release for the pallet; the board's column for the counts | git `production..staging` for the counts | speed only |
+| QA | the staging release merging, for the whole of storage; the board's column, per crate | the staging release; git `production..staging` for the counts | speed only |
 | Cleared | the Ready to ship column, per crate | the `untested` label on the release, for the whole release | **the only per-crate Cleared** |
 | Shipped | the production release merging | same | leftover crates tidied away |
 | Outside | bots, from pull requests and the feed | same | nothing |
