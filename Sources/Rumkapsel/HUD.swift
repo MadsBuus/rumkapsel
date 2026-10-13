@@ -77,12 +77,6 @@ extension StationController {
         infoBackground.anchorPoint = CGPoint(x: 0, y: 0)
         hud.addChild(infoBackground)
         hud.addChild(infoLabel)
-        shareLabel.fontSize = 10
-        shareLabel.fontColor = Palette.dim
-        shareLabel.horizontalAlignmentMode = .right
-        shareLabel.verticalAlignmentMode = .top
-        hud.addChild(shareDot)
-        hud.addChild(shareLabel)
         followLabel.fontSize = 13
         followLabel.fontColor = Palette.text
         followLabel.horizontalAlignmentMode = .center
@@ -106,8 +100,15 @@ extension StationController {
         bubblePlate.zPosition = 1
         bubbleLabel.isHidden = true
         bubblePlate.isHidden = true
+        bubbleName.fontSize = 13
+        bubbleName.fontColor = Palette.text
+        bubbleName.horizontalAlignmentMode = .center
+        bubbleName.verticalAlignmentMode = .bottom
+        bubbleName.zPosition = 2
+        bubbleName.isHidden = true
         hud.addChild(bubblePlate)
         hud.addChild(bubbleLabel)
+        hud.addChild(bubbleName)
         for o in LoungeOrder.allCases {
             let icon = SKSpriteNode(texture: o.texture, size: Self.iconSize)
             icon.colorBlendFactor = 1
@@ -165,7 +166,7 @@ extension StationController {
 
     func updateBubble() {
         func hide() {
-            bubbleLabel.isHidden = true; bubblePlate.isHidden = true
+            bubbleLabel.isHidden = true; bubblePlate.isHidden = true; bubbleName.isHidden = true
             bubbleIcons.forEach { $0.isHidden = true }
             bubbleLock.lock(); bubbleHits = nil; bubbleLock.unlock()
         }
@@ -192,8 +193,12 @@ extension StationController {
             icon.isHidden = false
             if under { picking = LoungeOrder.allCases[i] }
         }
-        bubbleLabel.text = picking?.words ?? m.words
-        let f = bubbleLabel.frame.union(CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih)).insetBy(dx: -8, dy: -5)
+        let whose = m.isCrew ? m.title.map { $0 + " · " } ?? "" : ""
+        bubbleLabel.text = picking?.words ?? whose + m.words
+        bubbleName.text = m.callsign
+        bubbleName.position = CGPoint(x: CGFloat(p.x), y: bubbleLabel.frame.maxY + 3)
+        bubbleName.isHidden = false
+        let f = bubbleLabel.frame.union(bubbleName.frame).union(CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih)).insetBy(dx: -8, dy: -5)
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
         bubblePlate.isHidden = false
@@ -203,15 +208,17 @@ extension StationController {
     }
 
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
-        let withOffices = Set(fleet.stations.values.flatMap { $0.rooms.values.compactMap(\.repo) })
-        let withRockets = Set(world.repoRoots.filter { github.openReleases(repoRoot: $0.key)?.isEmpty == false }.map(\.value.repo))
-        let repos = fleet.repoColors.keys.filter { withOffices.contains($0) || withRockets.contains($0) }
-            .sorted { fleet.repoColors[$0]! < fleet.repoColors[$1]! }
+        let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { !world.isNeighbours(st, $0) } }
+        let repos = Set(ours.compactMap(\.repo)).filter { !$0.isEmpty }
+            .sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
         let showTitles = ConfigStore.shared.current.showTitles
-        var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|\(showTitles)|"
+        let others = minions.values.filter { $0.isCrew && $0.state != .leaving && fleet.stations[$0.station] != nil }
+        let teammates = others.filter { !$0.isPeer }.map(\.busy).sorted { $0 && !$1 }
+        let neighbours = others.filter(\.isPeer).map(\.busy).sorted { $0 && !$1 }
+        var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|\(showTitles)|\(teammates)|\(neighbours)|"
         let rootOf = Dictionary(world.repoRoots.map { ($0.value.repo, $0.key) }, uniquingKeysWith: { a, _ in a })
         for repo in repos {
-            let offices = fleet.stations.values.flatMap { $0.rooms.values }.filter { $0.repo == repo }.count
+            let offices = ours.filter { $0.repo == repo }.count
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
             let loading = rootOf[repo].map { github.isBusy(repoRoot: $0) } ?? false
             signature += "\(repo):\(workers):\(offices):\(loading);"
@@ -219,7 +226,7 @@ extension StationController {
         let inked = signature + "|" + Looks.theme.rawValue
         guard inked != legendSignature else { return }
         legendSignature = inked
-        statusLabel.fontColor = ink.dim; shareLabel.fontColor = ink.dim; followLabel.fontColor = ink.text
+        statusLabel.fontColor = ink.dim; followLabel.fontColor = ink.text
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
         let slot = hud.size.width / CGFloat(max(1, repos.count))
@@ -232,7 +239,7 @@ extension StationController {
             name.horizontalAlignmentMode = .center
             name.verticalAlignmentMode = .top
             name.position = CGPoint(x: x, y: hud.size.height - 34)
-            let offices = fleet.stations.values.flatMap { $0.rooms.values }.filter { $0.repo == repo }.count
+            let offices = ours.filter { $0.repo == repo }.count
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
             let counts = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
             counts.fontSize = 10
@@ -251,30 +258,34 @@ extension StationController {
                 hud.addChild(spinner); legendNodes.append(spinner)
             }
         }
-        let jobs: [(String, Int, NSColor)] = [
-            ("working", busy, NSColor(rgb: (0.35, 0.78, 0.85))),
-            ("waiting", waiting, Palette.pyramid),
-            ("sleeping", asleep, NSColor(Colors.quarters).lighter(0.25)),
+        let white = ink.onLight ? ink.text : Palette.minion
+        let groups: [(title: String, figures: [(color: NSColor, lit: Bool)], color: NSColor)] = [
+            ("neighbours", neighbours.map { (Suit.base(.neighbour), $0) }, Suit.base(.neighbour).lighter(0.15)),
+            ("teammates", teammates.map { (Suit.base(.crew), $0) }, Suit.base(.crew).lighter(0.15)),
+            ("at work", Array(repeating: (white, true), count: busy), NSColor(rgb: (0.35, 0.78, 0.85))),
+            ("waiting for you", Array(repeating: (white, true), count: waiting), Palette.pyramid),
+            ("asleep", Array(repeating: (white, true), count: asleep), NSColor(Colors.quarters).lighter(0.25)),
         ]
         var x: CGFloat = hud.size.width - 16
-        for (title, count, color) in jobs.reversed() {
-            let icons = min(count, 8)
+        for (i, group) in groups.enumerated().reversed() where i >= 2 || !group.figures.isEmpty {
+            let icons = min(group.figures.count, 8)
             let iconsWidth = CGFloat(icons) * 8
-            for k in 0..<icons {
-                let r = SKSpriteNode(color: ink.onLight ? ink.text : Palette.minion, size: CGSize(width: 4, height: 9))
+            for (k, f) in group.figures.prefix(icons).enumerated() {
+                let r = SKSpriteNode(color: f.color, size: CGSize(width: 4, height: 9))
+                r.alpha = f.lit ? 1 : 0.35
                 r.position = CGPoint(x: x - iconsWidth + CGFloat(k) * 8 + 4, y: 14)
                 hud.addChild(r); jobNodes.append(r)
             }
             x -= iconsWidth + 6
             let l = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             l.fontSize = 12
-            l.fontColor = ink.onLight ? color.darker(0.4) : color
-            l.text = "\(title) \(count)"
+            l.fontColor = ink.onLight ? group.color.darker(0.4) : group.color
+            l.text = "\(group.title) \(group.figures.count)"
             l.horizontalAlignmentMode = .right
             l.verticalAlignmentMode = .bottom
             l.position = CGPoint(x: x, y: 9)
             hud.addChild(l); jobNodes.append(l)
-            x -= l.frame.width + 22
+            x -= l.frame.width + (i == 2 ? 40 : 22)
         }
     }
 
@@ -323,7 +334,7 @@ extension StationController {
         }
         if let claims = world.peerOffices[roomKey(station, room)], !claims.isEmpty {
             let who = claims.keys.sorted().joined(separator: ", ")
-            parts.append((world.pushedByPeer.contains(roomKey(station, room)) ? "checked out by " : "local branch on ") + who)
+            parts.append((room.repo.map { $0 + " · " } ?? "") + (world.pushedByPeer.contains(roomKey(station, room)) ? "checked out by " : "local branch on ") + who)
         } else if world.isProvisional(station, room) && room.worktree == nil {
             parts.append("held for a while · nobody is working here right now")
         }
@@ -355,7 +366,7 @@ extension StationController {
             followLabel.text = hint
             followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)
         } else if let id = following, let m = minions[id] {
-            followLabel.text = "following \(m.home.name) · \(m.words) · esc to let go"
+            followLabel.text = "following \(m.callsign)\(m.isCrew ? m.title.map { " (\($0))" } ?? "" : "") · \(m.home.name) · \(m.words) · esc to let go"
             followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)
         } else { followLabel.text = "" }
 
@@ -364,25 +375,7 @@ extension StationController {
             layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
             if !headless { placePlanets() }
             if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
-            let sharing = peers.isRunning
-            shareDot.isHidden = !sharing
-            shareLabel.isHidden = !sharing
-            if sharing {
-                let n = world.peerSnapshots.count
-                let up = peers.networkUp
-                let near = peers.nearby
-                let status = !up ? "no network"
-                    : peers.blocked ? "not allowed on the local network"
-                    : n > 0 ? "\(n) peer\(n == 1 ? "" : "s") in range"
-                    : near.count == 1 ? "\(near[0]) is near but not answering"
-                    : near.count > 1 ? "\(near.count) stations near, none answering"
-                    : "nobody in range"
-                shareLabel.text = "sharing as \(peers.name) · " + status
-                shareDot.color = !up ? NSColor(rgb: (0.45, 0.46, 0.5)) : n > 0 ? NSColor(rgb: (0.35, 0.85, 0.5)) : NSColor(rgb: (0.9, 0.7, 0.3))
-                shareLabel.position = CGPoint(x: hud.size.width - 14 - spaceLogCorner, y: hud.size.height - 14)
-                shareDot.position = CGPoint(x: hud.size.width - 14 - shareLabel.frame.width - 10, y: hud.size.height - 19)
-                shareDot.alpha = n > 0 && up ? 0.7 + 0.3 * sin(clock * 2) : 0.8
-            }
+            updateNeighbours()
         }
 
         var y = hud.size.height - 70
@@ -413,7 +406,9 @@ extension StationController {
             }
         } else if h.hasPrefix("minion:peer:") {
             let who = h.dropFirst("minion:peer:".count).split(separator: "/").first.map(String.init) ?? ""
-            infoLabel.text = "\(who) · working on their own machine · shared on the local network"
+            let m = minions[String(h.dropFirst(7))]
+            infoLabel.text = ["\(who)'s minion", m.map { $0.home.repo }, m?.activity.label, "working on their own machine · shared on the local network"]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "   ")
         } else if h.hasPrefix("minion:") {
             if let m = minions[String(h.dropFirst(7))] {
                 var parts: [String] = []

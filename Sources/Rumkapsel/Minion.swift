@@ -514,11 +514,13 @@ final class Minion: Body {
 extension Minion {
     func wearSuit(badge: NSColor) {
         guard figure == nil, let box = body.geometry as? SCNBox else { return }
-        let key = Suit.key(badge, crew: isCrew)
+        let kind: Suit.Kind = isPeer ? .neighbour : isCrew ? .crew : .white
+        let key = Suit.key(badge, kind)
         guard suitKey != key else { return }
         suitKey = key
         box.chamferRadius = 0
-        box.materials = Suit.materials(crew: isCrew)
+        box.materials = Suit.materials(kind)
+        for part in legs.childNodes { part.geometry?.firstMaterial = Suit.materials(kind)[4] }
         visor.geometry?.firstMaterial = Suit.visor
         let p = Suit.patch, w = Double(box.width), h = Double(box.height), d = Double(box.length)
         let patch = body.childNode(withName: "patch", recursively: false) ?? {
@@ -530,6 +532,6 @@ extension Minion {
             body.addChildNode(n)
             return n
         }()
-        patch.geometry?.firstMaterial = flat(Suit.patchColor(badge, crew: isCrew))
+        patch.geometry?.firstMaterial = flat(Suit.patchColor(badge, kind))
     }
 }

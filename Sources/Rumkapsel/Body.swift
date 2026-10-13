@@ -81,6 +81,8 @@ class Body {
     var isCrew = false
     var isPeer = false
     var peerFed: String?
+    var sharedCallsign: String?
+    var callsign: String { sharedCallsign ?? Callsign.of(id) }
     var busyUntil = 0.0
     var bed: Int?
     var pos: SIMD2<Double>
@@ -142,6 +144,7 @@ class Body {
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
     var bathing: Bool { if case .bath = current?.kind { return true }; return false }
     var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
+    var choring: Bool { if case .chore = current?.kind { return true }; return false }
     var workout: Command.Workout? { if case .exercise(let k, _, _) = current?.kind { return k }; return nil }
     enum Posture { case none, crouch, waist, reach, jump }
     var handsAt = 0
@@ -154,7 +157,15 @@ class Body {
         guard phaseKind == .lift || phaseKind == .setDown, phaseUntil > 0 else { return .none }
         return Routines.posture(handsAt: handsAt)
     }
-    var words: String { current?.words ?? "nothing in particular" }
+    var words: String {
+        guard let c = current else { return "nothing in particular" }
+        switch c.kind {
+        case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
+        case .exercise(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind.doing
+        case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
+        default: return c.words
+        }
+    }
 
     var cell: Cell { Cell(x: Int(pos.x.rounded()), y: Int(pos.y.rounded())) }
 

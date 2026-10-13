@@ -18,6 +18,19 @@ struct RGB: Codable, Equatable {
     var r: Double, g: Double, b: Double
     var tuple: (Double, Double, Double) { (r, g, b) }
 
+    var oklab: SIMD3<Double> {
+        func lin(_ c: Double) -> Double { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        let r = lin(self.r), g = lin(self.g), b = lin(self.b)
+        let l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        let m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        let s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        return SIMD3(0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+                     1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                     0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s)
+    }
+
+    func distance(to other: RGB) -> Double { simd_distance(oklab, other.oklab) }
+
     func shaded(_ f: Double) -> RGB {
         let hi = max(r, g, b), lo = min(r, g, b)
         let want = min(1, max(0, hi * f))
@@ -57,16 +70,24 @@ enum Colors {
     ]
 
     static let classicRepos: [RGB] = [
-        RGB(r: 0.808, g: 0.431, b: 0.212),
-        RGB(r: 0.835, g: 0.647, b: 0.251),
-        RGB(r: 0.522, g: 0.655, b: 0.267),
-        RGB(r: 0.326, g: 0.680, b: 0.368),
-        RGB(r: 0.396, g: 0.655, b: 0.627),
-        RGB(r: 0.251, g: 0.459, b: 0.706),
-        RGB(r: 0.426, g: 0.355, b: 0.740),
-        RGB(r: 0.641, g: 0.378, b: 0.700),
-        RGB(r: 0.671, g: 0.329, b: 0.522),
-        RGB(r: 0.760, g: 0.319, b: 0.363),
+        RGB(r: 0.966, g: 0.526, b: 0.458),
+        RGB(r: 0.745, g: 0.290, b: 0.388),
+        RGB(r: 0.888, g: 0.601, b: 0.214),
+        RGB(r: 0.730, g: 0.339, b: 0.007),
+        RGB(r: 0.692, g: 0.698, b: 0.223),
+        RGB(r: 0.571, g: 0.452, b: 0.022),
+        RGB(r: 0.383, g: 0.765, b: 0.480),
+        RGB(r: 0.348, g: 0.532, b: 0.039),
+        RGB(r: 0.088, g: 0.766, b: 0.738),
+        RGB(r: 0.079, g: 0.550, b: 0.401),
+        RGB(r: 0.145, g: 0.729, b: 0.947),
+        RGB(r: 0.015, g: 0.524, b: 0.612),
+        RGB(r: 0.545, g: 0.650, b: 0.992),
+        RGB(r: 0.103, g: 0.479, b: 0.797),
+        RGB(r: 0.776, g: 0.566, b: 0.927),
+        RGB(r: 0.471, g: 0.392, b: 0.786),
+        RGB(r: 0.924, g: 0.516, b: 0.718),
+        RGB(r: 0.654, g: 0.320, b: 0.630),
     ]
 }
 
@@ -496,6 +517,16 @@ final class Station {
         return true
     }
 
+    func relayOffices() {
+        let offices = rooms.values.filter { !$0.key.hasPrefix("kind:") }.sorted { ($0.openedAt, $0.key) < ($1.openedAt, $1.key) }
+        for r in offices { removeRoom(key: r.key) }
+        dug = []
+        for r in offices {
+            ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, openedAt: r.openedAt)
+            if let n = rooms[r.key] { n.branch = r.branch; n.repoRoot = r.repoRoot; n.worktree = r.worktree }
+        }
+    }
+
     func isReserved(_ c: Cell) -> Bool { blocks.reserved.contains(c) }
 
     private func takeSlot(repo: String?) -> [Cell] {
@@ -793,15 +824,56 @@ final class Fleet {
     }
 
     func color(forRepo repo: String) -> RGB {
-        let i = Fleet.slot(for: repo)
-        repoColors[repo] = i
-        return ConfigStore.shared.current.repos[repo]?.color ?? Fleet.color(slot: i)
+        if let own = ConfigStore.shared.current.repos[repo]?.color { return own }
+        guard !repo.isEmpty else { return Colors.idle }
+        return Fleet.color(slot: repoColors[repo] ?? handOut(repo))
     }
 
-    static func slot(for name: String) -> Int {
-        var h: UInt64 = 14695981039346656037
-        for b in name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
-        return Int((h >> 32) % UInt64(Colors.repos.count * 3))
+    private func handOut(_ repo: String) -> Int {
+        let cfg = ConfigStore.shared.current
+        let onFloor = Set(stations.values.flatMap { $0.rooms.values.compactMap(\.repo) })
+        let holders = repoColors.filter { cfg.repos[$0.key]?.color == nil }
+        let n = Colors.repos.count
+        var free = (0..<n).filter { i in !holders.values.contains(i) }
+        if free.isEmpty {
+            let idle = holders.filter { !onFloor.contains($0.key) }
+            for r in idle.keys { repoColors[r] = nil }
+            free = idle.values.filter { $0 < n }.sorted()
+        }
+        if free.isEmpty { free = Array(0..<(n * 3)) }
+        let used = onFloor.filter { $0 != repo }.compactMap { r in cfg.repos[r]?.color ?? repoColors[r].map(Fleet.color(slot:)) }
+        func room(_ i: Int) -> Double { used.map { Fleet.color(slot: i).distance(to: $0) }.min() ?? .infinity }
+        let pick = free.max { a, b in (room(a), -a) < (room(b), -b) } ?? 0
+        repoColors[repo] = pick
+        Fleet.publish(repoColors)
+        return pick
+    }
+
+    func adopt(_ slots: [String: Int]) -> Bool {
+        let n = Colors.repos.count * 3
+        let wanted = slots.filter { !$0.key.isEmpty && $0.value >= 0 && $0.value < n && repoColors[$0.key] != $0.value }
+        guard !wanted.isEmpty else { return false }
+        let taken = Set(slots.values)
+        for (r, i) in repoColors where slots[r] == nil && taken.contains(i) { repoColors[r] = nil }
+        for (r, i) in wanted { repoColors[r] = i }
+        Fleet.publish(repoColors)
+        recolorRooms()
+        return true
+    }
+
+    func resetColors() {
+        repoColors = [:]
+        Fleet.publish(repoColors)
+        recolorRooms()
+    }
+
+    static let paletteVersion = 2
+    private static let handedOutLock = NSLock()
+    private static var handedOut: [String: Int] = [:]
+    private static func publish(_ slots: [String: Int]) { handedOutLock.lock(); handedOut = slots; handedOutLock.unlock() }
+    static func handedOut(repo: String) -> RGB? {
+        handedOutLock.lock(); defer { handedOutLock.unlock() }
+        return handedOut[repo].map(color(slot:))
     }
 
     static func color(slot i: Int) -> RGB {
@@ -849,14 +921,14 @@ final class Fleet {
         return (lo, hi)
     }
 
-    private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int] }
+    private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int]; var palette: Int? }
     static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
     private var loaded = false
 
     func save() {
         guard persists, loaded else { return }
-        let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors)
+        let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors, palette: Fleet.paletteVersion)
         guard let json = try? JSONEncoder().encode(s) else { return }
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
@@ -866,7 +938,8 @@ final class Fleet {
         guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL),
               let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
-        repoColors = saved.repoColors
+        repoColors = saved.palette == Fleet.paletteVersion ? saved.repoColors : [:]
+        Fleet.publish(repoColors)
         for (name, s) in saved.stations where name != "crew" && name != "private" {
             let station = Station(name: name)
             station.restore(s, relayout: alone || (s.placement ?? OfficePlacement.rings.rawValue) != OfficePlacement.current.rawValue)

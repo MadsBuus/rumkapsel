@@ -14,6 +14,8 @@ struct PeerSnapshot: Codable {
     struct Minion: Codable {
         var id: String; var office: String; var asleep: Bool; var busy: Bool
         var activity: String? = nil; var waiting: Bool? = nil; var cones: Int? = nil
+        var doing: String? = nil
+        var callsign: String? = nil
     }
     var version: Int
     var name: String
@@ -23,6 +25,8 @@ struct PeerSnapshot: Codable {
     var github: [GitHubResolver.Knowledge]?
     var project: GitHubResolver.ProjectKnowledge?
     var twoWay: Bool? = nil
+    var sentAt: Date? = nil
+    var colors: [String: Int]? = nil
     static let current = 2
 }
 
@@ -46,8 +50,41 @@ final class PeerHub {
     var isRunning: Bool { listener != nil }
     var peerCount: Int { queue.sync { outgoing.count } }
     private var latest: PeerSnapshot?
+    private var latestBody: Data?
+    private var sentBody: Data?
+    private var sentAt = Date.distantPast
     private var heard: [ObjectIdentifier: String] = [:]
+    private var arrivals: [String: Arrival] = [:]
+    private var comings: [(at: Date, words: String)] = []
     var onSnapshot: ((PeerSnapshot) -> Void)?
+
+    struct Arrival { var at: Date; var gap: TimeInterval?; var lag: TimeInterval?; var count: Int }
+    struct Status {
+        var reaching: Set<String>
+        var reachedBy: Set<String>
+        var arrivals: [String: Arrival]
+        var comings: [(at: Date, words: String)]
+    }
+    static let heartbeat: TimeInterval = 3
+
+    var status: Status {
+        queue.sync {
+            Status(reaching: Set(outgoing.filter { $0.value.state == .ready }.keys), reachedBy: Set(heard.values),
+                   arrivals: arrivals, comings: comings)
+        }
+    }
+
+    private func note(_ words: String) {
+        StationLog.write("peer", words)
+        comings.append((Date(), words))
+        if comings.count > 30 { comings.removeFirst(comings.count - 30) }
+    }
+
+    private static func reason(_ error: Error?) -> String {
+        guard let error else { return "closed" }
+        let text = "\(error)"
+        return text.split(separator: ":", maxSplits: 1).last.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? text
+    }
 
     private static var tcp: NWParameters {
         let t = NWProtocolTCP.Options()
@@ -85,8 +122,11 @@ final class PeerHub {
         pm.start(queue: queue)
         pathMonitor = pm
         let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 2, repeating: 3)
-        t.setEventHandler { [weak self] in self?.broadcast() }
+        t.schedule(deadline: .now() + 2, repeating: 1)
+        t.setEventHandler { [weak self] in
+            guard let self, Date().timeIntervalSince(self.sentAt) >= PeerHub.heartbeat - 0.05 else { return }
+            self.broadcast()
+        }
         t.resume()
         timer = t
     }
@@ -100,7 +140,8 @@ final class PeerHub {
         incoming.forEach { $0.cancel() }; incoming = []
         answered = []
         heard = [:]
-        latest = nil
+        latest = nil; latestBody = nil; sentBody = nil
+        arrivals = [:]; comings = []
         found = [:]
         nearby = []; blocked = false
     }
@@ -126,12 +167,12 @@ final class PeerHub {
                 switch state {
                 case .ready:
                     wasUp = true
-                    StationLog.write("peer", "link to \(n) up")
+                    self.note("reached \(n)")
                 case .waiting(let e):
-                    if wasUp { StationLog.write("peer", "link to \(n) down: \(e)") }
+                    if wasUp { self.note("lost \(n): \(PeerHub.reason(e))") }
                     c.cancel()
                 case .failed(let e):
-                    if wasUp { StationLog.write("peer", "link to \(n) down: \(e)") }
+                    if wasUp { self.note("lost \(n): \(PeerHub.reason(e))") }
                     if outgoing[n] === c { outgoing[n] = nil }
                 case .cancelled:
                     if outgoing[n] === c { outgoing[n] = nil }
@@ -161,13 +202,17 @@ final class PeerHub {
                 if let snap = try? JSONDecoder().decode(PeerSnapshot.self, from: line), snap.version == PeerSnapshot.current, snap.name != name {
                     if incoming.contains(where: { $0 === c }) {
                         if snap.twoWay == true { answered.insert(ObjectIdentifier(c)) }
-                        if heard.updateValue(snap.name, forKey: ObjectIdentifier(c)) == nil { StationLog.write("peer", "link from \(snap.name) up") }
+                        if heard.updateValue(snap.name, forKey: ObjectIdentifier(c)) == nil { note("\(snap.name) reached us") }
                     }
+                    let now = Date()
+                    let before = arrivals[snap.name]
+                    arrivals[snap.name] = Arrival(at: now, gap: before.map { now.timeIntervalSince($0.at) },
+                                                  lag: snap.sentAt.map { now.timeIntervalSince($0) }, count: (before?.count ?? 0) + 1)
                     DispatchQueue.main.async { self.onSnapshot?(snap) }
                 }
             }
             if done || error != nil {
-                if let who = heard.removeValue(forKey: ObjectIdentifier(c)) { StationLog.write("peer", "link from \(who) down: \(error.map { "\($0)" } ?? "closed")") }
+                if let who = heard.removeValue(forKey: ObjectIdentifier(c)) { note("\(who) left us: \(PeerHub.reason(error))") }
                 incoming.removeAll { $0 === c }; answered.remove(ObjectIdentifier(c)); c.cancel(); return
             }
             receive(on: c, buffer: buf)
@@ -175,14 +220,23 @@ final class PeerHub {
     }
 
     func offer(_ snap: PeerSnapshot) {
-        queue.async { self.latest = snap }
+        let body = try? JSONEncoder().encode(snap)
+        queue.async {
+            self.latest = snap
+            self.latestBody = body
+            if body != self.sentBody { self.broadcast() }
+        }
     }
 
     private func broadcast() {
         dial()
         let open = (Array(outgoing.values) + incoming.filter { answered.contains(ObjectIdentifier($0)) }).filter { $0.state == .ready }
-        guard !open.isEmpty, let snap = latest, var data = try? JSONEncoder().encode(snap) else { return }
+        guard !open.isEmpty, var snap = latest else { return }
+        snap.sentAt = Date()
+        guard var data = try? JSONEncoder().encode(snap) else { return }
         data.append(UInt8(ascii: "\n"))
         for c in open { c.send(content: data, completion: .contentProcessed { _ in }) }
+        sentBody = latestBody
+        sentAt = Date()
     }
 }

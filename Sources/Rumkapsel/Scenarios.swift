@@ -440,6 +440,20 @@ enum Scenarios {
             return st.ledger.crates(of: "web").contains(where: \.alien) ? "the ejected object is still in the ledger" : nil
         }),
 
+        Scenario("a neighbour's minion takes a turn in the gym, then goes back to its office", [
+            ("Peer: Arrive", 32),
+            ("Peer: To the gym", 64),
+            ("Peer: Back to work", 64),
+        ], tail: 32, expects: [
+            .press("Peer: To the gym"),
+            .command("exercise", by: "kim") { if case .exercise = $0 { return true }; return false },
+            .press("Peer: Back to work"),
+        ], floor: { sim in
+            guard let m = sim.station.minions["peer:kim/kim-1"] else { return "no figure for kim's minion" }
+            if m.exercising { return "still in the gym" }
+            return m.place == .room(m.home.key) ? nil : "at \(m.place.words), not in kim's office \(m.home.key)"
+        }),
+
         Scenario("peer arrives and leaves: fade in, office held", [
             ("Peer: Leave", 64),
             ("Peer: Arrive", 96),

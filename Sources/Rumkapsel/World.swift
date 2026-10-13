@@ -265,6 +265,10 @@ final class World {
     func peerLive(_ key: String) -> Bool {
         peerSnapshots.values.contains { entry in entry.snap.minions.contains { !$0.asleep && "work|" + $0.office == key } }
     }
+    func isNeighbours(_ station: Station, _ room: Room) -> Bool {
+        let key = roomKey(station, room)
+        return room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key]?.isEmpty == false
+    }
     func isLocalLive(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && peerLive(key)
@@ -766,6 +770,11 @@ final class World {
         var changed = false
         var markers = false
         let cfg = ConfigStore.shared.current
+        if let colors = snap.colors, snap.name < peerName,
+           fleet.adopt(colors.filter { cfg.repos[$0.key]?.color == nil && cfg.repos[$0.key]?.station != "hidden" }) {
+            changed = true
+            events.append(.log("repository colours now match \(snap.name)'s"))
+        }
         let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
         var live: Set<String> = []
         var disputed: [(key: String, cells: [Cell])] = []

@@ -13,7 +13,7 @@ says who decides. The target is [STAGES.md](STAGES.md). File references are unde
 | GitHub pull requests | own branch's PR, team's open PRs, release PRs, activity feed | feed 1 min as a doorbell, PR asked at once when rung, all every 5 min | `GitHub.swift`, `Integrations/PullRequests.swift` |
 | Deploy workflows | `.github/workflows` on the branch a deploy runs from, by keyword | hourly | `GitHub.swift`, `Integrations/Deployments.swift` |
 | Board | one GitHub project, one single-select field | changes every 20 s, whole board every 5 min | `GitHub.swift` |
-| Neighbours | offices, pulls, boxes, board and GitHub knowledge | every 3 s | `Peers.swift`, `World.swift` |
+| Neighbours | offices, pulls, boxes, board and GitHub knowledge | as soon as something changes (looked at twice a second), at least every 3 s; GitHub knowledge every 30 s | `Peers.swift`, `World.swift`, `NeighboursPanel.swift` |
 | `.github/rumkapsel.json` | trunk, staging, production, release branches, board columns, ship | hourly, with the pipeline | `Pipelines.swift`, `GitHub.swift` |
 
 ## Stage by stage

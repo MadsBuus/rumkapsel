@@ -328,6 +328,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
         refresh.keyEquivalentModifierMask = [.command, .shift]
         station.addItem(withTitle: "Station Log", action: #selector(toggleSpaceLog), keyEquivalent: "l")
+        station.addItem(withTitle: "Neighbours", action: #selector(toggleNeighbours), keyEquivalent: "")
+        station.addItem(.separator())
+        station.addItem(withTitle: "Reset Colours", action: #selector(resetColors), keyEquivalent: "")
+        station.addItem(withTitle: "Reset Office Layout…", action: #selector(resetOfficeLayout), keyEquivalent: "")
 
         let develop = menu("Develop")
         let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
@@ -386,6 +390,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     @objc func restackYard() { controller.restackYard() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
+    @objc func toggleNeighbours() { controller.toggleNeighbours() }
+    @objc func resetColors() { controller.resetColors() }
+    @objc func resetOfficeLayout() { controller.resetOfficeLayout() }
 
     @objc func openGallery() {
         if galleryWindow == nil {
