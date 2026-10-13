@@ -219,9 +219,13 @@ final class SimulatorModel: ObservableObject {
         station.simulate(scan: ScanResult(sessions: live.sorted { $0.id < $1.id }))
     }
 
-    private func pushGitHub() {
+    private func pushGitHub(yardFirst: Bool = false) {
         github.injectSilently = true
-        defer { github.injectSilently = false; station.simulateGitHub() }
+        defer {
+            github.injectSilently = false
+            if yardFirst { station.reconcileYards() }
+            station.simulateGitHub()
+        }
         for r in repos {
             let sent = launches.filter { $0.repo == r }.map(\.pr)
             var open = offices.filter { $0.repo == r && ($0.owner == .teammate ? $0.prOpen : $0.pull?.state == "OPEN") }.map {
@@ -273,13 +277,13 @@ final class SimulatorModel: ObservableObject {
         pushScan()
     }
 
-    private func move(_ items: [ProjectItem], to status: String) {
+    private func move(_ items: [ProjectItem], to status: String, yardFirst: Bool = false) {
         for it in items {
             guard let i = board.firstIndex(where: { $0.repo == it.repo && $0.number == it.number }) else { continue }
             board[i] = ProjectItem(repo: it.repo, number: it.number, title: it.title, status: status,
                                    assignees: it.assignees, prURLs: it.prURLs, url: it.url, updatedAt: station.now)
         }
-        pushGitHub()
+        pushGitHub(yardFirst: yardFirst)
     }
 
     private func index(_ uid: String) -> Int? { offices.firstIndex { $0.uid == uid } }
@@ -750,6 +754,9 @@ final class SimulatorModel: ObservableObject {
                 button("Board: Catch up", "The board catches up: \(repo) storage → deck",
                        board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil
                            : .missing("something of \(repo) in storage", { [weak self] in self?.layInStorage() })),
+                button("Board: Catch up (yard first)", "The board catches up and the yard sees it before the world does",
+                       board.contains { $0.repo == repo && $0.status == statuses.storage } ? nil
+                           : .missing("something of \(repo) in storage", { [weak self] in self?.layInStorage() })),
                 button("Release: Staging merges (board lags)", "Staging merges, the board lagging", stagingOpen),
             ]),
             Group(id: "Release (\(repo))", note: nil, buttons: [
@@ -1025,8 +1032,8 @@ final class SimulatorModel: ObservableObject {
         case "Board: Move":
             guard let it = office.flatMap(boardItem) else { return }
             move([it], to: column)
-        case "Board: Catch up":
-            move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
+        case "Board: Catch up", "Board: Catch up (yard first)":
+            move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck, yardFirst: name.hasSuffix("(yard first)"))
 
         case "Repo: Ships on merge":
             shipsOnMerge.insert(repo)

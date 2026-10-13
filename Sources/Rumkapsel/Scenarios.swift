@@ -199,6 +199,15 @@ enum Scenarios {
             Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
+        Scenario("the board moves storage to QA and the yard sees it first: the crates are still carried", [
+            ("Target: web#455", 4.8),
+            ("Board: Catch up (yard first)", 4.8),
+        ], tail: 160, expects: [
+            .carry(to: .deck),
+        ], floor: { sim in
+            Scenario.crates(sim, "deck", "web") > 0 ? nil : "nothing of web stands on the deck"
+        }),
+
         Scenario("staging release closes: the crates stay in storage", [
             ("Target: web#455", 4.8),
             ("Release: Staging opens", 80),

@@ -47,6 +47,10 @@ final class World {
         return nil
     }
 
+    func carriesDueToDeck(repo: String) -> Set<Int> {
+        Set(transitions.compactMap { $0.record.repo == repo && $0.t.to == .qa && $0.t.from != nil && $0.t.from != .cleared ? $0.record.number : nil })
+    }
+
     func stationEvents() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []

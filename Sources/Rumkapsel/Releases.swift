@@ -224,8 +224,10 @@ extension World {
         let open = station.ledger.disagreements(repo: repo)
         guard !open.isEmpty else { return }
         let underway = releaseUnderway(station: station, repo: repo, root: root)
+        let due = carriesDueToDeck(repo: repo)
         for crate in open {
             if underway, crate.placed == .deck { continue }
+            if crate.placed == .storage, due.contains(crate.number) { continue }
             station.ledger.snap(repo: repo, number: crate.number)
         }
     }
