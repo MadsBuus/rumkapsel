@@ -366,6 +366,33 @@ enum LayoutTests {
             }
         }
 
+        test("a station keeps its facts across a save, and an older save brings its facts over from the ledger") {
+            let a = fresh()
+            a.ledger.adopt(Ledger.Word(storage: [1, 2], deck: [3], cleared: [3]), repo: "web")
+            let news: [Event] = [(1, Stage.stored), (2, .stored), (4, .qa), (5, .stored)].map { .work(WorkNews(crate: CrateID(repo: "web", number: $0.0), stage: $0.1)) }
+            _ = Rules.apply([.policy(repo: "web", RepoFacts(hasStaging: true, hasCleared: true))] + news + [.launched(repo: "web", hotfix: 5)],
+                            at: Date(timeIntervalSince1970: 0), to: &a.facts, yard: a.yard)
+            guard let json = try? JSONEncoder().encode(a.saved), let saved = try? JSONDecoder().decode(Station.Saved.self, from: json) else {
+                return expect(false, "the save round-trips")
+            }
+            let b = Station(name: "work")
+            b.restore(saved)
+            var want = a.facts
+            want.launches = [:]
+            want.crates[CrateID(repo: "web", number: 5)] = nil
+            expect(b.facts == want, "the same facts but what flew: \(b.facts.crates.keys.sorted())")
+            var old = saved
+            old.facts = nil
+            let c = Station(name: "work")
+            c.restore(old)
+            expect(c.facts.crates.mapValues(\.place) == [CrateID(repo: "web", number: 1): .waiting, CrateID(repo: "web", number: 2): .waiting,
+                                                         CrateID(repo: "web", number: 3): .cleared], "from the ledger: \(c.facts.crates.mapValues(\.place))")
+            let broken = String(decoding: json, as: UTF8.self).replacingOccurrences(of: "\"nextSeq\"", with: "\"nextSeqOld\"")
+            let d = Station(name: "work")
+            if let s = try? JSONDecoder().decode(Station.Saved.self, from: Data(broken.utf8)) { d.restore(s) } else { expect(false, "unreadable facts keep the save readable") }
+            expect(d.facts.crates.count == 3 && Set(d.rooms.keys) == Set(b.rooms.keys), "unreadable facts come over from the ledger, the rooms as saved")
+        }
+
         test("restacked, a repository's untested crates stand in the column of its tested ones, whoever is in storage") {
             let a = fresh()
             for (repo, n) in [("api", 30), ("android", 31), ("bot", 32)] { a.ledger.adopt(Ledger.Word(storage: [n], deck: [], cleared: []), repo: repo) }

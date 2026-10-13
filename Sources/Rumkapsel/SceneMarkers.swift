@@ -461,6 +461,7 @@ enum OfficeLight { case occupied, empty, dark }
 extension StationController {
     func restackYard() {
         for station in fleet.stations.values { station.ledger.forgetSlots() }
+        world.learn(.restack)
         fleet.save()
         rebuildMarkers()
         logEvent("the yard restacked")

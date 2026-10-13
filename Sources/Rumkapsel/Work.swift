@@ -206,6 +206,7 @@ final class WorkBook {
         records[other.id] = nil
     }
 
+    func record(id: Int) -> Record? { records[id] }
     var count: Int { records.count }
     func records(repo: String) -> [Record] { records.values.filter { $0.repo == repo }.sorted { $0.id < $1.id } }
 }

@@ -37,6 +37,7 @@ final class World {
     let releases = ReleaseBook()
     private(set) var officeCrates: [String: CrateRef] = [:]
     let works = WorkBook()
+    let feed = FactFeed()
     var pulls: PullRequests { PullRequests(github: github) }
     private var transitions: [(record: WorkBook.Record, t: Transition)] = []
 
@@ -342,6 +343,7 @@ final class World {
                 let who = r.number.map { "#\($0)" } ?? r.work().label
                 StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
                 self?.transitions.append((r, t))
+                self?.learn(r, t)
             }
             fleet.load(alone: peerSnapshots.isEmpty)
             if waitsForGitHub { github.loadKnowledge() }
@@ -427,7 +429,11 @@ final class World {
                     if let current = github.currentBranch(worktree: w), current != branch, !haulUnderway(office: key) { gone = true }
                 }
                 let closed = state == "CLOSED" && !merged
-                if closed, closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
+                if closed, closedAt[key] == nil {
+                    closedAt[key] = now
+                    learnClosed(office: room.key, repo: room.repo)
+                    events.append(.log("\(room.name): pull request closed, not merged"))
+                }
                 if state != nil, !closed { closedAt[key] = nil }
                 if merged, station.hasPad, !haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
                 let cleared = (merged && (!station.hasPad || haulLanded(office: key) || nothingToHaul.contains(key)))
@@ -481,8 +487,10 @@ final class World {
             case .started(let run, let elapsed):
                 events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
                                              release: run.release, elapsed: elapsed))
+                if !d.production { learn(.staging(repo: info.repo, .deploy(.running(since: now.addingTimeInterval(-elapsed), usual: d.usual))), repo: info.repo) }
             case .ended(_, let outcome):
                 events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
+                if !d.production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
             }
         }
         events += lostDeploys()
@@ -623,7 +631,11 @@ final class World {
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
             if closedUnmerged {
                 if let n = known?.number { station.ledger.forget(repo: room.repo ?? "", number: n) }
-                if closedAt[key] == nil { closedAt[key] = now; events.append(.log("\(room.name): pull request closed, not merged")) }
+                if closedAt[key] == nil {
+                    closedAt[key] = now
+                    learnClosed(office: room.key, repo: room.repo)
+                    events.append(.log("\(room.name): pull request closed, not merged"))
+                }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
             } else if !haulOrdered(office: key), station.hasPad {
                 let merged = haulMerged(station: station, room: room)
@@ -727,6 +739,7 @@ final class World {
             guard github.teamOpenPRs(repoRoot: root) != nil else { continue }
             let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }
             let (arrived, gone) = station.ledger.adoptDecon(open: bots.map(\.pr.number), repo: info.repo)
+            learn(.decon(repo: info.repo, open: bots.map(\.pr.number)), repo: info.repo)
             if !arrived.isEmpty { moved = true }
             if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name, repo: info.repo, numbers: arrived)) }
             for n in arrived where isReady(info.repo) {
@@ -749,6 +762,7 @@ final class World {
                     report(crate: n, repo: info.repo, .stored, by: .pulls, at: now)
                 } else {
                     station.ledger.forget(repo: info.repo, number: n)
+                    learn(.deconClosed(CrateID(repo: info.repo, number: n)), repo: info.repo)
                     events.append(.log("#\(n) \(Words.current.ejected)" + (state == "MERGED" ? "" : ", never cleared")))
                 }
             }

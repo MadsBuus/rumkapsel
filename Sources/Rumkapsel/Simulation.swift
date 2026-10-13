@@ -139,6 +139,7 @@ final class Simulation<B: Body> {
         stepRockets()
         reconcileBodies()
         onBeat(contractHallways())
+        world.beatFacts(now: now)
         replanBlockedWalks()
     }
 

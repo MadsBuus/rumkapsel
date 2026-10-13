@@ -15,6 +15,7 @@ enum Event: Equatable {
     case work(WorkNews)
     case decon(repo: String, open: [Int])
     case deconClosed(CrateID)
+    case renumbered(from: CrateID, to: CrateID)
     case staging(repo: String, StagingNews)
     case launched(repo: String, hotfix: Int?)
     case restack
@@ -26,6 +27,7 @@ enum Subject: Hashable { case crate(CrateID) }
 enum Effect: Equatable {
     case log(String)
     case quiet(Subject)
+    case renamed(Subject, to: Subject)
     case hatch(repo: String)
 }
 
@@ -59,6 +61,15 @@ enum Rules {
                 guard f.crates[id]?.zone == .decon else { continue }
                 put(id, nil, &f, g)
                 fx.append(.log("#\(id.number) \(Words.current.ejected), never cleared"))
+            case .renumbered(let from, let to):
+                guard from != to, let c = f.crates[from] else { continue }
+                if f.crates[to] == nil {
+                    f.crates[from] = nil
+                    f.crates[to] = CrateFact(id: to, place: c.place, stage: c.stage, alien: c.alien, seq: c.seq, column: c.column, closedAt: c.closedAt)
+                    fx.append(.renamed(.crate(from), to: .crate(to)))
+                } else {
+                    put(from, nil, &f, g)
+                }
             case .staging(let repo, let news):
                 staging(repo, news, &f)
             case .launched(let repo, let hotfix):

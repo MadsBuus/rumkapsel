@@ -81,7 +81,9 @@ extension World {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
             let pr = launch.pr
             let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
-            releases.hotfixLoads[key] = (hotfixRecord(repo: info.repo, pr: pr).number, now)
+            let crate = hotfixRecord(repo: info.repo, pr: pr).number
+            releases.hotfixLoads[key] = (crate, now)
+            learn(.launched(repo: info.repo, hotfix: crate ?? pr.number), repo: info.repo)
             assignPads()
             events.append(.chime(pr.number))
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
@@ -185,6 +187,7 @@ extension World {
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
             launched.insert(info.station + "|" + info.repo)
+            learn(.launched(repo: info.repo, hotfix: nil), repo: info.repo)
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
             for r in waiting(repo: info.repo, station: station.name) {
                 works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
@@ -254,11 +257,12 @@ extension World {
             let open = staging.first { $0.state == "OPEN" }
             guard releases.stagingSeen.contains(key) else {
                 releases.stagingSeen.insert(key)
-                if let open { releases.stagingPRs[key] = (open.number, "OPEN") }
+                if let open { releases.stagingPRs[key] = (open.number, "OPEN"); learn(.staging(repo: info.repo, .opened(open.number)), repo: info.repo) }
                 continue
             }
             if let open, releases.stagingPRs[key]?.number != open.number {
                 releases.stagingPRs[key] = (open.number, "OPEN")
+                learn(.staging(repo: info.repo, .opened(open.number)), repo: info.repo)
                 events.append(.stagingOpened(station: info.station, repo: info.repo, number: open.number))
                 continue
             }
@@ -266,6 +270,7 @@ extension World {
                   let pr = staging.first(where: { $0.number == known.number }), pr.state != "OPEN" else { continue }
             releases.stagingPRs[key] = (pr.number, pr.state)
             let merged = pr.state == "MERGED"
+            learn(.staging(repo: info.repo, merged ? .merged(pr.number) : .closed(pr.number)), repo: info.repo)
             events.append(merged ? .stagingMerged(station: info.station, repo: info.repo, number: pr.number)
                                  : .stagingClosed(station: info.station, repo: info.repo, number: pr.number))
         }

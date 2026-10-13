@@ -104,6 +104,18 @@ enum RuleTests {
             expect(f.crates[id("web", 8)] == nil && logs(out).count == 1, "closed: ejected, said: \(logs(out))")
         }
 
+        test("a crate renumbered when its issue is learned keeps its place; renumbered onto one already there, it goes") {
+            var f = stored("web", [1, 2, 900])
+            let before = f.crates[id("web", 900)]
+            let fx = apply(&f, [.renumbered(from: id("web", 900), to: id("web", 31))])
+            let now = f.crates[id("web", 31)]
+            expect(f.crates[id("web", 900)] == nil && now?.place == before?.place && now?.seq == before?.seq && now?.column == before?.column,
+                   "same place, same spot: \(String(describing: now))")
+            expect(fx == [.renamed(.crate(id("web", 900)), to: .crate(id("web", 31)))], "the picture is told: \(fx)")
+            apply(&f, [.renumbered(from: id("web", 2), to: id("web", 1))])
+            expect(f.crates[id("web", 2)] == nil && f.crates[id("web", 1)] != nil && f.crates.count == 2, "the other number already stands: the old one goes")
+        }
+
         test("a home band holds in every zone, an overflow takes the nearest free band, a newcomer the first free one") {
             var f = Facts()
             apply(&f, [.policy(repo: "web", staged), .policy(repo: "api", staged)])

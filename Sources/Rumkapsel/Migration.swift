@@ -12,6 +12,14 @@ struct LegacyLedger: Decodable {
     var crates: [String: Crate]
 }
 
+extension LegacyLedger {
+    init(_ l: Ledger) {
+        crates = Dictionary(l.allCrates.map { c in
+            (c.key, Crate(repo: c.repo, number: c.number, wanted: c.wanted?.rawValue, placed: c.placed?.rawValue, cleared: c.cleared, alien: c.alien))
+        }) { a, _ in a }
+    }
+}
+
 extension Facts {
     static func migrate(_ old: LegacyLedger, yard: YardGeometry) -> Facts {
         var f = Facts()

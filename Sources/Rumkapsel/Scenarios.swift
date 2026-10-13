@@ -639,6 +639,7 @@ final class ScenarioRunner {
             }
             if !hit { return "never saw \(want.words)" }
         }
+        if let m = sim.station.world.feed.unexplained.first { return "facts disagree with the ledger · " + m }
         return s.floor?(sim)
     }
 
@@ -652,6 +653,9 @@ final class ScenarioRunner {
             if let st = sim.station.world.fleet.stations["work"] {
                 for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
                     say("    crate  \(c.repo)#\(c.number): placed \(String(describing: c.placed)) wanted \(String(describing: c.wanted)) heading \(String(describing: c.heading)) at \(String(describing: c.at))")
+                }
+                for c in st.facts.crates.values.sorted(by: { $0.id < $1.id }) {
+                    say("    fact  \(c.id): \(c.place) column \(c.column.map(String.init) ?? "-") stage \(c.stage.map(String.init(describing:)) ?? "-")\(c.alien ? " alien" : "")")
                 }
             }
             for r in sim.station.simulation.rockets.values {

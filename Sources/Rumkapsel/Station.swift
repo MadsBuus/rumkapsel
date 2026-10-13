@@ -252,6 +252,7 @@ final class Station {
     var hall: Hall { blocks.hall }
 
     var ledger = Ledger()
+    var facts = Facts()
     var stored: [String: Int] { ledger.counts(in: .storage) }
     var storedBoxes: Int { stored.values.reduce(0, +) }
     var staged: [String: Int] { ledger.counts(in: .deck) }
@@ -747,6 +748,7 @@ final class Station {
         var rooms: [String: SavedRoom]
         var stored: Int?
         var ledger: Ledger?
+        var facts: Facts?
         var placement: String?
     }
     struct SavedRoom: Codable {
@@ -759,7 +761,14 @@ final class Station {
         Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree,
                       branch: $0.branch, repoRoot: $0.repoRoot, openedAt: $0.openedAt)
-        }, stored: storedBoxes, ledger: ledger, placement: OfficePlacement.current.rawValue)
+        }, stored: storedBoxes, ledger: ledger, facts: savedFacts, placement: OfficePlacement.current.rawValue)
+    }
+
+    private var savedFacts: Facts {
+        var f = facts
+        f.launches = [:]
+        f.crates = f.crates.filter { if case .aboard = $0.value.place { return false }; return true }
+        return f
     }
 
     func restore(_ s: Saved, relayout: Bool = false) {
@@ -767,6 +776,8 @@ final class Station {
         ledger = s.ledger ?? Ledger()
         if ledger.slotsDrawnBy != Ledger.slotScheme { ledger.forgetSlots() }
         ledger.forgetTransit()
+        facts = s.facts ?? Facts.migrate(LegacyLedger(ledger), yard: yard)
+        if facts.scheme != Facts.scheme { facts.scheme = Facts.scheme; Layout.relayout(&facts, yard: yard) }
         let kept = s.rooms.filter { key, _ in key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") }
         if relayout {
             let offices = kept.filter { !$0.key.hasPrefix("kind:") }
@@ -790,6 +801,19 @@ final class Station {
             rooms[key] = room
             for c in r.cells { occupied[c] = key }
         }
+    }
+}
+
+extension Station.Saved {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        spine = try c.decode(Int.self, forKey: .spine)
+        hallway = try c.decodeIfPresent([Cell].self, forKey: .hallway)
+        rooms = try c.decode([String: Station.SavedRoom].self, forKey: .rooms)
+        stored = try c.decodeIfPresent(Int.self, forKey: .stored)
+        ledger = try c.decodeIfPresent(Ledger.self, forKey: .ledger)
+        facts = try? c.decodeIfPresent(Facts.self, forKey: .facts)
+        placement = try c.decodeIfPresent(String.self, forKey: .placement)
     }
 }
 
