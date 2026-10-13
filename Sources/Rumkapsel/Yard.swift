@@ -25,8 +25,6 @@ extension Station {
     func layout(of yard: Yard, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
         let grids = yardGrids(yard)
         guard !grids(0).isEmpty else { return [] }
-        let bands = hallBands()
-
         struct Entry { let crate: Ledger.Crate; let group: Int; let cleared: Bool; let carried: Bool; let index: Int; var slot: Ledger.Slot? }
         var entries: [Entry] = []
         for repo in Set(ledger.crates.values.map(\.repo)).sorted() {
@@ -48,7 +46,7 @@ extension Station {
             let avoiding = aside["\(e.crate.repo)#\(e.crate.number)"]
             let slot = yard == .decon
                 ? Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: grids(0).joined().count * 2, avoiding: avoiding, tall: true)
-                : pile(repo: e.crate.repo, yard: yard, group: e.group, among: held, bands: bands, avoiding: avoiding)
+                : pile(repo: e.crate.repo, yard: yard, group: e.group, among: held, avoiding: avoiding)
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
             if e.carried { ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }
@@ -167,7 +165,8 @@ extension Station {
         return counts.mapValues { $0.max { ($0.value, -$0.key) < ($1.value, -$1.key) }!.key }
     }
 
-    private func pile(repo: String, yard: Yard, group: Int, among held: [(repo: String, slot: Ledger.Slot)], bands: [String: Int], avoiding: Int?) -> Ledger.Slot {
+    private func pile(repo: String, yard: Yard, group: Int, among held: [(repo: String, slot: Ledger.Slot)], avoiding: Int?) -> Ledger.Slot {
+        let bands = hallBands()
         let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
         func height(_ c: Int) -> Int { here.filter { $0.slot.column == c }.count }
         func next(_ c: Int) -> Ledger.Slot {

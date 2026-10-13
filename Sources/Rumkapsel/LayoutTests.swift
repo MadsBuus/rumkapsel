@@ -324,6 +324,19 @@ enum LayoutTests {
             }
         }
 
+        test("restacked, a repository's untested crates stand in the column of its tested ones, whoever is in storage") {
+            let a = fresh()
+            for (repo, n) in [("api", 30), ("android", 31), ("bot", 32)] { a.ledger.adopt(Ledger.Word(storage: [n], deck: [], cleared: []), repo: repo) }
+            a.ledger.adopt(Ledger.Word(storage: [], deck: [33], cleared: [33]), repo: "ios")
+            a.ledger.adopt(Ledger.Word(storage: [], deck: Array(10..<20), cleared: Array(14..<20)), repo: "web")
+            _ = a.layout(of: .storage); _ = a.layout(of: .deck)
+            a.ledger.forgetSlots()
+            _ = a.layout(of: .storage)
+            let deck = a.layout(of: .deck).filter { $0.repo == "web" }
+            let tested = Set(deck.filter(\.cleared).map(\.cell.x)), untested = Set(deck.filter { !$0.cleared }.map(\.cell.x))
+            expect(untested == tested, "web's untested in columns \(untested.sorted()), its tested in \(tested.sorted())")
+        }
+
         test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {
             let a = fresh()
             expect(a.hall.cells.count == Hall.wide * Hall.deep, "the hall is \(Hall.wide) by \(Hall.deep): \(cells(a.hall.cells))")
