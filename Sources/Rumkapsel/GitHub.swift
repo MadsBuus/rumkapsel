@@ -47,6 +47,7 @@ struct ReleasePR: Equatable {
     }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
     var tag = false
+    var hotfix = false
 }
 
 struct Pipeline: Equatable {
@@ -229,6 +230,7 @@ final class GitHubResolver {
     }
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
+    private var hotfixes: [String: ([ReleasePR], Date)] = [:]
     struct Cargo: Equatable {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
@@ -561,6 +563,7 @@ final class GitHubResolver {
         if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
     }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
+    private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
     private var pullsSeen: [String: [Int: String]] = [:]
     private var pullsWatchedAt: [String: Date] = [:]
@@ -583,6 +586,16 @@ final class GitHubResolver {
     func releases(repoRoot: String) -> [ReleasePR]? {
         lock.lock(); defer { lock.unlock() }
         return releases[repoRoot]?.0
+    }
+
+    func hotfixes(repoRoot: String) -> [ReleasePR] {
+        lock.lock(); defer { lock.unlock() }
+        return hotfixes[repoRoot]?.0 ?? []
+    }
+
+    func takeHotfixLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
+        lock.lock(); defer { lock.unlock() }
+        let out = pendingHotfixes; pendingHotfixes = []; return out
     }
 
     static func tags(repoRoot: String, run: ([String], String) -> Data?) -> [(name: String, at: Date)] {
@@ -967,6 +980,7 @@ final class GitHubResolver {
             }
             let pipe = detected.overridden(by: Pipeline.override(forRoot: repoRoot))
             let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
+            var foundHotfixes: [ReleasePR] = []
             let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
             func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
             for base in bases {
@@ -975,12 +989,15 @@ final class GitHubResolver {
                       let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
                 for o in arr {
                     let head = o["headRefName"] as? String ?? ""
-                    guard isReleaseHead(head) else { continue }
+                    let hotfix = base == productionBranch && !isReleaseHead(head)
+                    guard isReleaseHead(head) || hotfix else { continue }
                     let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-                    found.append(ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
-                                           head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
-                                           mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
-                                           production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch))
+                    var pr = ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
+                                       head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
+                                       mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
+                                       production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch)
+                    pr.hotfix = hotfix
+                    if hotfix { foundHotfixes.append(pr) } else { found.append(pr) }
                 }
             }
             if pipe.shipsOnTag, let newest = GitHubResolver.tags(repoRoot: repoRoot, run: run).first {
@@ -1063,8 +1080,18 @@ final class GitHubResolver {
             if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
                 pendingLaunches.append((repoRoot, tag))
             }
+            if let (before, at) = hotfixes[repoRoot] {
+                for pr in foundHotfixes where pr.state == "MERGED" {
+                    let was = before.first { $0.number == pr.number }
+                    guard was?.state == "OPEN" || (was == nil && (pr.mergedAt ?? .distantPast) > at) else { continue }
+                    pendingHotfixes.append((repoRoot, pr))
+                    expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
+                }
+            }
+            let hotfixesChanged = hotfixes[repoRoot]?.0 != foundHotfixes
+            hotfixes[repoRoot] = (foundHotfixes, Date())
             let pipelineChanged = pipelines[repoRoot] != detected
-            let changed = previous != found || cargo[repoRoot] != newCargo || pipelineChanged
+            let changed = previous != found || hotfixesChanged || cargo[repoRoot] != newCargo || pipelineChanged
             pipelines[repoRoot] = detected
             newCargo.exact = exact
             newCargo.at = countBegan
@@ -1387,6 +1414,15 @@ extension GitHubResolver {
         lock.lock()
         releases[repoRoot] = (rs, Date())
         for pr in merged { pendingLaunches.append((repoRoot, pr)) }
+        lock.unlock()
+        notify()
+    }
+
+    func inject(hotfixes hs: [ReleasePR], for repoRoot: String, merged: [ReleasePR] = []) {
+        guard frozen else { return }
+        lock.lock()
+        hotfixes[repoRoot] = (hs, Date())
+        for pr in merged { pendingHotfixes.append((repoRoot, pr)) }
         lock.unlock()
         notify()
     }

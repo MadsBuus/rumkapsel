@@ -230,137 +230,80 @@ enum Props {
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
-        let h = RocketGeometry.height, r = RocketGeometry.radius
+        let s = RocketGeometry.scale
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         Detail.apply(.hull, to: white)
         let paint = lit(color)
         Detail.apply(.hull, to: paint)
-        func plated(_ m: SCNMaterial, _ w: Double, _ h: Double, at: (Double, Double) = (0, 0)) -> SCNMaterial {
-            let c = m.copy() as! SCNMaterial
-            let unit = RocketGeometry.platingSpan
-            c.multiply.contentsTransform = SCNMatrix4Mult(SCNMatrix4MakeScale(CGFloat(w / unit), CGFloat(h / unit), 1),
-                                                          SCNMatrix4MakeTranslation(CGFloat(at.0 / unit), CGFloat(at.1 / unit), 0))
-            return c
-        }
         let tip = SCNNode(), lifter = SCNNode()
         tip.name = "tip"; lifter.name = "lifter"
         let base = RocketGeometry.hullBase
         tip.setValue(base, forKey: "base")
         n.addChildNode(lifter); n.addChildNode(tip)
 
-        let hullR = RocketGeometry.hullRadius, hullH = RocketGeometry.hullHeight, apothem = RocketGeometry.apothem
-        let rings = RocketGeometry.panels / 6, ringH = hullH / Double(rings)
-        let core = SCNNode(geometry: faceted(SCNCylinder(radius: apothem * 0.9, height: hullH)))
-        core.geometry!.firstMaterial = dark
-        core.position = v3(0, base + hullH / 2, 0)
+        func scaled(_ p: [(y: Double, r: Double)]) -> [(y: Double, r: Double)] { p.map { ($0.y * s, $0.r * s * RocketGeometry.fuller) } }
+        lifter.addChildNode(SCNNode(geometry: lathe(scaled(RocketShape.profile(from: RocketShape.base, to: RocketShape.split, steps: 6)),
+                                                    material: white, capBottom: true, capTop: true)))
+        let core = SCNNode(geometry: lathe(scaled(RocketShape.profile(from: RocketShape.split, to: RocketShape.panelTop, steps: 5)).map { ($0.y, $0.r * 0.9) },
+                                           material: dark, capBottom: true, capTop: false))
         core.name = "frame"
         tip.addChildNode(core)
-        for k in 0..<6 {
-            let a = Double(k) * .pi / 3 + .pi / 3
-            let rib = SCNNode(geometry: SCNBox(width: 0.014, height: hullH, length: 0.014, chamferRadius: 0))
-            rib.geometry!.firstMaterial = dark
-            rib.position = v3(sin(a) * hullR * 0.97, base + hullH / 2, cos(a) * hullR * 0.97)
-            rib.name = "frame"
-            tip.addChildNode(rib)
-        }
+        let rings = RocketGeometry.panels / 6
+        let ringH = (RocketShape.panelTop - RocketShape.split) / Double(rings)
         for ring in 0..<rings {
+            let y0 = RocketShape.split + ringH * Double(ring), y1 = y0 + ringH
             for k in 0..<6 {
-                let f = RocketGeometry.facing(side: k)
-                let panel = SCNNode(geometry: SCNBox(width: hullR - 0.006, height: ringH - 0.006, length: 0.014, chamferRadius: 0))
-                panel.geometry!.firstMaterial = plated(white, hullR, ringH, at: (Double(k) * hullR, Double(ring) * ringH))
-                panel.position = v3(f.x * apothem, base + ringH * (Double(ring) + 0.5), f.y * apothem)
-                panel.eulerAngles.y = CGFloat(atan2(f.x, f.y))
+                let panel = facet(y0: y0 * s, r0: RocketGeometry.hullRadius(at: y0 * s), y1: y1 * s, r1: RocketGeometry.hullRadius(at: y1 * s),
+                                  side: k, inset: 0.004, material: white)
                 panel.name = "panel\(ring * 6 + k)"
                 tip.addChildNode(panel)
             }
         }
-        let nose = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: hullR, height: r * 2.6)))
-        nose.geometry!.firstMaterial = plated(paint, 2 * .pi * hullR, r * 2.6)
-        nose.position = v3(0, base + hullH + r * 1.3, 0)
+        let nose = SCNNode(geometry: lathe(scaled(RocketShape.profile(from: RocketShape.panelTop, to: RocketShape.height, steps: 4)),
+                                           material: white, capBottom: true, capTop: false))
         nose.name = "nose"
         tip.addChildNode(nose)
-        let hatch = SCNNode()
-        hatch.name = "hatch"
-        let frameW = r * 0.9, frameH = 0.2
-        let frame = SCNNode(geometry: SCNBox(width: frameW, height: frameH, length: 0.03, chamferRadius: 0))
-        frame.geometry!.firstMaterial = dark
-        frame.position = v3(0, 0, -0.012)
-        hatch.addChildNode(frame)
-        let door = SCNNode(geometry: SCNBox(width: frameW - 0.02, height: frameH - 0.02, length: 0.02, chamferRadius: 0))
-        door.geometry!.firstMaterial = plated(white, frameW, frameH)
-        door.name = "door"
-        door.position = v3(0, 0, 0.004)
-        hatch.addChildNode(door)
-        let latch = SCNNode(geometry: SCNBox(width: frameW * 0.45, height: 0.016, length: 0.014, chamferRadius: 0))
-        latch.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
-        latch.position = v3(frameW * 0.08, 0, 0.02)
-        hatch.addChildNode(latch)
-        for dy in [-0.055, 0.055] {
-            let hinge = SCNNode(geometry: SCNBox(width: 0.02, height: 0.03, length: 0.02, chamferRadius: 0))
-            hinge.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.78, 0.82)))
-            hinge.position = v3(-frameW / 2 + 0.005, dy, 0.012)
-            hatch.addChildNode(hinge)
-        }
-        let at = RocketGeometry.hatchInTip
-        hatch.position = v3(at.x, at.y, at.z)
-        hatch.eulerAngles.y = .pi / 2
-        tip.addChildNode(hatch)
-        for k in 0..<3 {
-            let a = .pi / 2 + Double(2 * k + 1) * .pi / 3
-            let port = SCNNode(geometry: SCNBox(width: r * 0.36, height: r * 0.36, length: 0.02, chamferRadius: 0))
-            port.geometry!.firstMaterial = flat(NSColor(rgb: (0.35, 0.55, 0.85)))
-            port.position = v3(sin(a) * (apothem + 0.008), 0.12 + h * 0.75, cos(a) * (apothem + 0.008))
-            port.eulerAngles.y = CGFloat(a)
-            port.name = "port"
-            tip.addChildNode(port)
-        }
 
-        let lower = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: h * 0.45)))
-        lower.geometry!.firstMaterial = plated(white, 2 * .pi * r, h * 0.45)
-        lower.position = v3(0, 0.12 + h * 0.225, 0)
-        lifter.addChildNode(lower)
-        let band = SCNNode(geometry: faceted(SCNCylinder(radius: r * 1.02, height: h * 0.08)))
-        band.geometry!.firstMaterial = plated(paint, 2 * .pi * r, h * 0.08)
-        band.position = v3(0, 0.12 + h * 0.45, 0)
-        lifter.addChildNode(band)
-        for k in 0..<4 {
+        tip.addChildNode(RocketShape.hatch(scale: s, surface: { RocketGeometry.apothem(at: $0) }, flatShaded: true))
+
+        for k in 0..<7 {
+            let a = Double(k) * .pi / 3
+            let at = k == 6 ? SIMD2(0.0, 0.0) : SIMD2(cos(a), sin(a)) * RocketShape.r(RocketShape.base) * RocketShape.bellRing * s
+            let h = RocketShape.bellHeight * s
+            let bell = SCNNode(geometry: faceted(SCNCone(topRadius: RocketShape.bellTop * s, bottomRadius: RocketShape.bellBottom * s, height: h)))
+            bell.geometry!.firstMaterial = dark
+            bell.position = v3(at.x, RocketShape.base * s - h / 2, at.y)
+            lifter.addChildNode(bell)
+        }
+        for a in RocketShape.finBearings {
             let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * .pi / 2 + .pi / 4
-            let finH = r * 2.6, finL = r * 1.3, lean = 0.42
-            let fin = SCNNode(geometry: SCNBox(width: 0.035, height: finH, length: finL, chamferRadius: 0))
-            fin.geometry!.firstMaterial = plated(paint, r * 1.3, r * 2.6)
-            fin.position = v3(0, 0.12 + finH * 0.45, r * 0.3 + finL * 0.5 + finH * 0.5 * sin(lean) * 0.5)
-            fin.eulerAngles.x = -lean
+            pivot.eulerAngles.y = CGFloat(-a)
+            let fin = SCNNode(geometry: SCNShape(path: RocketShape.finOutline(scale: s), extrusionDepth: 0.012))
+            fin.geometry!.firstMaterial = paint
             pivot.addChildNode(fin)
+            let podR = RocketShape.podRadius * s, podL = RocketShape.podLength * s
+            let body = SCNNode(geometry: faceted(SCNCylinder(radius: podR, height: podL - 2 * podR)))
+            let cap = SCNNode(geometry: faceted(SCNCone(topRadius: 0, bottomRadius: podR, height: podR * 1.6)))
+            let foot = SCNNode(geometry: faceted(SCNCone(topRadius: podR, bottomRadius: podR * 0.7, height: podR)))
+            for (part, y) in [(body, podL / 2), (cap, podL - podR + podR * 0.8), (foot, podR / 2)] {
+                part.geometry!.firstMaterial = paint
+                part.position = v3(RocketShape.finReach * s, y, 0)
+                pivot.addChildNode(part)
+            }
             lifter.addChildNode(pivot)
         }
-        let throat = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.35, height: 0.04)))
-        throat.geometry!.firstMaterial = dark
-        throat.position = v3(0, 0.11, 0)
-        lifter.addChildNode(throat)
-        let bell = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.35, bottomRadius: r * 0.75, height: 0.09)))
-        bell.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.36)))
-        bell.position = v3(0, 0.055, 0)
-        lifter.addChildNode(bell)
-        for k in 0..<3 {
-            let pivot = SCNNode()
-            pivot.eulerAngles.y = Double(k) * 2 * .pi / 3 + .pi / 3
-            let leg = SCNNode(geometry: SCNBox(width: 0.03, height: 0.24, length: 0.03, chamferRadius: 0))
-            leg.geometry!.firstMaterial = dark
-            leg.position = v3(0, 0.11, r * 1.15)
-            leg.eulerAngles.x = -0.55
-            pivot.addChildNode(leg)
-            let foot = SCNNode(geometry: SCNBox(width: 0.06, height: 0.02, length: 0.06, chamferRadius: 0))
-            foot.geometry!.firstMaterial = dark
-            foot.position = v3(0, 0.01, r * 1.15 + 0.12 * sin(0.55))
-            pivot.addChildNode(foot)
-            lifter.addChildNode(pivot)
+        for a in RocketShape.rcsBearings {
+            tip.addChildNode(RocketShape.thruster(at: a, scale: s, surface: { RocketGeometry.hullRadius(at: $0) }, hull: white, nozzle: dark))
         }
+        for a in RocketShape.legBearings { tip.addChildNode(RocketShape.leg(at: a, scale: s, segments: 2, material: paint.copy() as! SCNMaterial)) }
+        let engineH = RocketShape.engineHeight * s
+        let engine = SCNNode(geometry: faceted(SCNCone(topRadius: RocketShape.engineTop * s, bottomRadius: RocketShape.engineBottom * s, height: engineH)))
+        engine.geometry!.firstMaterial = dark
+        engine.position = v3(0, base - engineH / 2, 0)
+        tip.addChildNode(engine)
 
-        for k in 0..<6 { tip.addChildNode(leg(at: Double(k) * .pi / 3 + .pi / 6, hullRadius: hullR, base: base)) }
-
-        let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
+        let flame = SCNNode(geometry: faceted(SCNCone(topRadius: RocketGeometry.radius * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
         flame.position = v3(0, -0.2, 0)
         flame.name = "flame"
@@ -371,35 +314,74 @@ enum Props {
         return n
     }
 
-    static func legs(_ tip: SCNNode, lift: Double) {
-        let angle = RocketGeometry.legAngle(lift: lift)
-        for c in tip.childNodes {
-            guard let leg = c.childNode(withName: "leg", recursively: false) else { continue }
-            leg.eulerAngles.z = CGFloat(angle)
-            leg.isHidden = lift >= 0.98
-        }
+    static func paintNose(_ rocket: SCNNode, _ color: NSColor) {
+        guard let tip = part(rocket, "tip") else { return }
+        for c in tip.childNodes where (c.value(forKey: "part") as? String) == "nose" { c.geometry?.firstMaterial = lit(color) }
     }
 
-    private static func leg(at a: Double, hullRadius: Double, base: Double) -> SCNNode {
-        let pivot = SCNNode()
-        pivot.eulerAngles.y = CGFloat(-a)
-        let hinge = SCNNode()
-        hinge.name = "leg"
-        hinge.position = v3(hullRadius * 0.96, base + 0.004, 0)
-        let w0 = 2 * hullRadius * sin(.pi / 6) * 0.9, w1 = w0 * 0.42, length = RocketGeometry.legLength
-        let outline = NSBezierPath()
-        outline.move(to: NSPoint(x: -w0 / 2, y: 0))
-        outline.line(to: NSPoint(x: w0 / 2, y: 0))
-        outline.line(to: NSPoint(x: w1 / 2, y: -length))
-        outline.line(to: NSPoint(x: -w1 / 2, y: -length))
-        outline.close()
-        let plate = SCNShape(path: outline, extrusionDepth: 0.012)
-        plate.firstMaterial = lit(NSColor(white: 0.06, alpha: 1))
-        let leaf = SCNNode(geometry: plate)
-        leaf.eulerAngles.y = .pi / 2
-        hinge.addChildNode(leaf)
-        pivot.addChildNode(hinge)
-        return pivot
+    static func nameRocket(_ rocket: SCNNode, repo: String, color: NSColor) {
+        guard let lifter = part(rocket, "lifter"), let tip = part(rocket, "tip"), !repo.isEmpty else { return }
+        let names = RocketShape.names(repo.uppercased(), color: color, scale: RocketGeometry.scale,
+                                      apothem: { RocketGeometry.apothem(at: $0) }, width: RocketShape.nameWidth * RocketGeometry.scale, flatShaded: true)
+        names.lifter.forEach(lifter.addChildNode)
+        names.tip.forEach(tip.addChildNode)
+        shape(rocket, lifter: !lifter.isHidden, panels: RocketGeometry.panels)
+    }
+
+    private static func corner(_ j: Int, r: Double, y: Double) -> SIMD3<Double> {
+        let a = .pi / 6 + Double(j) * .pi / 3
+        return SIMD3(cos(a) * r, y, sin(a) * r)
+    }
+
+    static func lathe(_ profile: [(y: Double, r: Double)], material: SCNMaterial, capBottom: Bool, capTop: Bool) -> SCNGeometry {
+        var verts: [SCNVector3] = [], normals: [SCNVector3] = [], idx: [Int32] = []
+        func quad(_ a: SIMD3<Double>, _ b: SIMD3<Double>, _ c: SIMD3<Double>, _ d: SIMD3<Double>, out: SIMD3<Double>) {
+            var nrm = simd_normalize(simd_cross(b - a, d - a))
+            if simd_dot(nrm, out) < 0 { nrm = -nrm }
+            let i = Int32(verts.count)
+            for p in [a, b, c, d] { verts.append(SCNVector3(p.x, p.y, p.z)); normals.append(SCNVector3(nrm.x, nrm.y, nrm.z)) }
+            idx += [i, i + 1, i + 2, i, i + 2, i + 3, i, i + 2, i + 1, i, i + 3, i + 2]
+        }
+        for i in 0..<(profile.count - 1) {
+            let lo = profile[i], hi = profile[i + 1]
+            for j in 0..<6 {
+                let a = corner(j, r: lo.r, y: lo.y), b = corner(j + 1, r: lo.r, y: lo.y)
+                let c = corner(j + 1, r: hi.r, y: hi.y), d = corner(j, r: hi.r, y: hi.y)
+                quad(a, b, c, d, out: (a + b) / 2 - SIMD3(0, lo.y, 0))
+            }
+        }
+        for (end, wanted, down) in [(profile.first!, capBottom, true), (profile.last!, capTop, false)] where wanted && end.r > 0.001 {
+            let centre = Int32(verts.count)
+            let up = SCNVector3(0, down ? -1 : 1, 0)
+            verts.append(SCNVector3(0, end.y, 0)); normals.append(up)
+            for j in 0...6 { let p = corner(j, r: end.r, y: end.y); verts.append(SCNVector3(p.x, p.y, p.z)); normals.append(up) }
+            for j in 0..<Int32(6) { idx += [centre, centre + 1 + j, centre + 2 + j, centre, centre + 2 + j, centre + 1 + j] }
+        }
+        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals)],
+                            elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
+        g.firstMaterial = material
+        return g
+    }
+
+    private static func facet(y0: Double, r0: Double, y1: Double, r1: Double, side k: Int, inset: Double, material: SCNMaterial) -> SCNNode {
+        let j = (6 - k) % 6
+        let corners = [corner(j - 1 + 6, r: r0, y: y0), corner(j + 6, r: r0, y: y0), corner(j + 6, r: r1, y: y1), corner(j - 1 + 6, r: r1, y: y1)]
+        let centre = corners.reduce(SIMD3<Double>(repeating: 0), +) / 4
+        let pulled = corners.map { centre + ($0 - centre) * (1 - inset / max(0.01, r0)) }
+        let node = SCNNode(geometry: lathePiece(pulled.map { $0 - centre }, out: SIMD3(centre.x, 0, centre.z)))
+        node.geometry!.firstMaterial = material
+        node.position = SCNVector3(centre.x, centre.y, centre.z)
+        return node
+    }
+
+    private static func lathePiece(_ q: [SIMD3<Double>], out: SIMD3<Double>) -> SCNGeometry {
+        var nrm = simd_normalize(simd_cross(q[1] - q[0], q[3] - q[0]))
+        if simd_dot(nrm, out) < 0 { nrm = -nrm }
+        let verts = q.map { SCNVector3($0.x, $0.y, $0.z) }
+        let normals = Array(repeating: SCNVector3(nrm.x, nrm.y, nrm.z), count: 4)
+        let idx: [Int32] = [0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2]
+        return SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals)],
+                           elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
     }
 
     static func part(_ rocket: SCNNode, _ name: String) -> SCNNode? {
@@ -410,13 +392,15 @@ enum Props {
         guard let tip = part(rocket, "tip") else { return }
         let base = (tip.value(forKey: "base") as? Double) ?? 0
         part(rocket, "lifter")?.isHidden = !lifter
-        legs(tip, lift: lifter ? 1 : 0)
+        if lifter { part(rocket, "lifter")?.position = SCNVector3Zero }
+        RocketShape.fold(tip, lifter ? 1 : 0)
+        RocketShape.showLegs(tip, !lifter)
         tip.position.y = CGFloat(lifter ? 0 : RocketGeometry.standHeight - base)
         let whole = panels >= RocketGeometry.panels
         for c in tip.childNodes {
             let name = (c.value(forKey: "part") as? String) ?? ""
             if name.hasPrefix("panel"), let i = Int(name.dropFirst(5)) { c.isHidden = i >= panels }
-            else if name == "nose" || name == "hatch" || name == "port" { c.isHidden = !whole }
+            else if name == "nose" || name == "hatch" || name == "name" || name == "rcs" { c.isHidden = !whole }
         }
     }
 }

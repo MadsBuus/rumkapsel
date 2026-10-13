@@ -52,6 +52,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
             $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } }
     }
     static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
+    static let hotfixGone = PlaybookWait.until("the hotfix rocket climbed") { c in !c.simulation.rockets.keys.contains { RocketKey.parts($0).hotfix != nil } }
 }
 
 struct PlaybookEntry {
@@ -134,7 +135,7 @@ enum Playbook {
         PlaybookEntry("release", "QA approves a crate", "carried from the staged rows across the aisle to the cleared rows",
                       [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Production PR opened", "two drones fly the kick stage in under the tip as its legs fold up",
+        PlaybookEntry("release", "Production PR opened", "the iris opens, the tip goes down the shaft onto its kick stage and the deck raises the stack flush with the pad",
                       [("1x", 0.5), ("Release: Production opens", 12)],
                       camera: .area("pad", 3), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production PR merged", "the drones form a ring at the field and the vortex pulls web's cleared crates through it, spiralling them into the rocket",
@@ -143,6 +144,13 @@ enum Playbook {
         PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                            ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
+
+        PlaybookEntry("release", "Hotfix PR opened", "an express rocket with a red tip stands beside web's release rocket",
+                      at([("1x", 0.5), ("Release: Production opens", 2), ("Release: Hotfix opens", 12)]),
+                      camera: .area("pad", 3), tail: 4, yard: true, rooms: [], crowd: true),
+        PlaybookEntry("release", "Hotfix PR merged", "#455's crate is carried to storage, the vortex pulls it into the express rocket and it goes up; the release rocket stays",
+                      at([("1x", 0.5), ("Release: Production opens", 2), ("Release: Hotfix opens", 6), ("Release: Hotfix merges", .hotfixGone)]),
+                      camera: .area("yard", 2.6), tail: 10, yard: true, rooms: [], crowd: true),
 
         PlaybookEntry("detours", "Staging deploy fails", "the staged crates' lights turn red",
                       [("16x", 0.5), ("Release: Staging opens", 0.25), ("Release: Staging merges", 0.25), ("Deploy: Staging starts", .stagedDown),
@@ -162,6 +170,9 @@ enum Playbook {
                       camera: .whole(2.0), tail: 16, rooms: []),
         PlaybookEntry("others", "Peer station disconnects", "peer's offices fade out", [("Peer: Leave", 2)],
                       camera: .whole(2.0), tail: 16, rooms: []),
+        PlaybookEntry("others", "A neighbour's minion takes a break", "kim's minion, in its orange suit, takes a turn in the gym, sits on the couch, then goes back to work",
+                      [("Peer: Arrive", 2), ("Peer: To the gym", 24), ("Peer: To the lounge", 16), ("Peer: Back to work", 12)],
+                      camera: .follow("kim", 3), tail: 4),
 
         PlaybookEntry("life", "Session asleep", "minion goes to its bunk", at([("Set: session = sleeping", 1), ("Night", 3)]),
                       camera: .follow(who, 4), tail: 30, rooms: ["kind:quarters"], crowd: false, settle: 8),

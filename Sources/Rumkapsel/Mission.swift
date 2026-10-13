@@ -10,6 +10,7 @@ enum DeployOutcome {
 struct Mission {
     let repo: String
     let station: String
+    var rocket = ""
     var started: Double
     var expected: Double
     var release: String
@@ -123,7 +124,8 @@ extension StationController {
     }
 
     func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
-        let m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
+        var m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
+        m.rocket = world.rocketKey(station: station, repo: repo, release: release)
         if var current = mission, current.repo == repo, current.ended == nil {
             current.started = min(current.started, m.started); current.expected = expected
             if !release.isEmpty { current.release = release }
@@ -139,6 +141,10 @@ extension StationController {
             logEvent("\(repo): liftoff, deploying to production")
             return
         }
+        if rocketLoading(m.rocket) {
+            queuedMissions.append(m)
+            return
+        }
         launch(m)
         logEvent("\(repo): liftoff, deploying to production")
     }
@@ -149,7 +155,7 @@ extension StationController {
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
-        rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
+        missionRockets(m).forEach {
             $0.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
             let leaving = $0.clone()
             leaving.name = nil
@@ -167,7 +173,7 @@ extension StationController {
         settleColony(repo)
         Colonies.hoist(planets[repo]?.childNode(withName: "colony", recursively: false), repo: repo, release: release,
                        color: NSColor(fleet.color(forRepo: repo)))
-        buildMissionCraft(repo: repo, release: release)
+        buildMissionCraft(repo: repo, release: release, hotfix: RocketKey.parts(m.rocket).hotfix != nil)
         scene.lightingEnvironment.contents = FlightCraft.environment
         if missionCamera.camera == nil {
             let cam = SCNCamera()
@@ -268,7 +274,23 @@ extension StationController {
         }
     }
 
+    func rocketLoading(_ key: String) -> Bool {
+        simulation.rockets[key].map { $0.isLaunching && ($0.phaseKind == .load || $0.kick != .docked) } ?? false
+    }
+
+    func missionRockets(_ m: Mission) -> [SCNNode] {
+        if let v = rocketViews[m.rocket] { return v.node.isHidden ? [] : [v.node] }
+        let others = Set(rocketViews.values.map { ObjectIdentifier($0.node) })
+        return rocketRoot.childNodes.filter {
+            $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true && !$0.isHidden && !others.contains(ObjectIdentifier($0))
+        }
+    }
+
     func stepMission() {
+        if mission == nil, let i = queuedMissions.firstIndex(where: { !rocketLoading($0.rocket) }) {
+            launch(queuedMissions.remove(at: i))
+            return
+        }
         guard let m = mission else { return }
         if let end = m.ended, clock - end.at > (end.outcome.signalLost ? 5 : end.outcome == .live ? 24 : 8) {
             clearMission()
@@ -516,10 +538,10 @@ extension StationController {
         }
     }()
 
-    private func buildMissionCraft(repo: String, release: String) {
+    private func buildMissionCraft(repo: String, release: String, hotfix: Bool) {
         missionCraft.childNodes.forEach { $0.removeFromParentNode() }
         missionCraft.removeAllActions()
-        let (lifter, tip) = FlightCraft.build(color: NSColor(fleet.color(forRepo: repo)), repo: repo, release: release)
+        let (lifter, tip) = FlightCraft.build(color: NSColor(fleet.color(forRepo: repo)), repo: repo, release: release, hotfix: hotfix)
         FlightCraft.mountCameras(lifter: lifter, tip: tip)
         missionCraft.addChildNode(lifter)
         missionCraft.addChildNode(tip)
@@ -539,7 +561,7 @@ extension StationController {
         guard clock - m.lastThrust >= every else { return }
         mission?.lastThrust = clock
         var pods: [SCNNode] = []
-        missionCraft.enumerateHierarchy { n, _ in if n.name == "rcs" { pods.append(n) } }
+        missionCraft.enumerateHierarchy { n, _ in if n.name == "rcs", (n.value(forKey: "facesCamera") as? Bool) != true { pods.append(n) } }
         guard !pods.isEmpty, let local = pods[Int(clock * 7) % pods.count].value(forKey: "nozzle") as? SIMD3<Double> else { return }
         let pod = pods[Int(clock * 7) % pods.count]
         let at = pod.simdConvertPosition(SIMD3(Float(local.x), Float(local.y), Float(local.z)), to: nil)
@@ -564,7 +586,7 @@ extension StationController {
     }
 
     private func missionPad(_ m: Mission) -> SIMD3<Double> {
-        if let rocket = rocketRoot.childNodes.first(where: { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true }) {
+        if let rocket = rocketViews[m.rocket]?.node ?? rocketRoot.childNodes.first(where: { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true }) {
             let p = rocket.worldPosition
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }

@@ -37,7 +37,7 @@ enum Palette {
     static let void = NSColor(rgb: (0.055, 0.067, 0.125))
     static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))
     static let core = NSColor(rgb: (0.13, 0.14, 0.18))
-    static let padFloor = NSColor(rgb: (0.105, 0.115, 0.140))
+    static let padFloor = NSColor(rgb: (0.270, 0.292, 0.345))
     static let labFloor = NSColor(rgb: (0.365, 0.400, 0.467))
     static let storageFloor = NSColor(rgb: (0.247, 0.275, 0.337))
     static let walkFloor = NSColor(rgb: (0.290, 0.320, 0.384))
@@ -362,6 +362,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var labelCells: [String: Set<Cell>] = [:]
 
     let padHexRoot = SCNNode()
+    let padLiftRoot = SCNNode()
+    var padLifts: [String: PadLiftView] = [:]
     let berthRoot = SCNNode()
     var berthHexes: [String: [SCNNode]] = [:]
     var berthLit: [String: BerthLight] = [:]
@@ -1049,8 +1051,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             break
         case .releaseMerged(let stationName, let repo, _, _, _, false):
             if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
-        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
-            simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
+        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command, let hotfix):
+            simulation.rocket(station: stationName, repo: repo, hotfix: hotfix, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
             promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:
@@ -1152,6 +1154,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             simulation.replanBlockedWalks()
         }
         simulation.stepShuttles()
+        simulation.stepKicks(dt: dt)
         simulation.stepTips(dt: dt)
         simulation.stepVortices()
         simulation.stepDrones(dt: dt)
@@ -1161,6 +1164,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         updateBerths()
         tickHullLamps()
         drawRockets()
+        tickPadLifts(dt: dt)
         tickSparks(dt: dt)
         turnPlanets(dt: dt)
         drawDrones(dt: dt)

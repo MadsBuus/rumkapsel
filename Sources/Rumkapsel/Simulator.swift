@@ -85,6 +85,8 @@ final class SimulatorModel: ObservableObject {
     private var shipsOnMerge: Set<String> = []
     private var shipsOnTag: Set<String> = []
     private var launches: [(repo: String, pr: ReleasePR)] = []
+    private var hotfixPRs: [String: [ReleasePR]] = [:]
+    private var hotfixLaunches: [(repo: String, pr: ReleasePR)] = []
     private var botPRs: [String: [(number: Int, title: String, branch: String)]] = [:]
     let bot = "dependabot[bot]"
     private var peerHere = false
@@ -240,8 +242,10 @@ final class SimulatorModel: ObservableObject {
             github.inject(openPRs: open, for: root(r))
             github.inject(feed: feeds[r] ?? [], for: root(r))
             github.inject(releases: releases[r] ?? [], for: root(r), merged: sent)
+            github.inject(hotfixes: hotfixPRs[r] ?? [], for: root(r), merged: hotfixLaunches.filter { $0.repo == r }.map(\.pr))
         }
         launches = []
+        hotfixLaunches = []
         github.inject(project: board)
     }
 
@@ -778,6 +782,10 @@ final class SimulatorModel: ObservableObject {
                                : .missing("an untested release on \(repo)", { [weak self] in self?.layProduction() }))
                            : (onDeck(repo).isEmpty ? .missing("something on \(repo)'s deck", { [weak self] in self?.layOnDeck() }) : nil)),
                 button("Release: Production merges", "Production merges: it ships", productionOpen),
+                button("Release: Hotfix opens", "The office picked above opens a pull request straight into production",
+                       hotfixPRs[repo]?.contains(where: { $0.state == "OPEN" }) == true ? .already("a hotfix is already open") : needsMine),
+                button("Release: Hotfix merges", "The hotfix merges: it ships on its own",
+                       hotfixPRs[repo]?.contains(where: { $0.state == "OPEN" }) == true ? nil : .missing("an open hotfix on \(repo)", { [weak self] in self?.run("Release: Hotfix opens") })),
                 button("Deploy: Production starts", "A production deploy starts (usually a minute)",
                        station.mission == nil ? nil : .already("a deploy is in flight")),
                 button("Deploy: Goes live", "…it goes live", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
@@ -1138,6 +1146,33 @@ final class SimulatorModel: ObservableObject {
                 move(board.filter { $0.repo == shipping && ($0.status == st.cleared || $0.status == st.deck || (self.noStaging.contains(shipping) && $0.status == st.storage)) }, to: st.shipped)
             }
 
+        case "Release: Hotfix opens":
+            guard let o = office, o.owner == .me else { return }
+            let n = o.home.issue ?? o.number
+            let url = "https://example.invalid/\(o.repo)/\(n)"
+            setPull(PullRequest(number: n, title: "hotfix: \(o.title)", state: "OPEN", reviewDecision: "APPROVED", isDraft: false, url: url), on: o.uid)
+            var pr = ReleasePR(number: n, title: "hotfix: \(o.title)", base: ConfigStore.shared.current.productionBranch, head: o.branch,
+                               state: "OPEN", url: url, labels: [], mergedAt: nil, production: true, staging: false)
+            pr.hotfix = true
+            hotfixPRs[o.repo, default: []].append(pr)
+            pushGitHub()
+        case "Release: Hotfix merges":
+            guard let i = hotfixPRs[repo]?.lastIndex(where: { $0.state == "OPEN" }) else { return }
+            var pr = hotfixPRs[repo]![i]
+            pr = { var m = ReleasePR(number: pr.number, title: pr.title, base: pr.base, head: pr.head, state: "MERGED", url: pr.url,
+                                     labels: pr.labels, mergedAt: station.now, production: true, staging: false); m.hotfix = true; return m }()
+            hotfixPRs[repo]![i] = pr
+            hotfixLaunches.append((repo, pr))
+            if let o = offices.first(where: { $0.repo == repo && $0.pull?.number == pr.number }) {
+                setPull(PullRequest(number: pr.number, title: pr.title, state: "MERGED", reviewDecision: "APPROVED", isDraft: false, url: pr.url), on: o.uid)
+            } else {
+                pushGitHub()
+            }
+            let shipping = repo, number = pr.number
+            station.after(6) { [weak self] in
+                guard let self else { return }
+                station.handle(.deployStarted(station: deployStation(shipping), repo: shipping, production: true, expected: 60, release: "#\(number)"))
+            }
         case "Night": station.simulate(.night(true))
         case "Day": station.simulate(.night(false))
         case "Everyone to lounge": station.simulate(.lounge)
@@ -1216,7 +1251,7 @@ final class SimulatorModel: ObservableObject {
             return "releaseOpened \(repo)#\(n) -> \(base)\(untested ? " untested" : "")"
         case .releaseMerged(_, let repo, let n, let base, _, let production):
             return "releaseMerged \(repo)#\(n) -> \(base)\(production ? " production" : "")"
-        case .rocketCommand(_, let repo, _, _, _, _, let c): return "rocketCommand \(repo): \(c.words)"
+        case .rocketCommand(_, let repo, _, _, _, _, let c, let hotfix): return "rocketCommand \(repo)\(hotfix.map { " hotfix #\($0)" } ?? ""): \(c.words)"
         case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
         case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
         case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"

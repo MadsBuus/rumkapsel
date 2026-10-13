@@ -34,6 +34,7 @@ struct Spark {
 
 enum Hull {
     static let white = NSColor(rgb: (0.92, 0.92, 0.95))
+
     static let bare = NSColor(rgb: (0.48, 0.5, 0.55))
     static let hot = NSColor(rgb: (1.0, 0.52, 0.14))
     static let glow = NSColor(rgb: (0.95, 0.38, 0.06))
@@ -134,6 +135,8 @@ extension StationController {
     private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
         let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
+        Props.nameRocket(n, repo: r.repo, color: color)
+        if r.hotfix != nil { Props.paintNose(n, RocketShape.hotfixRed) }
         Props.shape(n, lifter: r.kick == .docked, panels: r.panels)
         if r.untested, let own = Looks.current.hold(tall: r.kick == .docked) { own.name = "hold"; n.addChildNode(own) }
         n.position = padPosition(station: station, slot: slot)
@@ -156,7 +159,7 @@ extension StationController {
             weld(r, v)
             paintHull(r, v)
             signal(r, v)
-            placeKick(r, v, station: st)
+            placeKick(r, v)
             vent(r, v)
             guard r.stage.rank < 3, !v.node.hasActions else { continue }
             if r.untested != v.untestedShown {
@@ -202,12 +205,12 @@ extension StationController {
             if t >= 1 { panel.position = rest; v.flying[i] = nil }
         }
         let whole = r.panels >= RocketGeometry.panels && v.flying.isEmpty
-        for name in ["nose", "hatch", "port"] {
+        for name in ["nose", "hatch", "name", "rcs"] {
             for c in tip.childNodes where (c.value(forKey: "part") as? String) == name {
                 if whole, c.isHidden { c.isHidden = false; c.setValue(clock, forKey: "on") }
                 if let on = c.value(forKey: "on") as? Double {
-                    let k = CGFloat(min(1, max(0.01, (clock - on) / 0.35)))
-                    c.scale = SCNVector3(k, k, k)
+                    let k = CGFloat(min(1, max(0, (clock - on) / 0.35)))
+                    c.opacity = k
                     if k >= 1 { c.setValue(nil, forKey: "on") }
                 }
             }
@@ -314,20 +317,13 @@ extension StationController {
         return seam.convertPosition(SCNVector3Zero, to: propRoot)
     }
 
-    private func placeKick(_ r: RocketJob, _ v: RocketView, station: Station) {
+    private func placeKick(_ r: RocketJob, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip"), let stage = Props.part(v.node, "lifter") else { return }
-        stage.isHidden = r.kick == .none
-        if let foot = r.kickAt {
-            let p = v.node.convertPosition(v3(foot.x, foot.y, foot.z), from: v.node.parent)
-            stage.position = p
-            let out = simd_distance(foot, simulation.kickDepot(station))
-            stage.opacity = CGFloat(min(1, out / 1.5))
-        } else {
-            stage.position = SCNVector3Zero
-            stage.opacity = 1
-        }
-        tip.position.y = CGFloat(RocketGeometry.tipDrop(lift: r.lift))
-        Props.legs(tip, lift: r.lift)
+        stage.isHidden = r.dock <= 0
+        stage.position = v3(0, RocketGeometry.deck(dock: r.dock), 0)
+        tip.position.y = CGFloat(r.tipOffset)
+        RocketShape.fold(tip, RocketGeometry.fold(dock: r.dock))
+        RocketShape.showLegs(tip, r.kick != .docked)
     }
 
     func play(rocket cue: Cue) {
@@ -335,9 +331,9 @@ extension StationController {
         case .rocketLoading(let key):
             rocketViews[key]?.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
         case .liftOff(let key):
-            if let node = rocketViews[key]?.node {
+            if let node = rocketViews[key]?.node, !queuedMissions.contains(where: { $0.rocket == key && $0.ended == nil }) {
                 node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-                liftOff(node, repo: String(key.split(separator: "|", maxSplits: 1).last ?? ""))
+                liftOff(node, repo: RocketKey.parts(key).repo)
             }
         case .steam:
             break

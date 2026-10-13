@@ -43,7 +43,8 @@ enum SpaceLog {
             func capital(_ t: String) -> String { t.prefix(1).uppercased() + t.dropFirst() }
             switch kind {
             case .launch where isShipped: return (nil, capital("\(crates(n)) shipped"))
-            case .launch: return (nil, (repo ?? "The \(v.theRocket)") + " \(v.liftedOff)" + (note == nil ? "" : ", \(crates(n)) \(v.aboard)"))
+            case .launch: return (nil, (repo ?? "The \(v.theRocket)") + " \(v.liftedOff)" + (what.hasSuffix("as a hotfix") ? " as a hotfix" : "")
+                                    + (note == nil ? "" : ", \(crates(n)) \(v.aboard)"))
             case .staging:
                 let load = note == nil ? "a load" : crates(n)
                 return who.map { ($0, "sent \(load) to \(v.theDeck)") } ?? (nil, capital("\(load) went to \(v.theDeck)"))
@@ -109,7 +110,8 @@ enum SpaceLog {
                 guard let at = pr.mergedAt, at > since else { continue }
                 let by = r.feed.first { $0.kind == "pr_merge" && $0.prNumber == pr.number && pr.number > 0 }.map { who($0.actor) }
                 if pr.isProduction {
-                    out.append(Entry(key: "launch:\(r.name):\(pr.number):\(pr.title)", at: at, kind: .launch, repo: r.name, what: "\(Words.current.launchedTo) production", items: [pr.title], who: by))
+                    out.append(Entry(key: "launch:\(r.name):\(pr.number):\(pr.title)", at: at, kind: .launch, repo: r.name,
+                                     what: "\(Words.current.launchedTo) production" + (pr.hotfix ? " as a hotfix" : ""), items: [pr.title], who: by))
                 } else if pr.isStaging {
                     out.append(Entry(key: "staging:\(r.name):\(pr.number)", at: at, kind: .staging, repo: r.name, what: "deployed to staging", items: ["release #\(pr.number)"], who: by))
                 }

@@ -28,9 +28,6 @@ couple of seconds; judge looks against references and Mads' eyes, not alone.
 - **A better landed overlay.** "web is live / Landed after 39s" is not cool enough.
 - **Stars.** The flight has its own point-star sky all round; Mads only saw it now and then. Check it reads at
   every zoom of the long lens.
-- **The station's rocket and the flight's rocket have drifted apart.** Undecided. Proposed: the flight rocket
-  stouter (about 7:1); the station rocket a little slimmer, same height, with the flight's look (nose and band in
-  the repository's colour, slim fins, the six black flaps, the engine cluster), still faceted and untextured.
 
 ### The order board (`Board.swift`)
 Agreed design: every piece of work is an order with a rank, taken at safe points, put back when preempted; idle

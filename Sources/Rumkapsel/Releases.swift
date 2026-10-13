@@ -10,6 +10,8 @@ final class ReleaseBook {
     var awaitingDeploy: [String: Date] = [:]
     var padSlotOf: [String: Int] = [:]
     var launchedThisPass: Set<String> = []
+    var hotfixLoads: [String: (crate: Int?, at: Date)] = [:]
+    var hotfixRecords: Set<Int> = []
 }
 
 extension World {
@@ -41,7 +43,7 @@ extension World {
     func waiting(repo: String, station: String) -> [WorkBook.Record] {
         let from: Stage = stagingIsDeck(station: station, repo: repo) ? .qa : .stored
         return works.records(repo: repo).filter { r in
-            guard let stage = r.stage, stage >= from, stage < .shipped else { return false }
+            guard !releases.hotfixRecords.contains(r.id), let stage = r.stage, stage >= from, stage < .shipped else { return false }
             return !r.quiet || r.words[.git] != nil || r.words[.board] != nil
         }
     }
@@ -54,7 +56,72 @@ extension World {
         var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(releases.mergeLaunches)
         for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
             && !github.pipeline(repoRoot: root).shipsAtOnce && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
-        return pads
+        for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true {
+            for pr in github.hotfixes(repoRoot: root) where pr.state == "OPEN" {
+                pads.insert(RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number))
+            }
+        }
+        return pads.union(releases.hotfixLoads.keys)
+    }
+
+    private func hotfixRecord(repo: String, pr: ReleasePR) -> WorkBook.Record {
+        let r = works.find(repo: repo, pull: pr.number) ?? works.note(repo: repo, branch: pr.head, pull: pr.number, pullState: pr.state)
+        releases.hotfixRecords.insert(r.id)
+        return r
+    }
+
+    func hotfixWish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
+        .rocketCommand(station: station.name, repo: repo, label: "rocket:\(pr.url)|\(repo) · hotfix #\(pr.number) \(pr.title)",
+                       untested: false, tall: true, cargo: 1, command: .rocket(stage, station: station.name, repo: repo), hotfix: pr.number)
+    }
+
+    private func applyHotfixes() -> [WorldEvent] {
+        var events: [WorldEvent] = []
+        for launch in github.takeHotfixLaunches() {
+            guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
+            let pr = launch.pr
+            let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
+            releases.hotfixLoads[key] = (hotfixRecord(repo: info.repo, pr: pr).number, Date())
+            assignPads()
+            events.append(.chime(pr.number))
+            events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
+            events.append(.log("\(info.repo) \(Words.current.launchedTo) production as a hotfix: \(pr.title)"))
+            events.append(hotfixWish(.launch, station: station, repo: info.repo, pr: pr))
+        }
+        for (root, info) in repoRoots {
+            guard let station = fleet.stations[info.station], station.hasPad else { continue }
+            for pr in github.hotfixes(repoRoot: root) where pr.state == "OPEN" {
+                let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
+                _ = hotfixRecord(repo: info.repo, pr: pr)
+                guard releases.padSlotOf[key] != nil, releases.hotfixLoads[key] == nil else { continue }
+                if releases.announced.insert(key).inserted {
+                    events.append(.log("\(info.repo): hotfix #\(pr.number) \(Words.current.onThePad)"))
+                }
+                events.append(hotfixWish(.standBy, station: station, repo: info.repo, pr: pr))
+            }
+        }
+        return events
+    }
+
+    func rocketKey(station: String, repo: String, release: String) -> String {
+        guard release.hasPrefix("#"), let n = Int(release.dropFirst()), let root = root(station: station, repo: repo),
+              github.hotfixes(repoRoot: root).contains(where: { $0.number == n }) else { return station + "|" + repo }
+        return RocketKey.of(station: station, repo: repo, hotfix: n)
+    }
+
+    func hotfixCrateComing(_ key: String) -> Bool {
+        guard let load = releases.hotfixLoads[key], let n = load.crate, Date().timeIntervalSince(load.at) < 120 else { return false }
+        let p = RocketKey.parts(key)
+        guard let station = fleet.stations[p.station] else { return false }
+        if let row = station.ledger[p.repo, n] { return !row.stands(in: .pad) }
+        return works.find(repo: p.repo, crate: n).flatMap { office(for: $0) } != nil
+    }
+
+    func hotfixAboard(_ key: String) {
+        let p = RocketKey.parts(key)
+        guard let n = releases.hotfixLoads[key]?.crate, let station = fleet.stations[p.station] else { return }
+        if let r = works.find(repo: p.repo, crate: n) { works.report(r, .shipped, by: .pulls) }
+        station.ledger.forget(repo: p.repo, number: n)
     }
 
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
@@ -110,6 +177,7 @@ extension World {
         var launched: Set<String> = []
         releases.launchedThisPass = []
         assignPads()
+        events += applyHotfixes()
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
             let pr = launch.pr
@@ -268,7 +336,7 @@ extension World {
             let prefix = station.name + "|"
             let count = padSlots(station: station).count
             func urgent(_ key: String) -> Bool {
-                if releases.mergeLaunches.contains(key) || rocketBusy(key) { return true }
+                if RocketKey.parts(key).hotfix != nil || releases.mergeLaunches.contains(key) || rocketBusy(key) { return true }
                 let repo = String(key.dropFirst(prefix.count))
                 if stagingUnderway(key) { return true }
                 return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
@@ -287,9 +355,9 @@ extension World {
     }
     func padKeys() -> Set<String> { Set(releases.padSlotOf.keys) }
 
-    func padSpot(station: Station, repo: String) -> Spot {
+    func padSpot(station: Station, repo: String, key: String? = nil) -> Spot {
         let slots = padSlots(station: station)
-        let slot = releases.padSlotOf[station.name + "|" + repo] ?? 0
+        let slot = releases.padSlotOf[key ?? station.name + "|" + repo] ?? 0
         let pc = slots[slot % slots.count]
         let foot = SIMD2(pc.x, pc.y + 1.05)
         let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))

@@ -1,20 +1,35 @@
 import Foundation
 
 enum RocketGeometry {
-    static let height = 1.5, radius = 0.17
+    static let scale = RocketShape.station
+    static let radius = RocketShape.radius * scale
     static let panels = 30
-    static var hullRadius: Double { radius * 0.9 }
-    static var apothem: Double { hullRadius * cos(.pi / 6) }
-    static var hullBase: Double { 0.12 + height * 0.49 }
-    static var hullHeight: Double { height * 0.4 }
-    static let standHeight = 0.3
-    static let legOut = 0.62, legFolded = -0.25
-    static var legLength: Double { standHeight / cos(legOut) }
-    static func legAngle(lift: Double) -> Double { legOut + (legFolded - legOut) * min(1, max(0, lift)) }
-    static var hatchInTip: SIMD3<Double> { SIMD3(apothem + 0.01, 0.12 + height * 0.6, 0) }
-    static func tipDrop(lift: Double) -> Double { (standHeight - hullBase) * (1 - min(1, max(0, lift))) }
-    static func hatch(lift: Double) -> SIMD3<Double> { hatchInTip + SIMD3(0, tipDrop(lift: lift), 0) }
-    static var kickGrip: Double { hullBase * 0.55 }
+    static let fuller = 1.06
+    static func hullRadius(at y: Double) -> Double { RocketShape.r(y / scale) * scale * fuller }
+    static func apothem(at y: Double) -> Double { hullRadius(at: y) * cos(.pi / 6) }
+    static var hullBase: Double { RocketShape.split * scale }
+    static var hullHeight: Double { (RocketShape.panelTop - RocketShape.split) * scale }
+    static var standHeight: Double { RocketShape.standDepth * scale }
+    static var hatchInTip: SIMD3<Double> {
+        let y = RocketShape.hatchHeight * scale
+        return SIMD3(apothem(at: y) + 0.01, y, 0)
+    }
+    static func hatch(offset: Double) -> SIMD3<Double> { hatchInTip + SIMD3(0, offset, 0) }
+
+    static let dockSeconds = 9.0
+    static let irisEnd = 0.14, lowerEnd = 0.48, lockEnd = 0.56
+    static var shaftDepth: Double { hullBase + 0.35 }
+    static var doorRadius: Double { ((RocketShape.finReach + RocketShape.podRadius) * scale + 0.04) / cos(.pi / 6) }
+    private static func ease(_ t: Double) -> Double { let k = min(1, max(0, t)); return k * k * (3 - 2 * k) }
+    static func iris(dock: Double) -> Double { ease(dock / irisEnd) }
+    static func deck(dock: Double) -> Double { -shaftDepth * (1 - ease((dock - lockEnd) / (1 - lockEnd))) }
+    static func tipBase(dock: Double) -> Double {
+        if dock <= irisEnd { return standHeight }
+        if dock < lowerEnd { return standHeight + (-shaftDepth + hullBase - standHeight) * ease((dock - irisEnd) / (lowerEnd - irisEnd)) }
+        return deck(dock: dock) + hullBase
+    }
+    static func tipOffset(dock: Double) -> Double { tipBase(dock: dock) - hullBase }
+    static func fold(dock: Double) -> Double { ease((dock - (lowerEnd - 0.1)) / 0.1) }
     static let platingSpan = 0.7
     static func facing(side k: Int) -> SIMD2<Double> {
         let a = .pi / 2 + Double(k) * .pi / 3
@@ -31,25 +46,36 @@ enum RocketGeometry {
     }
     static var rings: Int { panels / 6 }
     static var ringHeight: Double { hullHeight / Double(rings) }
-    static func ringMiddle(_ ring: Int, lift: Double) -> Double {
-        hullBase + tipDrop(lift: lift) + ringHeight * (Double(ring) + 0.5)
+    static func ringMiddle(_ ring: Int, offset: Double = 0) -> Double {
+        hullBase + offset + ringHeight * (Double(ring) + 0.5)
+    }
+}
+
+enum RocketKey {
+    static func of(station: String, repo: String, hotfix: Int? = nil) -> String {
+        station + "|" + repo + (hotfix.map { "|hotfix#\($0)" } ?? "")
+    }
+    static func parts(_ key: String) -> (station: String, repo: String, hotfix: Int?) {
+        let p = key.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        let hotfix = p.count > 2 && p[2].hasPrefix("hotfix#") ? Int(p[2].dropFirst("hotfix#".count)) : nil
+        return (p.first ?? "", p.count > 1 ? p[1] : "", hotfix)
     }
 }
 
 final class RocketJob {
     let station: String
     let repo: String
+    let hotfix: Int?
     var command: Command
     var phase = 0
     var until = 0.0
     var label = ""
     var untested = false
     var tall = true
-    var kick = Kick.none
-    var kickSince = -1.0
-    var kickAt: SIMD3<Double>?
-    var kickWay: SIMD2<Double>?
-    var lift = 0.0
+    var dock = 0.0
+    var docking = false
+    var kick: Kick { dock >= 1 ? .docked : dock <= 0 ? .none : docking ? .coming : .going }
+    var tipOffset: Double { RocketGeometry.tipOffset(dock: dock) }
     enum Kick: Equatable { case none, coming, docked, going }
     var cargo = 0
     var panels = RocketGeometry.panels
@@ -59,11 +85,11 @@ final class RocketJob {
     var seam = 0
     var deployRunning = false
 
-    init(station: String, repo: String, command: Command) {
-        self.station = station; self.repo = repo; self.command = command
+    init(station: String, repo: String, hotfix: Int? = nil, command: Command) {
+        self.station = station; self.repo = repo; self.hotfix = hotfix; self.command = command
     }
 
-    var key: String { station + "|" + repo }
+    var key: String { RocketKey.of(station: station, repo: repo, hotfix: hotfix) }
 
     var stage: Command.RocketStage {
         if case .rocket(let s, _, _) = command.kind { return s }
@@ -82,9 +108,9 @@ final class RocketJob {
 }
 
 extension Simulation {
-    func rocket(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command) {
+    func rocket(station: String, repo: String, hotfix: Int? = nil, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command) {
         guard fleet.stations[station] != nil, case .rocket(let stage, _, _) = command.kind else { return }
-        let key = station + "|" + repo
+        let key = RocketKey.of(station: station, repo: repo, hotfix: hotfix)
         if let r = rockets[key] {
             r.label = label
             if r.stage.rank < 3 { r.cargo = cargo; r.untested = untested; r.tall = tall }
@@ -96,9 +122,9 @@ extension Simulation {
             take(r, command)
             return
         }
-        let r = RocketJob(station: station, repo: repo, command: command)
+        let r = RocketJob(station: station, repo: repo, hotfix: hotfix, command: command)
         r.label = label; r.untested = untested; r.tall = tall; r.cargo = cargo
-        if tall { r.kick = .docked; r.lift = 1 }
+        if tall, world.settling { r.dock = 1; r.docking = true }
         if let b = staging[key], b.deploy != .live {
             r.panels = 0
             r.welded = 0
@@ -137,7 +163,7 @@ extension Simulation {
             cue(.rocketLoading(key: r.key))
             loadCrates(r)
         case .climb:
-            world.clearPad(station: r.station, repo: r.repo)
+            if r.hotfix != nil { world.hotfixAboard(r.key) } else { world.clearPad(station: r.station, repo: r.repo) }
             if world.releases.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
             cue(.liftOff(key: r.key))
             r.until = clock + 15
@@ -147,20 +173,32 @@ extension Simulation {
         }
     }
 
+    func stepKicks(dt: Double) {
+        for r in rockets.values {
+            r.docking = r.tall || r.stage.rank >= 3
+            let target = r.docking ? 1.0 : 0.0
+            guard r.dock != target else { continue }
+            let step = Theme.forPlan.kickRises ? dt / RocketGeometry.dockSeconds : 1
+            r.dock = r.docking ? min(1, r.dock + step) : max(0, r.dock - step)
+        }
+    }
+
     func stepRockets() {
         for r in Array(rockets.values) {
             switch r.phaseKind {
             case .load:
                 guard r.isLaunching else { advanceRocket(r); continue }
+                guard r.kick == .docked else { continue }
                 if let v = vortices[r.key] {
                     if v.closedAt != nil { advanceRocket(r) }
                     continue
                 }
                 loadCrates(r)
-                if vortices[r.key] == nil { advanceRocket(r) }
+                if vortices[r.key] == nil, !world.hotfixCrateComing(r.key) { advanceRocket(r) }
             case .climb:
                 if clock >= r.until {
                     rockets[r.key] = nil
+                    world.releases.hotfixLoads[r.key] = nil
                     cue(.rocketGone(key: r.key))
                     if world.releases.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
                        st.ledger.crates(of: r.repo).contains(where: { $0.placed == .storage }) {
@@ -181,10 +219,18 @@ extension Simulation {
         take(r, .rocket(.steam, station: r.station, repo: r.repo))
     }
 
-    private func loadSource(_ r: RocketJob) -> Yard { world.stagingIsDeck(station: r.station, repo: r.repo) ? .deck : .storage }
+    private func loadSource(_ r: RocketJob) -> Yard {
+        r.hotfix == nil && world.stagingIsDeck(station: r.station, repo: r.repo) ? .deck : .storage
+    }
 
     private func loadCrates(_ r: RocketJob) {
-        guard let station = fleet.stations[r.station] else { return }
+        guard r.kick == .docked, let station = fleet.stations[r.station] else { return }
+        if r.hotfix != nil {
+            guard r.isLaunching, let n = world.releases.hotfixLoads[r.key]?.crate,
+                  station.ledger.crates(of: r.repo).contains(where: { $0.number == n && $0.stands(in: .storage) }) else { return }
+            openVortex(r, station: station, from: .storage, crates: [n])
+            return
+        }
         let yard = loadSource(r)
         let repo = r.repo
         let standing = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
@@ -205,12 +251,12 @@ extension Simulation {
                 cue(.rocketGone(key: key))
                 continue
             }
-            if r.stage.rank == 0 { r.cargo = world.cargoWaiting(station: st, repo: r.repo) }
+            if r.stage.rank == 0, r.hotfix == nil { r.cargo = world.cargoWaiting(station: st, repo: r.repo) }
         }
     }
 
-    func rocketSpot(station: Station, repo: String) -> SIMD2<Double>? {
-        guard let slot = world.releases.padSlotOf[station.name + "|" + repo], !station.hall.padSlots.isEmpty else { return nil }
+    func rocketSpot(station: Station, key: String) -> SIMD2<Double>? {
+        guard let slot = world.releases.padSlotOf[key], !station.hall.padSlots.isEmpty else { return nil }
         return station.hall.padSlots[slot % station.hall.padSlots.count]
     }
 

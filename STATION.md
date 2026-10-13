@@ -100,12 +100,22 @@ through it one way: in from the hallway at the back, out through the field to th
   repository's colour
 - rocket: a release on its way down to production, the planet below, where the users live. It comes in
   two pieces. The tip is the staging release, welded on the pad by drones while staging deploys. The
-  **kick stage** is the production release: when one opens, drones fly it out and set it under the tip,
-  and it is the burn that takes the tip down. The ring on the pad under it is its beacon: pulsing red while
+  **kick stage** is the production release, and it is the burn that takes the tip down. Under each pad
+  slot is a lift: a hex door in the pad floor, an iris, over a shaft whose deck holds the kick stage. When
+  a production release opens, the iris opens under the standing tip, the tip goes down into the shaft onto
+  the kick stage and locks, and the deck raises the whole stack until it is flush with the pad and is
+  floor again. After launch the empty deck sinks and the iris closes; when the release closes unmerged
+  the same runs backwards and the tip comes up to stand on its legs again. An idle pad shows only its
+  closed doors. The ring on the pad under it is its beacon: pulsing red while
   what it would ship is untested, flashing amber while its tip is welded, its repository's colour otherwise.
   It vents only when it is fuelled and go: its kick stage under it and everything it ships tested, waiting
-  only for the merge. A tip waiting alone stands on its own six legs, the ones it lands on at its colony;
-  they fold away as the kick stage takes it. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
+  only for the merge. A tip waiting alone stands on its own three legs, the ones it lands on at its colony;
+  they fold in just before it settles onto the kick stage and are out of sight while it is docked, and in
+  flight they close into a tapered ring round the tip's engine. The station's rocket and the flight's are one
+  shape (`RocketShape`), a 1950s rocket: one streamlined body, a long point, three swept fins to the ground
+  with pods on their tips; only the finish differs, flat and six-sided on the station, plated and twelve-sided
+  in flight. Its repository's colour is on the fins, the pods and the legs, and its name runs down the side.
+  A hotfix goes up in an express rocket of its own, the same rocket with a red tip. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
 - nothing is round; everything has flat sides
 
 ## Things are heavy

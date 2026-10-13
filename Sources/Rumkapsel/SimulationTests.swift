@@ -160,6 +160,9 @@ enum SimulationTests {
         test("a release merged: the vortex pulls every cleared crate into the hold, one after another, and only then does the rocket climb") {
             let (sim, station, _) = fixture()
             station.ledger.adopt(Ledger.Word(storage: [], deck: [430, 431, 432], cleared: [430, 431, 432]), repo: "web")
+            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.standBy, station: "work", repo: "web"))
+            let docked = step(sim, seconds: 10, until: { sim.rockets["work|web"]?.kick == .docked }, beat: { sim.stepRockets() })
+            expect(docked, "the standing tip goes down onto its kick stage and the lift docks it")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.launch, station: "work", repo: "web"))
             sim.stepRockets()
             guard let v = sim.vortices["work|web"] else { return expect(false, "the merge opens a vortex: phase \(String(describing: sim.rockets["work|web"]?.phaseKind))") }
@@ -605,6 +608,7 @@ enum SimulationTests {
             sim.clock += dt
             sinceBeat += dt
             if sinceBeat >= 0.5 { sinceBeat = 0; beat() }
+            sim.stepKicks(dt: dt)
             sim.stepTips(dt: dt)
             sim.stepVortices()
             sim.stepShuttles()

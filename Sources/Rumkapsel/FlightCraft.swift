@@ -2,93 +2,86 @@ import AppKit
 import SceneKit
 
 enum FlightCraft {
-    static let radius = 0.12
-    static let engineTop = 0.09, lifterTop = 1.12, skirtTop = 1.28
-    static let tipBase = 1.36, tipTop = 2.06, noseTop = 2.42
-    static let cameraBearing = Double.pi * 7 / 6
-    static let legBearings = [Double.pi / 6, Double.pi * 5 / 6, Double.pi * 3 / 2]
+    static let radius = RocketShape.radius
+    static var lifterTop: Double { RocketShape.split }
+    static var tipBase: Double { RocketShape.split }
+    static var noseTop: Double { RocketShape.height }
+    static let cameraBearing = RocketShape.cameraBearing
     static let sides = 12
-    static var cornerOffset: Double { (Double.pi / 6).truncatingRemainder(dividingBy: 2 * .pi / Double(sides)) }
+    static let cornerOffset = Double.pi / Double(sides)
     static func faceMiddle(near bearing: Double) -> Double {
         let step = 2 * Double.pi / Double(sides), first = cornerOffset + step / 2
         return first + ((bearing - first) / step).rounded() * step
     }
     static let plateSize = 0.22
-    static let flapLength = 0.17, flapClosed = -0.25, flapOut = 0.62
-    static var standDepth: Double { flapLength * cos(flapOut) }
+    static var standDepth: Double { RocketShape.standDepth }
 
-    static func build(color: NSColor, repo: String, release: String) -> (lifter: SCNNode, tip: SCNNode) {
+    static func build(color: NSColor, repo: String, release: String, hotfix: Bool = false) -> (lifter: SCNNode, tip: SCNNode) {
         let lifter = SCNNode(), tip = SCNNode()
         lifter.name = "lifter"; tip.name = "tip"
         buildLifter(lifter, color: color, repo: repo, release: release)
-        buildTip(tip, color: color, repo: repo)
+        buildTip(tip, color: color, repo: repo, hotfix: hotfix)
+        let names = RocketShape.names(repo.uppercased(), color: color, scale: 1, apothem: { RocketShape.r($0) * cos(.pi / Double(sides)) },
+                                      width: RocketShape.nameWidth, flatShaded: false)
+        names.lifter.forEach(lifter.addChildNode)
+        names.tip.forEach(tip.addChildNode)
         return (lifter, tip)
     }
 
     // MARK: the lifter
 
+    private static func bands(_ profile: [(y: Double, r: Double)], material: SCNMaterial, closeBottom: Bool, closeTop: Bool) -> SCNNode {
+        let n = SCNNode()
+        let span = (low: profile.first!.y, high: profile.last!.y)
+        for i in 0..<(profile.count - 1) {
+            let lo = profile[i], hi = profile[i + 1]
+            n.addChildNode(SCNNode(geometry: hullBand(r0: lo.r, r1: max(0.0005, hi.r), y0: lo.y, y1: hi.y, material: material,
+                                                      closed: (closeBottom && i == 0, closeTop && i == profile.count - 2), span: span)))
+        }
+        return n
+    }
+
     private static func buildLifter(_ n: SCNNode, color: NSColor, repo: String, release: String) {
-        let r = radius
-        let bodySkin = Materials.plated(seed: 21)
+        let shape = RocketShape.self
+        let bodySkin = Materials.hull(seed: 21)
         bodySkin.multiply.contents = Textures.sootRise
         bodySkin.multiply.mappingChannel = 1
         bodySkin.multiply.wrapS = .clamp; bodySkin.multiply.wrapT = .clamp
-        let body = SCNNode(geometry: hullBand(r0: r, r1: r, y0: engineTop, y1: lifterTop, material: bodySkin, closed: (false, true)))
-        n.addChildNode(body)
-        let skirtSkin = Materials.plated(seed: 41, tint: SIMD3(0.3, 0.31, 0.33))
-        skirtSkin.isDoubleSided = true
-        let skirt = SCNNode(geometry: hullBand(r0: r * 1.005, r1: r * 1.005, y0: lifterTop + 0.001, y1: skirtTop, material: skirtSkin))
-        n.addChildNode(skirt)
-        let plate = SCNNode(geometry: round(SCNCylinder(radius: r * 0.98, height: 0.02)))
-        plate.geometry!.firstMaterial = skin(Textures.soot, shine: 0.05)
-        plate.position = v3(0, engineTop + 0.01, 0)
-        n.addChildNode(plate)
+        n.addChildNode(bands(shape.profile(from: shape.base, to: shape.split, steps: 8), material: bodySkin, closeBottom: true, closeTop: true))
+        let tail = shape.r(shape.base)
         for k in 0..<7 {
             let a = Double(k) * .pi / 3
-            let at = k == 6 ? SIMD2(0.0, 0.0) : SIMD2(cos(a), sin(a)) * r * 0.62
-            let bell = SCNNode(geometry: round(SCNCone(topRadius: 0.011, bottomRadius: 0.03, height: engineTop - 0.01)))
+            let at = k == 6 ? SIMD2(0.0, 0.0) : SIMD2(cos(a), sin(a)) * tail * shape.bellRing
+            let bell = SCNNode(geometry: round(SCNCone(topRadius: shape.bellTop, bottomRadius: shape.bellBottom, height: shape.bellHeight)))
             bell.geometry!.firstMaterial = Materials.bell
-            bell.position = v3(at.x, (engineTop - 0.01) / 2, at.y)
+            bell.position = v3(at.x, shape.base - shape.bellHeight / 2, at.y)
             n.addChildNode(bell)
         }
-        for a in legBearings { n.addChildNode(fin(at: a, from: engineTop + 0.02, to: engineTop + 0.46, reach: 0.06, color: color)) }
-        n.addChildNode(SCNNode(geometry: hullBand(r0: r * 1.004, r1: r * 1.004, y0: lifterTop - 0.08, y1: lifterTop,
-                                                 material: Materials.plated(seed: 21, tint: paint(color)))))
-        n.addChildNode(nameplate(repo.uppercased(), face: faceMiddle(near: .pi * 13 / 12), top: lifterTop - 0.14, length: 0.62))
-        n.addChildNode(raceway(from: engineTop + 0.05, to: lifterTop - 0.02))
+        for a in shape.finBearings { n.addChildNode(fin(at: a, color: color)) }
         let plume = FlightCraft.airPlume()
         plume.name = "lifter plume"
-        plume.position = v3(0, 0.005, 0)
+        plume.position = v3(0, shape.base - shape.bellHeight, 0)
         n.addChildNode(plume)
     }
 
     // MARK: the tip
 
-    private static func buildTip(_ n: SCNNode, color: NSColor, repo: String) {
-        let r = radius
-        let plates = Materials.plated(seed: 31)
-        let nosePaint = Materials.plated(seed: 31, tint: paint(color))
-        n.addChildNode(SCNNode(geometry: hullBand(r0: r, r1: r, y0: tipBase, y1: tipTop, material: plates, closed: (true, false))))
-        let steps = 6, noseH = noseTop - tipTop
-        func radiusAt(_ t: Double) -> Double { r * (1 - t * t) }
-        for i in 0..<steps {
-            let t0 = Double(i) / Double(steps), t1 = Double(i + 1) / Double(steps)
-            n.addChildNode(SCNNode(geometry: hullBand(r0: radiusAt(t0), r1: max(0.0005, radiusAt(t1)), y0: tipTop + noseH * t0, y1: tipTop + noseH * t1, material: nosePaint)))
+    private static func buildTip(_ n: SCNNode, color: NSColor, repo: String, hotfix: Bool) {
+        let shape = RocketShape.self
+        let plates = Materials.hull(seed: 31)
+        n.addChildNode(bands(shape.profile(from: shape.split, to: shape.panelTop, steps: 5), material: plates, closeBottom: true, closeTop: false))
+        let nose = hotfix ? Materials.plated(seed: 31, tint: paint(RocketShape.hotfixRed)) : plates
+        n.addChildNode(bands(shape.profile(from: shape.panelTop, to: shape.height, steps: 6), material: nose, closeBottom: false, closeTop: false))
+        for a in shape.legBearings { n.addChildNode(RocketShape.leg(at: a, scale: 1, segments: 4, material: Materials.plated(seed: 41, tint: paint(color)))) }
+        let engine = SCNNode(geometry: round(SCNCone(topRadius: shape.engineTop, bottomRadius: shape.engineBottom, height: shape.engineHeight)))
+        engine.geometry!.firstMaterial = Materials.bell
+        engine.position = v3(0, shape.split - shape.engineHeight / 2, 0)
+        n.addChildNode(engine)
+        for a in shape.rcsBearings {
+            n.addChildNode(RocketShape.thruster(at: a, scale: 1, surface: { RocketShape.r($0) * cos(.pi / Double(sides)) }, hull: plates, nozzle: Materials.dark))
         }
-        for k in 0..<6 { n.addChildNode(flap(at: cameraBearing + Double(k) * .pi / 3 + .pi / 6)) }
-        n.addChildNode(SCNNode(geometry: hullBand(r0: r * 1.012, r1: r * 1.012, y0: tipBase, y1: tipBase + 0.03,
-                                                 material: Materials.plated(seed: 31, tint: SIMD3(0.12, 0.12, 0.13)))))
-        for a in legBearings { n.addChildNode(fin(at: a, from: tipBase + 0.03, to: tipBase + 0.36, reach: 0.045, color: color)) }
-        for a in legBearings.map({ $0 + .pi / 3 }) where abs(remainder(a - cameraBearing, 2 * .pi)) > 0.1 {
-            n.addChildNode(thrusterPod(at: a, height: tipTop - 0.08))
-        }
-        n.addChildNode(raceway(from: tipBase + 0.05, to: tipTop - 0.04))
-        let blade = SCNNode(geometry: SCNBox(width: 0.004, height: 0.07, length: 0.04, chamferRadius: 0.001))
-        blade.geometry!.firstMaterial = Materials.metal
-        let mast = legBearings[0] + .pi / 3
-        blade.position = v3(cos(mast) * r * 0.86, tipTop + 0.07, sin(mast) * r * 0.86)
-        blade.eulerAngles.y = CGFloat(-mast)
-        n.addChildNode(blade)
+        n.addChildNode(raceway(from: shape.split + 0.05, to: shape.panelTop - 0.04))
+        n.addChildNode(RocketShape.hatch(scale: 1, surface: { RocketShape.r($0) * cos(.pi / Double(sides)) }, flatShaded: false))
         let beacon = SCNNode(geometry: SCNSphere(radius: 0.012))
         beacon.geometry!.firstMaterial = Materials.glow(color.lighter(0.5))
         beacon.position = v3(0, noseTop + 0.004, 0)
@@ -110,7 +103,7 @@ enum FlightCraft {
         n.addChildNode(strain)
         let plume = FlightCraft.vacuumPlume()
         plume.name = "tip plume"
-        plume.position = v3(0, tipBase - 0.01, 0)
+        plume.position = v3(0, tipBase - RocketShape.engineHeight, 0)
         plume.isHidden = true
         n.addChildNode(plume)
         n.setValue(tipBase, forKey: "split")
@@ -121,36 +114,13 @@ enum FlightCraft {
         return SIMD3(Double(c.redComponent), Double(c.greenComponent), Double(c.blueComponent)) * 0.82
     }
 
-    static func nameplate(_ name: String, face: Double, top: Double, length: Double) -> SCNNode {
-        let width = min(radius * 0.62, 2 * radius * sin(.pi / Double(sides)) * 0.82)
-        let image = Textures.draw(1600, Int(1600 * width / length)) { _, w, h in
-            let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: h * 0.62, weight: .black),
-                                                      .foregroundColor: NSColor(white: 0.08, alpha: 0.88), .kern: h * 0.08]
-            NSAttributedString(string: name, attributes: big).draw(at: NSPoint(x: w * 0.02, y: h * 0.04))
-        }
-        let plane = SCNPlane(width: length, height: width)
-        let m = SCNMaterial()
-        m.lightingModel = .physicallyBased
-        m.diffuse.contents = image
-        m.roughness.contents = NSColor(white: 0.7, alpha: 1)
-        m.metalness.contents = NSColor(white: 0.1, alpha: 1)
-        m.transparencyMode = .aOne
-        plane.firstMaterial = m
-        let letters = SCNNode(geometry: plane)
-        letters.eulerAngles.z = .pi / 2
-        let mount = SCNNode()
-        let out = SIMD2(cos(face), sin(face)) * (radius * cos(.pi / Double(sides)) + 0.0012)
-        mount.position = v3(out.x, top - length / 2, out.y)
-        mount.eulerAngles.y = CGFloat(atan2(cos(face), sin(face)))
-        mount.addChildNode(letters)
-        return mount
-    }
-
     static func surface(at bearing: Double, radius r: Double = radius) -> Double {
         r * cos(.pi / Double(sides)) / cos(bearing - faceMiddle(near: bearing))
     }
 
-    static func hullBand(r0: Double, r1: Double, y0: Double, y1: Double, material: SCNMaterial, closed: (bottom: Bool, top: Bool) = (false, false)) -> SCNGeometry {
+    static func hullBand(r0: Double, r1: Double, y0: Double, y1: Double, material: SCNMaterial, closed: (bottom: Bool, top: Bool) = (false, false),
+                         span: (low: Double, high: Double)? = nil) -> SCNGeometry {
+        let whole0 = span?.low ?? y0, whole1 = span?.high ?? y1
         let tile = plateSize
         var verts: [SCNVector3] = [], normals: [SCNVector3] = [], uvs: [CGPoint] = [], whole: [CGPoint] = [], tangents: [SCNVector4] = [], idx: [Int32] = []
         func corner(_ k: Int, _ r: Double, _ y: Double) -> SIMD3<Double> {
@@ -171,7 +141,7 @@ enum FlightCraft {
                 verts.append(SCNVector3(p.x, p.y, p.z)); normals.append(SCNVector3(n.x, n.y, n.z))
                 let side = (p == a0 || p == a1) ? -0.5 : 0.5
                 uvs.append(CGPoint(x: mid + side * w / tile, y: -y / tile))
-                whole.append(CGPoint(x: side + 0.5, y: (y1 - y) / max(1e-6, y1 - y0)))
+                whole.append(CGPoint(x: side + 0.5, y: (whole1 - y) / max(1e-6, whole1 - whole0)))
                 tangents.append(SCNVector4(along.x, along.y, along.z, 1))
             }
             idx += [base, base + 2, base + 1, base, base + 3, base + 2]
@@ -202,66 +172,22 @@ enum FlightCraft {
         return g
     }
 
-    private static func fin(at a: Double, from y0: Double, to y1: Double, reach: Double, color: NSColor) -> SCNNode {
+    private static func fin(at a: Double, color: NSColor) -> SCNNode {
+        let shape = RocketShape.self
         let pivot = SCNNode()
         pivot.eulerAngles.y = CGFloat(-a)
-        let profile = NSBezierPath()
-        let h = y1 - y0
-        profile.move(to: NSPoint(x: 0, y: h))
-        profile.line(to: NSPoint(x: reach * 0.35, y: h * 0.7))
-        profile.line(to: NSPoint(x: reach, y: h * 0.32))
-        profile.line(to: NSPoint(x: reach, y: h * 0.12))
-        profile.line(to: NSPoint(x: reach * 0.45, y: 0))
-        profile.line(to: NSPoint(x: 0, y: 0))
-        profile.close()
-        let shape = SCNShape(path: profile, extrusionDepth: 0.006)
-        shape.chamferRadius = 0.0012
-        let skin = Materials.plated(seed: 41, tint: SIMD3(0.36, 0.38, 0.41))
-        let fit = SCNMatrix4MakeScale(CGFloat(reach / plateSize), CGFloat(h / plateSize), 1)
+        let plate = SCNShape(path: shape.finOutline(scale: 1), extrusionDepth: 0.01)
+        plate.chamferRadius = 0.0015
+        let skin = Materials.plated(seed: 41, tint: paint(color))
+        let fit = SCNMatrix4MakeScale(CGFloat(shape.finReach / plateSize), CGFloat(shape.finRootHigh / plateSize), 1)
         for p in [skin.diffuse, skin.roughness] { p.contentsTransform = fit }
         skin.normal.contents = nil
-        shape.firstMaterial = skin
-        let plate = SCNNode(geometry: shape)
-        plate.position = v3(radius * 0.97, y0, 0)
-        pivot.addChildNode(plate)
-        let edge = SCNNode(geometry: SCNBox(width: 0.004, height: h * 0.2, length: 0.0075, chamferRadius: 0.001))
-        let paintMaterial = SCNMaterial()
-        paintMaterial.lightingModel = .physicallyBased
-        let c = paint(color)
-        paintMaterial.diffuse.contents = NSColor(red: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 1)
-        paintMaterial.roughness.contents = NSColor(white: 0.5, alpha: 1)
-        edge.geometry!.firstMaterial = paintMaterial
-        edge.position = v3(radius * 0.97 + reach + 0.0015, y0 + h * 0.22, 0)
-        pivot.addChildNode(edge)
-        return pivot
-    }
-
-    private static func flap(at a: Double) -> SCNNode {
-        let pivot = SCNNode()
-        pivot.eulerAngles.y = CGFloat(-a)
-        let hinge = SCNNode()
-        hinge.name = "flap"
-        hinge.position = v3(surface(at: a) * 0.96, tipBase + 0.004, 0)
-        hinge.eulerAngles.z = CGFloat(flapClosed)
-        let outline = NSBezierPath()
-        let w0 = 2 * radius * sin(.pi / 6) * 0.9, w1 = w0 * 0.42
-        outline.move(to: NSPoint(x: -w0 / 2, y: 0))
-        outline.line(to: NSPoint(x: w0 / 2, y: 0))
-        outline.line(to: NSPoint(x: w1 / 2, y: -flapLength))
-        outline.line(to: NSPoint(x: -w1 / 2, y: -flapLength))
-        outline.close()
-        let plate = SCNShape(path: outline, extrusionDepth: 0.008)
-        plate.chamferRadius = 0.002
-        let black = SCNMaterial()
-        black.lightingModel = .physicallyBased
-        black.diffuse.contents = NSColor(white: 0.035, alpha: 1)
-        black.roughness.contents = NSColor(white: 0.45, alpha: 1)
-        black.metalness.contents = NSColor(white: 0.5, alpha: 1)
-        plate.firstMaterial = black
-        let leaf = SCNNode(geometry: plate)
-        leaf.eulerAngles.y = .pi / 2
-        hinge.addChildNode(leaf)
-        pivot.addChildNode(hinge)
+        plate.firstMaterial = skin
+        pivot.addChildNode(SCNNode(geometry: plate))
+        let pod = SCNNode(geometry: round(SCNCapsule(capRadius: shape.podRadius, height: shape.podLength)))
+        pod.geometry!.firstMaterial = Materials.plated(seed: 23, tint: paint(color))
+        pod.position = v3(shape.finReach, shape.podLength / 2, 0)
+        pivot.addChildNode(pod)
         return pivot
     }
 
@@ -272,30 +198,7 @@ enum FlightCraft {
         strain.enumerateHierarchy { n, _ in n.particleSystems?.first?.birthRate = CGFloat(260 * k) }
     }
 
-    static func feet(_ tip: SCNNode, out: Double) {
-        let k = max(0, min(1, out))
-        let angle = flapClosed + (flapOut - flapClosed) * k
-        tip.enumerateHierarchy { n, _ in if n.name == "flap" { n.eulerAngles.z = CGFloat(angle) } }
-    }
-
-    private static func thrusterPod(at a: Double, height: Double) -> SCNNode {
-        let pivot = SCNNode()
-        pivot.name = "rcs"
-        pivot.setValue(SIMD3(radius + 0.04, height, 0), forKey: "nozzle")
-        pivot.eulerAngles.y = CGFloat(-a)
-        let pod = SCNNode(geometry: SCNBox(width: 0.03, height: 0.05, length: 0.04, chamferRadius: 0.006))
-        pod.geometry!.firstMaterial = skin(Textures.soot, shine: 0.2)
-        pod.position = v3(radius + 0.01, height, 0)
-        pivot.addChildNode(pod)
-        for (dy, dz) in [(0.014, 0.0), (-0.014, 0.0), (0.0, 0.014), (0.0, -0.014)] {
-            let nozzle = SCNNode(geometry: round(SCNCone(topRadius: 0.003, bottomRadius: 0.006, height: 0.012)))
-            nozzle.geometry!.firstMaterial = Materials.bell
-            nozzle.position = v3(radius + 0.03, height + dy, dz)
-            nozzle.eulerAngles.z = -.pi / 2
-            pivot.addChildNode(nozzle)
-        }
-        return pivot
-    }
+    static func feet(_ tip: SCNNode, out: Double) { RocketShape.fold(tip, 1 - out) }
 
     private static func raceway(from: Double, to: Double) -> SCNNode {
         let a = cameraBearing + 0.42
@@ -487,6 +390,12 @@ enum FlightCraft {
             m.roughness.contents = maps.roughness
             m.metalness.contents = NSColor(white: 0.35, alpha: 1)
             for p in [m.diffuse, m.normal, m.roughness] { p.wrapS = .repeat; p.wrapT = .repeat; p.mipFilter = .linear; p.maxAnisotropy = 8 }
+            return m
+        }
+        static func hull(seed: UInt64) -> SCNMaterial {
+            let m = plated(seed: seed)
+            m.metalness.contents = NSColor(white: 0.03, alpha: 1)
+            m.diffuse.intensity = 1.75
             return m
         }
         static let metal = skin(nil, color: NSColor(rgb: (0.62, 0.64, 0.68)), shine: 0.7)
