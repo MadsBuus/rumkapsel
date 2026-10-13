@@ -78,7 +78,6 @@ enum Place: Hashable {
     static let lounge = Place.room("kind:lounge")
     static let bath = Place.room("kind:bath")
     static let gym = Place.room("kind:gym")
-    static let airlock = Place.room("kind:airlock")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -146,7 +145,7 @@ final class Station {
     }
 
     private struct Blocks {
-        var core: [Cell], airlock: [Cell], hangar: [Cell], hall: Hall, corridor: [Cell]
+        var core: [Cell], hangar: [Cell], bayMargin: [Cell], hall: Hall, corridor: [Cell]
         var hallway: Set<Cell>
         var reserved: Set<Cell>
         var hallDistance: [Cell: Int]
@@ -154,10 +153,11 @@ final class Station {
     private var blocksCache: Blocks?
     private var blocks: Blocks {
         if let b = blocksCache { return b }
-        let core = plan.plaza, airlock = makeAirlockCells(), hangar = makeHangarCells()
+        let core = plan.plaza, hangar = makeHangarCells()
+        let bayMargin = hangar.map(\.y).min().map { top in hangar.filter { $0.y == top }.map { Cell(x: $0.x, y: top - 1) }.filter { !plan.south.contains($0) } } ?? []
         let hall = hasPad ? Hall(entrance: plan.west.last ?? Cell(x: -2, y: 0), padGap: Theme.forPlan.padGap) : .none
         var reserved = Set(core)
-        for cells in [airlock, hangar, hall.cells, hall.padCells, hall.deconCells] { reserved.formUnion(cells) }
+        for cells in [hangar, bayMargin, hall.cells, hall.padCells, hall.deconCells] { reserved.formUnion(cells) }
         reserved.formUnion(floor.allHall)
         reserved.formUnion(dug)
         let built = Set(plan.west + plan.south).union(floor.base).union(dug)
@@ -171,7 +171,7 @@ final class Station {
             let c = queue[head]; head += 1
             for n in c.neighbours where hallway.contains(n) && n != plan.monolith && dist[n] == nil { dist[n] = dist[c]! + 1; queue.append(n) }
         }
-        let b = Blocks(core: core, airlock: airlock, hangar: hangar, hall: hall,
+        let b = Blocks(core: core, hangar: hangar, bayMargin: bayMargin, hall: hall,
                        corridor: built.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, hallway: hallway, reserved: reserved, hallDistance: dist)
         blocksCache = b
         return b
@@ -180,19 +180,16 @@ final class Station {
     var coreCells: [Cell] { blocks.core }
     var monolithCell: Cell { plan.monolith }
     var coreCenter: Cell { Cell(x: plan.monolith.x, y: plan.monolith.y + 1) }
-    var airlockCells: [Cell] { blocks.airlock }
-    static let airlockLength = 1
     static let hullDepth = 5.0
-    private func makeAirlockCells() -> [Cell] {
-        guard hasHangar, let end = plan.south.last else { return [] }
-        return (1...Station.airlockLength).map { Cell(x: end.x, y: end.y + $0) }
+    var bayMargin: [Cell] { blocks.bayMargin }
+    var bayDoor: (inside: Cell, bay: Cell)? {
+        guard hasHangar, let end = plan.south.last else { return nil }
+        return (end, Cell(x: end.x, y: end.y + 1))
     }
-    var airlockInner: [Cell] { airlockCells.prefix(1).map { $0 } }
-    var airlockHatches: [(inside: Cell, bay: Cell)] { airlockCells.suffix(1).map { ($0, Cell(x: $0.x, y: $0.y + 1)) } }
     var hangarCells: [Cell] { blocks.hangar }
     private func makeHangarCells() -> [Cell] {
         guard hasHangar, let end = plan.south.last else { return [] }
-        let y = end.y + Station.airlockLength + 1
+        let y = end.y + 1
         return (-3...3).flatMap { dx in (0..<4).map { d in Cell(x: end.x + dx, y: y + d) } }
     }
     var bayMouth: BayMouth {
@@ -201,7 +198,7 @@ final class Station {
     static let fieldTop = 1.6, mouthHeight = 0.85
     var hangarCenter: SIMD2<Double> {
         guard let end = plan.south.last else { return .zero }
-        return SIMD2(Double(end.x), Double(end.y + Station.airlockLength) + 2.5)
+        return SIMD2(Double(end.x), Double(end.y) + 2.5)
     }
     static let hive = 1.3
     static let hiveRow = 1.3 * 0.866
@@ -304,7 +301,6 @@ final class Station {
         var w = Set(coreCells)
         w.remove(plan.monolith)
         w.formUnion(hangarCells)
-        w.formUnion(airlockCells)
         w.formUnion(hall.cells)
         w.formUnion(hall.deconCells)
         w.formUnion(corridorCells)
@@ -327,7 +323,6 @@ final class Station {
         switch place {
         case .core: return coreCells.filter { $0 != plan.monolith }
         case .room("kind:hangar"): return hangarCells
-        case .room("kind:airlock"): return airlockCells
         case .room("kind:pad"): return hall.padCells
         case .room("kind:storage"): return hall.walkwayCells
         case .room("kind:deck"): return hall.aisleCells.isEmpty ? hall.padCells : hall.aisleCells
@@ -396,7 +391,7 @@ final class Station {
         if let areas = yardAreaCache { return areas[c] }
         var areas: [Cell: String] = [:]
         for (name, cells) in [("corridor", corridorCells + coreCells), ("pad", hall.padCells), ("hall", hall.cells),
-                              ("decon", hall.deconCells), ("hangar", hangarCells), ("airlock", airlockCells)] {
+                              ("decon", hall.deconCells), ("hangar", hangarCells)] {
             for cell in cells { areas[cell] = name }
         }
         yardAreaCache = areas
@@ -412,8 +407,7 @@ final class Station {
 
     private func computeYardDoorways() -> [(Cell, Cell)] {
         var out: [(Cell, Cell)] = []
-        for a in airlockInner { out.append((Cell(x: a.x, y: a.y - 1), a)) }
-        for h in airlockHatches { out.append((h.inside, h.bay)) }
+        if let door = bayDoor { out.append(door) }
         guard hasPad, let armEnd = plan.west.last else { return out }
         out.append((armEnd, Cell(x: armEnd.x - 1, y: armEnd.y)))
         if let decon = hall.deconDoorway { out.append(decon) }

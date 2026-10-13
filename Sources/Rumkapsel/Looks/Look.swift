@@ -11,10 +11,9 @@ protocol Look {
     func backdrop(into root: SCNNode) -> [(SCNNode, SIMD2<Double>)]
     func ground(under stations: [Station], into root: SCNNode)
 
-    // MARK: the input: the bay and the airlock
+    // MARK: the input: the bay
 
     func input(_ station: Station) -> SetPiece?
-    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool)
     func shuttle(color: NSColor) -> SCNNode
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)?
     var drawsBerthHexes: Bool { get }
@@ -25,7 +24,7 @@ protocol Look {
     // MARK: the output: decon, storage, the deck and the pad
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece?
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
+    func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode
     func launch(_ rocket: SCNNode) -> SCNAction
 
@@ -77,9 +76,6 @@ extension Look {
     func ground(under stations: [Station], into root: SCNNode) {}
 
     func input(_ station: Station) -> SetPiece? { nil }
-    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
-        Classic.airlockFrame(width: width, spans: spans, tint: tint)
-    }
     func shuttle(color: NSColor) -> SCNNode { Classic.shuttle(color: color) }
     func shipPose(_ leg: ShipLeg) -> (pos: SIMD3<Double>, yaw: Double)? { nil }
     var drawsBerthHexes: Bool { true }
@@ -90,7 +86,7 @@ extension Look {
     }
 
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? { nil }
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.hatchFrame(facing: facing) }
+    func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.doorFrame(facing: facing) }
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode { Classic.rocket(color: color, tall: tall, cargo: cargo) }
     func launch(_ rocket: SCNNode) -> SCNAction { Classic.launch() }
 
@@ -126,7 +122,7 @@ extension Look {
     func message(color: NSColor, floor: NSColor) -> SCNNode? { nil }
 }
 
-enum Floor { case hallway, room, fixed, yard, pad, bay, airlock }
+enum Floor { case hallway, room, fixed, yard, pad, bay }
 
 struct Tile {
     let floor: Floor
@@ -143,7 +139,7 @@ struct OfficeSign {
     let name: String
 }
 
-enum Area: String { case bay = "hangar", airlock, storage, deck, pad, decon }
+enum Area: String { case bay = "hangar", storage, deck, pad, decon }
 
 struct SetPiece {
     var parts: [Area: [SCNNode]] = [:]
@@ -198,7 +194,7 @@ enum Dressing {
 
     static func bayParking(_ station: Station) -> Cell? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
-        let keepOff = station.hangarSlots + station.airlockCells.map { SIMD2(Double($0.x), Double($0.y)) }
+        let keepOff = station.hangarSlots + (station.bayDoor.map { [SIMD2(Double($0.inside.x), Double($0.inside.y))] } ?? [])
         func clearance(_ c: Cell) -> Double { keepOff.map { simd_distance(SIMD2(Double(c.x), Double(c.y)), $0) }.min() ?? 0 }
         guard let c = station.hangarCells.max(by: { (clearance($0), $0.y, $0.x) < (clearance($1), $1.y, $1.x) }), clearance(c) > 0.9 else { return nil }
         return c

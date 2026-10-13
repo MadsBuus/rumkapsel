@@ -19,7 +19,7 @@ enum Bulkhead {
 
     static func styles(of st: Station) -> [Cell: Style] {
         var out: [Cell: Style] = [:]
-        for c in st.hall.cells + st.hall.deconCells + st.hall.padCells + st.airlockCells + st.hangarCells { out[c] = .yard }
+        for c in st.hall.cells + st.hall.deconCells + st.hall.padCells + st.hangarCells { out[c] = .yard }
         for (key, room) in st.rooms { for c in room.cells { out[c] = key.hasPrefix("kind:") ? .quarters : .office } }
         return out
     }

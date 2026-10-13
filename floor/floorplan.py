@@ -3,7 +3,7 @@
 The one generator. The fixed floor is not described here: it is dumped out of the app, so there is no
 second copy of the yard to drift from the first.
 
-The yard, the bay, the airlock and the plaza's two fixed arms are not ours to move: they are dumped out
+The yard, the bay and the plaza's two fixed arms are not ours to move: they are dumped out
 of the app (`--dump-floor`) with all their doorways and lanes, and everything here grows around them. So
 a plan belongs to a theme, because a theme's yard is not in the same place.
 """
@@ -37,10 +37,9 @@ QUARTERS = [("lounge", 3, 3), ("quarters", 2, 4), ("bath", 2, 2), ("gym", 3, 2)]
 def load(theme):
     d = json.load(open(os.path.join(HERE, f'{theme}.json')))
     fixed = {k: [tuple(c) for c in v] for k, v in d.items() if k != "monolith"}
-    # The airlock pierces the hull and the bay floats outside it, where the shuttles put down. The hull
-    # is the line the airlock starts at: past it there is no floor to build on, only space, so nothing
-    # this generator lays may go there.
-    hull = min(y for _, y in fixed["airlock"])
+    # The bay floats outside the hull, where the shuttles put down. The hull is the line the bay starts
+    # at: past it there is no floor to build on, only space, so nothing this generator lays may go there.
+    hull = min(y for _, y in fixed["hangar"])
     return fixed, tuple(d["monolith"]), hull
 
 def inside(p, hull):

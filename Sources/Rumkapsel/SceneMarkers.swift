@@ -59,8 +59,8 @@ extension StationController {
             furnitureObstacles = furniture
         }
         for (station, cells) in furnitureObstacles { blocked[station, default: []].formUnion(cells) }
-        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("airlockdoor:") {
-            let stationName = String(door.name!.dropFirst("airlockdoor:".count))
+        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("glassdoor:") {
+            let stationName = String(door.name!.dropFirst("glassdoor:".count))
             guard let st = fleet.stations[stationName] else { continue }
             for post in door.childNodes where post.name == "post" {
                 let f = Double(Station.fine)

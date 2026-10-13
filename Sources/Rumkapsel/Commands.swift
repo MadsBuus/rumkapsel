@@ -264,7 +264,6 @@ extension Place {
             case "kind:lounge": return Words.current.theCouch
             case "kind:bath": return Words.current.theBath
             case "kind:gym": return Words.current.theGym
-            case "kind:airlock": return Words.current.theAirlock
             case "kind:hangar": return Words.current.theBay
             case "kind:deck": return Words.current.theDeck
             case "kind:pad": return Words.current.thePad

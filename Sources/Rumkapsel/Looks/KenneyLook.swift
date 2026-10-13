@@ -229,37 +229,18 @@ struct KenneyLook: Look {
     func input(_ station: Station) -> SetPiece? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
         var piece = SetPiece()
-        for (area, cells) in [(Area.bay, station.hangarCells), (.airlock, station.airlockCells)] {
+        for (area, cells) in [(Area.bay, station.hangarCells)] {
             if let k = slab(cells, of: station, grow: 0.5, Self.kerb, y: -0.004) { piece.add(k, as: area) }
             if let a = slab(cells, of: station, grow: 0.36, Self.concrete, y: Kit.plateTop) { piece.add(a, as: area) }
         }
         if let apron = slab(station.hangarCells, of: station, grow: -0.14, Self.bayPaint, y: Kit.plateTop + 0.003) {
             piece.add(apron, as: .bay)
         }
-        if !station.airlockCells.isEmpty {
-            let xs = station.airlockCells.map(\.x), zs = station.airlockCells.map(\.y)
-            let lane = SCNNode(geometry: SCNPlane(width: min(0.8, Double(xs.max()! - xs.min()!) + 0.7), height: Double(zs.max()! - zs.min()!) + 0.4))
-            lane.geometry!.firstMaterial = flat(Self.hazard.darker(0.15))
-            lane.eulerAngles.x = -.pi / 2
-            lane.position = v3(station.offset.x + Double(xs.min()! + xs.max()!) / 2, Kit.plateTop + 0.003,
-                               station.offset.y + Double(zs.min()! + zs.max()!) / 2)
-            piece.add(lane, as: .airlock)
-        }
         return piece
     }
 
-    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
-        let row = SCNNode()
-        for x in spans {
-            guard let gate = Kit.gate(yaw: 0) else { return Classic.airlockFrame(width: width, spans: spans, tint: tint) }
-            gate.position = v3(x, 0, 0)
-            row.addChildNode(gate)
-        }
-        return (row, false)
-    }
-
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
-        guard let gate = Kit.gate(yaw: facing.x == 0 ? 0 : .pi / 2) else { return Classic.hatchFrame(facing: facing) }
+    func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+        guard let gate = Kit.gate(yaw: facing.x == 0 ? 0 : .pi / 2) else { return Classic.doorFrame(facing: facing) }
         return (gate, 0.9)
     }
 

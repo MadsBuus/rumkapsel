@@ -39,10 +39,10 @@ enum Theme: String, CaseIterable, Identifiable {
     var vocabulary: Vocabulary {
         var v = Vocabulary()
         guard self == .kingdom else { return v }
-        v.bay = "caravans"; v.airlock = "gate"; v.pad = "harbour"; v.storage = "granary"; v.deck = "market"; v.decon = "customs"
+        v.bay = "caravans"; v.pad = "harbour"; v.storage = "granary"; v.deck = "market"; v.decon = "customs"
         v.zoneWaiting = "stored"; v.zoneTesting = "tasting"; v.zoneCleared = "sealed"
         v.dorm = "inn"; v.lounge = "tavern"; v.bath = "bathhouse"; v.gym = "training yard"; v.monolith = "keep"
-        v.theBay = "the caravan gate"; v.theAirlock = "the gate"; v.thePad = "the harbour"; v.theRocket = "the ship"
+        v.theBay = "the caravan gate"; v.thePad = "the harbour"; v.theRocket = "the ship"
         v.inStorage = "the granary"; v.theDeck = "the market"; v.testedRow = "the sealed stores"; v.testDeck = "market"
         v.inDecon = "customs"; v.theMonolith = "the keep"; v.theDorm = "the inn"; v.theCouch = "the tavern bench"
         v.theBath = "the bathhouse"; v.theGym = "the training yard"
@@ -70,10 +70,10 @@ enum Theme: String, CaseIterable, Identifiable {
 }
 
 struct Vocabulary {
-    var bay = "bay", airlock = "airlock", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
+    var bay = "bay", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
     var zoneWaiting = "waiting", zoneTesting = "testing", zoneCleared = "cleared"
     var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", monolith = "monolith"
-    var theBay = "the bay", theAirlock = "the airlock", thePad = "the pad", theRocket = "the rocket"
+    var theBay = "the bay", thePad = "the pad", theRocket = "the rocket"
     var inStorage = "storage", theDeck = "the deck", testedRow = "the cleared rows", testDeck = "test deck", inDecon = "decon"
     var theMonolith = "the monolith", theDorm = "the dorm", theCouch = "the couch", theBath = "the bath", theGym = "the gym"
     var lookRound = "having a look round the station", leaving = "off the station on the next shuttle"
