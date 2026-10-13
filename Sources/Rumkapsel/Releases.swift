@@ -223,7 +223,6 @@ extension World {
         station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)
         let open = station.ledger.disagreements(repo: repo)
         guard !open.isEmpty else { return }
-        if open.contains(where: { $0.placed == .storage && $0.wanted == .deck && $0.heading == .deck }) { return }
         let underway = releaseUnderway(station: station, repo: repo, root: root)
         for crate in open {
             if underway, crate.placed == .deck { continue }
