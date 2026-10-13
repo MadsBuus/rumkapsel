@@ -19,7 +19,7 @@ swift build --build-system native
 ```
 
 The native build system is named because Xcode 26.1's default lays the products out where the debug binary
-cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios pallet` runs
+cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios staging` runs
 the scenarios whose name contains a word; `--scenarios-verbose` prints each
 scenario's whole log, ledger and bodies. For a look at the picture, `--simulator --snapshot out.png
 --simulate "Target: web#455,Open PR,Merge PR" --delay 19` renders a frame after those presses, without
@@ -34,8 +34,7 @@ numbered pictures from the delay on, for a contact sheet or a gif.
 
 - `--scenarios` builds a station of its own per scenario, with a made-up org, presses simulator buttons,
   and steps station time in 1/30 s ticks in a tight loop. No frames are drawn and no wall clock is
-  involved. A scenario is judged on the record of events and commands, on invariants checked every
-  tick, and on the floor at the end.
+  involved. A scenario is judged on the record of events and commands and on the floor at the end.
 - `--ledger-tests`, `--pipeline-tests` and the body rules are model-only: facts in, rules out, no station.
 - The suite runs the exact code the app runs, scene-side logic included, which is where most bugs have
   lived: walks, doorways, deliveries, carries. That is its strength. Its weakness is the same fact: every
@@ -77,18 +76,18 @@ ledger tests already follow that shape; the scene is what is still mixed in.
   crates, then rockets and shuttles. The rulebook is STATION.md; every rule keeps its scenario.
 - Done, the four slices: `Simulation` (`Simulation.swift`) owns the clock, the bodies, the orders, the walks,
   the rest and the idle life, and steps every command a body runs: the quiet ones there, the carries, office
-  deliveries, stows and packs in `Carries.swift`, the pallet errand in `Pallet.swift`, and the body reconciler
-  in `Bodies.swift`; the shuttles' flights and the rockets' stages are its too (`Ships.swift`). A body's load
-  and pose are facts on it; a pallet, a flight and a rocket are numbers on the station clock; the scene keeps a
+  deliveries, stows and packs in `Carries.swift`, and the body reconciler in `Bodies.swift`; the shuttles'
+  flights, the rockets' stages and the vortex are its too (`Shuttles.swift`, `Rockets.swift`, `Vortex.swift`). A body's load
+  and pose are facts on it; a flight, a rocket and a vortex are numbers on the station clock; the scene keeps a
   node for each and places it from those facts, and what it shows once comes back as a cue. Nothing the scene
   draws decides anything, and the simulation borrows nothing from the scene any more.
 - `--sim-tests` steps a bare `Simulation<Body>` through a send, a bath visit, a gym turn, a rest refused under
   a visit, the idle clock, the airlock, a carry from storage to the deck with the ledger in step, a wedged
-  carrier giving up, and the whole pallet errand from the console to the deck.
+  carrier giving up, and a release pulled off its rows by the vortex.
 - Measured on 2026-09-14, the gate of sixteen scenarios: 17 s before the split, 12 s after it and after the
   station's fixed cells, the placement's neighbour distances and the furniture's obstacle cells stopped being
   rebuilt on every read. A sample of the run puts what is left in three places: the bodies' step and their
-  routes, about a third; the invariants and the yard reconciliation, about a fifth; the simulator's presses,
+  routes, about a third; the checks and the yard reconciliation, about a fifth; the simulator's presses,
   which place rooms and redraw the static floor, about an eighth.
 
 ## Change 4: the scenario suite on the simulation alone
@@ -96,16 +95,16 @@ ledger tests already follow that shape; the scene is what is still mixed in.
 Not done. Three things still make a scenario need a `StationController`, and they are the remaining slice:
 
 - The event glue. `Scene.handle(_:)` turns a `WorldEvent` into what happens: an office merged becomes a haul
-  from where the package node stands, a staging release becomes a pallet order, an archive cancels carries and
+  from where the package node stands, a staging release carries storage to the staged rows, an archive cancels carries and
   sinks the tiles. The decisions in it belong in the simulation, with the drawing left as cues; the package's
   cell, today read off its node, would come from the office's far cells worked out on the model side.
 - The obstacles. `refreshObstacles` reads the props' bounding boxes to tell the station what a walk goes round.
-  The crates come from the ledger's layout, the cones from the bodies, the pallet and the rockets from the
+  The crates come from the ledger's layout, the cones from the bodies, the rockets from the
   simulation already; the furniture is the last part read off nodes, and would become a table of footprints per
   room kind that `SceneStatic` draws from too.
 - The stows. `rebuildMarkers` notices a commit count going up and hands the owner a stow while it draws; the
   count is the world's, and the order should be issued from the model's diff, not from the redraw.
 - With those three moved, `ScenarioRunner` can build a `Simulation<Body>` and a `World` without a view, press
-  the same simulator buttons through the world's entry points, and judge the same records and invariants,
-  the invariants reading the ledger and the bodies rather than the nodes. The scene then gets its own test:
+  the same simulator buttons through the world's entry points, and judge the same records,
+  reading the ledger and the bodies rather than the nodes. The scene then gets its own test:
   given a simulation state, the right nodes exist at the right places, checked on one frame.

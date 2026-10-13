@@ -1,8 +1,3 @@
-// Model-only tests of the station log: `.build/debug/Rumkapsel --spacelog-tests`.
-//
-// Facts shaped like what GitHub tells the station — a feed, release pull requests, board items — are
-// read back as the log. No station and no network. Exits non-zero if anything failed.
-
 import Foundation
 
 enum SpaceLogTests {

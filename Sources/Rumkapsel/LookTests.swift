@@ -1,14 +1,3 @@
-// What each look promises to draw, checked by machine: `.build/debug/Rumkapsel --look-tests`.
-//
-// A look conforms to `Look` by shape, not by declaration. There is no `override` keyword to catch a
-// method that has stopped matching its requirement, so changing a hook's signature silently unhooks
-// every look that had taken it: the old method keeps compiling, nothing calls it, and the protocol's
-// default is used instead. That is how Space Center lost the computer desk in every office without a
-// word from the compiler.
-//
-// So each theme says here what it draws differently from the classic station, and this holds it to it.
-// `Theme.allCases` drives the run, so a theme added without a word about what it draws fails the gate.
-
 import AppKit
 import Foundation
 import SceneKit
@@ -16,24 +5,21 @@ import SceneKit
 enum LookTests {
     private static var failures = 0
 
-    /// What a theme draws for itself. `drawn` must come back with something; `classic` must not.
     private struct Claim {
         var drawn: [String] = []
         var classic: [String] = []
-        /// Whether the theme lets the scene letter its floor.
         var letters = true
-        /// Whether an office keeps a rim of its full colour while its floor dims.
         var rims = true
     }
 
     private static let claims: [Theme: Claim] = [
-        .classic: Claim(classic: ["input", "output", "console", "crate", "hold", "pallet", "tool", "message",
-                                  "office", "station", "figure", "gate", "security unit", "jetpack"]),
-        .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold", "pallet"],
-                       classic: ["tool", "message", "gate", "security unit", "jetpack"], rims: false),
-        .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "console", "crate", "hold",
-                                "pallet", "tool", "message"],
-                        classic: ["gate", "security unit", "jetpack"], letters: false, rims: false),
+        .classic: Claim(classic: ["input", "output", "crate", "hold", "tool", "message",
+                                  "office", "station", "figure", "drone", "jetpack"]),
+        .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold"],
+                       classic: ["tool", "message", "drone", "jetpack"], rims: false),
+        .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold",
+                                "tool", "message"],
+                        classic: ["drone", "jetpack"], letters: false, rims: false),
     ]
 
     static func run() -> Never {
@@ -73,7 +59,6 @@ enum LookTests {
         exit(failures == 0 ? 0 : 1)
     }
 
-    /// Whether the current look hands back a piece of its own for each hook that has a classic default.
     private static func made(on station: Station) -> [String: Bool] {
         let look = Looks.current
         let office = station.rooms.values.first { !$0.key.hasPrefix("kind:") }
@@ -81,13 +66,10 @@ enum LookTests {
         return [
             "input": look.input(station) != nil,
             "output": look.output(station, deckInUse: true) != nil,
-            "console": look.console(color: .white) != nil,
             "crate": look.crate(color: .white) != nil,
             "hold": look.hold(tall: true) != nil,
             "jetpack": look.jetpack(height: 0.5, depth: 0.11) != nil,
-            "pallet": look.pallet(color: .white) != nil,
-            "gate": look.gate(width: 4, gap: -0.33...0.33) != nil,
-            "security unit": look.securityUnit() != nil,
+            "drone": look.padDrone() != nil,
             "tool": look.tool(.hammer, height: 0.5, depth: 0.3) != nil,
             "message": look.message(color: .white, floor: .white) != nil,
             "office": office.flatMap { look.dress(office: $0, in: station, sign: sign) } != nil,

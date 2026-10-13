@@ -1,10 +1,7 @@
-// A repository's production, as a planet on the horizon: a real surface, in its colour.
-
 import AppKit
 import SceneKit
 
 enum Planets {
-    /// The surfaces in Resources/Planets, from Solar System Scope (CC BY 4.0).
     static let surfaces = ["mercury", "moon", "mars", "ceres", "eris", "haumea", "makemake", "jupiter", "saturn", "uranus", "neptune", "venus_atmosphere", "earth_daymap"]
 
     static let root: URL? = {
@@ -14,7 +11,6 @@ enum Planets {
         return FileManager.default.fileExists(atPath: src.path) ? src : nil
     }()
 
-    /// The same name makes the same world on every run.
     static func seed(_ name: String) -> UInt32 {
         var h: UInt32 = 2166136261
         for b in name.utf8 { h = (h ^ UInt32(b)) &* 16777619 }
@@ -26,7 +22,6 @@ enum Planets {
     private static var tinted: [String: CGImage] = [:]
     private static let lock = NSLock()
 
-    /// A lit globe with a rim of atmosphere; the saturn surface keeps its ring. The scene turns the globe.
     static func make(name: String, color: NSColor, radius: Double) -> SCNNode {
         let node = SCNNode()
         let surface = surfaceName(for: name)
@@ -35,7 +30,6 @@ enum Planets {
         let m = SCNMaterial()
         m.lightingModel = .lambert
         m.diffuse.contents = color
-        // Tinted off the render thread; the plain colour stands in until then.
         DispatchQueue.global(qos: .utility).async { if let img = image(surface, color: color) { m.diffuse.contents = img } }
         globe.geometry!.firstMaterial = m
         globe.name = "globe"
@@ -71,7 +65,6 @@ enum Planets {
         return air
     }
 
-    /// A flat ring, its texture running from the inner edge to the outer.
     private static func ring(inner: Double, outer: Double, color: NSColor) -> SCNNode? {
         guard let img = image("ring", ext: "png", color: color, keepAlpha: true) else { return nil }
         let n = 96
@@ -98,7 +91,6 @@ enum Planets {
         return node
     }
 
-    /// A surface in the repository's colour: its own dark and light stretched to the colour's darkest and lightest.
     static func image(_ surface: String, ext: String = "jpg", color: NSColor, keepAlpha: Bool = false) -> CGImage? {
         let key = "\(surface)|\(color)"
         lock.lock(); defer { lock.unlock() }
@@ -116,7 +108,6 @@ enum Planets {
             let l = (Int(px[i * 4]) * 54 + Int(px[i * 4 + 1]) * 183 + Int(px[i * 4 + 2]) * 19) >> 8
             lum[i] = UInt8(l); hist[l] += 1
         }
-        // The 2nd and 98th percentiles.
         func percentile(_ p: Double) -> Int {
             let target = Int(Double(w * h) * p); var run = 0
             for (i, c) in hist.enumerated() { run += c; if run >= target { return i } }

@@ -1,10 +1,3 @@
-// Model-only tests of the crate ledger: `.build/debug/Rumkapsel --ledger-tests`.
-//
-// No station, no scene, no clock. Facts are fed to a ledger in every order a source and a hand
-// can produce them, and after each the ledger must hold: every crate placed in one yard at most,
-// a hand landing outranking any older word from the source, and wanted equal to placed as soon as
-// the source has said something newer. Exits non-zero if anything failed.
-
 import Foundation
 
 enum LedgerTests {
@@ -58,10 +51,10 @@ enum LedgerTests {
             l.order(repo: "web", number: 1, to: .deck); l.landed(repo: "web", number: 1, in: .deck, at: at(30))
             l.order(repo: "web", number: 2, to: .deck); l.landed(repo: "web", number: 2, in: .deck, at: at(31))
             expect(l.counts(in: .deck)["web"] == 2 && l.counts(in: .storage)["web"] == nil, "both on the deck by hand")
-            l.adopt(word(storage: [1, 2], updated: [1: at(0), 2: at(0)]), repo: "web")   // the board still says storage, from before
+            l.adopt(word(storage: [1, 2], updated: [1: at(0), 2: at(0)]), repo: "web")
             expect(l["web", 1]?.placed == .deck && l["web", 2]?.placed == .deck, "a stale answer takes nothing back")
             expect(l.disagreements(repo: "web").isEmpty, "and asks for no carry")
-            l.adopt(word(deck: [1, 2], updated: [1: at(40), 2: at(40)]), repo: "web")   // the board catches up
+            l.adopt(word(deck: [1, 2], updated: [1: at(40), 2: at(40)]), repo: "web")
             expect(l.disagreements(repo: "web").isEmpty && l["web", 1]?.movedAt == nil, "wanted equals placed, the hand is history")
         }
 
@@ -71,7 +64,7 @@ enum LedgerTests {
             l.landed(repo: "web", number: 1, in: .deck, at: at(50))
             l.adopt(word(deck: [1], updated: [1: at(60)]), repo: "web")
             expect(l.disagreements(repo: "web").isEmpty, "agreed")
-            l.adopt(word(storage: [1], updated: [1: at(0)]), repo: "web")   // a peer's older copy of the board
+            l.adopt(word(storage: [1], updated: [1: at(0)]), repo: "web")
             expect(l["web", 1]?.placed == .deck && l["web", 1]?.wanted == .deck, "an older word is not news")
         }
 
@@ -79,7 +72,7 @@ enum LedgerTests {
             var l = Ledger()
             l.adopt(word(storage: [1], updated: [1: at(0)]), repo: "web")
             l.landed(repo: "web", number: 1, in: .deck, at: at(10))
-            l.adopt(word(storage: [1], updated: [1: at(20)]), repo: "web")   // moved back to storage after the landing: news
+            l.adopt(word(storage: [1], updated: [1: at(20)]), repo: "web")
             expect(l.disagreements(repo: "web").map(\.number) == [1], "a newer disagreement is for the reconciler")
             l.snap(repo: "web", number: 1)
             expect(l["web", 1]?.placed == .storage, "no carry deck to storage: redrawn where the source says")
@@ -102,9 +95,9 @@ enum LedgerTests {
             l.adopt(word(deck: [1], cleared: [1], updated: [1: at(0)]), repo: "web")
             l.order(repo: "web", number: 1, to: .pad); l.landed(repo: "web", number: 1, in: .pad, at: at(10))
             expect(l.counts(in: .deck)["web"] == nil, "off the deck")
-            l.adopt(word(deck: [1], cleared: [1], updated: [1: at(0)]), repo: "web")   // the board still says ready to ship
+            l.adopt(word(deck: [1], cleared: [1], updated: [1: at(0)]), repo: "web")
             expect(l["web", 1]?.placed == .pad, "stays aboard")
-            l.adopt(word(updated: [:]), repo: "web")   // shipped: the source counts it nowhere
+            l.adopt(word(updated: [:]), repo: "web")
             expect(l["web", 1] == nil, "lifted off with the rocket")
         }
 
@@ -122,15 +115,15 @@ enum LedgerTests {
 
         test("the board moves a crate while it is being carried: the landing does not outrank that word") {
             var l = Ledger()
-            l.adopt(word(storage: [7], updated: [7: at(0)]), repo: "web")     // merged: to storage
-            l.order(repo: "web", number: 7, to: .storage)                     // the office's package is on its way
-            l.adopt(word(deck: [7], updated: [7: at(10)]), repo: "web")       // the board moves it on to the deck meanwhile
-            l.landed(repo: "web", number: 7, in: .storage, at: at(20))        // it lands in storage after that
+            l.adopt(word(storage: [7], updated: [7: at(0)]), repo: "web")
+            l.order(repo: "web", number: 7, to: .storage)
+            l.adopt(word(deck: [7], updated: [7: at(10)]), repo: "web")
+            l.landed(repo: "web", number: 7, in: .storage, at: at(20))
             expect(l["web", 7]?.placed == .storage && l["web", 7]?.wanted == .deck, "down in storage, wanted on the deck")
             expect(l.disagreements(repo: "web").map(\.number) == [7], "a carry to the deck follows")
             var m = Ledger()
             m.adopt(word(storage: [8], updated: [8: at(0)]), repo: "web")
-            m.order(repo: "web", number: 8, to: .deck)                        // the station moves it before the board says so
+            m.order(repo: "web", number: 8, to: .deck)
             m.landed(repo: "web", number: 8, in: .deck, at: at(20))
             expect(m["web", 8]?.placed == .deck && m.disagreements(repo: "web").isEmpty, "no word since the order: the station's move stands")
         }
@@ -138,10 +131,10 @@ enum LedgerTests {
         test("after a relaunch the source's word is taken again, except aboard the rocket") {
             var l = Ledger()
             l.adopt(word(deck: [1, 2], cleared: [2], updated: [1: at(0), 2: at(0)]), repo: "web")
-            l.order(repo: "web", number: 1, to: .storage); l.landed(repo: "web", number: 1, in: .storage, at: at(10))   // moved by hand against the word
-            l.order(repo: "web", number: 2, to: .pad); l.landed(repo: "web", number: 2, in: .pad, at: at(10))           // loaded into the rocket
-            l.forgetTransit()   // the relaunch
-            l.adopt(word(deck: [1, 2], cleared: [2], updated: [1: at(0), 2: at(0)]), repo: "web")   // the board read afresh, unchanged
+            l.order(repo: "web", number: 1, to: .storage); l.landed(repo: "web", number: 1, in: .storage, at: at(10))
+            l.order(repo: "web", number: 2, to: .pad); l.landed(repo: "web", number: 2, in: .pad, at: at(10))
+            l.forgetTransit()
+            l.adopt(word(deck: [1, 2], cleared: [2], updated: [1: at(0), 2: at(0)]), repo: "web")
             expect(l.disagreements(repo: "web").map(\.number) == [1], "the hand move is history: #1 is carried on to the deck")
             expect(l["web", 2]?.placed == .pad, "#2 stays aboard")
         }

@@ -1,13 +1,3 @@
-// What every body is doing and why it is standing there: `rumkapsel --dump-bodies [seconds] [station]`.
-//
-// A body's place on the floor is decided in three steps, and a body standing somewhere odd has come
-// off one of them: the place it was sent to, the spot within that place its fixture gives it, and the
-// pose it holds there. A bunk is the hardest of the three, because the bed is a cell, the walk aims at
-// that cell, and only a body that is resting *and* asleep is ever moved off it onto the mattress.
-//
-// This prints all three per body, with every gate that decides them, so five bodies in five different
-// states can be read rather than guessed at from a picture.
-
 import AppKit
 
 extension StationController {
@@ -22,7 +12,6 @@ extension StationController {
             say("station \(st.name): \(here.count) bodies · \(st.beds.count) beds · clock \(String(format: "%.1f", clock))")
             say("  who              place        activity      cmd        rest job crew  bed  down  bedIn  riseIn lying bench pose")
             for m in here {
-                // The pose the scene will draw this instant, by the same call the scene makes.
                 let pose: String
                 switch m.currentPose(at: clock) {
                 case .standing: pose = "standing"
@@ -39,8 +28,6 @@ extension StationController {
                             pad(num(m.beddingUntil), 6), pad(num(m.risingUntil), 6),
                             pad(m.lying ? "yes" : "no", 5), pad(m.onBench ? "yes" : "no", 5), pose].joined(separator: " "))
             }
-            // Where each body actually is against where its bunk is: a body on the mattress and a body a
-            // shin's reach off it are a hand apart on the floor and unmistakable in a picture.
             let inBed = here.filter { $0.bed != nil }
             if !inBed.isEmpty {
                 say("  bunks: index  bedAt            bodyAt           off")
@@ -56,7 +43,6 @@ extension StationController {
                                 pad(String(format: "%.2f,%.2f", m.pos.x, m.pos.y), 16),
                                 String(format: "%.2f", off)].joined(separator: " "))
                 }
-                // Two bodies holding the same bunk is its own answer.
                 let taken = Dictionary(grouping: inBed, by: { $0.bed! }).filter { $0.value.count > 1 }
                 for (b, who) in taken.sorted(by: { $0.key < $1.key }) {
                     say("  bunk \(b) is held by \(who.count): \(who.map { $0.home.name }.joined(separator: ", "))")

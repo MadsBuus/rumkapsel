@@ -1,22 +1,16 @@
-// A repository's colony on its planet: hab pods panelled in its colour, a glass dome, tanks, a radio mast,
-// solar rows, lamps, a rover, people in suits, boulders, and a flag with the release that last landed.
-// Built in the colony's own frame, the ground at the origin and up along +Y, and seen only onboard.
-
 import AppKit
 import SceneKit
 
 enum Colonies {
-    /// `ground` is the planet's radius: each piece is set down on its curve.
     static func build(repo: String, color: NSColor, release: String, ground: Double) -> SCNNode {
         let colony = SCNNode()
         colony.name = "colony"
         var rng = SplitMix(seed: UInt64(Planets.seed(repo)) &* 2654435761)
-        let still = SCNNode()   // everything that never moves
-        let live = SCNNode()    // lights that blink, people, the flag
+        let still = SCNNode()
+        let live = SCNNode()
 
         pad(into: still, live: live, color: color)
 
-        // Pods round one side joined by tubes, the dome, the tanks, the mast, solar rows further out.
         let turn = rng.next() * 2 * .pi
         func spot(_ a: Double, _ d: Double) -> SIMD3<Double> { SIMD3(cos(a + turn) * d, 0, sin(a + turn) * d) }
         let podCount = 2 + Int(rng.next() * 2)
@@ -56,7 +50,6 @@ enum Colonies {
         for k in 0..<5 { lamp(at: spot(Double(k) * 1.25 + 0.3, 0.26 + Double(k % 2) * 0.04), into: still, live: live) }
         rocks(into: still, rng: &rng, color: color)
 
-        // People out on the regolith: one by the flag, one walking between the pods, one at the rover.
         let flagAt = SIMD3(0.1, 0.0, 0.05)
         for (i, at) in [flagAt + SIMD3(0.025, 0, 0.02), pods[0] + SIMD3(0.05, 0, 0.04), roverAt + SIMD3(0.04, 0, -0.02)].enumerated() {
             let a = astronaut()
@@ -72,7 +65,6 @@ enum Colonies {
         flagNode.position = v3(flagAt.x, 0, flagAt.z)
         live.addChildNode(flagNode)
 
-        // A low light over the colony, the ground and the landed tip.
         let sun = SCNNode()
         sun.light = SCNLight()
         sun.light!.type = .spot
@@ -101,8 +93,6 @@ enum Colonies {
 
     // MARK: the pieces
 
-    /// Sets a piece down on a ball of this radius whose top is the colony's origin: dropped to the surface
-    /// and tilted to stand square on it.
     private static func settle(_ piece: SCNNode, on r: Double) {
         let p = SIMD3(Double(piece.position.x), Double(piece.position.y), Double(piece.position.z))
         let d = (p.x * p.x + p.z * p.z).squareRoot()
@@ -129,7 +119,6 @@ enum Colonies {
     private static let dark = blinn(NSColor(rgb: (0.12, 0.12, 0.14)))
     private static let glow = flat(NSColor(rgb: (1, 0.82, 0.48)))
 
-    /// The landing pad: a slab with a ring and a cross in the repository's colour, lights round its rim.
     private static func pad(into still: SCNNode, live: SCNNode, color: NSColor) {
         let slab = SCNNode(geometry: faceted(SCNCylinder(radius: 0.08, height: 0.006), 6))
         slab.geometry!.firstMaterial = blinn(NSColor(rgb: (0.36, 0.37, 0.4)))
@@ -156,8 +145,6 @@ enum Colonies {
         }
     }
 
-    /// A hab pod: a faceted shell of panels, some of them insulation in the repository's colour and a band
-    /// of lit windows, its seams dark, on skids, with a door and steps.
     private static func habPod(size s: Double, color: NSColor, seed: Double) -> SCNNode {
         let pod = SCNNode()
         var rng = SplitMix(seed: UInt64(seed * 1e9))
@@ -196,7 +183,6 @@ enum Colonies {
         return pod
     }
 
-    /// A geodesic dome of glass on a white ring, its frame showing, green growing inside.
     private static func glassDome(size s: Double, seed: Double) -> SCNNode {
         let dome = SCNNode()
         let r = 0.07 * s
@@ -235,7 +221,6 @@ enum Colonies {
         return dome
     }
 
-    /// A walkway tube between two modules, ribbed.
     private static func tube(from a: SIMD3<Double>, to b: SIMD3<Double>) -> SCNNode {
         let length = simd_distance(a, b)
         let t = SCNNode()
@@ -254,7 +239,6 @@ enum Colonies {
         return t
     }
 
-    /// A cluster of capsule tanks with dark bands, one in the repository's colour, on a base.
     private static func tanks(count: Int, color: NSColor, seed: Double) -> SCNNode {
         let farm = SCNNode()
         var rng = SplitMix(seed: UInt64(seed * 1e9))
@@ -280,7 +264,6 @@ enum Colonies {
         return farm
     }
 
-    /// A lattice mast with a dish at the top, and red lights blinking up its height.
     private static func mast(at p: SIMD3<Double>, into still: SCNNode, live: SCNNode) {
         let m = SCNNode()
         m.position = v3(p.x, 0, p.z)
@@ -322,7 +305,6 @@ enum Colonies {
         }
     }
 
-    /// A row of solar panels on low frames, tilted to the light, their cells gridded.
     private static func solarRow(panels: Int) -> SCNNode {
         let row = SCNNode()
         let cells = SCNMaterial()
@@ -352,7 +334,6 @@ enum Colonies {
         return true
     }
 
-    /// A six-wheeled rover: a low body, a cab in the repository's colour with a lit window, an antenna.
     private static func rover(color: NSColor) -> SCNNode {
         let r = SCNNode()
         let body = SCNNode(geometry: SCNBox(width: 0.05, height: 0.012, length: 0.028, chamferRadius: 0.002))
@@ -380,7 +361,6 @@ enum Colonies {
         return r
     }
 
-    /// A lamp post: a pole, a head, and its light.
     private static func lamp(at p: SIMD3<Double>, into still: SCNNode, live: SCNNode) {
         let pole = SCNNode(geometry: SCNBox(width: 0.0025, height: 0.05, length: 0.0025, chamferRadius: 0))
         pole.geometry!.firstMaterial = steel
@@ -395,7 +375,6 @@ enum Colonies {
         live.addChildNode(bulb)
     }
 
-    /// Boulders over the regolith, clear of the pad: low-poly and jagged, grey drawn towards the planet's colour.
     private static func rocks(into still: SCNNode, rng: inout SplitMix, color: NSColor) {
         let stone = blinn(NSColor(rgb: (0.46, 0.45, 0.44)).mixed(with: color, 0.25), shine: 0.05)
         for _ in 0..<40 {
@@ -409,7 +388,6 @@ enum Colonies {
         }
     }
 
-    /// Someone in a suit: white, a backpack, a gold visor.
     private static func astronaut() -> SCNNode {
         let a = SCNNode()
         let suit = blinn(NSColor(rgb: (0.93, 0.93, 0.95)), shine: 0.3)
@@ -440,7 +418,6 @@ enum Colonies {
         return a
     }
 
-    /// The flag beside the pad, flying the release that last landed, a face on each side.
     private static func flag(repo: String, release: String, color: NSColor) -> SCNNode {
         let flag = SCNNode()
         flag.name = "flag"
@@ -465,7 +442,6 @@ enum Colonies {
         return flag
     }
 
-    /// The flag's cloth: the repository's colour, its name, and the release.
     static func flagImage(repo: String, release: String, color: NSColor) -> NSImage {
         NSImage(size: NSSize(width: 360, height: 200), flipped: false) { r in
             color.setFill(); r.fill()
@@ -480,15 +456,12 @@ enum Colonies {
         }
     }
 
-    /// Hoists a new release on a colony's flag.
     static func hoist(_ colony: SCNNode?, repo: String, release: String, color: NSColor) {
         let image = flagImage(repo: repo, release: release, color: color)
         colony?.childNode(withName: "cloth", recursively: true)?.childNodes.forEach { $0.geometry?.firstMaterial?.diffuse.contents = image }
     }
 }
 
-/// Meshes the colony is cut from: a geodesic sphere, faceted shells with a material per face, their seams
-/// as lines, and jagged rocks.
 enum Mesh {
     static func icosphere(_ subdivisions: Int) -> (verts: [SIMD3<Double>], faces: [(Int, Int, Int)]) {
         let t = (1 + 5.0.squareRoot()) / 2
@@ -517,7 +490,6 @@ enum Mesh {
         return (verts, faces)
     }
 
-    /// Triangles with flat normals facing out from the middle, each drawn in the material its kind names.
     static func faceted(_ tris: [(SIMD3<Double>, SIMD3<Double>, SIMD3<Double>)], _ kinds: [Int], _ materials: [SCNMaterial]) -> SCNGeometry {
         var verts: [SCNVector3] = [], normals: [SCNVector3] = []
         var elements: [[Int32]] = Array(repeating: [], count: materials.count)
@@ -538,7 +510,6 @@ enum Mesh {
         return g
     }
 
-    /// Every edge of the triangles once, as lines.
     static func edges(_ tris: [(SIMD3<Double>, SIMD3<Double>, SIMD3<Double>)], _ material: SCNMaterial) -> SCNGeometry {
         var verts: [SCNVector3] = [], idx: [Int32] = [], seen = Set<String>()
         func key(_ p: SIMD3<Double>) -> String { String(format: "%.4f,%.4f,%.4f", p.x, p.y, p.z) }
@@ -555,7 +526,6 @@ enum Mesh {
         return g
     }
 
-    /// A boulder: a coarse geodesic sphere with its corners pushed in and out, flat underneath.
     static func rock(seed: Double, material: SCNMaterial) -> SCNGeometry {
         var rng = SplitMix(seed: UInt64(seed * 1e9) | 1)
         let (verts, faces) = icosphere(1)
@@ -565,7 +535,6 @@ enum Mesh {
     }
 }
 
-/// A small seeded generator: the same seed, the same colony.
 struct SplitMix {
     private var state: UInt64
     init(seed: UInt64) { state = seed }

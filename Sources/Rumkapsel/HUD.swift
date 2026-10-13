@@ -1,14 +1,10 @@
-// The overlay: the legend, the log, the info panel and the hover bubble.
-
 import AppKit
 import SceneKit
 import SpriteKit
 
-/// What you can pick for a lounger from its bubble: the same things its idle clock picks.
 enum LoungeOrder: CaseIterable {
     case gym, bed, read, shower, toilet
 
-    /// The system symbol drawn for it: a dumbbell, a bed, a book, a shower, a toilet.
     var symbol: String {
         switch self {
         case .gym: return "dumbbell.fill"
@@ -19,7 +15,6 @@ enum LoungeOrder: CaseIterable {
         }
     }
 
-    /// What picking it sends the minion to do, said in the bubble while the cursor is on it.
     var words: String {
         switch self {
         case .gym: return "work out in the gym"
@@ -30,7 +25,6 @@ enum LoungeOrder: CaseIterable {
         }
     }
 
-    /// Each in its own flat colour: steel, the dorm's plum, amber, water, porcelain.
     var color: NSColor {
         switch self {
         case .gym: return Palette.debris
@@ -41,7 +35,6 @@ enum LoungeOrder: CaseIterable {
         }
     }
 
-    /// The symbol in white on clear, drawn well above its size on screen so it stays sharp; the sprite tints it.
     var texture: SKTexture {
         let side: CGFloat = 96
         let config = NSImage.SymbolConfiguration(pointSize: side * 0.8, weight: .semibold)
@@ -67,8 +60,6 @@ enum LoungeOrder: CaseIterable {
 extension StationController {
     // MARK: hud
 
-    /// The HUD's ink for the ground under it: light text over a dark look, dark text over a light one, read off
-    /// the look's background so a theme needs to say nothing.
     var ink: (text: NSColor, dim: NSColor, onLight: Bool) {
         let bg = Looks.current.background.usingColorSpace(.deviceRGB) ?? Palette.void
         let light = bg.redComponent * 0.3 + bg.greenComponent * 0.59 + bg.blueComponent * 0.11 > 0.3
@@ -131,38 +122,28 @@ extension StationController {
     static let iconSize = CGSize(width: 20, height: 20)
     static let iconGap: CGFloat = 8
 
-    /// Whether you may send this one somewhere: nothing but rest in hand and not at work, as with the idle
-    /// clock. Mid-visit, on a job, with one waiting, or carrying, the icons are dimmed and clicks do nothing.
-    /// It asks what the simulation asks — whether the doing in hand can be cut into — so a minion walking
-    /// to the gym can still be turned round, while a turn under way stays its own until it is over.
     func canOrder(_ m: Minion) -> Bool {
         m.state == .settled && !m.busy && !m.hasLoad && !m.onJob
             && (m.current == nil || m.phaseKind.interruptible)
     }
 
-    /// The bubble's say on a point, from the main thread: over the plate, or on the way up to it from the
-    /// minion, the hover stays where it is, so the mouse can leave the body for the icons.
     func bubbleTakes(point p: NSPoint) -> Bool {
         bubbleLock.lock(); defer { bubbleLock.unlock() }
         bubbleCursor = p
         return bubbleHits?.hold.contains(p) ?? false
     }
 
-    /// A click on the plate, from the main thread: an icon gives its order and closes the bubble; between them it does nothing but is spent.
     func bubbleClick(at p: NSPoint) -> Bool {
         bubbleLock.lock(); defer { bubbleLock.unlock() }
         guard let hits = bubbleHits, hits.plate.contains(p) else { return false }
         if let i = hits.icons.firstIndex(where: { $0.contains(p) }) {
             let order = LoungeOrder.allCases[i]
-            // The pick closes the bubble: the hover is let go, so the minion is free to set off at once.
             bubbleHits = nil
             enqueue { [self] in self.order(minionId: hits.minion, order); self.hovered = nil }
         }
         return true
     }
 
-    /// You picked a lounger's next thing: given through the very calls the idle clock makes, then its idle
-    /// clock is put back to nothing, so it starts afresh once the lounger is back on the couch.
     func order(minionId: String, _ o: LoungeOrder) {
         guard let m = minions[minionId], let station = fleet.stations[m.station], canOrder(m) else { return }
         switch o {
@@ -177,13 +158,11 @@ extension StationController {
             send(m, to: .lounge)
         case .bed:
             send(m, to: .quarters)
-            m.napping = m.place == .quarters   // a bed was found: lie down once there
+            m.napping = m.place == .quarters
         }
-        m.idle = IdleClock()   // a fresh clock: armed again once the lounger is back on the couch
+        m.idle = IdleClock()
     }
 
-    /// Hovering a minion holds it still and says what it is doing, above its head, with a row of
-    /// things you may send it to do under the words. The row is dimmed while it is not for picking.
     func updateBubble() {
         func hide() {
             bubbleLabel.isHidden = true; bubblePlate.isHidden = true
@@ -218,13 +197,11 @@ extension StationController {
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
         bubblePlate.isHidden = false
-        // The hold: the plate, and a column down to the minion's feet, so the way up to the icons is covered.
         let feet = view.projectPoint(m.node.position)
         let column = CGRect(x: CGFloat(p.x) - 28, y: min(CGFloat(feet.y), f.minY) - 6, width: 56, height: max(0, f.minY - CGFloat(feet.y)) + 6)
         bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), rects); bubbleLock.unlock()
     }
 
-    /// Top: repos in their colours with counts. Bottom: jobs with one tiny minion per worker, like the game.
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
         let withOffices = Set(fleet.stations.values.flatMap { $0.rooms.values.compactMap(\.repo) })
         let withRockets = Set(world.repoRoots.filter { github.openReleases(repoRoot: $0.key)?.isEmpty == false }.map(\.value.repo))
@@ -266,7 +243,6 @@ extension StationController {
             counts.position = CGPoint(x: x, y: hud.size.height - 52)
             hud.addChild(name); hud.addChild(counts)
             legendNodes.append(name); legendNodes.append(counts)
-            // A small spinner beside the title while this repository is being refreshed from GitHub.
             if rootOf[repo].map({ github.isBusy(repoRoot: $0) }) == true {
                 let spinner = SKSpriteNode(color: name.fontColor ?? Palette.dim, size: CGSize(width: 7, height: 7))
                 spinner.position = CGPoint(x: x + name.frame.width / 2 + 12, y: hud.size.height - 41)
@@ -314,7 +290,6 @@ extension StationController {
         while eventLabels.count > 5 { eventLabels.removeLast().0.removeFromParent() }
     }
 
-    /// A span in the shortest words that still say it: 40m, 2h, 3d, 5w. Under a minute is "just now".
     static func span(_ seconds: TimeInterval) -> String {
         let s = max(0, seconds)
         if s < 60 { return "just now" }
@@ -324,9 +299,6 @@ extension StationController {
         return "\(Int(s / (7 * 24 * 3600)))w"
     }
 
-    /// How old the work in an office is, and how long since anything happened in it. The age counts from
-    /// the pull request or issue where GitHub has said when that began, otherwise from when the office
-    /// first stood here, which is the most this machine can know.
     private func roomAge(station: Station, room: Room) -> String? {
         guard !room.key.hasPrefix("kind:") else { return nil }
         var opened = room.openedAt
@@ -369,26 +341,22 @@ extension StationController {
     }
 
     func updateInfo() {
-        // The counters are your sessions: one body per session on a station that is shown. Teammates,
-        // subagents and workers whose session ended are on the floor but not in the count.
         let active = minions.values.filter { $0.state != .leaving && !$0.isCrew && !$0.isSubagent && $0.freeSince == 0 && fleet.stations[$0.station] != nil }
         let busy = active.filter(\.busy).count
         let waiting = active.filter { $0.activity == .waiting && !$0.busy }.count
         let asleep = active.filter { $0.activity == .sleeping }.count
-        // The cue for fast time: shown while space is held, gone the moment it is let go.
         statusLabel.text = liveTimeScale > 1 ? "\(Int(liveTimeScale))× · holding space" : ""
         statusLabel.horizontalAlignmentMode = .center
         statusLabel.fontSize = 13
         statusLabel.fontColor = Palette.pyramid
         statusLabel.position = CGPoint(x: hud.size.width / 2, y: 12)
         infoLabel.position = CGPoint(x: 14, y: 12)
-        // Following: who, and their order in their own words, live. Esc lets go.
         if let hint = walkHint {
             followLabel.text = hint
             followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)
         } else if let id = following, let m = minions[id] {
             followLabel.text = "following \(m.home.name) · \(m.words) · esc to let go"
-            followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)   // above the legend's line
+            followLabel.position = CGPoint(x: hud.size.width / 2, y: liveTimeScale > 1 ? 54 : 36)
         } else { followLabel.text = "" }
 
         if clock - hudClock > 0.5 {
@@ -396,12 +364,10 @@ extension StationController {
             layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
             if !headless { placePlanets() }
             if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
-            // Sharing indicator: green dot when broadcasting, with how many stations are in range.
             let sharing = peers.isRunning
             shareDot.isHidden = !sharing
             shareLabel.isHidden = !sharing
             if sharing {
-                // Grey without a network, amber while looking, green once someone answers.
                 let n = world.peerSnapshots.count
                 let up = peers.networkUp
                 let near = peers.nearby
@@ -474,7 +440,6 @@ extension StationController {
             let prs = github.pulls(repo: repo, task: n)
             let what = prs.isEmpty ? "PR #\(n)" : "issue #\(n) · " + prs.map { "PR #\($0)" }.joined(separator: ", ")
             var parts = ["\(repo) · \(what)"]
-            // What the crate holds and whose it is: the number alone says nothing on a row of them.
             let work = github.work(repo: repo, number: n)
             if let title = work?.title, !title.isEmpty { parts.append(title) }
             if let author = work?.author { parts.append("by " + world.crewName(author) + (author == github.myLogin() ? " · yours" : "")) }
@@ -511,7 +476,6 @@ extension StationController {
         }
     }
 
-    /// A crate in storage or on the deck opens its pull request.
     func openCargo(named name: String) {
         let parts = name.split(separator: "|").map(String.init)
         guard parts.count == 3, let n = Int(parts[2]), n > 0 else { return }
@@ -554,7 +518,6 @@ extension StationController {
         if let url { DispatchQueue.main.async { NSWorkspace.shared.open(url) } }
     }
 
-    /// A line in the station log from outside the scene, such as an update notice.
     func announce(_ text: String) {
         enqueue { [self] in logEvent(text); ringBell(seed: text.hashValue) }
     }

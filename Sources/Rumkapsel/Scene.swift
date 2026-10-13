@@ -1,5 +1,3 @@
-// The scene's spine: shared helpers, every stored property, the build, the scan glue and the tick.
-
 import AppKit
 import QuartzCore
 import SceneKit
@@ -16,18 +14,12 @@ extension NSColor {
                        green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
                        blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t, alpha: 1)
     }
-    /// Shading, in the one way that keeps a colour the colour it was. Adding or subtracting the same
-    /// amount from red, green and blue does not: it flattens the ratios between them, which is what the
-    /// eye reads as hue, so a darkened orange comes out red and a lightened one comes out cream. These
-    /// move brightness and leave hue and saturation where they are — which is how the game shades, every
-    /// face of a crate the same colour at a different value.
     func dimmed(_ f: CGFloat) -> NSColor { shaded(value: f) }
     func darker(_ f: CGFloat) -> NSColor { shaded(value: 1 - f) }
     func lighter(_ f: CGFloat) -> NSColor {
         let c = usingColorSpace(.deviceRGB)!
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         c.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
-        // Brightness has a ceiling, so past it a colour lightens by losing saturation — as paint does.
         let want = b + f
         let over = max(0, want - 1)
         return NSColor(calibratedHue: h, saturation: max(0, s - over * 1.6), brightness: min(1, want), alpha: 1)
@@ -43,17 +35,18 @@ extension NSColor {
 
 enum Palette {
     static let void = NSColor(rgb: (0.055, 0.067, 0.125))
-    static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))   // #7E665A, the game's hallway floor
+    static let corridor = NSColor(rgb: (0.494, 0.400, 0.353))
     static let core = NSColor(rgb: (0.13, 0.14, 0.18))
+    static let padFloor = NSColor(rgb: (0.105, 0.115, 0.140))
+    static let labFloor = NSColor(rgb: (0.365, 0.400, 0.467))
+    static let storageFloor = NSColor(rgb: (0.247, 0.275, 0.337))
+    static let walkFloor = NSColor(rgb: (0.290, 0.320, 0.384))
+    static let deconFloor = NSColor(rgb: (0.204, 0.208, 0.243))
     static let minion = NSColor(rgb: (0.96, 0.96, 0.94))
     static let pyramid = NSColor(rgb: (0.98, 0.85, 0.35))
     static let debris = NSColor(rgb: (0.55, 0.6, 0.7))
-    /// An object of unknown origin: grey in decon, grey in storage, grey aboard.
     static let alien = NSColor(rgb: (0.58, 0.6, 0.66))
-    /// The light on decon's hatch and on an unscreened object's plate.
     static let alienLight = NSColor(rgb: (0.5, 0.95, 0.55))
-    /// Your own work: the straps on a crate whose pull request is yours. Near white, because the crate
-    /// itself is already its repository's colour and a second colour there would read as another repo.
     static let mine = NSColor(rgb: (0.95, 0.96, 0.93))
     static let text = NSColor(rgb: (0.85, 0.87, 0.92))
     static let dim = NSColor(rgb: (0.5, 0.53, 0.6))
@@ -61,29 +54,16 @@ enum Palette {
 
 func v3(_ x: Double, _ y: Double, _ z: Double) -> SCNVector3 { SCNVector3(x, y, z) }
 
-/// Nothing in the station is round: every turned shape is cut with a few flat sides.
-/// Which nodes the pointer may find. A node carries `normal` unless it is scenery too big to click
-/// through — the hull wall leaning over the airlock — which carries `scenery` and is passed over. The
-/// camera reads the same mask, so scenery is a bit of its own rather than none at all.
 enum Pick {
     static let normal = 1
     static let scenery = 2
-    /// The planets on the horizon: never picked, and lit by their own sun rather than the station's.
     static let planet = 16
-    /// The craft the mission camera rides: drawn by that camera only.
     static let onboard = 32
-    /// A planet's colony: drawn by the mission camera only, lit by the planets' sun and its own light.
     static let colony = 64
-    /// A rocket lifting off the pad while its flight is on: drawn by the station's camera only, since the
-    /// mission camera is riding it.
     static let launching = 128
-    /// A planet's shell of air: drawn by the station's camera, not by the flight's, which goes down inside it.
     static let air = 256
 }
 
-/// Whether the sky is drawn at all. The star field, the debris and the nebulae are some two hundred
-/// nodes of weather around a station of a few hundred, which is noise when what you are looking at is
-/// the station: `--no-stars` leaves the void empty.
 enum Backdrop {
     static let drawn = !CommandLine.arguments.contains("--no-stars")
 }
@@ -109,7 +89,6 @@ func lit(_ color: NSColor) -> SCNMaterial {
     return m
 }
 
-/// Text laid flat on the floor, wrapped to a width in world units, pivoted on its centre.
 func floorText(_ text: String, color: NSColor, size: Double, maxWidth: Double, lines: Int, bold: Bool = false) -> (node: SCNNode, width: Double, height: Double) {
     let t = SCNText(string: text, extrusionDepth: 0)
     t.font = bold ? (NSFont(name: "HelveticaNeue-Bold", size: 1) ?? NSFont.boldSystemFont(ofSize: 1))
@@ -134,7 +113,6 @@ func floorText(_ text: String, color: NSColor, size: Double, maxWidth: Double, l
     return (outer, w, h)
 }
 
-/// Uppercase, letter-spaced signage cut into a floor, pivoted on its centre.
 func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, width: Double, height: Double) {
     let attributed = NSAttributedString(string: text.uppercased(), attributes: [
         .font: NSFont(name: "Futura-CondensedExtraBold", size: 1) ?? NSFont(name: "HelveticaNeue-CondensedBlack", size: 1) ?? NSFont.boldSystemFont(ofSize: 1),
@@ -156,8 +134,6 @@ func floorSign(_ text: String, color: NSColor, size: Double) -> (node: SCNNode, 
     return (outer, w, h)
 }
 
-/// All scene and HUD mutation happens on SceneKit's render thread, via `enqueue`, so the
-/// SpriteKit overlay is never touched while it is being drawn.
 final class StationController: NSObject, SCNSceneRendererDelegate {
     let pendingLock = NSLock()
     var pending: [() -> Void] = []
@@ -173,13 +149,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tilesBuilt = 0
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         timed("handoff") { for w in work { w() } }
-        // Wall time rather than the renderer's: a frame asked for by hand carries no timestamp.
         let now = CACurrentMediaTime()
         guard Trace.frames else {
             if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
             return
         }
-        // With RK_FRAMES set, a frame that took too long says so, and says what it spent the time on.
         let gap = now - lastFrameAt
         lastFrameAt = now
         let began = frameBegan
@@ -193,29 +167,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// What a frame spent its time on, while `RK_FRAMES` is set. Off, `timed` is the call it wraps.
     enum Trace {
         static let frames = ProcessInfo.processInfo.environment["RK_FRAMES"] != nil
         static let slowFrame = 0.05, slowWork = 0.02
     }
     private var phases: [(name: String, seconds: Double)] = []
     private var lastFrameAt = CACurrentMediaTime()
-    /// Which frame this is, and which frame last built the floor: the floor is built once a frame at
-    /// most. Everything that changes it asks for a redraw, and on a launch a dozen of those arrive
-    /// together — each one rebuilding every tile of every station, on the thread that is drawing.
     private var frameNo = 0
     private var lastFloorFrame = -1
     private var lastGitHubFrame = -1
-    /// Tiles built since the last frame was reported, for the trace.
     var tilesBuilt = 0
-    /// Floor and border geometry shared between every tile that looks the same, and the look it was
-    /// built for: a change of look empties it.
     var tileCache: [String: SCNGeometry] = [:]
-    /// Whose floor each cell is, per station, for the length of one redraw.
     var owners: [String: [Cell: String]] = [:]
     var tileCacheLook: Theme = Looks.theme
 
-    /// Runs `body`, noting how long it took when frames are being traced.
     @discardableResult func timed<T>(_ name: String, _ body: () -> T) -> T {
         guard Trace.frames else { return body() }
         let t0 = CACurrentMediaTime()
@@ -226,13 +191,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let view: StationView
     let scene = SCNScene()
     let hud: SKScene
-    /// The station itself: its bodies, orders, walks and clock. The scene draws it and decides nothing.
     let simulation: Simulation<Minion>
     var world: World { simulation.world }
     let drone = Drone()
     private let scanner = TranscriptScanner()
     private let scanQueue = DispatchQueue(label: "rumkapsel.scan")
-    /// The two handles the scene reaches for constantly; everything else it asks `world` for by name.
     var fleet: Fleet { world.fleet }
     var github: GitHubResolver { world.github }
 
@@ -246,112 +209,75 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let propRoot = SCNNode()
     let markerRoot = SCNNode()
     private let debrisRoot = SCNNode()
-    /// Whatever the look lays under the fleet; rebuilt with the floor.
     let groundRoot = SCNNode()
-    /// Where the view starts from before the user turns it: the look's.
     var viewYaw: Double { Looks.current.viewYaw }
     let rig = SCNNode()
     let pitchNode = SCNNode()
     let cameraNode = SCNNode()
     var roomTiles: [String: [SCNNode]] = [:]
-    /// Doorways: pairs of cells whose shared edge has no dark border, keyed "x,y|x,y" in both orders.
     var openEdges: Set<String> = []
     var roomLabels: [String: SCNNode] = [:]
     var floorLabels: [(node: SCNNode, baseYaw: Double)] = []
-    /// Rooms whose office has not been delivered yet, keyed by "station|room". Station truth keeps the
-    /// list; the model has already put the room on the floor, this only holds its tiles back until a
-    /// carrier walks it in.
     var undelivered: Set<String> { world.truth.pendingOffices }
-    /// Offices whose pull request crate is being packed right now: drawn only once the worker is done.
     var packing: Set<String> = []
-    /// Offices whose newest cube is off the floor, waiting for its worker or on its head: drawn once it is
-    /// stowed. And each office's newest cube as last drawn.
     var stowHeld: Set<String> = []
     var newestCube: [String: SCNNode] = [:]
     var boxes: [String: SCNNode] = [:]
     var outlines: [String: SCNNode] = [:]
     let beamRoot = SCNNode()
     let rocketRoot = SCNNode()
-    /// The rockets and the ships as drawn: a node per rocket by "station|repo", a node per flight.
     var rocketViews: [String: RocketView] = [:]
-    /// Sparks off a welder's torch, in the air.
     var sparks: [Spark] = []
-    /// The soot a rocket left on its pad slot, by where it stood: the next launch there burns over it.
-    var scorches: [String: SCNNode] = [:]
+    var undocking: [(node: SCNNode, since: Double)] = []
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
-    /// The pallet each station has out, as drawn, keyed by station name; the errand is the simulation's.
-    var palletViews: [String: PalletView] = [:]
-    /// The panel on the wall by each storage doorway, so an order can make it blink.
-    var consolePanels: [String: SCNNode] = [:]
-    /// Props on their way out, fading on the station's clock rather than on an action.
-    var fadingProps: [(node: SCNNode, at: Double)] = []
     var lastBoxCount: [String: Int] = [:]
-    /// What each marker was last drawn as, by node name: an office's boxes by everything that shapes
-    /// them, a yard crate by whether it wears the tested sticker. A redraw leaves alone whatever would
-    /// come out the same, so drawing the floor twice costs nothing and moves nothing.
     var markerSignatures: [String: String] = [:]
-    /// The one crate an office with a pull request has on its floor, by room key, with what it was built
-    /// from: it stays where it stands for as long as the pull request does, and a redraw only re-lights it.
     var packages: [String: SCNNode] = [:]
     var packageBuilt: [String: String] = [:]
-    /// The tile each office's crate was given, kept so nothing drawn later moves it.
     var packageCells: [String: Cell] = [:]
-    /// Crates under way, by node: the one table that moves a crate's picture.
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
-    /// The cells the furniture covers, per station, and the static root's size when that was read.
     var furnitureObstacles: [String: Set<Cell>] = [:]
     var furnitureObstaclesAt = -1
     private var localSignature = ""
     private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
-    /// The gym's two things that move: the barbell over the bench and the bag on its arm, per station.
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     private var lastBusy: [String: Double] = [:]
-    var stationAnchors: [String: SCNNode] = [:]     // props that must move with a station when it shifts
+    var stationAnchors: [String: SCNNode] = [:]
     var knownSpine: [String: Int] = [:]
-    /// Each station's dug hallway as last drawn, so hallway given back can be taken up tile by tile.
     var knownHall: [String: [Cell]] = [:]
-    // Peers on the local network: their snapshots, the stations built from them, and their minions.
     let peers = PeerHub()
     var fadeIn: Set<String> = []
     private let peerRoot = SCNNode()
-    /// How many of the peers' figures stand on the station, for the checks.
     var peerFigures: Int { minions.values.filter(\.isPeer).count }
     private var peerColorBook: [String: RGB] = [:]
     var roomPower: [String: Bool] = [:]
-    /// How lit each office is drawn.
     var roomLight: [String: OfficeLight] = [:]
-    /// Crates under way are the simulation's (`Cargo`); the node each one is drawn as is kept here, by command id.
     var cargo: [Int: Cargo] {
         get { simulation.cargo }
         set { simulation.cargo = newValue }
     }
     var cargoNodes: [Int: SCNNode] = [:]
-    /// The gate between the deck and the pad, per station: its scanner and the security unit beside it.
-    var gates: [String: GateView] = [:]
+    var droneRacks: [String: SCNNode] = [:]
+    var fields: [String: HangarField] = [:]
+    var padFields: [String: HangarField] = [:]
+    var vortexViews: [String: VortexView] = [:]
+    var padRings: [String: SCNNode] = [:]
+    var droneViews: [String: DroneView] = [:]
+    var puffs: [Puff] = []
     private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
     let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
     let infoBackground = SKSpriteNode(color: Palette.void.withAlphaComponent(0.85), size: CGSize(width: 1, height: 1))
     let statusLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
-    /// Who the camera is with and what they are doing, bottom centre while following.
     let followLabel = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
-    /// What a hovered minion is doing, on a dark plate above its head.
     let bubbleLabel = SKLabelNode(fontNamed: "HelveticaNeue")
     let bubblePlate = SKSpriteNode(color: Palette.void.withAlphaComponent(0.9), size: CGSize(width: 1, height: 1))
-    /// The bubble's row of orders, one symbol each, in `LoungeOrder` order.
     var bubbleIcons: [SKSpriteNode] = []
-    /// Decon's hatch light per station, for the blink and the puff when something comes through.
     var hatchLights: [String: SCNNode] = [:]
-    /// When a manual GitHub refresh last went out. Focus, the menu item and `g` all land in the same place,
-    /// and macOS will hand us two activations in a row; the second one would find every cache age just
-    /// cleared by `invalidate()` and ask GitHub the whole round again, so a refresh close behind another is
-    /// dropped. The poller's own intervals are untouched — this guards only the manual door.
     private var askedGitHubAt = Date.distantPast
-    /// Objects just through decon's hatch, by marker name: drawn high and floated down onto their pile.
     var incoming: Set<String> = []
-    /// Where the bubble and its icons are on screen, for the main thread's hover and click; nil while no bubble shows.
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
     var bubbleCursor: CGPoint?
@@ -363,61 +289,45 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
     var mission: Mission?
-    /// Someone walking the station at eye height, while they do.
     var walker: Walker?
-    /// Rehearsals started, so a rehearsal's own ending never ends the one that replaced it.
     var rehearsals = 0
     let missionCamera = SCNNode()
     let missionCraft = SCNNode()
-    /// Pad rockets hidden while their flight is on, shown again when it ends.
     var hiddenRockets: [SCNNode] = []
     var missionView: SCNView?
     var missionScreen: MissionScreen?
-    /// Main thread: the × pressed, or the chip clicked to keep the window open.
     var missionUserSmall = false, missionUserOpened = false
-    /// The window's size: 0 in its corner, 1 medium, 2 filling the station. Filled, it can be turned a little.
     var missionSize = 0
-    /// How far it is turned about the craft or the colony: yaw and pitch, in radians.
     var missionOrbit = SIMD2<Double>(0, 0)
-    /// Production flights waiting for the window while another is shown.
     var queuedMissions: [Mission] = []
-    /// What the mission window last showed, so it is redrawn only when that changes.
     var missionShown = ""
     let planetRoot = SCNNode()
     var planets: [String: SCNNode] = [:]
     var spaceLogButton: SpaceLogButton?
     var spaceLogPanel: SpaceLogPanel?
     var spaceLogClock = -100.0
-    /// Whether the log is open and when it was last drawn, as the scene's thread knows it.
     var spaceLogOpen = false
     var spaceLogDrawnAt = 0.0
-    /// The width the log's button takes in the top right corner, set on the main thread.
     var spaceLogCorner: CGFloat = 0
     var hovered: String?
-    /// The minion the camera goes with, until a pan, Esc or a click on the floor.
     var following: String?
     private var lastTick = 0.0
-    /// How fast station time runs in the live app: 1, or 4 while space is held.
     var liveTimeScale = 1.0
-    /// Visits that ran their course in a simulated run, and station time: both the simulation's.
     var visitLog: [(kind: String, lasted: Double, planned: Double)] { simulation.visitLog }
     var clock: Double {
         get { simulation.clock }
         set { simulation.clock = newValue }
     }
-    var targetHalf = SIMD2<Double>(6, 6)   // half-extent of the fleet as the default camera sees it
+    var targetHalf = SIMD2<Double>(6, 6)
     var targetFocus = SIMD2<Double>(0, 0)
     var userZoom = 1.0
     var userZoomChanged = false
-    var userDriving = 0.0          // seconds left of snappy camera response after a gesture
-    /// A hand has been on the camera since launch: the one-time framing when the floor has finished arriving
-    /// is for a view nobody has touched.
+    var userDriving = 0.0
     var userTookView = false
-    /// The frame counter in the corner: frames and the slowest of them since it last said, on real time.
     let fpsLabel = SKLabelNode(fontNamed: "HelveticaNeue-Light")
     private var fpsFrames = 0, fpsMark = 0.0, fpsWorst = 0.0
-    private var keyMove = SIMD2<Double>(0, 0)   // WASD held: screen-relative direction, x right and y up
-    private var keyZoom = 0.0                    // E/Q held: +1 zooms in, -1 out
+    private var keyMove = SIMD2<Double>(0, 0)
+    private var keyZoom = 0.0
     var userYaw = 0.0
     var userPitch = -Double.pi / 6
     var userPan = SIMD2<Double>(0, 0)
@@ -429,41 +339,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var watcher: DirectoryWatcher?
     var viewSize = CGSize(width: 640, height: 440)
     let demo: Bool
-    /// Set only in a simulator window: the event and command taps, and the clock the panel drives.
     var sim: SimHooks? {
         get { simulation.hooks }
         set { simulation.hooks = newValue }
     }
-    /// A scripted run with no frame ever drawn: the view's own tick and its decorations are skipped, since
-    /// nothing reads them. Everything on the station clock still runs, scene-side logic included.
     var headless = false
-    /// Station time as a date: the wall clock for the app, the simulated clock for a simulator, which
-    /// runs at its own pace and may stall. Everything on the station that judges freshness against
-    /// "now" reads this, so a slow frame can never age a session or a landing.
     var now: Date { simulation.now }
     var demoClock = 0.0
     var demoMerged = false
     var demoStaged = false
 
-    static let activeWindow: TimeInterval = 60 * 60     // a worker stays with a session for an hour of quiet
+    static let activeWindow: TimeInterval = 60 * 60
     static let busyWindow: TimeInterval = 90
     static let replyWindow: TimeInterval = 20
     static let sleepWindow: TimeInterval = 5 * 60
     static let subagentWindow: TimeInterval = 3 * 60
-    static let scanWindow: TimeInterval = 14 * 24 * 3600   // how far back transcripts are read
+    static let scanWindow: TimeInterval = 14 * 24 * 3600
 
-    /// Dark ink for anything written on a tile, whatever the tile's colour.
     static let inkOnTile = NSColor(rgb: (0.03, 0.03, 0.05))
-    /// Floor cells under a room's writing, so boxes and cones keep off the words.
     var labelCells: [String: Set<Cell>] = [:]
 
     let padHexRoot = SCNNode()
-    /// The hexagons on the bay's berths, by station, and which of them burn in whose colour.
     let berthRoot = SCNNode()
     var berthHexes: [String: [SCNNode]] = [:]
     var berthLit: [String: BerthLight] = [:]
 
-    var viewPinned = false   // set from the command line: never overridden by the remembered view
+    var viewPinned = false
 
     init(frame: NSRect, demo: Bool, simulated: Bool = false) {
         self.demo = demo
@@ -481,8 +382,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         buildHUD()
         view.scene = scene
         view.backgroundColor = Palette.void
-        view.antialiasingMode = .multisampling2X   // flat shading and straight edges: 2X reads the same as 4X
-        view.preferredFramesPerSecond = 30           // raised to 60 while a gesture is under way, lowered while unseen (tickView)
+        view.antialiasingMode = .multisampling2X
+        view.preferredFramesPerSecond = 30
         view.isPlaying = true
         view.autoresizingMask = [.width, .height]
         view.allowsCameraControl = false
@@ -490,8 +391,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
         view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
-        // A double-click pokes a minion and opens an office, its crate or a rocket; anywhere else on the floor it
-        // walks you in there.
         view.onDoubleClick = { [weak self] node, floor in
             let n = node?.name ?? ""
             self?.enqueue {
@@ -501,9 +400,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onClick = { [weak self] node in
-            // A click on the station outside the flight's window puts the window back small in its corner.
             if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
-            // A click on a minion follows it; a click anywhere else lets go.
             let n = node?.name ?? ""
             if n.hasPrefix("minion:") {
                 let id = String(n.dropFirst(7))
@@ -518,7 +415,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.onContextMenu = { [weak self] node, event in self?.showContextMenu(for: node?.name, event: event) }
         view.onZoom = { [weak self] f, point in
-            // Zoom about the ground point under the cursor: it stays put on screen while the view scales.
             let ground = point.flatMap { self?.groundPoint(at: $0) }
             self?.enqueue {
                 guard let self, self.walker == nil else { return }
@@ -533,7 +429,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onRotate = { [weak self] r, point in
-            // Pivot on the ground point under the cursor: rotate the camera focus around it.
             let ground = point.flatMap { self?.groundPoint(at: $0) }
             self?.enqueue {
                 guard let self, self.walker == nil else { return }
@@ -566,7 +461,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom; if dir != .zero || zoom != 0 { self?.userTookView = true } } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
-        // Space: the station runs faster while it is held; walking, it fires the jetpack instead.
         view.onHold = { [weak self] held in
             guard let self else { return }
             if let w = self.walker { w.thrusting = held; self.liveTimeScale = 1 } else { self.liveTimeScale = held ? 4 : 1 }
@@ -590,9 +484,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.delegate = self
 
-        // What the model cannot see for itself: a crate already on someone's arms, or a rocket mid-load.
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
-        // The scene's ears on the simulation.
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
@@ -646,22 +538,17 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rebuildStatic()
     }
 
-    /// What lies past the fleet, from the look: the colour beyond everything and whatever drifts there.
     private func buildBackdrop() {
         debrisRoot.childNodes.forEach { $0.removeFromParentNode() }
         scene.background.contents = Looks.current.background
         debris = []
-        guard Backdrop.drawn else { return }   // `--no-stars`: the station alone, for looking at the station
+        guard Backdrop.drawn else { return }
         debris = Looks.current.backdrop(into: debrisRoot)
     }
 
     func roomKey(_ station: Station, _ room: Room) -> String { "\(station.name)|\(room.key)" }
 
-    /// Tiles depend on whether a branch is pushed, so relayout when that changes; otherwise just the props.
     func onGitHubUpdate() {
-        // Every repository that answers says so, and on a launch they answer together: a dozen of these
-        // arrive in one frame, each taking the world's whole diff against GitHub. Once a frame is enough,
-        // since the one that runs sees everything that has landed by then.
         if !headless {
             guard lastGitHubFrame != frameNo else { return }
             lastGitHubFrame = frameNo
@@ -671,11 +558,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
             return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0):\(checks)"
         } }.sorted().joined()
-        // The world's diff first, then the redraw: a crate the board just cleared is handed to a carrier
-        // while it still stands on the untested row, and the redraw then leaves it out as carried.
         timed("github") { handle(world.applyGitHub(now: now, timed: { n, b in self.timed(n, b) })) }
-        // Offices left waiting for somewhere to stand come round on the next frame, since GitHub may
-        // have nothing further to say and they would otherwise wait for something that never comes.
         if world.placementsLeft { enqueue { [weak self] in self?.onGitHubUpdate() } }
         reconcileYards()
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
@@ -701,7 +584,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func apply(_ result: ScanResult) {
         let now = self.now
-        // The model works out what the floor should look like; the scene then places the workers on it.
         var homes: [String: World.MinionHome] = [:]
         for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
         newRooms = [:]
@@ -715,7 +597,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 && now.timeIntervalSince(s.lastModified) < (s.isSubagent ? StationController.subagentWindow : StationController.activeWindow)
         }
         let liveIds = Set(liveSessions.map(\.id))
-        // Workers whose session ended are free for reuse; they rest until someone needs them.
         for m in minions.values where !m.isCrew && !m.isSubagent && !liveIds.contains(m.id) && m.freeSince == 0 { m.freeSince = clock; m.busy = false; m.activity = .sleeping; clearPyramids(m) }
         for s in liveSessions {
             seen.insert(s.id)
@@ -724,7 +605,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             var isNew = minions[s.id] == nil
             var reused = false
             if isNew && !s.isSubagent {
-                // A free worker on this station takes the new session before the shuttle brings another.
                 if let free = minions.values.filter({ $0.station == stationName && !$0.isCrew && !$0.isSubagent && $0.freeSince > 0 && !$0.onJob })
                     .min(by: { $0.freeSince < $1.freeSince }) {
                     minions[free.id] = nil
@@ -768,7 +648,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let who = home.issue.map { "#\($0)" } ?? URL(fileURLWithPath: s.cwd).lastPathComponent
             if !isNew {
                 for (event, marker) in s.eventMarkers where m.markers[event] != marker {
-                    // A local signal never moves anything; it re-asks the authority now and for a while.
                     let root = s.repoRoot
                     switch event {
                     case .prOpened:
@@ -782,7 +661,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                         if let root { if let b = s.branch { github.expect("pull:" + root + "@" + b, for: 180, every: 30) }; github.expect("feed:" + root, every: 20) }
                     case .committed: logEvent("\(who) committed")
                     case .skill: if case .skill(let name) = s.activity { logEvent("\(who) used /\(name)") }
-                    case .prompt: break   // the model says so, as a .prompt event: the cones went up already
+                    case .prompt: break
                     case .tool: continue
                     }
                     ringBell(seed: s.id.hashValue &+ event.rawValue.hashValue)
@@ -792,7 +671,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.toolCount = s.toolCount
             m.promptCount = s.promptCount
             if !m.isSubagent {
-                // Bounded: the cone can fail to place (no room yet), which must never spin the render thread.
                 let want = min(5, s.queuedCount)
                 var attempts = 0
                 while m.queuedCones.count < want && attempts < 5 {
@@ -818,8 +696,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             m.state = .leaving; m.path = []
         }
         for station in fleet.stations.values {
-            // A standing crew of two, always present, so the station is never empty: standing by in the
-            // lounge, so only where there is one.
             let workers = minions.values.filter { $0.station == station.name && !$0.isSubagent && !$0.isCrew && $0.state != .leaving }
             if workers.count < 2, !station.cells(of: .lounge).isEmpty {
                 for k in workers.count..<2 {
@@ -838,7 +714,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let free = minions.values.filter { $0.station == station.name && $0.freeSince > 0 && $0.state != .leaving && !$0.isSubagent }
                 .sorted { $0.freeSince < $1.freeSince }
             for (i, m) in free.enumerated() where !m.isQA {
-                let longIdle = clock - m.freeSince > 20 * 60 && i >= 2          // keep a couple on standby, let the rest go
+                let longIdle = clock - m.freeSince > 20 * 60 && i >= 2
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
                     dismiss(m)
@@ -849,8 +725,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
-        // Offices that appeared without a shuttle ever ordered for them just show up. One with an order
-        // out, in the air or on the floor, is the delivery queue's: it is walked in, never conjured.
         let pending = Set(minions.values.compactMap { m in newRooms[m.id].map { "\(m.station)|\($0)" } })
         for key in undelivered where !pending.contains(key) && world.truth.delivery(for: key) == nil {
             layoutDirty = true
@@ -868,8 +742,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: peers
 
-    /// Sharing started, stopped or renamed. Already sharing under the same name, it carries on: a restart
-    /// drops every peer's connection.
     func applySharing() {
         let cfg = ConfigStore.shared.current
         let name = cfg.shareName.isEmpty ? NSUserName() : cfg.shareName
@@ -879,14 +751,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } else { peers.stop() }
     }
 
-    /// Our own claim for the others: offices we have checked out ourselves in repositories ticked
-    /// for sharing. Nothing learned from GitHub or from another peer goes back out.
     private func makeSnapshot(withGitHub: Bool) -> PeerSnapshot? {
         let cfg = ConfigStore.shared.current
         guard let station = fleet.stations["work"] else { return nil }
         var offices: [PeerSnapshot.Office] = []
         for r in station.rooms.values where r.worktree != nil && !r.key.hasPrefix("kind:") && (r.repo.map { cfg.shared(repo: $0) } ?? false)
-            && now.timeIntervalSince(r.lastActive) < World.roomsWindow {   // only what was worked in lately: old checkouts stay home
+            && now.timeIntervalSince(r.lastActive) < World.roomsWindow {
             let key = roomKey(station, r)
             let pr = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
             offices.append(PeerSnapshot.Office(key: r.key, name: r.name, repo: r.repo ?? "", branch: r.branch, color: r.color, cells: r.cells,
@@ -908,8 +778,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return PeerSnapshot(version: PeerSnapshot.current, name: peers.name, since: peers.since, offices: offices, minions: ms, github: knowledge, project: board, twoWay: true)
     }
 
-    /// A peer's claim lands on our work station. The model merges it; the scene shows the result and
-    /// stands their figures in whichever offices we happened to give them.
     func receivePeer(_ snap: PeerSnapshot) {
         world.peerName = peers.name
         timed("peer") { handle(world.applyPeer(snap, now: now)) }
@@ -918,23 +786,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         placePeerMinions(snap)
     }
 
-    /// Their minions are bodies here like any other. The wire carries facts and no places — the two
-    /// machines lay their floors differently, so their coordinates would mean nothing here — and the
-    /// facts are all this sets. Where the body goes and how it lies is the station's to decide, by the
-    /// same code that puts our own to bed: anything else is a second way of standing a body in a room,
-    /// and the second way is the one that puts two of them under one bunk.
     private func placePeerMinions(_ snap: PeerSnapshot) {
         let station = fleet.station("work")
         for m in snap.minions {
-            // One person, one body. A colleague heard on the network is the same colleague the board
-            // named when they hold the same office, and the board's body is the one that stays: the
-            // reactions a teammate's pull request plays out are addressed to it by login. The network
-            // only drives it, and hands it back when it goes quiet.
             if let crew = minions.values.first(where: { $0.isCrew && !$0.isPeer && $0.home.key == m.office }) {
                 crew.peerFed = snap.name
                 drive(crew, by: m, station: station)
-                // They may have stood here as a figure of their own before we knew they were the same
-                // person. One person, one body: the figure goes.
                 removePeerFigure("peer:\(snap.name)/\(m.id)")
                 continue
             }
@@ -957,13 +814,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         let live = Set(snap.minions.map { "peer:\(snap.name)/\($0.id)" })
         for id in minions.keys where id.hasPrefix("peer:\(snap.name)/") && !live.contains(id) { removePeerFigure(id) }
-        // A colleague this peer was speaking for and no longer mentions goes back to the board's word.
         let claimed = Set(snap.minions.map(\.office))
         for b in minions.values where b.peerFed == snap.name && !b.isPeer && !claimed.contains(b.home.key) { handBack(b) }
     }
 
-    /// What a peer told us about one of its minions, put onto a body. The facts and nothing else: where
-    /// the body goes and how it lies is the station's, by the same code that places our own.
     private func drive(_ b: Minion, by m: PeerSnapshot.Minion, station: Station) {
         b.busy = m.busy && !m.asleep
         b.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
@@ -979,8 +833,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for _ in 1..<max(1, cones) { addPyramid(for: b, queued: true) }
     }
 
-    /// The network has stopped speaking for this body: it is the board's again, which says only that a
-    /// teammate is about, and a teammate about with nothing to do is asleep in the quarters.
     private func handBack(_ b: Minion) {
         b.peerFed = nil
         b.busy = false
@@ -989,51 +841,31 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         send(b, to: .quarters)
     }
 
-    /// A peer's figure leaves, the way any body leaves.
     private func removePeerFigure(_ id: String) {
         guard let m = minions[id] else { return }
         despawn(m)
     }
 
-    /// A peer has gone quiet: its figures leave, its offices stay held until their hold runs out.
     func dropPeer(_ name: String) {
-        for id in minions.keys where id.hasPrefix("peer:\(name)/") { removePeerFigure(id) }   // their figures leave with them
-        for b in minions.values where b.peerFed == name { handBack(b) }                          // and those they spoke for are the board's again
+        for id in minions.keys where id.hasPrefix("peer:\(name)/") { removePeerFigure(id) }
+        for b in minions.values where b.peerFed == name { handBack(b) }
         handle(world.dropPeer(name))
         flushScene()
     }
 
     // MARK: events
 
-    /// The floor plan or the props changed. The rebuild waits until the caller has finished its own
-    /// work, so a scan can place its workers before the station is redrawn under them.
     private var layoutDirty = false
-    /// Which offices were last drawn as not yet looked at, so the lights can be brought up on the ones
-    /// that have been without rebuilding the floor under them.
     private var drawnUnchecked: [String: Bool] = [:]
-    /// Whether the floor was still arriving last tick, so the one settling can be done when it stops.
     private var wasLooking = true
-    /// When the floor was last rebuilt, on the wall clock.
     var lastRebuildAt = CACurrentMediaTime()
 
-    /// The floor is still arriving, or has only just stopped. Answers from GitHub are not the end of it:
-    /// offices land after them, and minions after those, each a rebuild of its own. Holding until the
-    /// rebuilds go quiet is what "settled" has to mean, or the view is let go one step too early.
-    /// Whether the view pulls back to take in the whole floor while the floor is arriving. True for the
-    /// station you keep, where a redraw is a thing to watch settle. False for the playbook, where the
-    /// floor is torn down and laid again every play and the point is one body: there, a settle throws the
-    /// camera out to a forty-tile fit and back for every rebuild, which reads as zooming at random.
     var settlesView = true
     var floorSettling: Bool { settlesView && (world.stillLooking || CACurrentMediaTime() - lastRebuildAt < 1.5) }
 
-    /// How dim an office is while it waits to be looked at.
-    static let unlitOffice = 0.75   // dim enough to read as unconfirmed, not so dim the colour goes
-    /// How much floor the view takes in while a station is still arriving: one height, held still,
-    /// since the frames of a launch are too uneven for the camera to move on.
+    static let unlitOffice = 0.75
     var settlingHalf: SIMD2<Double> { SIMD2(20, 20) }
 
-    /// The lights, apart from the floor. An office confirmed today comes up to full where it stands: the
-    /// tiles are already drawn, so this is a fade on what is there, never a reason to build them again.
     private func lightRooms() {
         for st in fleet.stations.values {
             for room in st.rooms.values where !room.key.hasPrefix("kind:") {
@@ -1050,44 +882,33 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
     var markersDirty = false
-    /// Offices ordered this scan, by session id: the worker fetches its own from the bay.
     private var newRooms: [String: String] = [:]
-    /// Peer offices waiting for a carrier.
     private var peerDeliveries: [String] = []
 
     func flushScene(firstRun: Bool = false) {
-        // The world's word first, then the picture: the reconciler may hand out carries or move a count,
-        // and the redraw that follows draws what it decided. The drawing itself decides nothing.
         timed("yards") { reconcileYards() }
         timed("lights") { lightRooms() }
-        // The floor has stopped arriving: frame it whole and settle everyone, once.
         if wasLooking, !floorSettling {
             wasLooking = false
-            if !userTookView { focusNow(on: focused) }   // a view already being driven is not reframed under the hand
+            if !userTookView { focusNow(on: focused) }
             timed("settle") { for st in fleet.stations.values { resettle(st) } }
         }
         if layoutDirty {
-            // One floor a frame. The rest of what is asked for keeps its place in the queue and is drawn
-            // on the next one, which is a frame late and not a second of the window frozen. A run with no
-            // window has no frames to spread the work over, so it does the lot as it comes.
             if !headless {
                 guard lastFloorFrame != frameNo else { return }
                 lastFloorFrame = frameNo
             }
             layoutDirty = false; markersDirty = false
             timed("floor") { rebuildStatic() }
-            if firstRun, !viewPinned, !world.simulated { restoreView() }   // a playbook's station is framed by its entry, never by your view
-            // Not while offices are still arriving: settling the bodies and reframing on a floor that
-            // is about to grow again is the jitter.
+            if firstRun, !viewPinned, !world.simulated { restoreView() }
             if !floorSettling { timed("settle") { for st in fleet.stations.values { resettle(st) } } }
-            refreshRockets()   // the pad may have moved with the floor: rockets standing by and the due rings follow it
+            refreshRockets()
         } else if markersDirty {
             markersDirty = false
             timed("markers") { rebuildMarkers() }
         }
     }
 
-    /// Offices ordered by a peer or by GitHub, once the floor they stand on has been drawn.
     private func flushDeliveries() {
         let station = fleet.station("work")
         for roomKey in peerDeliveries {
@@ -1104,8 +925,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func handle(_ events: [WorldEvent]) { for e in events { handle(e) } }
 
-    /// A message reached the session: the one cone that stands for the message being worked. The
-    /// queued cone at the head of the row, if any, is the one it came from.
     private func promptLanded(station: String, key: String, minionId: String, count: Int) {
         guard let m = minions[minionId], !m.isSubagent, count > 0 else { return }
         if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
@@ -1113,7 +932,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         arrangeQueuedCones(m)
     }
 
-    /// The one place that turns an event into a cue. Diffs emit; this decides what the station does.
     func handle(_ event: WorldEvent) {
         sim?.onEvent?(event)
         if sim == nil { StationLog.write("event", SimulatorModel.describe(event)) }
@@ -1151,7 +969,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             world.truth.renameOffice(from: oldKey, to: newKey)
             if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
             if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
-            if let m = minions[session], m.place == .room(from) { m.place = .room(to) }   // a delivery under way follows by its order
+            if let m = minions[session], m.place == .room(from) { m.place = .room(to) }
         case .officeArchived(let station, let key, let roomKey, let name, let hall, let announce, let reason):
             archive(station: station, key: key, roomKey: roomKey, name: name, hall: hall, announce: announce, reason: reason)
         case .officeMerged(let stationName, let key, let repo, let number):
@@ -1167,7 +985,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             setCrewRoster(members)
         case .deconArrived(let stationName, let repo, let numbers):
             hatchBlink(station: stationName)
-            // Just through the hatch: drawn at hatch height, they float down onto their pile.
             for n in numbers { incoming.insert("decon:\(stationName)|\(repo)|\(n)") }
         case .deconCleared(let stationName, let repo, let number):
             guard let station = fleet.stations[stationName] else { return }
@@ -1175,22 +992,18 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .crewActivity(let a):
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
-            simulation.orderPallet(station: station, repo: repo, number: number)
+            simulation.stagingOpened(station: stationName, repo: repo, number: number)
         case .stagingMerged(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) merged")
-            simulation.palletMerged(station: station, repo: repo)
+            simulation.stagingMerged(station: stationName, repo: repo, number: number)
+            if let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .stagingClosed(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
             logEvent("\(repo): staging release #\(number) closed, not merged")
-            simulation.palletClosed(station: station, repo: repo)
+            simulation.stagingClosed(station: stationName, repo: repo, number: number)
         case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
-            break    // the rocket command that comes with it is the cue; the log line came as a .log
+            break
         case .releaseMerged(let stationName, let repo, _, _, _, false):
-            // A staging release without a board and without a pallet: nothing else would move the crates.
-            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName],
-               world.truth.pallets[stationName]?.repo != repo { stageCargo(station: st, repo: repo) }
+            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command):
             simulation.rocket(station: stationName, repo: repo, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
@@ -1203,10 +1016,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let label = "#\(item.number) \(item.title.prefix(36))"
             switch to {
             case .deck where from == st.storage:
-                logEvent("\(label): on staging, to the deck")   // the yard reconciliation carries it across
+                logEvent("\(label): on staging, to the deck")
                 markersDirty = true
             case .cleared:
-                logEvent("\(label): passed QA, ready to ship")   // the record's word carries it across the deck
+                logEvent("\(label): passed QA, ready to ship")
             case .shipped where from != nil:
                 logEvent("\(label): shipped")
             case .storage where from == st.development:
@@ -1217,8 +1030,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         case .pullRequestOpened(let repo, let number, let author, let roomKey):
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
-            // My own office with a worker: the crate does not appear by itself. The worker clears the
-            // cones and packs it at the office's package slot, once it is free to.
             if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.isPeer && $0.home.key == roomKey }),
                let st = fleet.stations[m.station], let room = st.rooms[roomKey] {
                 let key = m.station + "|" + roomKey
@@ -1249,17 +1060,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: tick
 
-    /// Things due later on the station clock, so they wait when the clock waits.
     private var timers: [(at: Double, run: () -> Void)] = []
     func after(_ seconds: Double, _ run: @escaping () -> Void) { timers.append((clock + seconds, run)) }
 
     func tick(now: TimeInterval) {
         let dt = min(0.1, max(0, now - lastTick))
         lastTick = now
-        // Station time runs at real speed, or faster while space is held, in steps small enough that a
-        // minion still walks rather than jumps. The camera, labels and HUD stay on real time.
         var budget = dt * (sim == nil ? liveTimeScale : 1)
-        while budget > 1e-9 {   // a rounding sliver is not a step: it would run every decision twice in one frame
+        while budget > 1e-9 {
             let step = min(budget, 1.0 / 30.0)
             budget -= step
             stepStation(dt: step)
@@ -1270,7 +1078,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private var lastOffer: TimeInterval = 0
     private var offers = 0
-    /// What the peers hear, built here where the floor is changed, every few seconds; the GitHub answers every tenth time.
     private func offerSnapshot(now: TimeInterval) {
         guard peers.isRunning, now - lastOffer >= 3 else { return }
         lastOffer = now
@@ -1278,7 +1085,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if let snap = makeSnapshot(withGitHub: offers % 10 == 1) { peers.offer(snap) }
     }
 
-    /// Everything that happens on the station, by its clock.
     private func stepStation(dt: Double) {
         clock += dt
         if !timers.isEmpty {
@@ -1295,21 +1101,26 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             simulation.stepRockets()
             simulation.reconcileBodies()
             if simulation.contractHallways() { layoutDirty = true }
-            flushScene()   // the reconciler's beat: the source against the floor, and a redraw only if that moved a count
+            flushScene()
             timed("obstacles") { refreshObstacles() }
             simulation.replanBlockedWalks()
         }
         simulation.stepShuttles()
-        simulation.stepPallets(dt: dt)
-        simulation.stepGates(dt: dt)
+        simulation.stepTips(dt: dt)
+        simulation.stepVortices()
+        simulation.stepDrones(dt: dt)
         drawShuttles(dt: dt)
+        tickHangars()
+        tickUndocking()
         updateBerths()
         tickHullLamps()
         drawRockets()
         tickSparks(dt: dt)
-        drawPallets()
         turnPlanets(dt: dt)
-        tickGates(dt: dt)
+        drawDrones(dt: dt)
+        tickPuffs(dt: dt)
+        tickPadFields()
+        drawVortices()
         tickCrateMotions()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: World.peerQuiet) { dropPeer(name) }
@@ -1324,11 +1135,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         tickMinions(dt: dt)
     }
 
-    /// The view: camera, labels and HUD, on real time whatever the station clock is doing.
     private func tickView(dt: Double) {
         if hud.size != viewSize { hud.size = viewSize }
-        // A desk toy's frame rate: 60 while the camera is being driven, 30 whenever the window can be seen,
-        // focused or not, since it sits beside the work; 8 only when it is covered or hidden.
         let seen = (view.window?.occlusionState.contains(.visible) ?? true) && !headless
         let want = !seen ? 8 : (walker != nil || userDriving > 0 || keyMove != .zero || keyZoom != 0 ? 60 : 30)
         if view.preferredFramesPerSecond != want { view.preferredFramesPerSecond = want }
@@ -1338,24 +1146,20 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if wall - fpsMark >= 0.5 {
             let rate = Double(fpsFrames) / max(0.05, wall - fpsMark)
             fpsLabel.text = String(format: "%.0f fps of %d · slowest %.0f ms", rate, want, fpsWorst * 1000)
-            fpsLabel.position = CGPoint(x: 84, y: hud.size.height - 9)   // beside the window's buttons, not under them
+            fpsLabel.position = CGPoint(x: 84, y: hud.size.height - 9)
             fpsFrames = 0; fpsMark = wall; fpsWorst = 0
         }
         if !tickWalk(dt: dt, move: keyMove, turn: keyZoom) {
         if keyMove != .zero {
-            // Held WASD: a steady slide, a bit under the view's height per second.
             let speed = Double(viewSize.height) * 0.7 * dt
             pan(byPixels: -keyMove.x * speed, keyMove.y * speed)
         }
         if keyZoom != 0 {
-            // Held E/Q: doubles or halves the zoom in about a second.
             userZoom = min(6, max(0.4, userZoom * exp(keyZoom * dt * 0.7)))
             userZoomChanged = true
         }
 
         if let id = following {
-            // The camera keeps the followed minion in the middle; the zoom and the turn stay yours. One
-            // still stepping out of its shuttle is kept; one gone out through the airlock is let go.
             if let m = minions[id], m.state != .leaving || m.opacity > 0.05 {
                 userPan = SIMD2(Double(m.node.position.x), Double(m.node.position.z)) - targetFocus
             } else { following = nil }
@@ -1365,7 +1169,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let kp = userDriving > 0 ? 1 - exp(-dt * 25) : k
         if userDriving > 0 { userDriving -= dt }
         if floorSettling {
-            rig.position.x = focus.x; rig.position.z = focus.y   // pinned: nothing to ease toward
+            rig.position.x = focus.x; rig.position.z = focus.y
         } else {
             rig.position.x += (focus.x - Double(rig.position.x)) * kp
             rig.position.z += (focus.y - Double(rig.position.z)) * kp
@@ -1373,9 +1177,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let ky = 1 - exp(-dt * 10)
         rig.eulerAngles.y += (viewYaw + userYaw - Double(rig.eulerAngles.y)) * ky
         pitchNode.eulerAngles.x += (userPitch - Double(pitchNode.eulerAngles.x)) * ky
-        // Nothing eases while the floor arrives: an eased camera closes a fraction of whatever gap is
-        // left each frame, which is smooth only while the frames are even, and a launch is when they
-        // are least even.
         if floorSettling {
             cameraNode.camera!.orthographicScale = fitScale(half: settlingHalf) / userZoom
         } else {
@@ -1414,8 +1215,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if sim == nil, clock - lastSavedView > 2 { lastSavedView = clock; saveView() }
     }
 
-    /// Settings changed: rebuild the fleet from scratch on the next scan. A new share name changes nothing
-    /// on the floor, so it leaves the station standing.
     func applyConfigChange(from old: AppConfig, to new: AppConfig) {
         applySharing()
         var renamed = old
@@ -1424,8 +1223,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
             if Looks.theme != cfg.theme {
-                // A new look: the backdrop, the ships and the rockets are drawn again; the floor is
-                // rebuilt below and the minions come back with the rescan in their new figures.
                 Looks.use(cfg.theme)
                 buildBackdrop()
                 for v in rocketViews.values { v.node.removeFromParentNode() }
@@ -1444,7 +1241,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
 
     var knownRepos: [String] { world.knownRepos }
-    /// Each repository's checkout, remote and pipeline, for its page in the settings window.
     var repoDetails: [String: RepoDetail] {
         var out: [String: RepoDetail] = [:]
         for (root, info) in world.repoRoots.sorted(by: { $0.key < $1.key }) where out[info.repo] == nil {
@@ -1456,7 +1252,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
     var seenPeople: [String: SeenPerson] { world.seenPeople }
 
-    /// Re-asks GitHub about every office, branch and release right now.
     func refreshGitHub() {
         guard Date().timeIntervalSince(askedGitHubAt) > 3 else { return }
         askedGitHubAt = Date()
@@ -1477,9 +1272,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// Everything this station is doing, stopped. The playbook throws a station away for each play, and
-    /// one still drawing and still ticking after its view is gone competes for the frame with the live
-    /// one — several of them, after several plays.
     func quiesce() {
         timer?.invalidate(); timer = nil
         watcher = nil
@@ -1489,7 +1281,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.scene = nil
     }
 
-    /// Renders the current frame to a PNG, used for self-checks.
     func snapshot(to path: String) {
         let image = composedSnapshot()
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
@@ -1497,7 +1288,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         try? png.write(to: URL(fileURLWithPath: path))
     }
 
-    /// The rendered frame with the overlays on it: the log, and the mission's camera window.
     func composedSnapshot() -> NSImage {
         let image = view.snapshot()
         let overlays = view.subviews.filter { !$0.isHidden }
@@ -1509,7 +1299,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if let pip = v as? SCNView { pip.snapshot().draw(in: at, from: .zero, operation: .sourceOver, fraction: 1); continue }
                 guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
                 v.cacheDisplay(in: v.bounds, to: rep)
-                // A plain draw copies rather than blends.
                 rep.draw(in: NSRect(x: v.frame.minX * scale, y: v.frame.minY * scale, width: v.frame.width * scale, height: v.frame.height * scale),
                          from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }

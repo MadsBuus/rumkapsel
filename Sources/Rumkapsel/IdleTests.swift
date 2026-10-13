@@ -1,9 +1,3 @@
-// Model-only tests of a lounger's idle life: `.build/debug/Rumkapsel --idle-tests`.
-//
-// No station, no scene: a clock stepped by hand and rolls chosen on purpose. One idle clock per
-// lounger, armed on the couch, kept while away, dropped by work; a pick by weight, with nowhere to
-// go turning into a look round the station; roamers keeping apart except when there is company.
-
 import Foundation
 
 enum IdleTests {

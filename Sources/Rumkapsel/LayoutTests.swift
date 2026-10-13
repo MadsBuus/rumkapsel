@@ -1,9 +1,3 @@
-// Model-only tests of the floor plan: `.build/debug/Rumkapsel --layout-tests`.
-//
-// The plan is meant to be a pure function of shared facts, so that a station shared across machines
-// looks the same on every one of them. These hold it to that: two stations built from nothing and given
-// the same rooms in the same order lay them out identically, and a room's shape follows its key.
-
 import Foundation
 import simd
 
@@ -11,7 +5,7 @@ enum LayoutTests {
     private static var failures = 0
 
     static func run() -> Never {
-        Theme.pinnedForPlan = .classic   // the plan as Classic lays it out, whatever the config says
+        Theme.pinnedForPlan = .classic
         OfficePlacement.pinned = .rings
         let keys = ["task:web#455", "task:api#5158", "task:ios#298", "branch:web/feature-x", "task:web#460", "task:api#5140"]
 
@@ -28,7 +22,6 @@ enum LayoutTests {
             let a = fresh(), b = fresh()
             place("task:web#455", on: a); place("task:web#455", on: b)
             expect(a.rooms["task:web#455"]?.cells == b.rooms["task:web#455"]?.cells, "\(cells(a, "task:web#455")) against \(cells(b, "task:web#455"))")
-            // The plan holds the shapes, so a key no longer picks one — but the plan's own are varied.
             let shapes = Set(Floorplan.forStation("work").slots.prefix(40).map { s -> [Cell] in
                 let mx = s.cells.map(\.x).min() ?? 0, my = s.cells.map(\.y).min() ?? 0
                 return s.cells.map { Cell(x: $0.x - mx, y: $0.y - my) }.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
@@ -52,7 +45,6 @@ enum LayoutTests {
             let taken = a.rooms.values.compactMap { r in r.cells.first.flatMap { plan.slotOf[$0] } }.sorted()
             expect(taken == Array(taken.indices), "the first twelve offices took the first twelve slots: \(taken)")
 
-            // A slot freed by an office closing is the next one handed out, not one further along.
             let middle = a.rooms.values.first { r in r.cells.first.flatMap { plan.slotOf[$0] } == 4 }
             expect(middle != nil, "an office stands in slot 4")
             let cells = middle!.cells
@@ -66,7 +58,6 @@ enum LayoutTests {
             for i in 0..<16 { place("task:repo\(i % 3)#\(300 + i)", on: a) }
             let full = a.dugCount
             expect(full > 0 && a.spareHallway().isEmpty, "with every office standing nothing is spare, of \(full) cells dug")
-            // The inner offices close and the outermost stays: only the way to it is kept.
             let plan = a.floor
             let offices = a.rooms.values.filter { $0.key.hasPrefix("task:") }
             let outer = offices.max { ($0.cells.first.flatMap { plan.slotOf[$0] } ?? 0) < ($1.cells.first.flatMap { plan.slotOf[$0] } ?? 0) }!
@@ -76,12 +67,10 @@ enum LayoutTests {
             expect(a.dugCount < full, "hallway was given back: \(a.dugCount) of \(full) cells kept")
             expect(a.doorCell(of: outer.key) == door, "the office left keeps its door")
             expect(whole(a), "and the hallway is one piece with every room's door on it")
-            // Offices opening in the freed slots find their way back along the plan's hallway.
             for i in 0..<5 { place("task:between\(i)#\(500 + i)", on: a) }
             expect(whole(a), "offices opening between are reached: \(a.dugCount) cells dug")
             for i in 0..<5 { a.removeRoom(key: "task:between\(i)#\(500 + i)") }
             a.giveBack(a.spareHallway())
-            // The last one goes: nothing dug is needed, and offices opening again find their way.
             a.removeRoom(key: outer.key)
             a.giveBack(a.spareHallway())
             expect(a.dugCount == 0, "with no offices no dug hallway is left: \(a.dugCount)")
@@ -92,11 +81,7 @@ enum LayoutTests {
         test("every baked plan is whole: the essentials are joined before any office, and lighting the slots in order never breaks the floor") {
             expect(!Floorplan.all().isEmpty, "there are baked plans: \(Floorplan.all().count)")
             for plan in Theme.allCases.flatMap({ Floorplan.all($0) }) {
-                // Loading ran `check()`, which is where a bad bake stops the process. This states what it
-                // covers, and adds what a plan is for: a hundred slots, in order of their distance out.
                 expect(plan.slots.count >= 100, "plan \(plan.seed) has \(plan.slots.count) office slots")
-                // Slots open in rings out from the monolith, each ring sweeping round before the next
-                // begins — so the ring never goes back, though a slot's bearing does.
                 let rings = plan.slots.map(\.ring)
                 expect(zip(rings, rings.dropFirst()).allSatisfy { $0 <= $1 },
                        "plan \(plan.seed) opens ring by ring outward, \(rings.first ?? 0) to \(rings.last ?? 0)")
@@ -128,12 +113,11 @@ enum LayoutTests {
         test("two stations that placed one room differently agree once the lower name's cells are taken") {
             let a = fresh(), b = fresh()
             for k in keys.prefix(3) { place(k, on: a); place(k, on: b) }
-            place("task:web#900", on: b)             // b heard of one more room first
-            place("task:api#901", on: a); place("task:api#901", on: b)   // then both placed the same room, against different floors
+            place("task:web#900", on: b)
+            place("task:api#901", on: a); place("task:api#901", on: b)
             place("task:web#900", on: a)
             let differ = a.rooms["task:api#901"]!.cells != b.rooms["task:api#901"]!.cells || a.rooms["task:web#900"]!.cells != b.rooms["task:web#900"]!.cells
             expect(differ, "the two disagree before the tie-break")
-            // a has the lower name: b takes a's cells for every room they disagree on, all at once.
             expect(b.replaceRooms(["task:api#901", "task:web#900"].map { ($0, a.rooms[$0]!.cells) }), "the disputed rooms are taken as a placed them")
             for k in ["task:api#901", "task:web#900"] { expect(a.rooms[k]?.cells == b.rooms[k]?.cells, "\(k): \(cells(a, k)) against \(cells(b, k))") }
             let hall = Set(b.corridorCells + b.coreCells).subtracting([b.monolithCell])
@@ -152,7 +136,6 @@ enum LayoutTests {
             expect(a.dugCount > before, "hallway was dug for them: \(a.dugCount) cells")
             let hallway = Set(a.corridorCells + a.coreCells)
             for (k, r) in a.rooms { expect(!r.cells.contains(where: hallway.contains), "\(k) does not stand on the hallway") }
-            // An office takes a slot; the quarters take the places the plan keeps for them.
             let kept = Set(a.floor.quarters.values.joined())
             expect(a.rooms.values.allSatisfy { r in
                 r.cells.contains { a.floor.slotOf[$0] != nil } || r.cells.allSatisfy(kept.contains)
@@ -204,33 +187,35 @@ enum LayoutTests {
             expect(order.allSatisfy { kept.rooms[$0]?.cells == before.rooms[$0]?.cells }, "and without a relayout every office keeps its cells")
         }
 
-        test("Classic's pad stands right north of the deck, as it always has") {
+        test("Classic's pad stands right beyond the hall's field, the whole width of it") {
             let a = fresh()
-            expect(Set(a.deckCells.map { Cell(x: $0.x, y: $0.y - 4) }) == Set(a.padCells), "pad \(cells(a.padCells)) against the deck moved north")
+            let top = a.hall.cells.map(\.y).min()!
+            let field = Set(a.hall.cells.filter { $0.y == top }.map { Cell(x: $0.x, y: top - 1) })
+            expect(field.isSubset(of: Set(a.hall.padCells)), "the pad runs along the field: \(cells(a.hall.padCells))")
+            expect(a.hall.padCells.allSatisfy { $0.y < top }, "the pad is all beyond the glass")
         }
 
-        test("the hull is over everything but the pad and the bay, meets the floor where its pieces stand, and lets you through its doorways") {
+        test("the hull is over everything but the pad, the bay's hangar included, meets the floor where its pieces stand, and lets you through its doorways") {
             let a = fresh()
             for i in 0..<20 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
             let hull = StationHull(a)
-            let out = (a.padCells + a.hangarCells).filter { hull.inside.contains($0) }
-            expect(out.isEmpty, "the pad and the bay are under open space: \(cells(out))")
-            let indoors = a.storageCells + a.deckCells + a.deconCells + a.airlockCells + a.coreCells
+            let out = a.hall.padCells.filter { hull.inside.contains($0) }
+            expect(out.isEmpty, "the pad is under open space: \(cells(out))")
+            let indoors = a.hall.cells + a.hall.deconCells + a.airlockCells + a.coreCells + a.hangarCells
             let missed = indoors.filter { !hull.inside.contains($0) }
-            expect(missed.isEmpty, "storage, the deck, decon, the airlock and the hallway are indoors: \(cells(missed))")
-            // Where the station's view draws its pieces: across the airlock's outer door, and along the pad's east side.
-            if let door = a.airlockCells.max(by: { $0.y < $1.y }) {
-                let foot = SIMD2(Double(door.x), Double(door.y) + 0.5)
-                expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the airlock's outer door is a doorway in the hull's foot")
+            expect(missed.isEmpty, "the hall, decon, the passage, the bay and the hallway are indoors: \(cells(missed))")
+            for c in a.hangarCells where c.y == a.hangarCells.map(\.y).max() {
+                let foot = SIMD2(Double(c.x), Double(c.y) + 0.5)
+                expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the bay's mouth is open in the hull's foot at \(c.x)")
             }
-            if let east = a.padCells.map(\.x).max(), let y = a.padCells.map(\.y).min() {
+            if let east = a.hall.padCells.map(\.x).max(), let y = a.hall.padCells.map(\.y).min() {
                 let foot = SIMD2(Double(east) + 0.5, Double(y) + 0.5)
                 expect(hull.reach(foot).distance < 0.01, "the hull meets the floor along the pad's east side")
             }
-            for (deck, pad) in a.gateDoorway {
-                let through = (SIMD2(Double(deck.x), Double(deck.y)) + SIMD2(Double(pad.x), Double(pad.y))) / 2
-                let roof = hull.roof(over: through + SIMD2(0, Double(deck.y - pad.y)) * 0.01, top: 0.5) ?? .infinity
-                expect(roof > 0.5, "a body walks through the gate under the hull: roof \(roof)")
+            for (hall, out) in a.hall.padWall {
+                let through = (SIMD2(Double(hall.x), Double(hall.y)) + SIMD2(Double(out.x), Double(out.y))) / 2
+                let roof = hull.roof(over: through + SIMD2(0, Double(hall.y - out.y)) * 0.01, top: 0.5) ?? .infinity
+                expect(roof > 0.5, "the hall's pad wall stands under the hull: roof \(roof)")
             }
             let crown = StationHull.height(atDistance: 99)
             expect(abs(crown - StationHull.section.rise) < 1e-9 && StationHull.height(atDistance: 0) == 0,
@@ -250,9 +235,7 @@ enum LayoutTests {
                                     promptCount: 0, queuedCount: 0, eventMarkers: [:])
                 return world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
             }
-            // Past the first scans, while a floor waits for GitHub before it puts offices up.
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
-            // The office of the pull request the workspace merged, still waiting for its crate to reach storage.
             let merged = world.works.note(repo: "web", pull: 85, pullState: "MERGED")
             world.works.report(merged, .stored, by: .pulls)
             let old = "task:web#85"
@@ -280,7 +263,6 @@ enum LayoutTests {
                 let named = s.ways.flatMap(\.places)
                 expect(Set(named).count == named.count, "each place once on a sign: \(named)")
                 for p in places where p.cells.contains(s.cell) { expect(!named.contains(p.name), "no sign points to where it stands: \(p.name)") }
-                // A step the way an arrow points, for whoever faces the sign, is a step nearer each place it names.
                 for way in s.ways {
                     let d = s.wall
                     let w = [Signs.Turn.left: SIMD2(d.y, -d.x), .right: SIMD2(-d.y, d.x), .back: SIMD2(-d.x, -d.y)][way.turn]!
@@ -302,29 +284,81 @@ enum LayoutTests {
             }
         }
 
-        test("the yard has room for a pallet: a lane through its doorway, and a body's width of aisle past each end") {
+        test("a full yard: every crate on its own zone's tiles, a tile to a repository, none sharing a place, every stack built from the floor") {
             let a = fresh()
-            let rows = Set(a.storageCells.map(\.y)).sorted()
-            expect(Set(a.storageCells.map(\.x)).count == Station.yardWide && rows.count == 4,
-                   "storage is \(Station.yardWide) wide and four deep: \(cells(a.storageCells))")
-            // The lane is two columns of the crate rows either side of the aisle the pallet floats in.
-            let lane = a.palletLane
-            expect(lane.count == 4, "the lane is four cells: \(cells(Array(lane)))")
-            expect(lane.allSatisfy { a.storageCells.contains($0) }, "all of it storage floor")
-            expect(Set(lane.map(\.y)) == [a.storageNearRow, a.storageAisleRow + 1], "on the rows either side of the aisle")
-            // The doorway to the deck takes the lane and a column either side, so a body can walk past a
-            // pallet standing in it.
-            let gate = Set(a.yardDoorways.filter { a.storageCells.contains($0.0) && a.deckCells.contains($0.1)
-                                                || a.storageCells.contains($0.1) && a.deckCells.contains($0.0) }
-                .flatMap { [$0.0.x, $0.1.x] })
-            expect(Set(a.palletLaneColumns).isSubset(of: gate) && gate.count == Set(a.palletLaneColumns).count + 2,
-                   "the doorway is the lane with a column either side: \(gate.sorted())")
-            // And the aisle it stands in is wide enough to get round: a body needs a third of a tile.
-            let xs = a.storageCells.map { Double($0.x) }
-            let home = Double(a.palletLaneColumns.reduce(0, +)) / 2
-            let past = (xs.max()! + 0.5) - (home + PalletGeometry.width / 2 + 0.2)
-            expect(past >= 0.34 && abs(past - ((home - PalletGeometry.width / 2 - 0.2) - (xs.min()! - 0.5))) < 0.01,
-                   "\(past) of clear aisle at each end of it")
+            for (k, repo) in ["web", "api", "ios", "android"].enumerated() {
+                let base = 100 * (k + 1)
+                a.ledger.adopt(Ledger.Word(storage: Array(base..<base + 12), deck: Array(base + 50..<base + 62), cleared: Array(base + 50..<base + 56)), repo: repo)
+            }
+            for (yard, zones) in [(Yard.storage, [0: a.hall.storageCells]), (Yard.deck, [0: a.hall.clearedCells, 1: a.hall.stagedCells])] {
+                let layout = a.layout(of: yard)
+                expect(layout.count == 48, "\(yard) holds all 48: \(layout.count)")
+                for s in layout { expect(zones[s.group]?.contains(s.cell) == true, "\(yard) #\(s.number) stands in its zone, not on \(s.cell)") }
+                for (place, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)|\($0.level)" }) where here.count > 1 {
+                    expect(false, "\(yard) \(place) holds \(here.count) crates")
+                }
+                for (tile, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
+                    expect(false, "\(yard) tile \(tile) mixes \(Set(here.map(\.repo)).sorted())")
+                }
+                for (column, stack) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)" }) {
+                    expect(Set(stack.map(\.level)) == Set(0..<stack.count), "\(yard) column \(column) is built from the floor: \(stack.map(\.level).sorted())")
+                }
+            }
+        }
+
+        test("each repository piles in its own column, untested under tested and waiting under that; the first by the walkway, the next a column away") {
+            let a = fresh()
+            a.ledger.adopt(Ledger.Word(storage: [1, 2], deck: Array(10..<20), cleared: Array(10..<16)), repo: "web")
+            _ = a.layout(of: .deck); _ = a.layout(of: .storage)
+            a.ledger.adopt(Ledger.Word(storage: [30], deck: [40, 41], cleared: [40]), repo: "ios")
+            let deck = a.layout(of: .deck), storage = a.layout(of: .storage)
+            func columns(_ repo: String, _ cells: [YardSlot]) -> Set<Int> { Set(cells.filter { $0.repo == repo }.map(\.cell.x)) }
+            let walkway = a.hall.walkwayCells[0].x
+            let web = columns("web", deck + storage), ios = columns("ios", deck + storage)
+            expect(web == [walkway - 1], "web's tested, untested and waiting all in the column by the walkway: \(web.sorted())")
+            expect(ios == [walkway - 3], "ios a column away from web: \(ios.sorted())")
+            let tested = deck.filter { $0.repo == "web" && $0.cleared }
+            expect(tested.contains { $0.cell.y == a.hall.clearedGrid[0][0].y }, "web's tested pile starts by the field")
+            for (cell, here) in Dictionary(grouping: deck + storage, by: { "\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
+                expect(false, "tile \(cell) mixes \(Set(here.map(\.repo)).sorted())")
+            }
+        }
+
+        test("restacked, a repository's untested crates stand in the column of its tested ones, whoever is in storage") {
+            let a = fresh()
+            for (repo, n) in [("api", 30), ("android", 31), ("bot", 32)] { a.ledger.adopt(Ledger.Word(storage: [n], deck: [], cleared: []), repo: repo) }
+            a.ledger.adopt(Ledger.Word(storage: [], deck: [33], cleared: [33]), repo: "ios")
+            a.ledger.adopt(Ledger.Word(storage: [], deck: Array(10..<20), cleared: Array(14..<20)), repo: "web")
+            _ = a.layout(of: .storage); _ = a.layout(of: .deck)
+            a.ledger.forgetSlots()
+            _ = a.layout(of: .storage)
+            let deck = a.layout(of: .deck).filter { $0.repo == "web" }
+            let tested = Set(deck.filter(\.cleared).map(\.cell.x)), untested = Set(deck.filter { !$0.cleared }.map(\.cell.x))
+            expect(untested == tested, "web's untested in columns \(untested.sorted()), its tested in \(tested.sorted())")
+        }
+
+        test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {
+            let a = fresh()
+            expect(a.hall.cells.count == Hall.wide * Hall.deep, "the hall is \(Hall.wide) by \(Hall.deep): \(cells(a.hall.cells))")
+            for (name, zone) in [("cleared", a.hall.clearedCells), ("staged", a.hall.stagedCells), ("storage", a.hall.storageCells)] {
+                expect(zone.count == 8 && Set(zone).count == 8, "\(name) is eight tiles: \(cells(zone))")
+                expect(zone.allSatisfy(a.hall.cells.contains), "\(name) is in the hall")
+                let reach = Set(a.hall.aisleCells + a.hall.walkwayCells)
+                for c in zone {
+                    let near = c.neighbours.contains(where: reach.contains)
+                    let behind = c.neighbours.contains { n in zone.contains(n) && n.neighbours.contains(where: reach.contains) }
+                    expect(near || behind, "\(name) tile \(c) is reached from an aisle")
+                }
+            }
+            let zones = Set(a.hall.clearedCells + a.hall.stagedCells + a.hall.storageCells)
+            expect(zones.isDisjoint(with: a.hall.aisleCells) && zones.isDisjoint(with: a.hall.walkwayCells), "nothing stands on the aisles or the walkway")
+            expect(Set(a.hall.cells) == zones.union(a.hall.aisleCells).union(a.hall.walkwayCells), "the hall is the zones, the aisles and the walkway")
+            if let arm = a.plan.west.last {
+                expect(a.hall.walkwayCells.contains(Cell(x: arm.x - 1, y: arm.y)), "the west arm comes onto the walkway")
+            }
+            let top = a.hall.cells.map(\.y).min()!, bottom = a.hall.cells.map(\.y).max()!
+            expect(a.hall.clearedCells.allSatisfy { $0.y <= top + 1 } && a.hall.storageCells.allSatisfy { $0.y >= bottom - 1 },
+                   "cleared at the pad end, storage at the back")
         }
 
         for theme in Theme.allCases {
@@ -332,7 +366,7 @@ enum LayoutTests {
             test("\(theme.title): forty rooms keep off the yard, and no hallway is dug through it") {
                 let a = fresh()
                 for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
-                let yard = Set(a.padCells + a.deckCells + a.storageCells + a.deconCells)
+                let yard = Set(a.hall.padCells + a.hall.cells + a.hall.deconCells)
                 for (k, r) in a.rooms { expect(!r.cells.contains(where: yard.contains), "\(k) keeps off the yard") }
                 expect(yard.isDisjoint(with: a.corridorCells), "the hallway keeps off the yard")
             }
@@ -360,8 +394,8 @@ enum LayoutTests {
                 let a = fresh()
                 for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
                 let lock = Set(a.airlockCells), bay = Set(a.hangarCells)
-                expect(lock.count == Station.airlockLength, "the passage is \(lock.count) tiles")
-                var inside = Set(a.corridorCells + a.coreCells + a.padCells + a.deckCells + a.storageCells + a.deconCells)
+                expect(lock.count == Station.airlockLength, "the way into the bay is \(lock.count) tiles")
+                var inside = Set(a.corridorCells + a.coreCells + a.hall.padCells + a.hall.deckCells + a.hall.storageCells + a.hall.deconCells)
                 for r in a.rooms.values { inside.formUnion(r.cells) }
                 expect(lock.isDisjoint(with: inside), "nothing else stands in the airlock: \(cells(Array(lock.intersection(inside))))")
                 expect(bay.isDisjoint(with: inside), "nothing else stands in the bay: \(cells(Array(bay.intersection(inside))))")
@@ -393,13 +427,11 @@ enum LayoutTests {
         exit(0)
     }
 
-    /// The floor as text, one character a cell, for a look without a window: `#` the monolith, `.` hallway,
-    /// letters the rooms, `L D B G` the lounge, dorm, bath and gym, `=` yard, `~` bay, `^` airlock.
     static func draw(_ s: Station, byRepo: Bool = false) {
         var chars: [Cell: Character] = [:]
         for c in s.corridorCells + s.coreCells { chars[c] = "." }
         chars[s.monolithCell] = "#"
-        for c in s.padCells + s.deckCells + s.storageCells + s.deconCells { chars[c] = "=" }
+        for c in s.hall.padCells + s.hall.deckCells + s.hall.storageCells + s.hall.deconCells { chars[c] = "=" }
         for c in s.hangarCells { chars[c] = "~" }
         for c in s.airlockCells { chars[c] = "^" }
         let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
@@ -428,7 +460,6 @@ enum LayoutTests {
         FileHandle.standardError.write(out.data(using: .utf8)!)
     }
 
-    /// The hallway is one piece from the plaza, and every room has its door on it.
     private static func whole(_ s: Station) -> Bool {
         var hall = Set(s.corridorCells + s.coreCells); hall.remove(s.plan.monolith)
         guard let start = s.coreCells.first(where: { $0 != s.plan.monolith }) else { return false }
@@ -437,7 +468,6 @@ enum LayoutTests {
         return seen == hall && s.rooms.values.allSatisfy { r in r.cells.contains { c in c.neighbours.contains(where: s.isCorridor) } }
     }
 
-    /// Steps from each walkable cell to the nearest of `cells`.
     private static func walked(_ s: Station, to cells: Set<Cell>) -> [Cell: Int] {
         var far: [Cell: Int] = [:], frontier = Array(cells)
         for c in cells { far[c] = 0 }
@@ -459,13 +489,11 @@ enum LayoutTests {
         return world.fleet.station("work")
     }
 
-    /// An office of the repository its key names: `task:web#455` is web's.
     private static func place(_ key: String, on s: Station) {
         let repo = key.split(separator: ":").last.map { String($0.prefix { $0 != "#" && $0 != "/" }) } ?? "r"
         _ = s.ensureRoom(key: key, name: key, repo: repo, color: Colors.repos[0], lastActive: Date(timeIntervalSince1970: 0))
     }
 
-    /// The share of offices whose nearest other office is of their own repository.
     private static func neighbourly(_ s: Station) -> Double {
         let offices = s.rooms.values.filter { !$0.key.hasPrefix("kind:") }
         func gap(_ a: Room, _ b: Room) -> Int { a.cells.flatMap { c in b.cells.map { abs($0.x - c.x) + abs($0.y - c.y) } }.min() ?? .max }

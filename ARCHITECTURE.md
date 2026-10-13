@@ -19,7 +19,7 @@ already existed. `readyRepos` tracks which repositories have answered; only chan
 ## 2. Model and diffs
 
 `Station.swift` holds the floor plan: rooms keyed by branch (`task:repo#N` for `gh-N/...` branches), fixed
-rooms (`kind:...`), the yard, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway's
+rooms (`kind:...`), the hall, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway's
 skeleton and the office slots are a `Floorplan` (`Floorplan.swift`), drawn offline (`floor/`), baked, and
 picked from the station's name: the quarters, the hallway lit before anything opens, and a hundred office
 slots in rings out from the monolith, each with the run of hallway that first reaches it. A new office takes
@@ -27,13 +27,18 @@ a free slot and lights its run (`takeSlot`). Which slot is a setting (`OfficePla
 in rings, or the one nearest its repository's other offices, a repository's first office going to an inner
 slot clear of the others. Either way ties go to the earlier slot, so two machines with the same rooms
 choose alike; whoever opens an office places it, and peers adopt the cells. `Fleet` arranges
-stations and saves the layout (`fleet-v23.json`).
+stations and saves the layout (`fleet-v25.json`).
+
+The hall is a value (`Hall.swift`), worked out from where the hallway's west arm ends: one room five cells
+wide and eight deep, a walkway down one side, and three zones of crate rows, cleared, staged and storage,
+each two rows of four tiles with its own grid, an aisle between each zone and the next. Decon lies behind
+storage. Across the pad wall, past the pad field, is the pad, with the drone rack at its edge.
 
 `World.swift` owns that floor plan and the diffs. `applyScan`, `applyGitHub`, `applyPeer` and `dropPeer` take
 one fresh answer each, compare it with what was known, change the model, and hand back `WorldEvent`s
 (`Events.swift`): an office opened or archived, a board column change, a pull request opened or closed, a peer
-arriving. Counts in the yard are reconciled, not snapped: crates the board says moved to staging are carried
-across by minions (`reconcile`), and only what cannot be carried is redrawn.
+arriving. Counts in the yard are reconciled, not snapped: crates that reach QA are carried across by
+minions (`stationEvents`, `carryToDeck`), and only what is not carried is redrawn (`reconcile`).
 
 One thing the model cannot see for itself, whether an office has a package on its floor, the scene lends it
 as a closure (`hasPackage`); whether a rocket is mid-load the simulation answers (`rocketBusy`).
@@ -42,7 +47,7 @@ Rules that keep the place steady:
 
 - An update re-plans, it never resets. After the floor changes, `resettle` leaves settled minions alone and
   lets walkers keep their destination.
-- The yard layout is drawn from the ledger's rows (`yardLayout`): every crate keeps the place its row records,
+- The yard layout is drawn from the ledger's rows (`Station.layout(of:)`, `Yard.swift`): every crate keeps the place its row records,
   so a carrier is sent to the place its crate will occupy and nothing jumps when the layout redraws.
 - A peer's office is adopted where the peer put it, with a dig to reach it if need be. When both machines
   placed the same room before hearing each other, the lower peer name's cells stand and the other side
@@ -65,30 +70,32 @@ request, a pyramid is a session input. Nothing is round.
 
 The station apart from the picture is `Simulation` (`Simulation.swift`, no SceneKit): the clock, the bodies
 and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands, the
-carries, deliveries, stows and packs (`Carries.swift`), the body reconciler (`Bodies.swift`), the pallet
-errand (`Pallet.swift`) and the shuttles and rockets (`Ships.swift`). It is generic over the body:
+carries, deliveries, stows and packs (`Carries.swift`), the body reconciler (`Bodies.swift`), the order
+board (`Board.swift`), the shuttles (`Shuttles.swift`), the rockets (`Rockets.swift`), the pad drones
+(`Drones.swift`) and the vortex (`Vortex.swift`). It is generic over the body:
 `Simulation<Minion>` in the app, `Simulation<Body>` under `--sim-tests`. A frame is three steps per body,
-`stepWalk`, `stepThere` and `stepRest`, and a step each for the flights, the pallets and the rockets; the
-scene runs them and draws after. What the scene shows once, a flush, a fidget, a hop, a landing, a reveal, a
-crate lifting onto the pallet, a rocket's flame, is a `Cue` the simulation hands back and the scene plays at
+`stepWalk`, `stepThere` and `stepRest`, and a step each for the rockets, the shuttles, the rocket tips, the
+vortices and the drones; the scene runs them and draws after. What the scene shows once, a flush, a fidget,
+a hop, a landing, a reveal, a rocket's flame, is a `Cue` the simulation hands back and the scene plays at
 the end of the frame. A body's pose is a fact on the body, lying, seated, on the bench, and so is its load: a
 crate by number or an office's crate by key, with `landing` saying where it left the arms. The scene mirrors
 that each frame (`mirrorLoad`): the node is lifted when the load appears, sent down its arc when the
 set-down phase begins, and put where the landing says when the load goes; a crate under way is a `Cargo` on
-the simulation and a node on the scene, by command id. A pallet (`PalletJob`), a flight (`Flight`) and a
-rocket (`RocketJob`) are the same shape: the simulation keeps where they are and what they hold, the scene
-keeps a view per one (`PalletView`, `ShuttleView`, `RocketView`) and places it from those facts. Where the
+the simulation and a node on the scene, by command id. A flight (`Flight`), a rocket (`RocketJob`), a pad
+drone (`PadDrone`) and a vortex (`Vortex`) are the same shape: the simulation keeps where they are and what
+they hold, the scene keeps a view per one (`ShuttleView`, `RocketView`, `DroneView`, `VortexView`) and places
+it from those facts. Where the
 fixtures stand is the station's (`Fixtures.swift`).
 
 The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
 shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
 the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
-`SceneMarkers.swift` the crates, cones, the due rings, steam and power; `SceneTick.swift` the per-frame
+`SceneMarkers.swift` the crates, cones, the due rings, steam and power, and `restackYard`; `SceneTick.swift` the per-frame
 worker loop and the demo clock, the load mirror, the cues and the pose; `Jobs.swift` the hauls the events
 order, the crew, and the seam through which the scene asks the simulation for orders and walks by their old
 names; `HUD.swift` the overlay; `Minion.swift` one worker's figure on its `Body`; `Actors.swift` the ship and
-rocket nodes drawn from the simulation's flights and rockets; `Pallets.swift` the pallet's slab, shadow,
-light, pusher and flying crate drawn from its job.
+rocket nodes drawn from the simulation's flights and rockets; `DronesView.swift` and `VortexView.swift` the
+drones and the vortex with the crates it pulls; `PadWall.swift` the pad field and the drone rack.
 
 ## Debts
 
@@ -102,7 +109,7 @@ light, pusher and flying crate drawn from its job.
   that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
 - Three decisions are still the scene's, and they are what keeps a scenario needing a `StationController`
   (TESTING.md, Change 4): the event glue in `Scene.handle`, the obstacles read off the props' boxes, and the
-  stows ordered from inside the redraw. The ledger's `landed` is written by the scene's landing closures.
+  stows ordered from inside the redraw.
 - `Spot` carries a world position, so the scene's geometry leaks a little into the model side. Left alone
   on purpose: fixing it would touch every consumer of a spot for no change in behaviour.
 
@@ -138,10 +145,11 @@ Agreed direction, in the order things flow. Not all of it exists yet.
 
 Steps 4 to 7 exist for crates, described in the next section. `Commands.swift` holds `Command` (a kind, a
 phase list with each phase marked interruptible or not, and words for humans) and
-`StationTruth` (the pallet out and what rides on it, offices ordered and crates waiting in the bay). Where
-each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. `World`
-issues carries — `reconcile`, `carryToDeck`, `carryToStorage`, `carryToTested`, `carryToPad` — the simulation
-hands each to the nearest free body, and the scene keeps the crate's node by command id for the arms. Bodies
+`StationTruth` (offices ordered and their deliveries, whose crates wait in the bay). Where
+each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. The
+station issues carries (`Yard.swift`: `carryToDeck`, `carryToTested`, `carryToStorage`, `carryFromDecon`),
+the scene glue in `Jobs.swift` passes them to the simulation, the order board (`Board.swift`) hands each to
+the nearest free body by rank, and the scene keeps the crate's node by command id for the arms. Bodies
 execute one command at a time:
 a new one replaces the old at the next interruptible phase, at most one waits, a carry can only be redirected
 to another destination for the crate already on the arms, and a command whose target vanished sets down what
@@ -157,21 +165,29 @@ phases, both derived from the same durations, so the posture and the motion cann
 drawn once, in the hands: the yard it left leaves it out, and the yard it is bound for holds its place
 without drawing it.
 
-Shuttles, rockets and the crew run commands too (`Ships.swift`). A `Flight` flies one `.flight` command —
-`bringWorker` or `dropCrate` — through approach, descend, unload, rise and leave. Each phase is one
+Shuttles, rockets and the crew run commands too (`Shuttles.swift`, `Rockets.swift`). A `Flight` flies one
+`.flight` command — `bringWorker`, `takeWorker` or `dropCrate` — through approach, descend, unload, rise and leave. Each phase is one
 `FlightLeg`: the waypoints of that leg, its seconds and its easing, sampled as a rounded-off curve, so an
 `Arrival` and a `Departure` drawn per ship are the whole of how it flies. The ship's heading is the tangent
 of that curve, which is what the scene turns it onto. The unload writes truth:
 the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
-go from approach to lift. A `RocketJob`, one per station and repository, runs `.rocket` stages that only ever
-move forward: stand by, load, steam, launch. `World.applyReleases` reads the launch queue and the open
-releases and hands out those stages as commands — untested stands by, cleared loads, merged launches, and a
-launch loads first if it has to. The load phase issues the same `carryToPad` carries as before, remembers
-every crate it ordered aboard, and ends only when station truth counts all of them on the pad and nothing of
-the repository is left on the rows or on anyone's arms. A load that is taking its time is waited out; a
-rocket with no cargo at all still goes at once. A teammate's reaction
+go from approach to lift. A `RocketJob`, one per station and repository, runs `.rocket` stages: stand by,
+load, steam, launch. They move forward, except that a rocket not yet launching stands by again when it is no
+longer cleared. `World.applyReleases` (`Releases.swift`) reads the launch queue and the open releases and
+hands out those stages as commands — untested stands by, cleared loads and steams, merged launches — and
+gives each rocket a pad slot (`assignPads`). A rocket told to stand by sends whatever the ledger had aboard
+back to its rows (`Ledger.unload`). The launch opens a vortex (`Vortex.swift`): the three pad drones ring a
+point outside the pad field, and the release's crates are pulled off their rows one at a time, up, across
+and spiralling into the rocket's hatch, each landing on the pad in the ledger as it goes in. The rocket
+climbs when the vortex closes; a rocket with nothing to pull climbs at once. A repository that ships on
+merge launches a rocket each time a crate lands in storage (`launchOnMerge`). A teammate's reaction
 to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
 runs the same machine as everyone else and says so on hover.
+
+The drones (`Drones.swift`) do the pad's other work. Two of them ferry the kick stage in under a production
+rocket and away again. A rocket that arrives while its repository's staging deploy is not yet live stands
+with its tip unplated, and a drone welds it panel by panel at the pace of that deploy's usual length
+(`stepTips`).
 
 Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
 in the log when the command is issued.
@@ -181,12 +197,15 @@ in the log when the command is issued.
 Steps 4, 5 and 7 above, for crates. Every crate a station knows is one row in one ledger (`Ledger.swift`,
 kept on the `Station` and saved with it). The row has the source's side, `wanted`, the yard the board or
 git history says it belongs to, with the source's own time for that word; and the station's side, `placed`,
-the yard the station has it in, `at`, where it physically is (a slot, someone's arms, the pallet), `slot`,
+the yard the station has it in, `at`, where it physically is (a slot or someone's arms), `slot`,
 the place it holds in its yard, and `bound`, the place spoken for ahead of it while a carry is under way.
-Sources write only through `adopt`; completions write only through `landed` and the set-down. The counts
-the HUD, the rockets and the rings read are read off `placed` and kept nowhere; `yardLayout` draws from
-the rows and gives a place to any crate that has none. `StationTruth` is what is left besides: the pallet
-out and what rides on it, the offices ordered, the crates waiting in the bay.
+Sources write only through `adopt`; completions write only through `landed` and the set-down, and a carry
+records its own landing when it sets the crate down. The counts the HUD, the rockets and the rings read are
+read off `placed` and kept nowhere; `Station.layout(of:)` (`Yard.swift`) draws from the rows and gives a
+place to any crate that has none. Each repository piles in its own band of columns, the same band in
+storage and on the staging rows. Saved slots drawn under another `Ledger.slotScheme` are forgotten on load
+and drawn again, and Develop > Restack the Yard does the same on demand (`restackYard`). `StationTruth` is
+what is left besides: the offices ordered and their deliveries.
 
 A word from the source is news for a crate only if it is newer than the station's own move of it
 (`movedAt`). A board item carries when it last moved, so an answer older than a landing is stale for
@@ -194,21 +213,25 @@ that crate however fresh the poll, and a word older than the one already held (a
 is not news either. A source with no times of its own, git history, is believed again the moment it
 agrees with what the station did. Nothing decides by the clock.
 
-Disagreement is a queue, not an event. `reconcile` takes the source's answer into the ledger, then walks
-the crates the two sides disagree about, one at a time: storage to deck is one carry per crate, by the
-number the source named, with whatever stands on it and is staying moved aside first; anything else is
-redrawn where the source says, once, and never a deck crate while a rocket is loading from it. A crate
-already under way is left to its carrier; only the pallet holds a whole repository. A storage-to-deck
-carry whose crate the board has since put back is cancelled: not lifted yet, the crate stays; on the
-arms, it walks back. It runs from `flushScene` and the half-second tick, never from the drawing, and
-`rebuildMarkers` adopts what stands: only what is new is built and what is gone taken away.
+Disagreement is a queue, not an event. Storage to deck is carried: a crate's QA transition orders one
+carry per crate, by the number the source named, with whatever stands on it and is staying moved aside
+first (`stationEvents`, `carryToDeck`); a staging release that merges carries every storage crate of its
+repository to the staged rows, board or no board (`stagingMerged`, `stageCargo`). `reconcile`
+(`Releases.swift`) takes the source's answer into the ledger, then redraws the crates the two sides still
+disagree about where the source says, once, and never a deck crate while a release is under way
+(`releaseUnderway`). A crate already under way is left to its carrier. A storage-to-deck carry whose
+crate the board has since put back is cancelled (`callOffCarriesTakenBack`): not lifted yet, the crate
+stays; on the arms, it walks back. It runs from `flushScene` and after each GitHub answer, never from the
+drawing, and `rebuildMarkers` adopts what stands: only what is new is built and what is gone taken away.
 
 A carry names a yard, nothing more (`Command.carry(crate:from:to: Yard)`). The job holds the aim: a
 place asked for when the order is taken, which the yard then holds for the crate (`bound`); asked for
 again with the crate up on the arms, against the stack as it stands that moment; grounded at set-down,
 when `bound` becomes `slot`. One aside routine serves every planner. A carry that stalls is given up by
 the body reconciler and goes back in the queue from where the crate lies; nothing is ever set down by a
-clock. A carrier with carries of its repository queued behind it hurries, and says so.
+clock. A carrier with carries of its repository queued behind it hurries, and says so. A carry carries
+its own rank (`Cargo.rank`), and the order board hands out the highest-ranked opening first: a carry onto
+the cleared rows outranks one into storage.
 
 `--ledger-tests` feeds a ledger facts in every order, board before release, release before board, stale
 after fresh, A then B then A, and holds it to: every crate in one yard at most, a move outranking any
@@ -218,8 +241,8 @@ Station time is one value, `StationController.now`: the wall clock in the app, t
 simulator. Everything on the station that judges freshness against "now", a session's idleness, a peer's
 snapshot, a landing's time in the ledger, reads it, and the simulator stamps its facts with it. A frame
 that takes long, a route that searches the whole floor say, can therefore never age a session or make a
-landing look older than a board move. The route search itself reads the yard blocks, the doorways and the
-room doors from caches built once per floor plan; it used to rebuild them on every step.
+landing look older than a board move. The route search itself reads the hall, the doorways between areas
+and the room doors from caches built once per floor plan.
 
 ## Faster feedback from GitHub
 
@@ -247,91 +270,22 @@ Not done from step 1: conditional requests for the pull request lists, one Graph
 open pull requests and releases together, and the events an org-level feed would carry, which this
 token does not see.
 
-## The staging pallet
+## Staging releases
 
-Done. A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`
-sits beside `isProduction`, and `World.applyStaging` diffs each repository's release list into
+A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`
+sits beside `isProduction`, and `applyStaging` (`Releases.swift`) diffs each repository's release list into
 `.stagingOpened`, `.stagingMerged` and `.stagingClosed`. The first answer per repository is quiet.
 
-Station truth gains one pallet per station (`StationTruth.Pallet`: repo, number, the cell it hovers over,
-its state — arriving, loading, loaded, moving, unloading — and its crates by pallet slot, two rows of
-four, two levels, counted from the pallet's floor up). Further requests queue in `palletQueue` in the order they came.
-A crate on it is `Placement.pallet`, so `yardLayout` leaves it out of the rows and `reconcile` returns
-`.waiting` for that repository: from the moment a pallet is ordered until it is empty, the pallet is the
-hand carry for those crates and no `carryToDeck` is issued for them.
-
-Five commands run it, all on one minion, the dispatcher: `dispatch` (clipboard out, to the storage console),
-`waitPallet` (at the console with the hops and pacing of a minion waiting on you, or beside a loaded pallet
-until the release moves), `loadPallet` (the wand out, one crate at a time off the top of its stack, through
-an arc, onto its pallet slot), `pushPallet` (hands on the pallet, shoving it leg by leg out through the
-storage doorway and across to the untested row) and `unloadPallet`
-(the crates float off onto their deck slots, or back onto their stacks in storage when the release closed
-unmerged, and the empty pallet fades). The `PalletJob` in `Pallet.swift` holds where it hovers, what is aboard
-and the crate in the air; its state is the truth's, read there and written there. Two new props: `Props.pallet`, a two-tier slab hovering 0.12 above the floor on a
-cushion of light, bobbing on a sine, with a sunk field per crate slot, rivets along the
-rim, an amber corner light the tick blinks, and a floor shadow of its own that stays down and tightens as
-the slab sinks; and `Props.console`, the small panel on the wall by the storage doorway,
-which blinks while an order stands unanswered. Two new tools: `.clipboard` and `.telekinesis`, a short
-faceted wand whose tip lights, with a small omni light, while a crate is in the air; and `.hands`, held
-out in front for the push.
-
-The push, leg by leg. The pallet is heavy and only ever moves along one axis. `palletRoute` cuts the way
-to the deck into axis-aligned legs: line up on the two doorway columns without leaving storage, out
-through the doorway onto the deck's aisle row (the crate rows are every other row; the aisles are the
-rest — and of those it takes the one the doorway opens onto, so it never crosses a row of crates to
-reach it), then along that aisle to the repository's group on the untested row. Every leg end is clamped
-so the whole 1.8 by 0.92 footprint stays on the block's tiles. For each leg the minion walks round to the
-back side on that leg's axis — the walk goes round the slab, never through it — then leans in at a tilt
-of 0.35 and the pallet creeps forward at half a cell a second, easing in, with the pusher locked a step
-behind it and a small forward-and-back shove in the body. Squarely behind is a crate row as often as not,
-so `pushSpot` slides along the back edge to the nearest place that is clear floor and can be walked to, and
-`PalletJob.pushAcross` carries that stance into the push so the figure does not jump when the hands go on.
-The last stretch onto the spot — which the pathfinder will not route to, being hard against the slab — the
-body covers itself, at a walking pace rather than a slide. The minion tick skips anyone on a pallet errand, so the push places the pusher's own node.
-
-What differs from the plan above:
-
-- **Which crates it carries.** Every crate of that repository standing in storage, `PalletGeometry.capacity`
-  at most, taken by yard order from the top of each stack — not the pull request's own commit list, which the
-  sources do not break down per staging release. One that reaches storage while the pallet is still standing
-  there joins it: `palletLatecomer` gives it the next slot, and a pallet already loaded goes back to loading
-  for the one extra lift. Once it is moving or unloading it is too late and the crate stays on the rows.
-- **A crate in the air is moved by the tick, not by an SCNAction.** Actions do not advance in a headless
-  `--snapshot` run, so a load that depended on one never landed. The arc, the turn and the pallet's own
-  fade all ride the station clock, like everything else that decides something.
-- **The pallet is wider than a cell but no deeper** (1.8 by 0.92): four crates across, two deep, two
-  levels. A yard's crate rows have a single cell of aisle between them, and a pallet three crates deep
-  cannot float in one without standing in the stacks on either side. It hovers in storage's first aisle,
-  on the two columns of the deck doorway, at the x with the most air round it — `palletSpot` scores every
-  place along the aisles against the crates standing in the rows and the bodies on the floor, and gives up
-  its place by the door only where there is no room to float. The rows keep its lane out (`palletLane`: the
-  two middle doorway columns of the crate rows either side of the aisle) empty: in front because nothing stands
-  in a doorway and the way out must be clear, behind because that is where the pusher puts its hands on it.
-  A yard block is `Station.yardWide` = six columns, widened from four for this: the lane costs two of a row's
-  six cells rather than two of four, and the aisle past each end of the slab is a shade under a tile rather
-  than a third of one. The doorway is four columns, the lane with one either side, so a body can walk past a
-  pallet standing in it. `--layout-tests` pins all of it.
-  `Invariants.palletsClear` checks the whole of it every half second: no crate and nobody but the pusher,
-  who has its hands on it, is ever inside its footprint.
-- **A pallet is walked round, never through, where it stands now.** Its footprint is not in
-  `station.obstacles`: that set is only as fresh as the last marker rebuild, and a pallet slides while it is
-  pushed. `crowd` adds the live rectangle instead, so every walk planned round it is planned round where it
-  actually is, and `replanBlockedWalks` walks each path's line a fifth of a tile at a time against it — a
-  pallet is met between waypoints as often as on one — and replans at once for anyone already inside it.
-- **A release that ends while the dispatcher is still walking** is remembered (`palletWishes`) and handed
-  to the pallet the moment it is out, because the simulator presses "opens" and "merges" two seconds apart
-  and GitHub can answer just as fast.
-- **A dispatcher that goes away mid-errand** is replaced: the pallet is adopted by whoever is free, and one
-  caught half way across unloads where it stands.
-
-Still owed: nothing queues behind a pallet in practice, because a station has one storage yard and one
-console; a second repository's release simply waits. And while an order stands with nobody free to run it,
-that repository's crates do not move at all — the reconciler is holding them for a pallet that has not
-come out yet.
+The simulation keeps one `StagingBatch` per station and repository (`Staging.swift`): the release's number,
+whether it merged, and how its staging deploy stands, unheard, running, live or failed. A merge carries every
+crate of the repository standing in storage to the staged rows, one carry each, whatever the board says
+(`stageCargo`). A close without merging forgets the batch and moves nothing. While a merged batch's deploy
+is not yet live, a rocket that stands up for the repository is welded rather than whole, and the
+repository is put first for a pad slot.
 
 ## Carries know the stack
 
-Done. `yardLayout` hands out slots with a `column` — one square of floor, half a cell wide — and a
+Done. `Station.layout(of:)` hands out slots with a `column` — one square of floor, half a cell wide — and a
 `level` counted from the floor, and `Spot` carries that level and the slot's yaw along with the
 position. Storage jitter is seeded per crate rather than per place in the pile, so a crate keeps its
 own nudge and turn wherever it lands.
@@ -341,7 +295,10 @@ own nudge and turn wherever it lands.
   stands on it and is staying is moved aside first, one carry each to a fresh column of its
   repository's in the same yard (`aside`), and the wanted crate's carry waits on them: a command lists
   the commands that must finish before it (`after`), and the scheduler holds it back until they are
-  gone. `carryToPad` empties stacks from the top down the same way.
+  gone.
+- A crate on a back row, with no floor beside it, is reached across the row in front. Where that row
+  is taken the minion stands in the aisle beyond and floats the crate over, on the way up and on the
+  way down alike (`tossFrom`, `Hall.backRow`).
 - Pickup and set-down are height-aware. The minion stands an arm's length away, facing the stack, and
   the posture follows the height: level 0 a crouch, level 1 a lean at waist height, level 2 and up a
   reach with the head back. A crate off the floor comes up past the chest; one taken off a stack goes
@@ -368,9 +325,8 @@ Done. Two different closes:
 - **An issue's pull request closed without merging.** The work goes nowhere: not storage, not the deck.
   The crate in its office turns red and sits there for ten minutes, then fades out. After that the office
   clears the way a merged one does: a teammate's archives, one's own retires while the session lingers.
-- **A staging release closed without merging.** Those crates are still merged work waiting for a release:
-  the loaded pallet unloads back into storage the same slow way it was loaded. `.stagingClosed` sets the
-  pallet's wish, and `unloadPallet(back: true)` floats each crate onto the place `slotNow` gives it.
+- **A staging release closed without merging.** Those crates are still merged work waiting for a release,
+  and nothing has moved them yet: they stay in storage, and `.stagingClosed` only forgets the batch.
 
 ## Bodies
 

@@ -1,7 +1,6 @@
 import CoreServices
 import Foundation
 
-/// Fires a debounced callback whenever anything under a directory tree changes.
 final class DirectoryWatcher {
     private var stream: FSEventStreamRef?
     private let queue = DispatchQueue(label: "rumkapsel.fsevents")

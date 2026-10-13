@@ -7,7 +7,8 @@ The yard, the bay, the airlock and the plaza's two fixed arms are not ours to mo
 of the app (`--dump-floor`) with all their doorways and lanes, and everything here grows around them. So
 a plan belongs to a theme, because a theme's yard is not in the same place.
 """
-import json, math, random, sys
+import json, math, os, random, sys
+HERE = os.path.dirname(os.path.abspath(__file__))
 from collections import deque
 
 R = 4                      # rings of the web, out from the plaza
@@ -34,7 +35,7 @@ FAT = {i for i, f in enumerate(FAMILY) if f != 0}      # everything but the I
 QUARTERS = [("lounge", 3, 3), ("quarters", 2, 4), ("bath", 2, 2), ("gym", 3, 2)]
 
 def load(theme):
-    d = json.load(open(f'/tmp/claude-502/floor/{theme}.json'))
+    d = json.load(open(os.path.join(HERE, f'{theme}.json')))
     fixed = {k: [tuple(c) for c in v] for k, v in d.items() if k != "monolith"}
     # The airlock pierces the hull and the bay floats outside it, where the shuttles put down. The hull
     # is the line the airlock starts at: past it there is no floor to build on, only space, so nothing

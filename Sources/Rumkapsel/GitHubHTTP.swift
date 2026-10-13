@@ -1,14 +1,8 @@
-// GitHub's REST API asked directly, conditionally. Every answer's ETag is kept with its body, and the next
-// ask sends it back: "nothing changed" comes back as a 304, which GitHub does not count against the rate
-// limit, and the body kept from last time stands. That is what makes it cheap to ask every few seconds.
-// The token is the one `gh` is signed in with, asked for once.
-
 import Foundation
 
 final class GitHubHTTP {
     struct Answer {
         let data: Data
-        /// False when GitHub said 304: the same body as last time.
         let changed: Bool
     }
 
@@ -23,16 +17,12 @@ final class GitHubHTTP {
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: c)
     }()
-    /// How to ask for the token.
     private let tokenFrom: () -> String?
 
     init(token tokenFrom: @escaping () -> String?) { self.tokenFrom = tokenFrom }
 
-    /// Whether a token is in hand; until one is, callers ask `gh` the slow way.
     var hasToken: Bool { lock.lock(); defer { lock.unlock() }; return token != nil }
 
-    /// `path` under api.github.com, "repos/owner/repo/pulls?…". Blocks until GitHub answers; nil on any
-    /// failure, with a 401 dropping the token so the next ask fetches it again.
     func get(_ path: String) -> Answer? {
         guard let token = currentToken(), let url = URL(string: "https://api.github.com/" + path) else { return nil }
         var request = URLRequest(url: url)
@@ -61,7 +51,6 @@ final class GitHubHTTP {
         return result
     }
 
-    /// The token `gh` is signed in with.
     static func ghToken() -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")

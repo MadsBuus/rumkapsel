@@ -1,19 +1,12 @@
-// A production deploy as a flight: the repository's planet on the horizon, cameras bolted to the rocket riding
-// up from the pad to it, and the mission clock in a window in the corner, timed on how long its deploys
-// usually take.
-
 import AppKit
 import SceneKit
 
 enum DeployOutcome {
     case live, failed, cancelled
-    /// A flight begun at the merge whose deploy never showed.
     case lost
-    /// The signal is gone: the deploy failed, or none was ever seen.
     var signalLost: Bool { self == .failed || self == .lost }
 }
 
-/// A production deploy in flight, on the station's clock.
 struct Mission {
     let repo: String
     let station: String
@@ -21,31 +14,20 @@ struct Mission {
     var expected: Double
     var release: String
     var ended: (outcome: DeployOutcome, at: Double, progress: Double)?
-    /// How long the deploy took, from its start to its end.
     var took: Double?
-    /// When its window opened: a flight joined late still gets its minute in full before it shrinks.
     var shownAt = 0.0
     var dustRaised = false
-    /// The lifter has let go of the tip, and when.
     var separated = false
     var separatedAt = 0.0
-    /// Which way the craft's cameras face out from the hull, square to its heading: carried over from frame
-    /// to frame, so the craft never rolls on its own.
     var cameraSide: SIMD3<Double>?
-    /// The long lens on the station: where its operator has it pointed and how far it is zoomed, in degrees;
-    /// the colony camera's aim; and the clock at the last step, for how far each catches up.
     var trackAim: SIMD3<Double>?
     var trackVelocity = SIMD3<Double>(0, 0, 0)
     var trackFov = 30.0
     var colonyLook: SIMD3<Double>?
     var lastStep = 0.0
-    /// When the side thrusters last fired.
     var lastThrust = 0.0
-    /// Which rehearsal this is; nil for a real deploy.
     var rehearsal: Int?
 
-    /// How far along the flight is: most of the way by the usual length, creeping on past it, and after
-    /// the end, docking, falling back to the pad, or stopped where the signal was lost.
     func progress(at clock: Double) -> Double {
         func ease(_ t: Double) -> Double { let k = max(0, min(1, t)); return k * k * (3 - 2 * k) }
         if let end = ended {
@@ -55,27 +37,20 @@ struct Mission {
             case .failed, .lost: return end.progress
             }
         }
-        // Off the pad and through separation at the rocket's own pace, however long the deploy usually takes;
-        // then a long coast and approach over the rest of it, still moving at a third of the pace at the end;
-        // past the usual length it creeps.
         let e = max(0, clock - started), launch = launchSeconds, share = Mission.separationShare
         let f = e < launch ? share * e / launch : share + (1 - share) * (e - launch) / max(1, expected - launch)
         return f < 1 ? Mission.curve(f) : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
     }
 
-    /// How long from liftoff to separation: the rocket's own pace, or less for a deploy shorter than that.
     var launchSeconds: Double { min(Mission.liftoff, max(1, expected) * Mission.separationShare) }
 
-    /// The flight's shape, by share of the usual length.
     static func curve(_ f: Double) -> Double { 0.92 * (0.35 * f + 0.65 * (1 - pow(1 - f, 4))) }
-    /// Where on that shape separation falls.
     static let separationShare: Double = {
         var lo = 0.0, hi = 1.0
         for _ in 0..<40 { let mid = (lo + hi) / 2; if curve(mid) < separation { lo = mid } else { hi = mid } }
         return lo
     }()
 
-    /// The words under the clock.
     func phase(at clock: Double) -> String {
         if let end = ended {
             switch end.outcome {
@@ -99,18 +74,12 @@ struct Mission {
             : p < 0.8 ? "Cruising" : "Approaching \(repo)"
     }
 
-    /// Where along the flight the lifter lets go, and the tip's one short burn that sets it on course, in
-    /// seconds after that.
     static let separation = 0.5
     static let correction = 1.2..<2.7
-    /// Seconds from liftoff to separation.
     static let liftoff = 12.0
-    /// When the picture leaves the camera on the rocket for the long lens on the station, as a share of the way to
-    /// separation, so the lens sees it. And how far into the landing (seconds after the deploy went live) it cuts
-    /// to the colony's.
+    static let undock = 3.5
     static let toTheMast = 0.38
     static let colonyCut = 4.5
-    /// Out of the atmosphere: past here nothing shakes.
     static let space = 0.3
 
     static func duration(_ s: Double) -> String {
@@ -122,7 +91,6 @@ struct Mission {
 extension StationController {
     // MARK: missions
 
-    /// One planet per repository that ships to production, far out past the station on the horizon.
     func placePlanets() {
         var repos = Set(world.repoRoots.filter { !github.pipeline(repoRoot: $0.key).production.isEmpty }.map(\.value.repo))
         if let m = mission { repos.insert(m.repo) }
@@ -144,24 +112,18 @@ extension StationController {
             planetRoot.addChildNode(node)
             planets[repo] = node
         }
-        // Their own sun, low and from the side: it lights the flight's craft too, hard, out where the planets are.
         let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 1100
         sun.light!.categoryBitMask = Pick.planet | Pick.colony | Pick.onboard
         sun.look(at: SCNVector3(forward.x * 0.5 + side.x * 1.4, -0.25, forward.y * 0.5 + side.y * 1.4))
         let fill = SCNNode(); fill.light = SCNLight(); fill.light!.type = .ambient; fill.light!.intensity = 45
         fill.light!.categoryBitMask = Pick.planet | Pick.colony
-        // The craft's shadow side is never quite black: light off the planets and the station.
         let bounce = SCNNode(); bounce.light = SCNLight(); bounce.light!.type = .ambient; bounce.light!.intensity = 420
         bounce.light!.categoryBitMask = Pick.onboard
         planetRoot.addChildNode(sun); planetRoot.addChildNode(fill); planetRoot.addChildNode(bounce)
     }
 
-    /// A production deploy starts. One flight is shown at a time: another repository's waits its turn and
-    /// joins its own flight where it has got to, the clock having run for it all along.
     func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
         let m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
-        // Already flying since the merge: the run has turned up, and the clock is set to when it began.
-        // The clock only moves earlier: a flight never sinks back toward the pad because its run began after the merge.
         if var current = mission, current.repo == repo, current.ended == nil {
             current.started = min(current.started, m.started); current.expected = expected
             if !release.isEmpty { current.release = release }
@@ -187,23 +149,16 @@ extension StationController {
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
-        // The pad's own rocket is the one that flies: seen from the station it lifts off the pad and climbs
-        // out of sight, and the pad stands empty while the flight is on. The camera riding it never sees it.
         rocketRoot.childNodes.filter { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(repo) ") == true && !$0.isHidden }.forEach {
-            // The tower is let go of first and stays on the pad, as it does when a rocket lifts off on its own.
-            if let hold = $0.childNode(withName: "hold", recursively: false) {
-                hold.removeFromParentNode()
-                hold.position = $0.position
-                rocketRoot.addChildNode(hold)
-                hold.runAction(.sequence([.wait(duration: 6), .fadeOut(duration: 1.5), .removeFromParentNode()]))
-            }
+            $0.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
             let leaving = $0.clone()
             leaving.name = nil
             leaving.opacity = 1
             leaving.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.launching }
             Props.shape(leaving, lifter: true, panels: RocketGeometry.panels)
-            leaving.childNode(withName: "flame", recursively: false)?.opacity = 1
+            leaving.childNode(withName: "flame", recursively: false)?.opacity = 0
             rocketRoot.addChildNode(leaving)
+            undocking.append((leaving, clock))
             leaving.runAction(.sequence([Looks.current.launch(leaving), .removeFromParentNode()]))
             drone.sweep(up: true)
             $0.isHidden = true
@@ -213,7 +168,6 @@ extension StationController {
         Colonies.hoist(planets[repo]?.childNode(withName: "colony", recursively: false), repo: repo, release: release,
                        color: NSColor(fleet.color(forRepo: repo)))
         buildMissionCraft(repo: repo, release: release)
-        // What the craft's metal reflects. Only physically lit materials read it, and only the craft has those.
         scene.lightingEnvironment.contents = FlightCraft.environment
         if missionCamera.camera == nil {
             let cam = SCNCamera()
@@ -226,13 +180,11 @@ extension StationController {
             scene.rootNode.addChildNode(missionCamera)
         }
         let pad = missionPad(mission!)
-        scorch(at: v3(pad.x, 0, pad.z))
-        puff(at: pad, up: SIMD3(0, 1, 0), color: NSColor(rgb: (0.78, 0.8, 0.84)), count: 900, spread: 88, speed: 0.9, life: 4.5, size: 0.22)
+        puff(at: pad + SIMD3(0, 0.3, 0), up: SIMD3(0, 1, 0), color: NSColor(white: 0.95, alpha: 1), count: 80, spread: 80, speed: 0.4, life: 1.2, size: 0.03)
         stepMission()
         DispatchQueue.main.async { [self] in openMissionScreen() }
     }
 
-    /// The flight off the screen and the station as it was: its rockets back, the planets' air.
     private func clearMission() {
         mission = nil
         hiddenRockets.forEach { $0.isHidden = false }
@@ -241,8 +193,6 @@ extension StationController {
         DispatchQueue.main.async { [self] in closeMissionScreen() }
     }
 
-    /// A 45-second pretend deploy of the first repository with a planet, ending the given way. A rehearsal
-    /// already on screen gives way to the new one; a real deploy's flight never does.
     func rehearseLaunch(_ outcome: DeployOutcome) {
         enqueue { [self] in
             if let m = mission {
@@ -263,7 +213,6 @@ extension StationController {
         }
     }
 
-    /// What a repository last shipped, as its flag says it: the tag, or the production release's number.
     func latestRelease(_ repo: String) -> String? {
         guard let root = world.repoRoots.first(where: { $0.value.repo == repo })?.key,
               let pr = github.releases(repoRoot: root)?.filter({ $0.isProduction && $0.state == "MERGED" }).max(by: { ($0.mergedAt ?? .distantPast) < ($1.mergedAt ?? .distantPast) })
@@ -271,7 +220,6 @@ extension StationController {
         return pr.tag ? pr.title : "#\(pr.number)"
     }
 
-    /// A planet's colony, built the first time a flight heads there, on the spot where flights come down.
     private func settleColony(_ repo: String) {
         guard let node = planets[repo], node.childNode(withName: "colony", recursively: false) == nil,
               let globe = node.childNode(withName: "globe", recursively: false)?.geometry as? SCNSphere else { return }
@@ -284,7 +232,6 @@ extension StationController {
         node.addChildNode(colony)
     }
 
-    /// Where a flight comes down on a planet: high on the face turned to the station.
     func landingNormal(planet: SIMD3<Double>) -> SIMD3<Double> {
         let centre = frame(for: fleet.ordered).focus
         var toStation = SIMD3(centre.x - planet.x, 0, centre.y - planet.z)
@@ -313,7 +260,6 @@ extension StationController {
         }
     }
 
-    /// The planets turn slowly, once in ten minutes; one holds still while its own flight comes down onto it.
     func turnPlanets(dt: Double) {
         let landing = mission.flatMap { $0.ended?.outcome == .live ? $0.repo : nil }
         for (repo, node) in planets where repo != landing {
@@ -322,14 +268,12 @@ extension StationController {
         }
     }
 
-    /// Where the camera is and what it looks at, every frame, from the flight's progress.
     func stepMission() {
         guard let m = mission else { return }
         if let end = m.ended, clock - end.at > (end.outcome.signalLost ? 5 : end.outcome == .live ? 24 : 8) {
             clearMission()
             if !queuedMissions.isEmpty {
                 var next = queuedMissions.removeFirst()
-                // One that ended while it waited plays its ending now.
                 if let end = next.ended { next.ended = (end.outcome, clock, next.progress(at: end.at)) }
                 launch(next)
             }
@@ -345,16 +289,12 @@ extension StationController {
         var toStation = SIMD3(centre.x - planet.x, 0, centre.z - planet.z)
         toStation /= max(0.001, simd_length(toStation))
         let normal = landingNormal(planet: planet)
-        // Straight up, faster and faster, then over and out along a curve to the planet.
-        // Up, and over to the planet level: the curve off the top rises only as far as the dock is high, and comes
-        // in to it level, so it never flies downward on its way.
         let dock = planet + normal * r * 1.7
         let climb = max(6, (dock.y - pad.y - 0.9) / (1 + 1.8 / 0.45 * 0.55 / 3))
         let top = pad + SIMD3(0, climb + 0.9, 0)
         func path(_ s: Double) -> SIMD3<Double> {
             if s <= 0.45 { return pad + SIMD3(0, 0.9 + climb * pow(s / 0.45, 1.8), 0) }
             let t = min(1, (s - 0.45) / 0.55), u = 1 - t
-            // The curve leaves the top at the climb's own speed, so the turn onto the course is gradual.
             var c2 = dock + normal * r * 5
             c2.y = min(c2.y, dock.y)
             let c1 = top + SIMD3(0, climb * 1.8 / 0.45 * 0.55 / 3, 0)
@@ -369,10 +309,7 @@ extension StationController {
         tangent /= max(0.001, simd_length(tangent))
         var scale = 1.0
         var burning = m.ended.map { $0.outcome == .cancelled || ($0.outcome == .live && clock - $0.at < 10) } ?? true
-        // The colony's pad stands a few thousandths proud of the ground: the feet come down on its top.
         let hover = planet + normal * (r + 0.45), ground = planet + normal * (r + 0.007)
-        // The approach: the engine cuts, the side thrusters turn it round engine-first, and a braking burn takes it
-        // down through the air to a hover and onto the pad.
         var flipping = false
         if let l = landing {
             if l < 4 {
@@ -390,14 +327,10 @@ extension StationController {
                 scale = 1 - 0.78 * e
                 craft = l < 7 ? dock + (hover - dock) * e : hover + (ground - hover) * d
                 heading = normal
-                // What comes down is the tip, whose foot is a lifter's height up the craft: the craft is held that
-                // much lower, so the foot meets the ground.
                 craft -= heading * (FlightCraft.tipBase - FlightCraft.standDepth) * 0.55 * scale * e
             }
             burning = l < 1 || (l >= 4 && l < 10)
             if let tip = missionCraft.childNode(withName: "tip", recursively: false) {
-                // The flaps round the flame swing out into feet for the last of the descent; at touchdown the engine
-                // shuts down. Braking down through the air, the air takes the strain: a glow and streaks round its foot.
                 FlightCraft.feet(tip, out: ease((l - 8) / 1.2))
                 FlightCraft.strain(tip, heat: l >= 4 && l < 7.5 ? sin(.pi * (l - 4) / 3.5) : 0)
             }
@@ -411,8 +344,6 @@ extension StationController {
         let separated = mission?.separated ?? false
         missionCraft.scale = SCNVector3(0.55 * scale, 0.55 * scale, 0.55 * scale)
         missionCraft.position = v3(craft.x, craft.y, craft.z)
-        // Nose along the heading, and the side its cameras are on carried on from the last frame: off the pad
-        // it faces the station, and it only ever turns as far as the heading makes it.
         var side = m.cameraSide ?? SIMD3(centre.x - pad.x, 0, centre.z - pad.z)
         side -= heading * simd_dot(side, heading)
         if simd_length(side) < 1e-4 { side = tangent - heading * simd_dot(tangent, heading) }
@@ -422,19 +353,16 @@ extension StationController {
         let x = side * cos(bearing) - square * sin(bearing), z = side * sin(bearing) + square * cos(bearing)
         func f(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3(Float(v.x), Float(v.y), Float(v.z)) }
         missionCraft.simdOrientation = simd_quatf(simd_float3x3(columns: (f(x), f(heading), f(z))))
-        // The lifter burns from the pad to separation; the tip only for its course correction and its landing.
         let since = separated ? clock - (mission?.separatedAt ?? clock) : -1
-        // The tip lights a moment after separation and burns all the way out to the planet.
         let tipBurns = m.ended == nil ? since >= Mission.correction.lowerBound : burning
+        let coasting = m.ended == nil && clock - m.started < Mission.undock
+        if coasting { fireThrusters(often: true) }
         if let air = missionCraft.childNode(withName: "lifter plume", recursively: true) {
-            air.isHidden = !burning || separated
+            air.isHidden = !burning || separated || coasting
             FlightCraft.air(air, thin: s / Mission.space)
         }
         missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
 
-        // Three cameras, cut between. Off the pad, the one bolted to the lifter looking down past it. Then a long
-        // lens on the station, its operator keeping the rocket in frame: a little behind it, zooming in as it
-        // goes, until far out only the tip and its plume are left. For the landing, a camera at the colony.
         let dt = max(0, min(0.1, clock - m.lastStep))
         mission?.lastStep = clock
         let centreOfCraft = craft + heading * 0.6 * 0.55 * scale
@@ -449,7 +377,6 @@ extension StationController {
             up = column(mount.columns.1)
             fov = 58
         } else if atColony {
-            // On the ground by the pad, looking up the way the rocket comes down, and following it in.
             var around = simd_cross(normal, tangent)
             around /= max(0.001, simd_length(around))
             at = ground + normal * 0.09 + tangent * 0.62 + around * 0.32
@@ -461,17 +388,11 @@ extension StationController {
             up = normal
             fov = 40
         } else {
-            // The long lens: a little behind where the rocket is, a hand on it, and the zoom catching up.
-            // Off to the side of the way it goes, on the station's side, so it crosses the frame rather than
-            // shrinking into it: seen from behind, anything flying off toward the horizon sinks down the picture.
             var away = SIMD3(planet.x - pad.x, 0, planet.z - pad.z)
             away /= max(0.001, simd_length(away))
             var across = simd_cross(SIMD3(0, 1, 0), away)
             if simd_dot(across, SIMD3(centre.x - pad.x, 0, centre.z - pad.z)) < 0 { across = -across }
-            // Up a mast to about the height it cruises at, so the cruise reads level.
             at = pad + across * 8 - away * 2 + SIMD3(0, max(1, (dock.y - pad.y) * 0.7), 0)
-            // The operator swings after it on a heavy mount: a spring that overshoots and settles, leading it a
-            // little the way it is going, and every few seconds a correction where the frame had drifted.
             let distance0 = max(0.5, simd_length(centreOfCraft - at))
             let frame0 = distance0 * tan(m.trackFov * .pi / 360)
             let nudge = SIMD3(sin(floor(clock / 2.6) * 12.9898), 0.6 * sin(floor(clock / 2.6) * 78.233), cos(floor(clock / 2.6) * 37.719)) * frame0 * 0.25
@@ -484,12 +405,9 @@ extension StationController {
             mission?.trackVelocity = velocity
             let distance = max(0.5, simd_length(aim - at))
             let size = 1.4 * 0.55 * scale
-            // The zoom hunts: it creeps after the size it wants and breathes a little either side of it.
             let want = min(35, max(0.6, 2 * atan(size * 1.2 / distance) * 180 / .pi)) * (1 + 0.07 * sin(clock * 0.45) + 0.04 * sin(clock * 1.7))
             let zoom = m.trackFov + (want - m.trackFov) * (1 - exp(-dt * 0.9))
             mission?.trackFov = zoom
-            // At this length the view shivers: the mount, the air over a long way. A fraction of the frame,
-            // whatever the zoom, quicker and finer the further out it is.
             let frame = distance * tan(zoom * .pi / 360)
             let sx: Double = sin(clock * 13.1) + 0.6 * sin(clock * 29.7)
             let sy: Double = sin(clock * 17.3 + 2) + 0.5 * sin(clock * 31.1)
@@ -505,7 +423,6 @@ extension StationController {
             fov = zoom
         }
         missionCamera.camera?.fieldOfView = CGFloat(fov)
-        // The flight's own sky goes wherever the camera goes, so there are stars in every direction.
         let sky = scene.rootNode.childNode(withName: "flight stars", recursively: false) ?? {
             let n = FlightCraft.stars()
             scene.rootNode.addChildNode(n)
@@ -516,7 +433,6 @@ extension StationController {
             if flipping { fireThrusters(often: true) } else if m.ended == nil { fireThrusters(often: Mission.correction.contains(since)) }
         }
         up /= max(0.001, simd_length(up))
-        // Filling the station, the camera can be turned a little where it stands.
         if missionSize == 2, missionOrbit != .zero {
             let pivot = at
             var side = simd_cross(at - pivot, up)
@@ -526,11 +442,7 @@ extension StationController {
             look = pivot + turn.act(look - pivot)
             up = turn.act(up)
         }
-        // Shaking is the atmosphere's: on the climb out, easing off toward space, and again coming down.
-        // Only the camera bolted to the rocket feels it.
         let shake = onboard && m.ended == nil && s < Mission.space ? (0.012 + 0.05 * (1 - min(1, s / 0.05))) * (1 - s / Mission.space) : 0
-        // A rumble, not a twitch: a few slow sines out of step with each other, never a fresh jolt a frame.
-        // The camera is bolted to the hull, so the hull rumbles with it: the view trembles, it is not shoved.
         if shake > 0 {
             let t = clock, k = shake / 1.5 * 0.35 * simd_length(look - at)
             let x: Double = sin(t * 23.1) + 0.5 * sin(t * 37.7)
@@ -558,13 +470,11 @@ extension StationController {
         }
     }
 
-    /// The ground kicked up under the landing burn, in the planet's colour, blowing out low and settling.
     private func raiseDust(at point: SIMD3<Double>, normal: SIMD3<Double>, color: NSColor) {
         let sand = color.mixed(with: NSColor(rgb: (0.82, 0.74, 0.6)), 0.45)
         puff(at: point, up: normal, color: sand.withAlphaComponent(0.35), count: 220, spread: 88, speed: 0.3, life: 2.4, size: 0.008)
     }
 
-    /// A burst of soft particles from a point, going out around `up`, that then drift and fade.
     @discardableResult
     private func puff(at point: SIMD3<Double>, up: SIMD3<Double>, color: NSColor, count: Int, spread: CGFloat,
                       speed: CGFloat, life: CGFloat, size: CGFloat) -> SCNNode {
@@ -599,7 +509,6 @@ extension StationController {
         return node
     }
 
-    /// A soft round speck for smoke and dust.
     static let softDot: NSImage = {
         NSImage(size: NSSize(width: 32, height: 32), flipped: false) { r in
             NSGradient(colors: [NSColor.white, NSColor.white.withAlphaComponent(0)])!.draw(in: NSBezierPath(ovalIn: r), relativeCenterPosition: .zero)
@@ -607,7 +516,6 @@ extension StationController {
         }
     }()
 
-    /// The rocket the cameras ride (`FlightCraft`), in the repository's colour, with its cameras on. Seen only onboard.
     private func buildMissionCraft(repo: String, release: String) {
         missionCraft.childNodes.forEach { $0.removeFromParentNode() }
         missionCraft.removeAllActions()
@@ -620,15 +528,11 @@ extension StationController {
         if missionCraft.parent == nil { scene.rootNode.addChildNode(missionCraft) }
     }
 
-    /// Builds a flight's rocket once, unseen, and has its textures and shaders made ready: the first liftoff
-    /// would otherwise stall while that happens.
     func prepareFlight() {
         let (lifter, tip) = FlightCraft.build(color: NSColor(white: 0.6, alpha: 1), repo: "", release: "")
         view.prepare([lifter, tip]) { _ in }
     }
 
-    /// The thruster pods on the tip's sides: a quick run of puffs as it settles on course after separation and as
-    /// they turn it round for the braking burn, and one now and then on the way.
     private func fireThrusters(often settling: Bool) {
         guard let m = mission else { return }
         let every = settling ? 0.22 : 4.5
@@ -645,8 +549,6 @@ extension StationController {
             .enumerateHierarchy { n, _ in n.categoryBitMask = Pick.onboard }
     }
 
-    /// Stage separation: a puff of gas, and the lifter drops back from the tip, slowly at first and tumbling a
-    /// little, until it is gone. It stays with the craft as it goes, so the camera on it sees the tip pull away.
     private func separateStage(heading: SIMD3<Double>) {
         guard let lifter = missionCraft.childNode(withName: "lifter", recursively: false) else { return }
         let at = SIMD3(Double(lifter.worldPosition.x), Double(lifter.worldPosition.y), Double(lifter.worldPosition.z))
@@ -661,24 +563,20 @@ extension StationController {
         lifter.runAction(.sequence([.group([drop, tumble, .sequence([.wait(duration: 5), .fadeOut(duration: 2)])]), .removeFromParentNode()]))
     }
 
-    /// The foot of the flight: the repository's rocket where it stands, else the middle of its pad.
     private func missionPad(_ m: Mission) -> SIMD3<Double> {
         if let rocket = rocketRoot.childNodes.first(where: { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true }) {
             let p = rocket.worldPosition
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }
-        // No rocket of its own standing (a rehearsal, say): the first spot on the pad nobody stands on, never
-        // the middle of the pad, where someone else's rocket may be.
         let st = fleet.stations[m.station] ?? fleet.ordered.first
         guard let st else { return .zero }
-        let taken = Set(world.padOrder(station: st).compactMap { world.padSlotOf[$0] })
+        let taken = Set(world.padOrder(station: st).compactMap { world.releases.padSlotOf[$0] })
         let slots = world.padSlots(station: st)
         let free = (0..<slots.count).first { !taken.contains($0) } ?? 0
         let p = padPosition(station: st, slot: free)
         return SIMD3(Double(p.x), Double(p.y), Double(p.z))
     }
 
-    /// The camera's window, bottom left, over the station. Main thread.
     func openMissionScreen() {
         if missionView == nil {
             let frame = missionFrame
@@ -699,7 +597,6 @@ extension StationController {
                 guard let self, missionSize == 2 else { return }
                 missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
             }
-            // The ×: from medium or full back to the small picture; on the small picture, closed for this flight.
             screen.onClose = { [weak self] in
                 guard let self else { return }
                 if missionSize != 0 { setMissionSize(missionSize - 1) } else { missionUserSmall = true; sizeMission(auto: false, ended: false, chip: "") }
@@ -710,7 +607,7 @@ extension StationController {
             view.addSubview(screen)
             missionView = pip
             missionScreen = screen
-            setMissionSize(1)   // it opens at medium
+            setMissionSize(1)
         }
         missionView?.isHidden = false
         missionScreen?.isHidden = false
@@ -723,17 +620,13 @@ extension StationController {
         missionSize = 0; missionOrbit = .zero
     }
 
-    /// The window's place: the bottom right corner, over the log.
     var missionFrame: NSRect { NSRect(x: view.bounds.width - 12 - 384, y: 44, width: 384, height: 232) }
 
-    /// The window shows unless it was closed with the ×. Main thread.
     func sizeMission(auto: Bool, ended: Bool, chip text: String) {
         guard let pip = missionView, let screen = missionScreen else { return }
         pip.isHidden = missionUserSmall; screen.isHidden = missionUserSmall
     }
 
-    /// Landed, a click on the colony's flag opens the release it flies: the pull request, or the tag.
-    /// True when the click was the flag's.
     private func openLandedFlag(near p: NSPoint) -> Bool {
         guard let m = mission, m.ended?.outcome == .live, let pip = missionView,
               let flag = planets[m.repo]?.childNode(withName: "colony", recursively: false)?.childNode(withName: "cloth", recursively: true) else { return false }
@@ -746,9 +639,6 @@ extension StationController {
         return true
     }
 
-    /// The window a size up: from its corner to medium, to filling the station, and back to its corner.
-    /// The window at one of its sizes: 0 small in the corner, 1 medium, 2 filling the station. A click in it
-    /// steps it up; a click on the station outside it, or the ×, steps it down.
     func setMissionSize(_ size: Int) {
         guard let pip = missionView, let screen = missionScreen else { return }
         missionSize = max(0, min(2, size))
@@ -767,18 +657,12 @@ extension StationController {
     }
 }
 
-/// What lies over the camera's picture: the edge of a lens, faint scan lines, where the camera is, and
-/// the mission clock. Static when the signal is lost.
 final class MissionScreen: NSView {
-    /// A click that is not the ×, where it landed in the window.
     var onClick: ((NSPoint) -> Void)?
-    /// The × in the top right corner: the window shrinks to its chip.
     var onClose: (() -> Void)?
-    /// A drag, a two-finger scroll or a twist over the window: how far, across and up.
     var onOrbit: ((Double, Double) -> Void)?
     private var dragged = false
     private var repo = "", clock = "", phase = "", usual = ""
-    /// Which camera the picture is from, for the label in the corner.
     private var camera = "Onboard"
     private var outcome: DeployOutcome?
     private var success: (title: String, detail: String)?
@@ -814,13 +698,11 @@ final class MissionScreen: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let b = bounds
-        // The lens: dark at the corners.
         NSGradient(colors: [NSColor.black.withAlphaComponent(0), NSColor.black.withAlphaComponent(0.55)])!
             .draw(in: NSBezierPath(rect: b), relativeCenterPosition: .zero)
         NSColor.black.withAlphaComponent(0.07).setFill()
         var y: CGFloat = 0
         while y < b.height { NSRect(x: 0, y: y, width: b.width, height: 1).fill(); y += 3 }
-        // The engines' light at the foot of the frame while it climbs.
         if outcome?.signalLost == true {
             for _ in 0..<Int(b.width * b.height / 40) {
                 NSColor(white: CGFloat.random(in: 0.2...0.9), alpha: 0.5).setFill()
@@ -852,7 +734,6 @@ final class MissionScreen: NSView {
         NSAttributedString(string: usual, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.white.withAlphaComponent(0.55)])
             .draw(at: NSPoint(x: pad, y: pad))
 
-        // The success card, fading up in the middle of the picture.
         if let success {
             let a = CGFloat(min(1, Date().timeIntervalSince(successSince) / 1.2))
             let big = max(18, b.height * 0.1)
@@ -882,4 +763,3 @@ final class MissionScreen: NSView {
     private var closeRect: NSRect { NSRect(x: bounds.width - 30, y: bounds.height - 30, width: 26, height: 26) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
-

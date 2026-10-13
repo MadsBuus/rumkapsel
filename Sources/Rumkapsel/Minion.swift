@@ -1,29 +1,19 @@
-// One worker: its body, its tools, its poses. The state the simulation runs on is the `Body` it is.
-
 import AppKit
 import SceneKit
 
-/// One Claude session, walking between the rooms of its station: a `Body` with a figure on it.
 final class Minion: Body {
-    /// The node drawn on the arms for the body's load, and whether its set-down arc has begun.
     var carried: SCNNode?
     var arcStarted = false
-    /// The cube on the head for a stow, and the box on the floor it stands in for.
     var stowing: (cube: SCNNode, box: SCNNode)?
     var weldLight: SCNNode?
     private(set) var shadow: SCNNode!
-    /// The hammer's grip end, so the swing pivots in the hand rather than at the handle's middle.
     private(set) var hammerPivot: SCNNode?
-    /// The flashlight's grip, swept about to play its cone over the work.
     private(set) var lightPivot: SCNNode?
     enum Tool { case goggles, tablet, scanner, hammer, flashlight, clipboard, telekinesis, hands }
-    /// The wand's tip and the little light in it, lit only while a crate is in the air.
     private(set) var wandTip: SCNNode?
     private(set) var wandLight: SCNNode?
     private(set) var tool: Tool?
     private var toolNode: SCNNode?
-    /// What a body holds hangs here rather than on the box itself. Sitting shortens the box from the
-    /// top down, so the mount drops by what the top drops and every tool follows without knowing why.
     private let hold = SCNNode()
 
     var queuedCones: [SCNNode] = []
@@ -34,27 +24,20 @@ final class Minion: Body {
     private let bodyHeight: Double
     private let bodyDepth: Double
     var smoothFacing = 0.0
-    /// The lean as drawn, eased toward the body's lean.
     var drawnLean = SIMD2<Double>(0, 0)
-    /// What the figure is posed as right now, against what the body says it should be.
     private var posed: Pose = .standing
-    private var posedSeat = SIMD2<Double>(0, 0)   // where the body sits, in the figure's own frame, zero when standing
-    private let legs = SCNNode()                   // thighs out and shins down, the bend of a sit; unseen while standing
+    private var posedSeat = SIMD2<Double>(0, 0)
+    private let legs = SCNNode()
     private let visor: SCNNode
-    /// The look's own figure in the box's place, when it has one; the box and its visor are then not drawn.
     private let figure: SCNNode?
-    /// The suit last put on, so it is drawn once.
     private var suitKey = ""
-    /// The look the figure came from, which poses it on a seat.
     private let look: Look
     private var staticNode: SCNNode?
-    /// Whether the bath's pixels are in sight: they are drawn over everything, so a wall in the way hides them.
     var staticSeen = true
     private var towelNode: SCNNode?
     private var jetpackNode: SCNNode?
-    /// A few frames of grey noise: the discreet blur over whoever is in the bath.
     private static let noise: [NSImage] = (0..<4).map { _ in
-        let n = 5   // five fat pixels a side: coarse on purpose
+        let n = 5
         let img = NSImage(size: NSSize(width: n, height: n))
         img.lockFocus()
         for x in 0..<n { for y in 0..<n {
@@ -67,13 +50,11 @@ final class Minion: Body {
     func setStatic(_ on: Bool, frame: Int) {
         if !on { retire(staticNode); staticNode = nil; return }
         if staticNode == nil {
-            // A small patch of pixels over the proper place, nothing more.
-            let p = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.2))   // wider than the body: pixel pants
+            let p = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.2))
             p.geometry!.firstMaterial = flat(.white)
             p.geometry!.firstMaterial?.diffuse.magnificationFilter = .nearest
             p.constraints = [SCNBillboardConstraint()]
             p.position = staticSpot
-            // Drawn last and without depth, so the body's own faces never hide it.
             p.renderingOrder = 20
             p.geometry!.firstMaterial?.readsFromDepthBuffer = false
             p.geometry!.firstMaterial?.writesToDepthBuffer = false
@@ -84,32 +65,19 @@ final class Minion: Body {
         staticNode?.geometry?.firstMaterial?.diffuse.contents = Minion.noise[frame % Minion.noise.count]
         staticNode?.isHidden = !staticSeen
     }
-    /// Where the pixels go: over the lap, which moves onto the seat with the body, and forward over the thighs.
     private var staticSpot: SCNVector3 {
         guard case .seated(let h, _) = posed else { return v3(0, bodyHeight * 0.3, 0) }
         return v3(posedSeat.x, h + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9)
     }
-    /// The top of the bowl, where a sitter's thighs rest.
     static let seat = 0.2
-    /// How much of its height a body keeps as torso once it sits; the legs make up the rest.
     static let seatedTorso = 0.62
-    /// The top of a couch, lower than the bowl. Read by both the prop and the pose.
     static let couchSeat = 0.18
-    /// The top of a bunk's mattress: what a sleeper lies on, and sits on to get up, so it stands at a
-    /// seat's height like the couch does rather than at a doormat's.
     static let bedSeat = 0.18
-    /// How high the seat under this body is, by which seat it is on.
     var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
 
-    /// The one pose this body is in, from what it is doing. Flat beats sitting: a body on the bench is
-    /// both on a seat and on its back, and it is its back that shows.
-    ///
-    /// Getting up off a bunk is the one pose that is two: nobody rises from flat on their back straight
-    /// onto their feet. It swings round to sit on the edge of the mattress first, and stands from there.
     func currentPose(at clock: Double) -> Pose {
         let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
         if onBench { return .flat(height: Minion.seat) }
-        // Into bed: sit on the edge, then stretch out along it. Out of bed: the same, backwards.
         if beddingUntil > clock {
             return beddingUntil - clock > Minion.riseSit ? onEdge : .flat(height: Minion.bedSeat)
         }
@@ -121,7 +89,6 @@ final class Minion: Body {
         return .standing
     }
 
-    /// How far off the middle of the bunk its edge is: where a sitter puts itself on the way up.
     static let bedEdge = 0.17
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
@@ -134,7 +101,6 @@ final class Minion: Body {
         visor.geometry!.firstMaterial = flat(Palette.core)
         visor.position = v3(0, h * 0.3, d / 2 + 0.004)
         body.addChildNode(visor)
-        // The legs of a sit: thighs level from the torso's foot forward, shins from their end down to the floor.
         let thighs = SCNNode(geometry: SCNBox(width: w, height: d, length: d * 2.6, chamferRadius: 0.01))
         thighs.geometry!.firstMaterial = body.geometry!.firstMaterial
         thighs.position = v3(0, d / 2, d * 0.8)
@@ -143,8 +109,6 @@ final class Minion: Body {
         shins.position = v3(0, (d - Minion.seat) / 2, d * 1.6)
         legs.addChildNode(thighs); legs.addChildNode(shins)
         legs.opacity = 0
-        // A look's own figure stands in for the box, hung from the box's middle so every pose that
-        // turns or moves the body carries it along.
         let look = Looks.current
         let figure = look.figure(id: id, crew: crew, height: h)
         if let figure {
@@ -180,16 +144,13 @@ final class Minion: Body {
         visor.name = node.name
         legs.name = node.name; thighs.name = node.name; shins.name = node.name
         node.opacity = 0
-        opacity = -Double.random(in: 0...0.9)   // a moment of its own before it begins to show
+        opacity = -Double.random(in: 0...0.9)
     }
 
     var headHeight: Double { bodyHeight }
 
-    /// Where the hammer rests (about one o'clock seen from the side) and where it lands, as pitches of its grip.
     static let hammerRest = -1.05, hammerStrike = 0.55
 
-    /// Hold a tool: goggles, a tablet, a scanner or a hammer. Everything is flat-shaded boxes, held out
-    /// in front along the body's facing direction, so it moves with the body's tilt. Nil puts it away.
     func setTool(_ t: Tool?) {
         guard t != tool else { return }
         tool = t
@@ -225,7 +186,6 @@ final class Minion: Body {
             }
             n.addChildNode(band)
         case .tablet:
-            // A dark slab propped up from the belly, screen glowing back at the face, far edge raised.
             let slab = SCNNode(geometry: SCNBox(width: 0.18, height: 0.012, length: 0.13, chamferRadius: 0))
             slab.geometry!.firstMaterial = dark
             slab.position = v3(0, h * 0.26, d / 2 + 0.09)
@@ -236,7 +196,6 @@ final class Minion: Body {
             slab.addChildNode(screen)
             n.addChildNode(slab)
         case .scanner:
-            // A handheld scanner pointing forward with a bright tip.
             let grip = SCNNode(geometry: SCNBox(width: 0.05, height: 0.05, length: 0.2, chamferRadius: 0))
             grip.geometry!.firstMaterial = dark
             grip.position = v3(0.06, h * 0.3, d / 2 + 0.11)
@@ -247,7 +206,6 @@ final class Minion: Body {
             grip.addChildNode(tip)
             n.addChildNode(grip)
         case .hammer:
-            // Held at the grip: at rest it points up and a little forward, and swings down onto the work.
             let pivot = SCNNode()
             pivot.position = v3(0.07, h * 0.42, d / 2 + 0.04)
             pivot.eulerAngles.x = Minion.hammerRest
@@ -262,7 +220,6 @@ final class Minion: Body {
             n.addChildNode(pivot)
             hammerPivot = pivot
         case .hands:
-            // Both hands out at chest height: what you put on a heavy thing to shove it.
             for side in [-1.0, 1.0] {
                 let hand = SCNNode(geometry: SCNBox(width: 0.06, height: 0.06, length: 0.1, chamferRadius: 0))
                 hand.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.74, 0.8)))
@@ -270,7 +227,6 @@ final class Minion: Body {
                 n.addChildNode(hand)
             }
         case .clipboard:
-            // A flat board held at the side, paper clipped to it.
             let board = SCNNode(geometry: SCNBox(width: 0.15, height: 0.19, length: 0.012, chamferRadius: 0))
             board.geometry!.firstMaterial = lit(NSColor(rgb: (0.45, 0.34, 0.24)))
             board.position = v3(w / 2 + 0.05, h * 0.24, d / 2 + 0.02)
@@ -285,7 +241,6 @@ final class Minion: Body {
             board.addChildNode(clip)
             n.addChildNode(board)
         case .telekinesis:
-            // A short faceted wand, held out front. Its tip lights while a crate is in the air.
             let pivot = SCNNode()
             pivot.position = v3(0.07, h * 0.36, d / 2 + 0.04)
             pivot.eulerAngles.x = -0.5
@@ -312,7 +267,6 @@ final class Minion: Body {
             wandTip = tip
             wandLight = light
         case .flashlight:
-            // A torch held out front, with its cone of light drawn as a soft translucent cone.
             let pivot = SCNNode()
             pivot.position = v3(0.06, h * 0.34, d / 2 + 0.04)
             let barrel = SCNNode(geometry: faceted(SCNCylinder(radius: 0.025, height: 0.12), 4))
@@ -342,7 +296,7 @@ final class Minion: Body {
             light.light!.spotInnerAngle = 12
             light.light!.spotOuterAngle = 32
             light.light!.attenuationEndDistance = 2.2
-            light.eulerAngles.y = .pi   // a light shines down its -z; the torch points along +z
+            light.eulerAngles.y = .pi
             light.position = v3(0, 0, 0.13)
             pivot.addChildNode(light)
             n.addChildNode(pivot)
@@ -354,47 +308,34 @@ final class Minion: Body {
         toolNode = n
     }
 
-    /// The wand at work: the tip brightens and throws a little light while a crate is in the air.
     func setWand(lifting: Bool) {
         wandTip?.opacity = lifting ? 1 : 0.45
         wandLight?.light?.intensity = lifting ? 420 : 0
     }
 
-    /// Blink the scanner tip, if held.
     func blinkScanner(_ on: Bool) {
         toolNode?.childNodes.first?.childNode(withName: "tip", recursively: false)?.opacity = on ? 1 : 0.25
     }
 
-    /// How a body is held. Standing, sat on a seat of some height, or flat on its back — one answer,
-    /// because they are not things that can be true at once. Everything hung on the body follows from
-    /// this: the box's height, the face, whatever is held, the legs, the blur and the shadow.
     enum Pose: Equatable {
         case standing
         case seated(height: Double, at: SIMD2<Double>)
         case flat(height: Double)
     }
 
-    /// Copies what the body is onto the figure you see: its pose, where it stands, how solid it is.
-    /// This is not work the body does — it is the picture catching up to the facts — so it runs for
-    /// every body every frame, whatever else that frame skips. It lives here rather than in the scene,
-    /// so the gallery and the station draw a minion the one way.
-    /// `hover` is how high off the floor it flies, its shadow left on the floor under it.
     func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit, hover: Double = 0) {
         setPose(currentPose(at: clock))
         wear(outfit, clock: clock, dt: dt)
         let resting = path.isEmpty && state == .settled
-        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0   // nobody hops in the shower
-        // The lean is drawing only: the body is on its line, the figure a shoulder to the side of it, eased in and out.
+        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
         node.position = v3(station.offset.x + pos.x + drawnLean.x, hover + hop, station.offset.y + pos.y + drawnLean.y)
-        shadow.position.y = CGFloat(0.003 - hop - hover)   // the shadow stays on the floor while the body hops or flies
+        shadow.position.y = CGFloat(0.003 - hop - hover)
         let up = CGFloat(max(0.4, 1 - hover * 0.9))
         shadow.scale = SCNVector3(up, up, up)
         node.opacity = opacity
     }
 
-    /// Puts on the whole kit at once. The one place a prop is turned on or off, so no prop can
-    /// survive a change of activity: whatever is not in this outfit comes off.
     private func wear(_ o: Routines.Outfit, clock: Double, dt: Double) {
         setTool(o.tool)
         setStatic(o.pixels, frame: Int(clock * 12))
@@ -403,31 +344,20 @@ final class Minion: Body {
         stepFades(dt)
     }
 
-    /// A prop never pops. It fades up as it comes into the hands and down as it leaves them, and
-    /// only then is it taken away — so a wand put down at the end of a load is seen to be put down.
-    ///
-    /// The fade runs on the station's own clock rather than a scene action, for the reason a crate's
-    /// picture is tweened rather than given one: a headless step has no render loop, and a prop
-    /// handed to an action there would never finish leaving.
     static let fadeSeconds = 0.22
     private var fading: [(node: SCNNode, left: Double, out: Bool)] = []
 
-    /// Starts a prop on its way out. The node is let go of at once, so nothing can be handed it
-    /// again while it is still going.
     private func retire(_ node: SCNNode?) {
         guard let node else { return }
         fading.removeAll { $0.node === node }
         fading.append((node, Minion.fadeSeconds, true))
     }
 
-    /// And on its way in, from nothing.
     private func arrive(_ node: SCNNode) {
         node.opacity = 0
         fading.append((node, Minion.fadeSeconds, false))
     }
 
-    /// A prop arrives at nothing and is brought up by this, so whoever draws a body has to beat it. The
-    /// station beats it through `wear`; the gallery puts routines on a body itself and beats it directly.
     func stepFades(_ dt: Double) {
         guard !fading.isEmpty else { return }
         for i in fading.indices { fading[i].left -= dt }
@@ -440,13 +370,10 @@ final class Minion: Body {
         }
     }
 
-    /// What the figure is showing, for the rule that a prop belongs to the activity that put it there.
     var showsBathPixels: Bool { staticNode != nil }
     var showsTowel: Bool { towelNode != nil }
     var holding: Tool? { tool }
 
-    /// Puts the figure into a pose. The only thing that moves the body node, so no two poses can fight
-    /// over it, and the one place to look for what any of them does.
     func setPose(_ p: Pose) {
         guard p != posed else { return }
         let was = posed
@@ -460,9 +387,6 @@ final class Minion: Body {
             seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = 0
             at = v3(0, bodyHeight / 2, 0)
         case .seated(let height, let offset):
-            // A sitter's feet stay where it was standing and the rest of it goes back: the shins reach
-            // forward of the body, so the body sits that far behind the spot. Standing again is the
-            // way back, the torso coming up over the feet.
             seat = offset; boxHeight = torso; pitch = -0.1
             let back = offset.y - Minion.seatReach
             at = v3(offset.x, height + torso / 2, back)
@@ -480,15 +404,12 @@ final class Minion: Body {
         move.timingMode = .easeOut
         body.runAction(move)
 
-        // The box shortens from the top down, so whatever is held drops by what the crown drops.
         hold.runAction(.move(to: v3(0, (boxHeight - bodyHeight) / 2, 0), duration: t))
-        // The face keeps its place on the box: a third of the way up, whatever its height.
         visor.runAction(.move(to: v3(0, boxHeight * 0.3, bodyDepth / 2 + 0.004), duration: t))
-        // The box shortens into a torso as the legs come out, and back to full height as they go.
         SCNTransaction.begin()
         SCNTransaction.animationDuration = t
         if let figure {
-            look.pose(figure: figure, height: bodyHeight, torso: boxHeight)   // legs of its own
+            look.pose(figure: figure, height: bodyHeight, torso: boxHeight)
         } else {
             (body.geometry as? SCNBox)?.height = boxHeight
             legs.opacity = sitting ? 1 : 0
@@ -498,9 +419,6 @@ final class Minion: Body {
         shadow.runAction(.move(to: v3(0.03 + seat.x, 0.003, 0.02 + seat.y), duration: t))
     }
 
-    /// How long a change of pose takes: lying down is slower than sitting, standing up quicker than
-    /// going down. Swinging round to sit on the edge of a bunk is quicker still, because the standing
-    /// up has to follow it inside the moment the body is given to get up in.
     private static func poseSeconds(from: Pose, to: Pose) -> Double {
         if case .flat = from, case .seated = to { return 0.45 }
         if case .flat = to { return 0.7 }
@@ -508,9 +426,6 @@ final class Minion: Body {
         return 0.5
     }
 
-
-    /// A small shuffle on the seat: a lean to one side, held a beat, and back. Nothing while a pose is still settling.
-    /// A towel over the shoulders, draped across the top of the body, or none.
     func setTowel(_ on: Bool) {
         if !on { retire(towelNode); towelNode = nil; return }
         guard towelNode == nil else { return }
@@ -526,8 +441,6 @@ final class Minion: Body {
         towelNode = t
     }
 
-    /// A jetpack on the back, or none; with thrust, its flames stretch out under it and flicker, and the
-    /// pad under it glows.
     func setJetpack(_ thrust: Double?, clock: Double) {
         guard let thrust else { retire(jetpackNode); jetpackNode = nil; return }
         let pack = jetpackNode ?? {
@@ -550,8 +463,6 @@ final class Minion: Body {
         pack.childNode(withName: "exhaust", recursively: true)?.light?.intensity = CGFloat(thrust * (250 + 120 * sin(clock * 40)))
     }
 
-    /// The classic jetpack: a steel pack with two thrusters, a flame under each, and the glow they throw.
-    /// Facing -z from the middle of the body's back.
     static func jetpack(height h: Double) -> SCNNode {
         let n = SCNNode()
         let steel = lit(NSColor(rgb: (0.55, 0.57, 0.62))), dark = lit(NSColor(rgb: (0.25, 0.26, 0.3)))
@@ -570,7 +481,6 @@ final class Minion: Body {
             nozzle.geometry!.firstMaterial = dark
             nozzle.position = v3(x, h * 0.02 - h * 0.18 - 0.015, -0.075)
             n.addChildNode(nozzle)
-            // The flame hangs from the nozzle's mouth, so it stretches downward as it is scaled.
             let flame = SCNNode()
             flame.name = "flame"
             flame.position = v3(x, h * 0.02 - h * 0.18 - 0.03, -0.075)
@@ -599,12 +509,9 @@ final class Minion: Body {
         let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut
         body.runAction(.sequence([over, .wait(duration: 0.3), back]))
     }
-
 }
 
 extension Minion {
-    /// The suit on the box: soft seams, a waistband, a patch in its repository's colour, a glass visor. A look with its
-    /// own figure wears its own clothes. A face per material wants square edges: a chamfered box has fewer.
     func wearSuit(badge: NSColor) {
         guard figure == nil, let box = body.geometry as? SCNBox else { return }
         let key = Suit.key(badge, crew: isCrew)
@@ -613,7 +520,6 @@ extension Minion {
         box.chamferRadius = 0
         box.materials = Suit.materials(crew: isCrew)
         visor.geometry?.firstMaterial = Suit.visor
-        // The repository's patch on the chest: drawn only within a few tiles, like a crate's number.
         let p = Suit.patch, w = Double(box.width), h = Double(box.height), d = Double(box.length)
         let patch = body.childNode(withName: "patch", recursively: false) ?? {
             let plane = SCNPlane(width: w * (p.x1 - p.x0), height: h * (p.y1 - p.y0))

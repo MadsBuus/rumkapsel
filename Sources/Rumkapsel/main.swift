@@ -3,14 +3,7 @@ import ServiceManagement
 import Sparkle
 import SwiftUI
 
-/// Whether this run was started by a script rather than by somebody at the keyboard: the scenario
-/// suite, every model-only test, and a snapshot render. Such a run never takes the front: it has no
-/// dock icon, and the windows it opens are ordered in behind whatever the person is actually doing.
-/// The main window's place and the screen it was on, kept in the defaults. AppKit's own autosave puts a
-/// window back on the main screen whenever the saved screen's frame does not match exactly, which with
-/// several displays is most of the time.
 enum WindowPlace {
-    /// The station's window; other windows keep their own place under a key of their own.
     static let station = "windowPlace"
     static let playbook = "playbookPlace"
 
@@ -25,7 +18,6 @@ enum WindowPlace {
                                    "sx": s.minX, "sy": s.minY, "sw": s.width, "sh": s.height], forKey: key)
     }
 
-    /// The place AppKit's autosave last kept, "x y w h  sx sy sw sh", read once until one of our own is saved.
     private static func fromAutosave() -> [String: Any]? {
         guard let text = UserDefaults.standard.string(forKey: "NSWindow Frame RumkapselMain") else { return nil }
         let n = text.split(separator: " ").compactMap { Double($0) }
@@ -33,7 +25,6 @@ enum WindowPlace {
         return ["x": n[0], "y": n[1], "w": n[2], "h": n[3], "sx": n[4], "sy": n[5], "sw": n[6], "sh": n[7]]
     }
 
-    /// Back where it was, when that screen is connected: found by its number, else by its place and size.
     static func restore(_ w: NSWindow, as key: String = station) -> Bool {
         guard let d = UserDefaults.standard.dictionary(forKey: key) ?? (key == station ? fromAutosave() : nil), let x = d["x"] as? Double, let y = d["y"] as? Double,
               let width = d["w"] as? Double, let height = d["h"] as? Double else { return false }
@@ -60,7 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
     var floatItem: NSMenuItem!
-    /// The View menu, kept so its focus lines can be laid out again whenever the fleet changes.
     var viewMenu: NSMenu!
     var updater: SPUStandardUpdaterController!
     var settingsWindow: NSWindow?
@@ -71,60 +61,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     var playbook: PlaybookController?
     var simulatorWindow: NSWindow?
     var simulator: SimulatorController?
-    /// A scripted run's heartbeat: see below.
     private var frameBeat: Timer?
-    /// The `--scenarios` suite, when that is what this run is.
     private var scenarios: ScenarioRunner?
     let settingsModel = SettingsModel()
     static let feedbackRepo = "MadsBuus/rumkapsel"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Sparkle needs a real .app bundle; skip it for bare debug binaries, demos and snapshots.
         let inBundle = Bundle.main.bundleURL.pathExtension == "app"
         let headless = CommandLine.arguments.contains("--snapshot") || CommandLine.arguments.contains("--demo")
         updater = SPUStandardUpdaterController(startingUpdater: inBundle && !headless, updaterDelegate: self, userDriverDelegate: nil)
         let args = CommandLine.arguments
         let demo = args.contains("--demo")
         let simulatorOnly = args.contains("--simulator")
-        // The playbook on its own: its window only, never the station's over whatever else is open.
         let playbookOnly = args.contains("--playbook")
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
-        // Every test run reads the log in Classic's words, whatever theme is picked: scenarios expect lines by their words.
         if args.contains(where: { $0 == "--scenarios" || $0.hasSuffix("-tests") }) { Words.pinned = Vocabulary() }
-        // The crate ledger on its own: facts in every order, no station.
         if args.contains("--ledger-tests") { LedgerTests.run() }
-        // How a piece of work is named, from whatever a source brought: one office key, one crate number.
         if args.contains("--work-tests") { WorkTests.run() }
         if args.contains("--deploy-tests") { DeployTests.run() }
-        // Pipeline detection on its own: histories shaped like the real repositories'.
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
-        // The station log on its own: no station, no network.
         if args.contains("--spacelog-tests") { SpaceLogTests.run() }
-        // What each look promises to draw, since a look conforms by shape and can be unhooked in silence.
         if args.contains("--look-tests") { LookTests.run() }
         if args.contains("--dump-colors") { ColorDump.run() }
         if args.contains("--bake-plating") { Plating.bake(FlightCraft.Materials.families) }
         if args.contains("--bake-walls") { Bulkhead.bake() }
         if args.contains("--bake-detail") { Detail.bake() }
         if args.contains("--bake-suits") { Suit.bake() }
-        // One still of the flight rocket, for working on its look.
         if let i = args.firstIndex(of: "--look-dev"), args.count > i + 1 { LookDev.run(out: args[i + 1], shot: args.count > i + 2 ? args[i + 2] : "hull") }
         if let i = args.firstIndex(of: "--dump-floor") { FloorDump.run(theme: args.count > i + 1 ? args[i + 1] : "classic") }
-        // A lounger's idle clock and pick on their own: a clock stepped by hand, rolls chosen on purpose.
         if args.contains("--idle-tests") { IdleTests.run() }
-        // The walk step on its own: made-up bodies meeting on a made-up floor.
         if args.contains("--walk-tests") { WalkTests.run() }
-        // The simulation on its own: a body sent about a station of the fleet's making, no scene.
         if args.contains("--sim-tests") { SimulationTests.run() }
-        // The GitHub poller on its own, against the real configuration: what it asks and when, for a while.
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
             let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
             GitHubDiag.run(seconds: seconds, only: only)
         }
-        // The scripted regression suite: no window, no station of its own, one after another.
         if let i = args.firstIndex(of: "--scenarios") {
             let next = args.count > i + 1 ? args[i + 1] : nil
             let filter = (next?.hasPrefix("--") ?? true) ? nil : next
@@ -135,7 +109,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
         buildMenu()
         ConfigStore.shared.onChange = { [weak self] old, new in self?.controller.applyConfigChange(from: old, to: new) }
-        // `kill -USR1 <pid>` writes everything the station is doing to station.log.
         signal(SIGUSR1, SIG_IGN)
         dumpSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
         dumpSignal?.setEventHandler { [weak self] in self?.controller.dumpState() }
@@ -156,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         window.level = floatOn ? .floating : .normal
         window.isReleasedWhenClosed = false
 
-        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)   // the playbook plays its own stations; the app's stays quiet
+        controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)
         window.contentView = controller.view
         if !Scripted.run { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.controller.prepareFlight() } }
         controller.viewSize = controller.view.bounds.size
@@ -167,9 +140,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         controller.view.postsFrameChangedNotifications = true
         menuNeedsUpdate(viewMenu)
 
-        // Where it was last time, on the screen it was on; a screen no longer connected means the default
-        // corner. A scripted run (a snapshot, the scenarios, the simulator) neither reads nor writes the
-        // saved place, or its window would take the user's.
         let remembers = !Scripted.run && !simulatorOnly && !playbookOnly
         if !(remembers && WindowPlace.restore(window)), let screen = NSScreen.main {
             let f = screen.visibleFrame
@@ -184,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         if !simulatorOnly && !playbookOnly {
             if Scripted.run {
-                window.orderBack(nil)   // a render still needs the window drawn, just not in front
+                window.orderBack(nil)
             } else {
                 window.makeKeyAndOrderFront(nil)
                 window.makeFirstResponder(controller.view)
@@ -210,7 +180,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let i = args.firstIndex(of: "--share-as"), args.count > i + 1 {
             controller.peers.start(name: args[i + 1])
         }
-        // `--log`: the station log open for the picture.
         if args.contains("--log") {
             DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 3)) { [self] in controller.toggleSpaceLog() }
         }
@@ -223,13 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 exit(0)
             }
             openPlaybook(activating: false)
-            // One play, whichever was asked for: starting one in the window and another from the flag
-            // runs two stations in the time it takes to look at one.
             let wanted = args.firstIndex(of: "--entry").flatMap { args.count > $0 + 1 ? Playbook.find(args[$0 + 1]) : nil }
-            playbook?.model.play(wanted ?? 0)   // the same door the list's buttons go through
+            playbook?.model.play(wanted ?? 0)
         }
         if simulatorOnly { openSimulator() }
-        // The simulator runs its own station, so the view flags have to reach that one too.
         if let sim = simulator {
             if num("--yaw") != nil || num("--pitch") != nil || num("--zoom") != nil {
                 sim.station.setView(yawDegrees: num("--yaw") ?? 0, pitchDegrees: num("--pitch") ?? -30, zoom: num("--zoom") ?? 1)
@@ -239,17 +205,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sim.station.focus(on: name) }
             }
         }
-        // `--look bath` (with `--focus` naming the station) pans onto that room after the focus has settled.
         if let i = args.firstIndex(of: "--look"), args.count > i + 1, let f = args.firstIndex(of: "--focus"), args.count > f + 1 {
             let room = args[i + 1], stationName = args[f + 1], zoom = num("--zoom") ?? 3
-            // Once after the focus has settled, and again shortly before the picture in case anything moved the view.
             for at in [1.0, max(1.5, (num("--delay") ?? 4) - 3)] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
                     (self?.simulator?.station ?? self?.controller)?.look(at: room, in: stationName, zoom: zoom)
                 }
             }
         }
-        // `--follow leo`: the camera goes with that minion, applied after the focus and again before the picture.
         if let i = args.firstIndex(of: "--follow"), args.count > i + 1 {
             let who = args[i + 1]
             for at in [1.0, max(1.5, (num("--delay") ?? 4) - 3)] {
@@ -258,11 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 }
             }
         }
-        // `--walk 6`: down into the station on foot that many seconds in, where the view or `--follow` points.
         if let at = num("--walk") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleWalk() }
         }
-        // A scripted run: presses the named buttons in order, two seconds apart.
         if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
             if !simulatorOnly { openSimulator() }
             let names = args[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -290,13 +251,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
         if let path = snapshotPath {
             FileHandle.standardError.write("snapshot scheduled -> \(path)\n".data(using: .utf8)!)
-            // Off screen nothing asks SceneKit for a frame, so a scripted run would never tick.
-            // Ask for one thirty times a second and the station lives while the script plays.
             frameBeat = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { _ = (self?.simulator?.station.view ?? self?.controller.view)?.snapshot() }
             }
-            // `--frames N --every S` takes N pictures S seconds apart from the delay on, numbered before
-            // the extension, for a strip or a gif; one picture otherwise.
             let frames = max(1, Int(num("--frames") ?? 1)), every = num("--every") ?? 0.5
             func shot(_ k: Int) {
                 let url = URL(fileURLWithPath: path)
@@ -307,11 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 else { controller.snapshot(to: name) }
                 guard k + 1 == frames else { return }
                 if let sim = simulator {
-                    // The board's knobs as the panel has them, which a picture of the panel cannot
-                    // be read for: a snapshot loses a control's tint.
                     FileHandle.standardError.write(("--- board ---\n" + sim.model.boardLines.joined(separator: "\n") + "\n").data(using: .utf8)!)
-                    sim.station.dumpState()   // every body and order at this moment, to station.log beside the picture
-                    // The scripted run's whole story, so a check can read it rather than the picture.
+                    sim.station.dumpState()
                     FileHandle.standardError.write(("--- simulator log ---\n" + sim.model.logText + "\n").data(using: .utf8)!)
                 }
                 let nodes = (self.simulator?.station ?? self.controller).scene.rootNode.childNodes(passingTest: { n, _ in n.geometry != nil }).count
@@ -327,7 +281,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     private func buildMenu() {
         let main = NSMenu()
 
-        /// A top-level menu, in the bar and ready to be filled.
         func menu(_ title: String) -> NSMenu {
             let item = NSMenuItem()
             let sub = NSMenu(title: title)
@@ -336,7 +289,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             return sub
         }
 
-        // The application's own: what it is, keeping it current, and getting out.
         let app = menu("rumkapsel")
         app.addItem(withTitle: "About rumkapsel", action: #selector(about), keyEquivalent: "")
         let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "u")
@@ -352,8 +304,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         app.addItem(withTitle: "Hide", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         app.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        // The standard editing keys. Settings has fields to type organisations and a name into, and
-        // without these in the bar the system does not give them copy and paste.
         let edit = menu("Edit")
         for (title, selector, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z")] {
             edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
@@ -364,11 +314,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
             edit.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
         }
 
-        // What the station looks like from here: where the camera is pointed, and the two toggles
-        // worth reaching for often enough to want a key.
         let view = menu("View")
         viewMenu = view
-        view.delegate = self   // the stations it can point at are only known once there is a fleet
+        view.delegate = self
         view.addItem(withTitle: "Reset View", action: #selector(resetView), keyEquivalent: "r")
         let walk = view.addItem(withTitle: "Walk the Station", action: #selector(walk), keyEquivalent: "f")
         walk.keyEquivalentModifierMask = [.command, .shift]
@@ -376,28 +324,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
         musicItem = view.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
 
-        // The station's dealings with the outside.
         let station = menu("Station")
         let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
         refresh.keyEquivalentModifierMask = [.command, .shift]
         station.addItem(withTitle: "Station Log", action: #selector(toggleSpaceLog), keyEquivalent: "l")
 
-        // The tools for working on rumkapsel itself, out of the way of the ordinary path.
         let develop = menu("Develop")
         let g = develop.addItem(withTitle: "Graphics Gallery", action: #selector(openGallery), keyEquivalent: "g")
         g.keyEquivalentModifierMask = [.command, .shift]
         let play = develop.addItem(withTitle: "Playbook…", action: #selector(openPlaybook as () -> Void), keyEquivalent: "p")
         play.keyEquivalentModifierMask = [.command, .shift]
         develop.addItem(.separator())
-        // A reading of the station as it stands, onto the clipboard. A picture of a floor gone wrong says
-        // what it looks like; this says why, and it is the running station that has to answer, not a fresh
-        // one — the states worth asking about are the ones that took hours to arrive at.
         let bodies = develop.addItem(withTitle: "Copy Body Report", action: #selector(copyBodies), keyEquivalent: "b")
         bodies.keyEquivalentModifierMask = [.command, .shift]
         let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
         ledger.keyEquivalentModifierMask = [.command, .shift]
+        develop.addItem(withTitle: "Restack the Yard", action: #selector(restackYard), keyEquivalent: "")
         develop.addItem(.separator())
-        // A pretend production deploy on this station, for looking at the flight: nothing is recorded.
         develop.addItem(withTitle: "Rehearse Launch", action: #selector(rehearseLaunch), keyEquivalent: "")
         develop.addItem(withTitle: "Rehearse Failed Launch", action: #selector(rehearseFailedLaunch), keyEquivalent: "")
 
@@ -408,10 +351,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         NSApp.mainMenu = main
     }
 
-    /// The View menu's stations, laid out again whenever it is opened: one line per station the fleet
-    /// actually has, named rather than numbered, above the rest of the menu. Where there is only one
-    /// station there is nothing to choose between, so no line is put there at all — and that is the
-    /// whole of it when the stations become rooms of a single one.
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === viewMenu else { return }
         for item in menu.items where item.representedObject as? String == "focus" { menu.removeItem(item) }
@@ -444,6 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func resetView() { controller.resetView() }
+    @objc func restackYard() { controller.restackYard() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
 
@@ -464,8 +404,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// A station driven by hand: synthetic facts in, every event and command in the log.
-    /// The report onto the clipboard and into the log, so it can be pasted wherever it is being read.
     private func copy(_ text: String, what: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -480,8 +418,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
     @objc func openPlaybook() { openPlaybook(activating: true) }
 
-    /// The playbook's window, where it was left last time. Opened from the menu it comes to the front;
-    /// launched to play an entry it shows where it was without taking the keyboard from what you are doing.
     func openPlaybook(activating: Bool) {
         if playbookWindow == nil {
             let size = NSSize(width: 1100, height: 720)
@@ -537,12 +473,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
     }
 
-    /// The release notes bundled with this build, in a small scrollable window.
     @objc func openWhatsNew() {
         if notesWindow == nil {
             guard let url = Bundle.main.url(forResource: "WhatsNew", withExtension: "md"), let md = try? String(contentsOf: url, encoding: .utf8) else { return }
             let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-            // Headings become bold lines; the rest is inline markdown with its line breaks kept.
             let prepared = md.split(separator: "\n", omittingEmptySubsequences: false)
                 .map { $0.hasPrefix("## ") ? "**" + $0.dropFirst(3) + "**" : $0.hasPrefix("- ") ? "•  " + $0.dropFirst(2) : String($0) }.joined(separator: "\n")
             let text: NSAttributedString
@@ -643,7 +577,6 @@ MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
-    // A scripted suite has no window and wants no dock icon in the way.
     app.setActivationPolicy(Scripted.run ? .accessory : .regular)
     app.run()
 }

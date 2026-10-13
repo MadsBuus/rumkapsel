@@ -1,8 +1,3 @@
-// Model-only tests of how GitHub Actions runs become flights: `.build/debug/Rumkapsel --deploy-tests`.
-//
-// No station and no GitHub. Runs as `gh run list` reports them in, started and ended out; workflow files in,
-// whether they deploy a branch out.
-
 import Foundation
 
 enum DeployTests {
@@ -83,7 +78,7 @@ enum DeployTests {
         test("a deploy over before the station was watching is history, even after a stale first look") {
             let stale = run(1, began: -30 * 86400)
             let fresh = run(2, began: 0, took: 400)
-            let watching = t0.addingTimeInterval(20 * 60)   // the app started twenty minutes after that deploy began
+            let watching = t0.addingTimeInterval(20 * 60)
             let c = Deployments.changes(was: stale, runs: [fresh, stale], firstLook: false, at: t0.addingTimeInterval(23 * 60), watchingSince: watching)
             expect(c.isEmpty, "the replay of an earlier deploy flies nothing, got \(c)")
             let live = run(3, status: "in_progress", began: 25 * 60)

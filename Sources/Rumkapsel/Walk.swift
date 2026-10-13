@@ -1,54 +1,28 @@
-// How a body walks past another: the rule apart from the picture, no SceneKit.
-//
-// Bodies walk their line exactly and never stop for anybody; the model knows nothing of shoulders.
-// What passing changes is only how the figure is drawn: someone close ahead makes the walker turn to
-// face them and lean a shoulder to its own right for the length of the pass, like two broad
-// shoulders in a doorway, then it faces its way again. A pass is for meeting somebody in the way, so
-// only somebody in the lane ahead starts one, and no pass outlasts the walk it was meant to take:
-// whoever stands where the walker is going is given up on and walked past squarely.
-// Tested by `--walk-tests`.
-
 import Foundation
 
 enum Walk {
-    /// Someone within this of the walker, and not behind it, is being passed: far enough for the awkward moment.
     static let reach = 1.0
-    /// A pass begun is held until the other is this far behind, so it never flickers when the two are abreast.
     static let behind = 0.35
-    /// How far the figure leans off its line while passing: a shoulder's width.
     static let sidestep = 0.16
-    /// Within this of a waypoint counts as there.
     static let arrive = 0.08
-    /// The pass is driven by the gap to the other, no clock: from `reach` in, slow down and turn to face them;
-    /// from `leanFrom` in, slide out; behind, straighten up and stride on.
     static let leanFrom = 0.5
-    /// The pace while passing, of the walk's own.
     static let slowTo = 0.35
-    /// How far the figure hangs back with the turn, before the slide out.
     static let stepBack = 0.1
-    /// How far to either side of the line counts as in the way: a corridor's width. Someone standing
-    /// further aside than this is beside the walker, not in front of it, and is walked past squarely.
     static let lane = 0.45
-    /// How far a walker will go sideways for one pass before it gives up on it. A pass ends when the
-    /// other is behind, but somebody standing where the walker is headed never gets behind, and
-    /// somebody walking the same way keeps station: either would hold the turn for the whole walk.
     static let budget = 1.2
 
-    /// The body being passed this tick, if any: close, in the lane ahead, and not one already given up on.
     static func passing(_ m: Body, target: SIMD2<Double>, others: [Body]) -> Body? {
         let line = target - m.pos
         let len = (line.x * line.x + line.y * line.y).squareRoot()
         guard len > 1e-6 else { return nil }
         let dir = line / len
-        // The one already being passed is kept until clearly behind or gone; only then is anyone else looked at.
         if let id = m.passingId, let o = others.first(where: { $0.id == id }) {
             let along = (o.pos.x - m.pos.x) * dir.x + (o.pos.y - m.pos.y) * dir.y
-            if m.passWalked >= budget { m.passedId = id }   // the pass is going nowhere: stride on past them
+            if m.passWalked >= budget { m.passedId = id }
             else if along > -behind, dist2(o.pos, m.pos) < reach * reach * 1.5 { return o }
         }
         m.passingId = nil
         m.passWalked = 0
-        // One given up on is left alone until it is out of reach, so the turn does not begin again a step later.
         if let done = m.passedId, !others.contains(where: { $0.id == done && dist2($0.pos, m.pos) < reach * reach * 1.5 }) { m.passedId = nil }
         let found = others.filter { o in
             guard o.id != m.passedId else { return false }
@@ -61,23 +35,18 @@ enum Walk {
         return found
     }
 
-    /// One tick of one walker toward the first waypoint of its path: moves it along its line, pops the
-    /// waypoint on arrival, plays the pass on its clock, and says who was being passed.
     static func step(_ m: Body, speed: Double, dt: Double, others: [Body]) -> Body? {
         guard let target = m.path.first else { m.lean = .zero; m.passingId = nil; m.passedId = nil; m.passWalked = 0; return nil }
         let d = target - m.pos
         let dist = (d.x * d.x + d.y * d.y).squareRoot()
         let near = passing(m, target: target, others: others)
         let gap = near.map { dist2($0.pos, m.pos).squareRoot() } ?? reach
-        // 1. Slow down as the gap closes: an awkward moment.
         let closing = min(1, max(0, (reach - gap) / (reach - leanFrom)))
         let pace = 1 - (1 - slowTo) * closing
         let stride = speed * pace * dt
         m.pos = dist <= stride ? target : m.pos + d / dist * stride
         if near != nil { m.passWalked += min(stride, dist) }
         if dist2(target, m.pos) < arrive * arrive { m.pos = target; m.path.removeFirst() }
-        // A walk that ends ends straight: whatever the pass was doing, the figure faces the way it came
-        // and stands square; nobody is left half-turned toward someone who happened to be near.
         if m.path.isEmpty {
             m.lean = .zero
             m.passingId = nil
@@ -88,14 +57,10 @@ enum Walk {
         }
         if let near, dist > 1e-9 {
             let dir = d / dist
-            // 2. A quarter turn side-on, toward the side the other goes by on, the walker's left, so the
-            // shoulders lie along the line; 3. then, closer, slide a shoulder out to the right and pass.
             m.facing = atan2(-dir.y, dir.x)
             let out = min(1, max(0, (leanFrom - gap) / (leanFrom - sidestep)))
-            // A small step back with the turn, the hesitation, which the slide out then takes over.
             m.lean = SIMD2(dir.y, -dir.x) * (sidestep * out) - dir * (stepBack * closing * (1 - out))
         } else {
-            // 4. Face the way again and 5. stride on; the scene eases the lean away.
             m.lean = .zero
             if dist > 1e-9 { m.facing = atan2(d.x, d.y) }
         }

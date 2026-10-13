@@ -2,29 +2,6 @@ import AppKit
 import SceneKit
 import SpriteKit
 
-/// A showroom: every routine a body plays and every piece the current look draws, each on its own
-/// tile, one thing at a time and up close.
-///
-/// Two rules keep a tile honest.
-///
-/// **Nothing here writes an animation.** The motion comes from `Routines`, the same table the
-/// station's tick reads, and the arcs from the same `CrateMotion` the floor uses. A tile can only
-/// show what the app draws, so the picture cannot quietly drift from the station — which is what
-/// it used to do: the gallery's own copy had a tablet where the app had a torch, and a lightning
-/// bolt the app stopped drawing long ago.
-///
-/// **Nothing here names a theme.** Every piece comes through `Looks.current`, so the sheet shows
-/// whatever theme is on and a theme's own pieces can be judged against the classic ones without
-/// two themes ending up in the same picture.
-///
-/// Getting about:
-///
-///     --tiles                 every tile's name, one per line
-///     --tile <words>          the camera on the first tile whose name has those words, framed
-///     --tile <words> --zoom 2 …and closer or wider
-///
-/// and in the window, `]` and `[` step to the next tile and the one before, `0` pulls back to the
-/// whole sheet. The window's title says which tile the camera is on.
 final class GalleryController: NSObject, SCNSceneRendererDelegate {
     let view: StationView
     private let scene = SCNScene()
@@ -32,24 +9,18 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
     private let pitchNode = SCNNode()
     private let cameraNode = SCNNode()
     private var yaw = 0.0, pitch = -Double.pi / 5
-    /// Where the camera is aiming and how wide it is, eased toward every frame.
     private var at = SIMD2<Double>(0, 0), scale = 8.0
     private var clock = 0.0, lastTime = 0.0
-    private var updaters: [(Double, Double) -> Void] = []   // (clock, dt)
+    private var updaters: [(Double, Double) -> Void] = []
     private let drone = Drone()
-    /// The crates under way on the carry tiles, on the gallery's own clock: the station's own tween,
-    /// so a lift here rises exactly as a lift there does.
     private var motions: [ObjectIdentifier: CrateMotion] = [:]
 
-    /// One exhibit: what it is called and the box it stands in, so the camera can frame it alone.
     private struct Exhibit {
         let title: String
         let at: SIMD2<Double>
-        /// How tall the tallest thing on it is, so framing a rocket does not cut its nose off.
         var height = 1.0
     }
     private var exhibits: [Exhibit] = []
-    /// The tile the camera is on, or nil for the whole sheet.
     private var shown: Int?
 
     init(frame: NSRect) {
@@ -93,7 +64,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         build()
 
         let args = CommandLine.arguments
-        // `--tiles`: the sheet's contents, for picking one without taking a picture of the lot first.
         if args.contains("--tiles") {
             FileHandle.standardOutput.write((exhibits.map(\.title).joined(separator: "\n") + "\n").data(using: .utf8)!)
             exit(0)
@@ -105,13 +75,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         } else {
             showAll()
         }
-        // Where the camera starts is where it should already be: a snapshot must not catch it easing in.
         settle(by: 1)
     }
 
     // MARK: getting about
 
-    /// The first tile whose name has those words in it, however they are cased.
     private func index(matching words: String) -> Int? {
         let needle = words.lowercased()
         return exhibits.firstIndex { $0.title.lowercased().contains(needle) }
@@ -126,7 +94,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// The camera onto one tile, framed to it, with its name in the title bar.
     private func show(_ k: Int) {
         guard exhibits.indices.contains(k) else { return }
         shown = k
@@ -135,7 +102,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         title("\(k + 1)/\(exhibits.count)  \(e.title)")
     }
 
-    /// Back out to the whole sheet.
     private func showAll() {
         shown = nil
         (at, scale) = framing(exhibits.flatMap(corners(of:)))
@@ -146,8 +112,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         view.window?.title = "rumkapsel gallery — " + text
     }
 
-    /// The box a tile takes up: its own square up to whatever stands tallest on it, and the strip
-    /// its label runs along underneath.
     private func corners(of e: Exhibit) -> [SIMD3<Double>] {
         let half = GalleryController.tileSize / 2 + 0.1
         var out = [-half, half].flatMap { dx in [-half, half].flatMap { dz in
@@ -160,9 +124,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         return out
     }
 
-    /// Where the rig must stand and how wide the camera must be for these points to fill the view.
-    /// The projection is the rig's own — yaw, then pitch, then straight down the camera's axis —
-    /// so the frame is exact however the sheet is turned.
     private func framing(_ points: [SIMD3<Double>]) -> (at: SIMD2<Double>, scale: Double) {
         guard !points.isEmpty else { return (SIMD2(0, 0), 8) }
         let ry = Double.pi / 4 + yaw
@@ -175,11 +136,10 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         let lo = SIMD2(flat.map(\.x).min()!, flat.map(\.y).min()!)
         let hi = SIMD2(flat.map(\.x).max()!, flat.map(\.y).max()!)
         let mid = (lo + hi) / 2
-        // Back out of the projection onto the floor, where the rig stands.
         let qx = mid.x, qz = mid.y / sin(pitch)
         let aim = SIMD2(qx * cos(ry) + qz * sin(ry), -qx * sin(ry) + qz * cos(ry))
         let aspect = Double(max(1, view.bounds.width)) / Double(max(1, view.bounds.height))
-        let want = max((hi.y - lo.y) / 2, (hi.x - lo.x) / 2 / aspect) * 1.06   // a little air round the edges
+        let want = max((hi.y - lo.y) / 2, (hi.x - lo.x) / 2 / aspect) * 1.06
         return (aim, max(0.6, want))
     }
 
@@ -187,56 +147,38 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
 
     private static let tileSize = 2.6
     private static let columns = 6
-    /// The sheet is laid out in the camera's own frame at the angle it starts on, so it reads as
-    /// plain rows and columns rather than a diamond, while every prop on it is still seen at the
-    /// station's own angle. Turning the camera afterwards skews the sheet, which is the price of
-    /// looking at a prop from another side; the framing follows the turn either way.
     private static let sheetYaw = Double.pi / 4, sheetPitch = -Double.pi / 5
-    /// Tile to tile, in screen units: a 2.6 square seen at this angle is about 3.7 across and 2.2
-    /// down, and a row is dropped further still by whatever stands tallest on it, since a tall prop
-    /// rises up the picture into the row above.
     private static let across = 4.3, down = 3.2
-    /// How far below a tile its label sits.
     private static let labelDrop = 1.45
 
-    /// Where a point that far right of and below a spot lands on the floor.
     private func place(right: Double, down: Double) -> SIMD2<Double> {
         let ry = GalleryController.sheetYaw, p = GalleryController.sheetPitch
         let qx = right, qz = -down / sin(p)
         return SIMD2(qx * cos(ry) + qz * sin(ry), -qx * sin(ry) + qz * cos(ry))
     }
 
-    /// A row of spots across a tile, evenly spaced along the picture's horizontal, so a set of five
-    /// packages reads as a row rather than running off into the corner.
     private func spread(_ p: SIMD2<Double>, _ count: Int, gap: Double) -> [SIMD2<Double>] {
         (0..<count).map { p + place(right: (Double($0) - Double(count - 1) / 2) * gap, down: 0) }
     }
 
     // MARK: what goes on the sheet
 
-    /// A tile waiting for a spot: the layout needs every tile's height before it can space the rows,
-    /// so the sheet is declared first and drawn after.
     private struct Pending {
         let title: String
         let height: Double
-        /// Whether it starts a new band.
         let breaks: Bool
         let draw: (SIMD2<Double>) -> Void
     }
     private var pending: [Pending] = []
     private var breakNext = false
 
-    /// Starts a new band. A section always begins on its own row, so the sheet reads in bands and
-    /// `]` walks them in order.
     private func section() { breakNext = true }
 
-    /// One tile: what it is called, how tall it stands, and what to draw once it has a spot.
     private func add(_ title: String, height: Double = 1.0, _ draw: @escaping (SIMD2<Double>) -> Void) {
         pending.append(Pending(title: title, height: height, breaks: breakNext, draw: draw))
         breakNext = false
     }
 
-    /// Gives every declared tile a spot, a floor and a label, and then draws it.
     private func layout() {
         var rows: [[Pending]] = []
         for p in pending {
@@ -245,7 +187,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
         var y = 0.0
         for row in rows {
-            // A tall prop stands up the picture, so the row it is on drops by what it reaches.
             y += GalleryController.down + (row.map(\.height).max() ?? 1) * cos(GalleryController.sheetPitch)
             for (column, p) in row.enumerated() {
                 let at = place(right: Double(column) * GalleryController.across, down: y)
@@ -254,9 +195,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 floor.eulerAngles.x = -.pi / 2
                 floor.position = v3(at.x, 0, at.y)
                 scene.rootNode.addChildNode(floor)
-                // Turned to the camera's horizontal, so the words read across the picture rather
-                // than off into the corner of it.
-                // Two lines, so a title that says what all five states on a tile are still fits under it.
                 let label = floorText(p.title, color: Palette.text, size: 0.23, maxWidth: GalleryController.across - 0.3, lines: 2)
                 let under = at + place(right: 0, down: GalleryController.labelDrop)
                 label.node.position = v3(under.x, 0.01, under.y)
@@ -269,8 +207,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         pending = []
     }
 
-    /// A patch of coloured floor under a tile's props, where the room's colour is part of what is
-    /// being judged.
     private func ground(_ p: SIMD2<Double>, _ color: NSColor, size: Double = 2.0) {
         let f = SCNNode(geometry: SCNPlane(width: size, height: size))
         f.geometry!.firstMaterial = flat(color)
@@ -279,8 +215,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         scene.rootNode.addChildNode(f)
     }
 
-    /// A body standing on a tile, built the one way the station builds one, so it wears the current
-    /// look's figure.
     private func body(at p: SIMD2<Double>, sub: Bool = false, crew: Bool = false) -> Minion {
         let m = Minion(id: UUID().uuidString, station: "gallery",
                        home: Home(key: "x", name: "x", repo: "x", issue: nil),
@@ -294,13 +228,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         return m
     }
 
-    /// Every body on the sheet, so their props can be beaten each frame. A tile that hands a body a tool
-    /// and never beats it shows an empty pair of hands: the prop arrives at nothing and waits to be
-    /// brought up.
     private var bodies: [Minion] = []
 
-    /// Puts a routine's beat onto a body, the way the station's tick puts it: the spin on the body,
-    /// the tilt and roll on its head, the lean a step along its own facing.
     private func apply(_ r: Routines.Motion, to m: Minion, at p: SIMD2<Double>, facing: Double) {
         if let lit = r.scanner { m.blinkScanner(lit) }
         if let aim = r.aim { m.lightPivot?.eulerAngles = aim }
@@ -321,11 +250,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         layout()
     }
 
-    /// One tile per thing a session can be doing, named as the hover panel names it. Every one of
-    /// them plays `Routines`, so what stands here is what stands in an office.
     private func buildWork() {
         section()
-        // The monolith's own: a subagent at the core, with the beam coming down on it.
         add(Activity.researching.label, height: 2.6) { [self] p in
             let keep = Looks.current.monolith()
             keep.position = v3(p.x - 0.55, 0, p.y - 0.45)
@@ -339,7 +265,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                           clock: c, phase: m.bobPhase)
             }
         }
-        // The desk routines: the whole switch in `Routines.working`, one activity to a tile.
         for act in [Activity.exploring, .coding("app"), .testing, .running, .shipping, .skill("review"),
                     .planning, .delegating, .writing, .thinking, .reading, .qa] {
             add(act.label) { [self] p in
@@ -357,7 +282,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 }
             }
         }
-        // Waiting on you: the hop of the first minute.
         add(Activity.waiting.label) { [self] p in
             let m = body(at: p)
             updaters.append { c, _ in
@@ -376,8 +300,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         buildSeats()
     }
 
-    /// A night's sleep, end to end. The poses and the heights are the station's; the timing is the
-    /// gallery's, since on a station this plays out over hours.
     private func buildBed() {
         add(Activity.sleeping.label) { [self] p in
             ground(p, NSColor(Colors.quarters))
@@ -386,14 +308,8 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             scene.rootNode.addChildNode(bunk)
             let m = body(at: p)
 
-            // Going to bed and getting up are the same moves in opposite orders. It comes to the side
-            // of the bunk, turns its back on it, sits on the edge, and swings round into line as it
-            // stretches out; getting up it swings back out of line onto the edge, stands, and walks
-            // off as it faces. It stops at the bunk's edge, which is 0.17 out from the middle of a bed
-            // 0.34 across: that is where its feet go, and sitting puts the rest of it back onto the
-            // mattress behind them.
             let side = p.x + 0.17, off = p.x + 1.3
-            let onEdge = p.y + 0.1, along = p.y             // where it sits, and where it lies
+            let onEdge = p.y + 0.1, along = p.y
             let sat = Minion.Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
             let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0
             let walkIn = 1.5, turns = walkIn + 0.5, sitDown = turns + 0.5, lieBack = sitDown + 0.8
@@ -409,12 +325,12 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 case ..<walkIn:   x = ease(off, side, t / walkIn)
                 case ..<turns:    x = side; yaw = ease(toBed, offBed, (t - walkIn) / (turns - walkIn))
                 case ..<sitDown:  x = side; yaw = offBed; pose = sat
-                case ..<lieBack:  // a quarter turn into the bed's line as it stretches out
+                case ..<lieBack:
                                   let k = (t - sitDown) / (lieBack - sitDown)
                                   x = ease(side, p.x, k); z = ease(onEdge, along, k)
                                   yaw = ease(offBed, inLine, k); pose = .flat(height: Minion.bedSeat)
                 case ..<wakes:    x = p.x; z = along; yaw = inLine; pose = .flat(height: Minion.bedSeat)
-                case ..<sitsUp:   // and back out of it, onto the edge
+                case ..<sitsUp:
                                   let k = (t - wakes) / (sitsUp - wakes)
                                   x = ease(p.x, side, k); z = ease(along, onEdge, k)
                                   yaw = ease(inLine, offBed, k); pose = sat
@@ -430,9 +346,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// The one sitting pose, on the two seats that use it. The station's own seats, at its own
-    /// heights: a couch sized to suit the picture would hide the very misfit this tile is here to
-    /// show.
     private func buildSeats() {
         add("sit: couch / bowl") { [self] p in
             ground(p, NSColor(rgb: (0.40, 0.36, 0.30)))
@@ -445,14 +358,12 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 rest.geometry!.firstMaterial = lit(color)
                 rest.position = v3(spot.x, seat + back / 2, spot.y - 0.24)
                 scene.rootNode.addChildNode(rest)
-                // A sitter is put down a shin's reach behind its spot, so it stands that far in front
-                // of the seat — the same as a body walking up to a couch on a station.
                 return body(at: SIMD2(spot.x, spot.y + Body.seatReach))
             }
             let a = sitter(at: SIMD2(p.x - 0.5, p.y), NSColor(rgb: (0.62, 0.45, 0.4)),
                            seat: Minion.couchSeat, width: 0.8, back: 0.22)
             let b = sitter(at: SIMD2(p.x + 0.5, p.y), .white, seat: Minion.seat, width: 0.3, back: 0.3)
-            a.setTool(.tablet)   // reading on the couch: what a sitter most often has in its hands
+            a.setTool(.tablet)
             a.setPose(.seated(height: Minion.couchSeat, at: SIMD2(0, 0)))
             b.setPose(.seated(height: Minion.seat, at: SIMD2(0, 0)))
             var phase = 0
@@ -467,8 +378,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// The four turns at a cone, one to a tile, instead of waiting for the rota to come round. The
-    /// cone is the look's own message piece, which is what a body actually stands over.
     private func buildCone() {
         section()
         let room = NSColor(Colors.repos[0])
@@ -507,15 +416,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// Taking a crate up and putting it down again, at each of the four heights the hands work at.
-    /// The bend comes from `Routines.hold` and the arc from the station's own tween, so a crate that
-    /// clips through a head here clips through one there.
     private func buildHands() {
         section()
         let colour = NSColor(Colors.repos[1])
         for (level, name) in ["floor", "waist", "overhead", "a hop"].enumerated() {
             add("lift: " + name, height: 1.8) { [self] p in
-                // The shelf the crate comes off and goes back onto, at the height that level works at.
                 let shelfTop = [0.0, 0.42, 0.84, 1.16][level]
                 if shelfTop > 0 {
                     let post = SCNNode(geometry: SCNBox(width: 0.5, height: shelfTop, length: 0.5, chamferRadius: 0))
@@ -532,7 +437,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 crate.position = v3(shelf.x, shelf.y, shelf.z)
                 scene.rootNode.addChildNode(crate)
 
-                // One round: reach for it, carry it a beat, put it back, stand off a beat.
                 let up = Hands.liftFirst + Hands.liftSecond, down = Hands.setDownFirst + Hands.setDownSecond
                 let carries = up + 1.2, puts = carries + down, loop = puts + 1.4
                 var phase = -1
@@ -544,7 +448,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                         phase = now
                         switch now {
                         case 0:
-                            // Onto the arms, by the station's own two legs.
                             crate.removeFromParentNode()
                             m.node.addChildNode(crate)
                             crate.position = m.node.convertPosition(v3(shelf.x, shelf.y, shelf.z), from: nil)
@@ -561,7 +464,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                         default: break
                         }
                     }
-                    // Bent over it while the hands are on it, upright while it rides on the arms.
                     let working = now == 0 || now == 2
                     let hop = level >= 3 && working ? abs(sin(t * 2.4)) : 0
                     let held = Routines.hold(working ? Routines.posture(handsAt: level) : .none, tilt: 0, roll: 0, hop: hop)
@@ -574,20 +476,16 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    /// The pieces the current look draws, each in the state the station can put it in. Nothing here
-    /// names a theme: switch the theme and the sheet switches with it.
     private func buildPieces() {
         section()
         let pink = NSColor(Colors.repos[0]), teal = NSColor(Colors.repos[1]), amber = NSColor(Colors.repos[2])
 
-        // Three bodies: a session of yours, a subagent, a teammate's crew.
         add("figures: yours / subagent / crew") { [self] p in
             for (k, who) in [(false, false), (true, false), (false, true)].enumerated() {
                 let m = body(at: spread(p, 3, gap: 0.6)[k], sub: who.0, crew: who.1)
                 m.node.eulerAngles.y = 0.3
             }
         }
-        // Commits: the three sizes the rows pick from, and an uncommitted one.
         add("cubes: three sizes / uncommitted") { [self] p in
             ground(p, amber)
             let sizes = Props.cubeSizes + [0.26]
@@ -599,7 +497,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 scene.rootNode.addChildNode(n)
             }
         }
-        // A package in every light the rows can put on it.
         add("packages: open / pending / failing / closed / tested") { [self] p in
             ground(p, pink)
             let green = NSColor(rgb: (0.4, 0.82, 0.45)), pending = NSColor(rgb: (1.0, 0.72, 0.25))
@@ -615,25 +512,22 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 let s = states[k]
                 let pkg = Props.package(color: s.shell, band: s.band, size: 0.38, blink: s.blink)
                 if s.failing { pkg.addChildNode(Props.failingShell(size: 0.38 * 1.2)) }
-                if s.tested { let k = CGFloat(Station.testedScale); pkg.scale = SCNVector3(k, k, k) }
+                if s.tested { let k = CGFloat(0.5); pkg.scale = SCNVector3(k, k, k) }
                 pkg.position = v3(spot.x, 0, spot.y)
                 scene.rootNode.addChildNode(pkg)
             }
         }
-        // And the two a package can be whoever opened it: yours, strapped in white, and a bot's.
         add("packages: yours / a bot's") { [self] p in
             ground(p, pink)
             let spots = spread(p, 2, gap: 0.7)
             let mine = Props.package(color: pink, band: NSColor(rgb: (0.4, 0.82, 0.45)), size: 0.38, mine: true)
             mine.position = v3(spots[0].x, 0, spots[0].y)
             scene.rootNode.addChildNode(mine)
-            // Of unknown origin: grey wherever it stands, with a tint of the repository it came for.
             let alien = Props.package(color: Palette.alien.darker(0.3).mixed(with: pink.darker(0.3), 0.35),
                                       band: Palette.alienLight.darker(0.3), size: 0.3)
             alien.position = v3(spots[1].x, 0, spots[1].y)
             scene.rootNode.addChildNode(alien)
         }
-        // The message cone: the one being worked, and the ones queued behind it.
         add("cones: live / queued") { [self] p in
             ground(p, teal)
             for (k, spot) in spread(p, 3, gap: 0.55).enumerated() {
@@ -644,25 +538,14 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                 scene.rootNode.addChildNode(cn)
             }
         }
-        // What an office and a yard are made of.
-        add("crate / console / pallet", height: 1.4) { [self] p in
-            let spots = spread(p, 3, gap: 0.85)
-            let cart = Looks.current.pallet(color: amber) ?? Props.pallet(color: amber)
-            cart.scale = SCNVector3(0.8, 0.8, 0.8)
-            cart.position = v3(spots[0].x, 0.22, spots[0].y)
-            scene.rootNode.addChildNode(cart)
-            let desk = Looks.current.console(color: teal) ?? Props.console(color: teal)
-            desk.scale = SCNVector3(1.1, 1.1, 1.1)
-            desk.position = v3(spots[1].x, 0.55, spots[1].y)
-            scene.rootNode.addChildNode(desk)
+        add("crates: a stack", height: 1.4) { [self] p in
             for (k, c) in [pink, teal, amber].enumerated() {
                 let box = Looks.current.crate(color: c) ?? Props.crate(color: c)
                 box.scale = SCNVector3(0.85, 0.85, 0.85)
-                box.position = v3(spots[2].x + Double(k) * 0.05, 0.004 + Double(k) * 0.26, spots[2].y - Double(k) * 0.05)
+                box.position = v3(p.x + Double(k) * 0.05, 0.004 + Double(k) * 0.26, p.y - Double(k) * 0.05)
                 scene.rootNode.addChildNode(box)
             }
         }
-        // The way work leaves: a rocket for staging, and one for production held on the pad.
         add("rockets: staging / production held", height: 2.4) { [self] p in
             ground(p, NSColor(rgb: (0.24, 0.26, 0.32)))
             let spots = spread(p, 2, gap: 1.1)
@@ -671,10 +554,9 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             scene.rootNode.addChildNode(small)
             let tall = Looks.current.rocket(color: teal, tall: true, cargo: 8)
             tall.position = v3(spots[1].x, 0, spots[1].y)
-            if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) } else { Props.attachTower(to: tall, tall: true, held: true) }
+            if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) }
             scene.rootNode.addChildNode(tall)
         }
-        // The way work arrives: the shuttle, coming down with a crate and going back up.
         add("shuttle: down / drop / up", height: 2.4) { [self] p in
             ground(p, NSColor(Colors.hangar))
             let ring = SCNNode(geometry: faceted(SCNTube(innerRadius: 0.3, outerRadius: 0.34, height: 0.01)))
@@ -700,7 +582,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             }
             loop()
         }
-        // The centre of a station, and the bunk in its quarters.
         add("monolith / bed", height: 2.6) { [self] p in
             let spots = spread(p, 2, gap: 1.2)
             let keep = Looks.current.monolith()
@@ -710,7 +591,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             bunk.position = v3(spots[1].x, 0, spots[1].y)
             scene.rootNode.addChildNode(bunk)
         }
-        // What the hands hold, all of it at once.
         add("tools in hand") { [self] p in
             let tools: [Minion.Tool] = [.goggles, .hammer, .scanner, .flashlight, .tablet]
             for (k, spot) in spread(p, tools.count, gap: 0.48).enumerated() {
@@ -723,8 +603,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: the clock
 
-    /// A crate on its way, on the gallery's clock. The same tween the station uses, so the arcs
-    /// cannot differ.
     private func move(_ node: SCNNode, _ legs: [MotionLeg]) {
         motions[ObjectIdentifier(node)] = CrateMotion(node: node, legs: legs, start: clock, yawTo: nil, onDone: nil)
     }
@@ -739,7 +617,6 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         settle(by: 1 - exp(-dt * 10))
     }
 
-    /// Eases the camera toward where it is meant to be; `k` of 1 puts it there at once.
     private func settle(by k: Double) {
         rig.eulerAngles.y += (Double.pi / 4 + yaw - Double(rig.eulerAngles.y)) * k
         pitchNode.eulerAngles.x += (pitch - Double(pitchNode.eulerAngles.x)) * k

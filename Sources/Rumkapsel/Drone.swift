@@ -1,7 +1,6 @@
 import AVFoundation
 import Foundation
 
-/// A slow, procedurally generated ambient pad. No samples, just oscillators and a big hall.
 final class Drone: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let reverb = AVAudioUnitReverb()
@@ -24,28 +23,24 @@ final class Drone: @unchecked Sendable {
     private struct Bell { var freq: Double; var t: Double }
     private var bells: [Bell] = []
 
-    // Work layers: one per repo, a chord that stacks a note per minion working there.
     private struct Layer { var notes: [Double]; var level: Double; var target: Double; var phases: [Double] }
     private var layers: [Int: Layer] = [:]
     private var pendingWorkload: [Int: Int]?
     private struct Sweep { var t: Double; var up: Bool }
     private var sweeps: [Sweep] = []
-    private var thuds: [Double] = []      // ages of soft thuds in flight
-    private static let repoDegrees = [0, 7, 4, 11, 2, 9, 14, 16]   // semitones above the drone root per repo colour
+    private var thuds: [Double] = []
+    private static let repoDegrees = [0, 7, 4, 11, 2, 9, 14, 16]
 
-    // Voicings in MIDI note numbers. D minor colour throughout, never resolving too hard.
     private static let chords: [[Int]] = [
-        [38, 45, 53, 60, 64],   // D m9
-        [34, 41, 53, 57, 62],   // Bb maj7
-        [41, 48, 57, 60, 67],   // F add9
-        [36, 43, 52, 62, 67],   // C add9
-        [38, 45, 50, 57, 65],   // D m (open)
-        [43, 50, 53, 62, 69],   // G m9
+        [38, 45, 53, 60, 64],
+        [34, 41, 53, 57, 62],
+        [41, 48, 57, 60, 67],
+        [36, 43, 52, 62, 67],
+        [38, 45, 50, 57, 65],
+        [43, 50, 53, 62, 69],
     ]
     private static let pentatonic: [Int] = [74, 77, 79, 81, 84, 86, 89, 91]
 
-    /// Music on or off. Off, the engine is stopped outright: a render callback forty times a second for
-    /// silence is not lightweight.
     var isEnabled: Bool {
         get { masterTarget > 0 }
         set {
@@ -90,7 +85,6 @@ final class Drone: @unchecked Sendable {
         try? engine.start()
     }
 
-    /// A soft bell: one note of the D pentatonic, chosen from a seed so the same agent rings the same way.
     func ping(seed: Int) {
         lock.lock(); defer { lock.unlock() }
         guard bells.count < 8 else { return }
@@ -100,17 +94,14 @@ final class Drone: @unchecked Sendable {
 
     private static func hz(_ midi: Int) -> Double { 440 * pow(2, Double(midi - 69) / 12) }
 
-    /// Repo colour index -> minions working there. Layers fade in and out with the work.
     func setWorkload(_ load: [Int: Int]) {
         lock.lock(); pendingWorkload = load; lock.unlock()
     }
 
-    /// A soft low thud: a box set down, a hammer blow.
     func thud() {
         lock.lock(); if thuds.count < 6 { thuds.append(0) }; lock.unlock()
     }
 
-    /// A slow glide: up for a launch, down for a shuttle coming in.
     func sweep(up: Bool) {
         lock.lock(); if sweeps.count < 4 { sweeps.append(Sweep(t: 0, up: up)) }; lock.unlock()
     }
@@ -133,7 +124,7 @@ final class Drone: @unchecked Sendable {
     private func render(into buf: UnsafeMutablePointer<Float>, frames: Int) {
         let dt = 1.0 / sampleRate
         let chordLength = 28.0
-        let glide = 1.0 - exp(-dt / 2.5)      // a few seconds of portamento between chords
+        let glide = 1.0 - exp(-dt / 2.5)
         let cutoff = 1.0 - exp(-2 * .pi * 700 * dt)
         let masterRamp = 1.0 - exp(-dt / 1.5)
 
@@ -155,7 +146,6 @@ final class Drone: @unchecked Sendable {
                 chordIndex = (chordIndex + 1) % Drone.chords.count
                 targetFreqs = Drone.chords[chordIndex].map(Drone.hz)
             }
-            // the pad breathes: a slow swell over the length of each chord
             swell = 0.55 + 0.45 * sin((chordClock / chordLength) * .pi)
 
             var s = 0.0
@@ -183,7 +173,6 @@ final class Drone: @unchecked Sendable {
             }
             s += b * 0.07
 
-            // Work layers: soft stacked notes per repo, breathing with the pad.
             var w = 0.0
             for (index, var l) in layers {
                 l.level += (l.target - l.level) * layerRamp
@@ -198,7 +187,6 @@ final class Drone: @unchecked Sendable {
             }
             s += w * 0.05 * swell
 
-            // Sweeps: a slow glide up (launch) or down (arrival), fading as it goes.
             for k in localSweeps.indices {
                 let t = localSweeps[k].t
                 let progress = min(1, t / 6)

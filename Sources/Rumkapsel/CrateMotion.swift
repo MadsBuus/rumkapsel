@@ -1,19 +1,14 @@
-// The one way a crate's picture moves: a tween on the station clock, applied each tick. No scene
-// action ever moves a crate, so a headless step moves them too, and nothing can move one twice.
 import Foundation
 import SceneKit
 
-/// One leg of a crate's journey: where it ends up, how long it takes, how it eases.
 struct MotionLeg {
     enum Ease { case linear, easeIn, easeOut, easeInOut }
     var to: SIMD3<Double>
     var seconds: Double
     var ease: Ease = .easeInOut
-    var scale: Double? = nil   // end scale, when the leg shrinks or grows the crate
+    var scale: Double? = nil
 }
 
-/// A crate node under way: its legs, when it started, and what to do when it lands. Positions are in
-/// the node's parent's space, so a crate on the arms travels with the minion.
 final class CrateMotion {
     let node: SCNNode
     let legs: [MotionLeg]
@@ -39,7 +34,6 @@ final class CrateMotion {
         }
     }
 
-    /// Places the node for this moment. True once the last leg is done.
     func apply(at clock: Double) -> Bool {
         var elapsed = max(0, clock - start)
         var at = from
@@ -68,15 +62,12 @@ final class CrateMotion {
 }
 
 extension StationController {
-    /// Starts a crate on its way. Any motion it already had is replaced; nothing else may move it.
     func moveCrate(_ node: SCNNode, legs: [MotionLeg], yawTo: Double? = nil, onDone: (() -> Void)? = nil) {
         crateMotions[ObjectIdentifier(node)] = CrateMotion(node: node, legs: legs, start: clock, yawTo: yawTo, onDone: onDone)
     }
 
-    /// Whether a crate is under way.
     func crateMoving(_ node: SCNNode) -> Bool { crateMotions[ObjectIdentifier(node)] != nil }
 
-    /// Every tick: place every crate under way, and finish the ones that have landed.
     func tickCrateMotions() {
         for (id, motion) in crateMotions where motion.apply(at: clock) {
             crateMotions[id] = nil
@@ -84,6 +75,5 @@ extension StationController {
         }
     }
 
-    /// A crate stops where it is; its picture is left exactly where the last tick put it.
     func stopCrate(_ node: SCNNode) { crateMotions[ObjectIdentifier(node)] = nil }
 }

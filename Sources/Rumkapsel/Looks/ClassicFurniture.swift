@@ -1,13 +1,6 @@
-// The classic furniture of the fixed rooms, the default for every look: the lounge, the bath, the gym and
-// the beds. Pieces are placed in the world as the room stands; the scene names them and animates the ones
-// it moves.
-
 import AppKit
 import SceneKit
 
-/// What a fixed room is furnished with. `props` are solid and named for the room, so the pointer finds
-/// them; `fixtures` are stood on, lain on and stepped round, named for the gym; `bar`, `bag` and `towel`
-/// are the pieces the scene moves, each also among the others.
 struct Furnishing {
     var props: [SCNNode] = []
     var fixtures: [SCNNode] = []
@@ -21,7 +14,6 @@ extension Classic {
         var f = Furnishing()
         let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
         let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
-        // A low coffee table: a thin top on two side panels, with a magazine left on it.
         let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
         table.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
         table.position = v3(station.offset.x + cx, 0.2, station.offset.y + cy)
@@ -39,7 +31,7 @@ extension Classic {
         f.props.append(table)
         let lxs = lounge.cells.map(\.x)
         for c in station.couches {
-            let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1   // side walls run along z, the far wall along x
+            let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1
             let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: Minion.couchSeat, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
             couch.geometry!.firstMaterial = lit(NSColor(Colors.furnitureLight))
             couch.position = v3(station.offset.x + c.x, Minion.couchSeat / 2, station.offset.y + c.y)
@@ -49,9 +41,7 @@ extension Classic {
             couch.addChildNode(back)
             f.props.append(couch)
         }
-        // A potted plant and a low shelf against the back wall, clear of the side couches' ends: somewhere to look at.
         let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
-        // A square pot with a few flat leaves fanned out on a thin stem.
         let pot = SCNNode(geometry: SCNBox(width: 0.2, height: 0.16, length: 0.2, chamferRadius: 0))
         pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
         pot.position = v3(station.offset.x + Double(xs.min()!) + 0.3, 0.08, station.offset.y + Double(ys.min()!) - 0.3)
@@ -83,11 +73,8 @@ extension Classic {
 
     static func bath(_ bath: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        // A toilet in one corner and a shower in another, neither in the doorway nor on the sign.
         let fx = station.bathFixtures(bath: bath)
         let sc2 = fx.shower, tk = fx.toiletCorner, sk = fx.showerCorner
-        // A WC, square to the walls: a pedestal, the seat on it at Minion.seat, a dark inset
-        // for the hole, and the tank standing on the back of the seat against the wall.
         let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
         let spot = station.bowlSpot(bath: bath)
         let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
@@ -110,26 +97,22 @@ extension Classic {
         button.position = v3(0.06, 0.156, 0)
         tank.addChildNode(button)
         f.props.append(bowl)
-        // The shower: a nozzle on a short arm off the corner wall, and a drain in the floor below it.
         let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
         arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-        arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.72, station.offset.y + Double(sc2.y) + 0.35 * sk.y)   // clear of a head
+        arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.72, station.offset.y + Double(sc2.y) + 0.35 * sk.y)
         let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
         nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
         nozzle.position = v3(0, -0.03, -0.1 * sk.y)
         arm.addChildNode(nozzle)
         f.props.append(arm)
-        // The pole the arm comes off: a pipe up the corner wall from the floor, a tap at waist height.
         let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.72, length: 0.04, chamferRadius: 0))
         pole.geometry!.firstMaterial = arm.geometry!.firstMaterial
         pole.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.36, station.offset.y + Double(sc2.y) + 0.45 * sk.y)
         let tap = SCNNode(geometry: SCNBox(width: 0.07, height: 0.03, length: 0.05, chamferRadius: 0))
         tap.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        tap.position = v3(0, 0.0, -0.04 * sk.y)   // waist height on the pole, out from the wall
+        tap.position = v3(0, 0.0, -0.04 * sk.y)
         pole.addChildNode(tap)
         f.props.append(pole)
-        // A towel over a rail on the other wall of the corner, at the far end of the tile from the shower
-        // so it never lines up with the nozzle in the picture. The scene takes it off the rail by name.
         let railAt = station.towelRail(bath: bath)
         let rail = SCNNode(geometry: SCNBox(width: 0.02, height: 0.02, length: 0.24, chamferRadius: 0))
         rail.geometry!.firstMaterial = arm.geometry!.firstMaterial
@@ -153,12 +136,9 @@ extension Classic {
 
     static func gym(_ gym: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        // Four fixtures on the four corner tiles: a treadmill, a bench with a barbell over it, a
-        // bag on an arm, and a mat. The middle tiles stay clear to walk through.
         let spots = station.gymSpots(gym: gym)
         let dark = lit(NSColor(rgb: (0.22, 0.23, 0.28)))
         let steel = lit(NSColor(rgb: (0.66, 0.68, 0.74)))
-        // Treadmill: a low slab with a rail at its head.
         let tread = SCNNode(geometry: SCNBox(width: 0.42, height: 0.06, length: 0.72, chamferRadius: 0.01))
         tread.geometry!.firstMaterial = dark
         tread.position = v3(spots[0].x, 0.03, spots[0].y)
@@ -170,7 +150,6 @@ extension Classic {
         post.position = v3(0, 0.2, 0.34)
         tread.addChildNode(rail); tread.addChildNode(post)
         f.fixtures.append(tread)
-        // Bench and barbell: the bar rests on two uprights and rises for the presses.
         let bench = SCNNode(geometry: SCNBox(width: 0.28, height: 0.2, length: 0.7, chamferRadius: 0.01))
         bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
         bench.position = v3(spots[1].x, 0.1, spots[1].y)
@@ -192,7 +171,6 @@ extension Classic {
         }
         f.fixtures.append(bar)
         f.bar = bar
-        // The bag: a post in the corner with an arm out, and the bag hanging from it.
         let out = station.gymOutward(gym: gym, at: spots[2])
         let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
         bagPost.geometry!.firstMaterial = steel
@@ -203,7 +181,7 @@ extension Classic {
         bagArm.eulerAngles.y = atan2(-out.x, -out.y) + .pi / 2
         bagPost.addChildNode(bagArm)
         f.fixtures.append(bagPost)
-        let bag = SCNNode()   // pivot at the arm's end: the bag hangs from it and swings about it
+        let bag = SCNNode()
         bag.position = v3(spots[2].x, 1.08, spots[2].y)
         let sack = SCNNode(geometry: SCNBox(width: 0.2, height: 0.42, length: 0.2, chamferRadius: 0.02))
         sack.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.28, 0.26)))
@@ -214,7 +192,6 @@ extension Classic {
         bag.addChildNode(sack); bag.addChildNode(chain)
         f.fixtures.append(bag)
         f.bag = bag
-        // The mat: a pale square on the floor.
         let mat = SCNNode(geometry: SCNBox(width: 0.7, height: 0.012, length: 0.7, chamferRadius: 0))
         mat.geometry!.firstMaterial = flat(NSColor(Colors.furnitureLight))
         mat.position = v3(spots[3].x, 0.006, spots[3].y)
@@ -222,12 +199,10 @@ extension Classic {
         return f
     }
 
-    /// A bed flat on the floor, or the upper bunk: a slab on four thin posts. Centred on the origin; the
-    /// scene moves it over its spot and keeps its height.
     static func bed(level: Int, floorTop: Double) -> SCNNode {
         if level == 0 {
             let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
-            b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))   // lit shading pulls it toward the floor; the upper bunk lifts its colour the same way
+            b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))
             b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
             dress(b, top: Minion.bedSeat / 2)
             return b
@@ -245,16 +220,12 @@ extension Classic {
         return slab
     }
 
-    /// What tells a bed from a box, seen from above: a pillow at the head and covers that stop short of
-    /// it. The edge where the covers end is the whole point — a bare slab reads as a lid.
     private static func dress(_ mattress: SCNNode, top: Double) {
         let head = -0.36, foot = 0.36
         let pillow = SCNNode(geometry: SCNBox(width: 0.24, height: 0.035, length: 0.14, chamferRadius: 0.012))
         pillow.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.4))
         pillow.position = v3(0, top + 0.018, head + 0.11)
         mattress.addChildNode(pillow)
-        // From a hand's breadth below the pillow to the foot, and a shade proud of the mattress either
-        // side, the way a blanket hangs over.
         let from = head + 0.24
         let covers = SCNNode(geometry: SCNBox(width: 0.355, height: 0.03, length: foot - from, chamferRadius: 0.008))
         covers.geometry!.firstMaterial = lit(NSColor(Colors.bed).darker(0.22))

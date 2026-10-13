@@ -6,6 +6,16 @@ and deliberately not started.
 
 ## Next
 
+### Air and weight
+STATION.md's "Air and weight": the hull is the line between air and none. Minions work inside, drones outside,
+and crossing the hull is the hand-off from people to machines. The window, the pad's field, the drones' vortex, the bay
+as a hangar behind its field, the kick stage and the undock stand. Still open:
+
+- **The flight's opening shot.** The flight now coasts clear on its thrusters before the kick stage lights, but
+  its first camera is still the old lifter's down cam; an undock wants its own shot.
+- **Spacewalks.** A minion suited and on its jetpack goes out through the field. Wanted; what for is open.
+- **The walk's jetpack stays** as a toy for the one walking, gravity or not.
+
 ### The deploy flight
 The flight is `FlightCraft.swift` (the rocket), `Plating.swift` (its hull, baked into `Resources/Plating` by
 `--bake-plating`) and the cameras in `Mission.swift`. `rumkapsel --look-dev <png> [shot]` renders a still in a
@@ -46,11 +56,8 @@ F walks the hallways at eye height; a click on a minion rides along behind it on
 ## Bugs and loose ends
 - **An office that flaps.** The old `claude/launch-flight` office (worktree `release-strategies-detection`) opens
   and archives every few seconds in the station log. Its branch is merged.
-- **A ghost crate on the conveyor**, seen once in the real station. Waiting to see it again; a playbook entry with
-  two crates queued at the belt may show it.
-- **Gate placements typed in by hand** (belt ends, operator and monitor offsets, the tested stack, rocket foot and
-  tower) should be measured from the things they belong to, like the welder now is.
-- **The security robot** at the gate does not work the right way; a separate thread was started for it.
+- **"Production PR opened" in the playbook** says the approved crate goes aboard, but the release it opens holds
+  untested work (#430 in QA), so the rocket only stands by. The same on main before the drones.
 - **Frame cost**, from 0.41: the session scan (89 ms in one frame) and `gh.crew` (44 ms worst) on the main thread.
 
 ## Ideas

@@ -1,31 +1,24 @@
-// The hallway's way-finding, a sign to a thing: beside each arm of the plaza what lies down it, at each fork of the
-// main route which way each place parts off, and among the offices the way back to the monolith. Each points along the
-// route a minion would walk, as seen by whoever reads it, facing its wall.
-
 import AppKit
 import SceneKit
 
 enum Signs {
-    /// Which way a place lies for somebody reading the sign, facing its wall.
     enum Turn: Int, Comparable {
         case left, back, right
         static func < (a: Turn, b: Turn) -> Bool { a.rawValue < b.rawValue }
         var arrow: String { ["←", "↓", "→"][rawValue] }
     }
 
-    /// One sign: in the junction `cell`, on its wall toward `wall`, and what lies each way for whoever reads it.
     struct Sign {
         let cell: Cell
         let wall: SIMD2<Int>
         let ways: [(turn: Turn, places: [String])]
     }
 
-    /// The places worth a sign, by the word the station calls them by, and the floor that is each.
     static func places(_ st: Station) -> [(name: String, cells: Set<Cell>)] {
         let v = Words.current
         var out: [(String, Set<Cell>)] = [
-            (v.bay, Set(st.hangarCells)), (v.pad, Set(st.padCells)), (v.storage, Set(st.storageCells)),
-            (v.deck, Set(st.deckCells)), (v.monolith, Set(st.coreCells)),
+            (v.bay, Set(st.hangarCells)), (v.pad, Set(st.hall.padCells)), (v.storage, Set(st.hall.storageCells)),
+            (v.deck, Set(st.hall.deckCells)), (v.monolith, Set(st.coreCells)),
         ]
         for (key, name) in [("kind:quarters", v.dorm), ("kind:lounge", v.lounge), ("kind:bath", v.bath), ("kind:gym", v.gym)] {
             if let room = st.rooms[key] { out.append((name, Set(room.cells))) }
@@ -33,13 +26,8 @@ enum Signs {
         return out.filter { !$0.1.isEmpty }.map { (name: $0.0.prefix(1).uppercased() + $0.0.dropFirst(), cells: $0.1) }
     }
 
-    /// How far apart the ways back to the monolith stand at least, in steps, from each other and every other sign.
     static let spacing = 4
 
-    /// Every sign the station's hallway wants, each saying one thing: beside each of the plaza's arms, what lies down
-    /// it; at each fork of the main route (the walks from the plaza to the places), which way each place parts off;
-    /// and among the offices, where hallways meet or offices open on them, the way back to the monolith, a few only:
-    /// none within `spacing` steps of another sign.
     static func plan(_ st: Station) -> [Sign] {
         let walk = st.walkable
         let hall = Set(st.corridorCells + st.coreCells).subtracting([st.plan.monolith])
@@ -54,14 +42,11 @@ enum Signs {
         let places = places(st).filter { $0.name != home }
         let plazaCells = core
 
-        /// Facing the wall toward `d`: its left and right run along it, behind is back across the junction.
         func turn(_ w: SIMD2<Int>, facing d: SIMD2<Int>) -> Turn? {
             w == SIMD2(d.y, -d.x) ? .left : w == SIMD2(-d.y, d.x) ? .right : w == SIMD2(-d.x, -d.y) ? .back : nil
         }
         func step(_ a: Cell, _ b: Cell) -> SIMD2<Int> { SIMD2(b.x - a.x, b.y - a.y) }
 
-        // The main route: one walk from the plaza to each place, the shortest, and every sign reads off it, so no
-        // two signs send a place different ways.
         var parent: [Cell: Cell] = [:], seen = plazaCells, frontier = plazaCells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         while !frontier.isEmpty {
             var next: [Cell] = []
@@ -81,7 +66,6 @@ enum Signs {
         let main = Set(routes.flatMap(\.path))
 
         var plazaSigns: [Sign] = [], forks: [Sign] = [], backs: [Sign] = []
-        // Beside each arm out of the plaza, on the plaza's wall by the opening: the places whose route leaves by it.
         var leaving: [Cell: [SIMD2<Int>: [String]]] = [:]
         for r in routes {
             guard let k = r.path.firstIndex(where: { !core.contains($0) }), k > 0 else { continue }
@@ -91,21 +75,17 @@ enum Signs {
             for d in steps {
                 guard let names = leaving[e]?[d] else { continue }
                 for side in [SIMD2(d.y, -d.x), SIMD2(-d.y, d.x)] where core.contains(at(e, side)) && wall(at(e, side), d) {
-                    // Standing at the sign, the opening is back the way `side` came.
                     guard let t = turn(SIMD2(-side.x, -side.y), facing: d) else { continue }
                     plazaSigns.append(Sign(cell: at(e, side), wall: d, ways: [(turn: t, places: names)]))
                     break
                 }
             }
         }
-        // Forks are where the main route splits; ways back stand where a hallway meets another or an office opens on it.
         for j in hall.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) where !core.contains(j) && (main.contains(j) ? arms(j) : doors(j)) >= 3 {
             guard let up = parent[j] else { continue }
             let back = step(j, up), coming = SIMD2(-back.x, -back.y)
-            // The wall ahead of whoever comes from the plaza, else one beside them.
             let walls = [coming, SIMD2(coming.y, -coming.x), SIMD2(-coming.y, coming.x)].filter { wall(j, $0) }
             if main.contains(j) {
-                // A fork of the main route: which way each place on beyond parts off, and the way back.
                 var onward: [SIMD2<Int>: [String]] = [:]
                 for r in routes { if let i = r.path.firstIndex(of: j), i + 1 < r.path.count { onward[step(j, r.path[i + 1]), default: []].append(r.name) } }
                 guard onward.count >= 2 else { continue }
@@ -118,7 +98,6 @@ enum Signs {
                     break
                 }
             } else {
-                // Among the offices: the way back to the monolith.
                 for d in steps where wall(j, d) {
                     guard let t = turn(back, facing: d), t != .back else { continue }
                     backs.append(Sign(cell: j, wall: d, ways: [(turn: t, places: [home])]))
@@ -132,16 +111,10 @@ enum Signs {
     }
 }
 
-
-/// How a sign is drawn: an old terminal's black screen, the places in red phosphor glowing a little, scan lines
-/// across it. The ways are amber arrows rolling along beside them, drawn apart so they can move.
 enum SignArt {
     static let red = NSColor(rgb: (1.0, 0.24, 0.16)), amber = NSColor(rgb: (1.0, 0.68, 0.18))
-    /// How far the arrows roll beside each way, in lines' heights.
     static let train = 2.4
 
-    /// The lines a sign carries: two places to a line at most, every line with its way's arrows, so none reads as
-    /// belonging to the way above it.
     static func lines(_ sign: Signs.Sign) -> [(turn: Signs.Turn?, text: String)] {
         sign.ways.flatMap { way in
             Swift.stride(from: 0, to: way.places.count, by: 2).map { k in
@@ -150,13 +123,11 @@ enum SignArt {
         }
     }
 
-    /// The sign's picture, `width` by `height` in the scene's units, drawn at 1024 pixels across.
     static func image(_ lines: [(turn: Signs.Turn?, text: String)], width: Double, height: Double) -> NSImage {
         let pw = 1024, ph = Int(1024 * height / width)
         let face = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
         return Textures.draw(pw, ph) { ctx, w, h in
             let row = h / (CGFloat(lines.count) + 0.9)
-            // As big as a line allows, and smaller where the longest line would run off the screen.
             let room = w - row * (train + 0.35) - w * 0.15
             var size = row * 0.58
             let widest = lines.map { NSAttributedString(string: $0.text, attributes: [.font: NSFont(descriptor: face.fontDescriptor, size: size) ?? face,
@@ -188,12 +159,8 @@ enum SignArt {
 }
 
 extension Signs {
-    /// One of the arrows rolling along a sign's line: where its run starts and ends on the sign, and how far through
-    /// the train it is.
     struct Arrow { let node: SCNNode; let from: SIMD2<Double>; let to: SIMD2<Double>; let phase: Double }
 
-    /// A sign as a lit plane standing on its own origin, facing +z, only drawn within a few tiles, and its arrows:
-    /// three to a way, rolling off toward it.
     static func panel(_ sign: Sign) -> (node: SCNNode, arrows: [Arrow]) {
         let lines = SignArt.lines(sign)
         let width = 0.5, height = 0.05 + 0.055 * Double(lines.count)
@@ -220,7 +187,7 @@ extension Signs {
                 face.firstMaterial = arrowFace(turn)
                 face.levelsOfDetail = [SCNLevelOfDetail(geometry: nil, worldSpaceDistance: 5)]
                 let a = SCNNode(geometry: face)
-                a.renderingOrder = 51   // over the sign, whatever order the see-through things are sorted in
+                a.renderingOrder = 51
                 node.addChildNode(a)
                 let left = SIMD2(x0 + glyph / 2, y), right = SIMD2(x0 + span - glyph / 2, y)
                 switch turn {
@@ -236,8 +203,6 @@ extension Signs {
         return (node, arrows)
     }
 
-    /// The arrows one moment on: each runs its way and back to the start, brightest halfway, the three a third
-    /// of a run apart, so they roll along like a train.
     static func roll(_ arrows: [Arrow], at clock: Double) {
         for a in arrows {
             let t = (clock * 0.8 + a.phase).truncatingRemainder(dividingBy: 1)

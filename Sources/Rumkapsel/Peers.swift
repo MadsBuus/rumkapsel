@@ -2,69 +2,53 @@ import Foundation
 import Network
 import dnssd
 
-/// What one app tells the others: its own claim on the shared work station. Only offices it has
-/// checked out itself go out, keyed by branch so every app agrees on which office is which.
 struct PeerSnapshot: Codable {
     struct Office: Codable {
         var key: String; var name: String; var repo: String; var branch: String?; var color: RGB; var cells: [Cell]
-        var pushed: Bool         // the branch exists on the remote: the office is permanent
-        var startedAt: Date      // when this checkout appeared here: a fresh one earns a shuttle
+        var pushed: Bool
+        var startedAt: Date
         var lastActive: Date
         var boxes: Int; var dim: Bool
-        /// The office's pull request, if it has one: number, state, review and checks. Absent from older peers.
         var pull: Int? = nil; var pullState: String? = nil; var review: String? = nil; var checks: String? = nil
     }
     struct Minion: Codable {
         var id: String; var office: String; var asleep: Bool; var busy: Bool
-        /// What the session is doing, whether it waits on its person, and how many messages stand as cones.
         var activity: String? = nil; var waiting: Bool? = nil; var cones: Int? = nil
     }
     var version: Int
     var name: String
-    var since: Date              // when this app started sharing
+    var since: Date
     var offices: [Office]
     var minions: [Minion]
-    /// Parsed GitHub answers for the shared repositories, sent now and then so one poll serves the room.
     var github: [GitHubResolver.Knowledge]?
     var project: GitHubResolver.ProjectKnowledge?
-    /// The sender reads snapshots on the connections it opens, so one sent back that way arrives.
     var twoWay: Bool? = nil
     static let current = 2
 }
 
-/// Bonjour on the local network: advertise, browse, and swap snapshots as newline-delimited JSON. Every
-/// connection carries snapshots both ways, so two stations talk as long as either can reach the other.
 final class PeerHub {
     private let type = "_rumkapsel._tcp"
     private var listener: NWListener?
     private var browser: NWBrowser?
     private var outgoing: [String: NWConnection] = [:]
-    /// Every other station Bonjour shows, answering or not; dialled again each beat until one answers.
     private var found: [String: NWEndpoint] = [:]
     private var incoming: [NWConnection] = []
-    /// Incoming connections whose far end said it reads what comes back.
     private var answered: Set<ObjectIdentifier> = []
     private let queue = DispatchQueue(label: "rumkapsel.peers")
     private var timer: DispatchSourceTimer?
     private var pathMonitor: NWPathMonitor?
     private(set) var networkUp = true
-    /// macOS keeps this app off the local network: Privacy & Security › Local Network has it off.
     private(set) var blocked = false
-    /// Names of the stations Bonjour shows, for the main thread.
     private(set) var nearby: [String] = []
-    /// Peers we are actually talking to right now.
     var connectedCount: Int { queue.sync { outgoing.values.filter { $0.state == .ready }.count } }
     private(set) var name = ""
     private(set) var since = Date()
     var isRunning: Bool { listener != nil }
     var peerCount: Int { queue.sync { outgoing.count } }
-    /// The newest snapshot the scene handed over, sent every beat whether or not the scene is drawing.
     private var latest: PeerSnapshot?
-    /// Who is at the far end of each incoming connection, once a snapshot has said.
     private var heard: [ObjectIdentifier: String] = [:]
     var onSnapshot: ((PeerSnapshot) -> Void)?
 
-    /// TCP that notices a station gone without a word: a link that stops answering fails within seconds.
     private static var tcp: NWParameters {
         let t = NWProtocolTCP.Options()
         t.enableKeepalive = true
@@ -127,16 +111,12 @@ final class PeerHub {
             guard case .service(let n, _, _, _) = r.endpoint, n != name else { continue }
             found[n] = r.endpoint
         }
-        // Bonjour on wifi drops a listing for seconds at a time while the station behind it answers on.
-        // A connection that is up stays up until TCP itself gives out; only one still dialling is let go.
         for (n, c) in outgoing where found[n] == nil && c.state != .ready { c.cancel(); outgoing[n] = nil }
         dial()
         let names = found.keys.sorted()
         DispatchQueue.main.async { [weak self] in self?.nearby = names }
     }
 
-    /// A connection to every station found that has none. One that cannot get through yet (refused,
-    /// or no route) is dropped, so the next beat tries again from scratch.
     private func dial() {
         for (n, endpoint) in found where outgoing[n] == nil {
             let c = NWConnection(to: endpoint, using: PeerHub.tcp)
@@ -194,7 +174,6 @@ final class PeerHub {
         }
     }
 
-    /// The scene's newest word, built on its own thread from its own state.
     func offer(_ snap: PeerSnapshot) {
         queue.async { self.latest = snap }
     }
