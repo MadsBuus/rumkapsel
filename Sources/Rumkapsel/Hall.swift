@@ -13,6 +13,9 @@ struct Hall {
     let clearedCells: [Cell]
     let stagedCells: [Cell]
     let storageCells: [Cell]
+    let clearedGrid: [[Cell]]
+    let stagedGrid: [[Cell]]
+    let storageGrid: [[Cell]]
     let padCells: [Cell]
     let deconCells: [Cell]
     let crateRows: Set<Cell>
@@ -27,6 +30,7 @@ struct Hall {
 
     private init() {
         cells = []; walkwayCells = []; aisleCells = []; clearedCells = []; stagedCells = []; storageCells = []
+        clearedGrid = []; stagedGrid = []; storageGrid = []
         padCells = []; deconCells = []; crateRows = []; windowWatch = []; padWall = []; padField = nil
         padCenter = .zero; droneRackCell = nil; deconHatch = (.zero, SIMD2(0, -1))
     }
@@ -37,9 +41,12 @@ struct Hall {
         cells = (0..<Hall.deep).flatMap { d in (0..<Hall.wide).map { x in Cell(x: x0 - x, y: top + d) } }
         walkwayCells = (0..<Hall.deep).map { Cell(x: x0, y: top + $0) }
         aisleCells = row(top + 2) + row(top + 5)
-        clearedCells = row(top) + row(top + 1)
-        stagedCells = row(top + 4) + row(top + 3)
-        storageCells = row(top + 7) + row(top + 6)
+        clearedGrid = [row(top), row(top + 1)]
+        stagedGrid = [row(top + 3), row(top + 4)]
+        storageGrid = [row(top + 6), row(top + 7)]
+        clearedCells = clearedGrid.flatMap { $0 }
+        stagedCells = stagedGrid.flatMap { $0 }
+        storageCells = storageGrid.flatMap { $0 }
         deconCells = (0..<2).flatMap { d in (0..<Hall.wide).map { x in Cell(x: x0 - x, y: top + Hall.deep + d) } }
         crateRows = Set(storageCells + stagedCells + clearedCells + deconCells.filter { $0.y == top + Hall.deep + 1 })
         windowWatch = row(top + 2) + [Cell(x: x0, y: top), Cell(x: x0, y: top + 1)]

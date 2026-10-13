@@ -306,6 +306,24 @@ enum LayoutTests {
             }
         }
 
+        test("each repository piles in its own column, untested under tested and waiting under that; the first by the walkway, the next a column away") {
+            let a = fresh()
+            a.ledger.adopt(Ledger.Word(storage: [1, 2], deck: Array(10..<20), cleared: Array(10..<16)), repo: "web")
+            _ = a.layout(of: .deck); _ = a.layout(of: .storage)
+            a.ledger.adopt(Ledger.Word(storage: [30], deck: [40, 41], cleared: [40]), repo: "ios")
+            let deck = a.layout(of: .deck), storage = a.layout(of: .storage)
+            func columns(_ repo: String, _ cells: [YardSlot]) -> Set<Int> { Set(cells.filter { $0.repo == repo }.map(\.cell.x)) }
+            let walkway = a.hall.walkwayCells[0].x
+            let web = columns("web", deck + storage), ios = columns("ios", deck + storage)
+            expect(web == [walkway - 1], "web's tested, untested and waiting all in the column by the walkway: \(web.sorted())")
+            expect(ios == [walkway - 3], "ios a column away from web: \(ios.sorted())")
+            let tested = deck.filter { $0.repo == "web" && $0.cleared }
+            expect(tested.contains { $0.cell.y == a.hall.clearedGrid[0][0].y }, "web's tested pile starts by the field")
+            for (cell, here) in Dictionary(grouping: deck + storage, by: { "\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
+                expect(false, "tile \(cell) mixes \(Set(here.map(\.repo)).sorted())")
+            }
+        }
+
         test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {
             let a = fresh()
             expect(a.hall.cells.count == Hall.wide * Hall.deep, "the hall is \(Hall.wide) by \(Hall.deep): \(cells(a.hall.cells))")

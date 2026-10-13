@@ -23,8 +23,9 @@ struct YardSlot {
 
 extension Station {
     func layout(of yard: Yard, stillUntested: Int? = nil, aside: [String: Int] = [:]) -> [YardSlot] {
-        let rows = yardRows(yard)
-        guard !rows(0).isEmpty else { return [] }
+        let grids = yardGrids(yard)
+        guard !grids(0).isEmpty else { return [] }
+        let bands = hallBands()
 
         struct Entry { let crate: Ledger.Crate; let group: Int; let cleared: Bool; let carried: Bool; let index: Int; var slot: Ledger.Slot? }
         var entries: [Entry] = []
@@ -44,8 +45,10 @@ extension Station {
         var held: [(repo: String, slot: Ledger.Slot)] = entries.compactMap { e in e.slot.map { (e.crate.repo, $0) } }
         for i in entries.indices where entries[i].slot == nil {
             let e = entries[i]
-            let slot = Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: rows(e.group).count * 2,
-                                    avoiding: aside["\(e.crate.repo)#\(e.crate.number)"], tall: yard == .decon)
+            let avoiding = aside["\(e.crate.repo)#\(e.crate.number)"]
+            let slot = yard == .decon
+                ? Ledger.place(repo: e.crate.repo, in: yard, group: e.group, among: held, cap: grids(0).joined().count * 2, avoiding: avoiding, tall: true)
+                : pile(repo: e.crate.repo, yard: yard, group: e.group, among: held, bands: bands, avoiding: avoiding)
             entries[i].slot = slot
             held.append((e.crate.repo, slot))
             if e.carried { ledger.setBound(repo: e.crate.repo, number: e.crate.number, slot) }
@@ -54,9 +57,10 @@ extension Station {
         return entries.map { e in
             let s = e.slot!
             let level = held.filter { $0.slot.group == s.group && $0.slot.column == s.column && $0.slot.order < s.order }.count
-            let row = rows(s.group)
+            let grid = grids(s.group)
             let paired = held.contains { $0.slot.group == s.group && $0.slot.column == s.column ^ 1 }
-            let cell = row[min(s.column / 2, row.count - 1)]
+            let tile = s.column / 2, width = grid[0].count
+            let cell = grid[min(tile / width, grid.count - 1)][tile % width]
             let side = paired ? (s.column % 2 == 0 ? -0.25 : 0.25) : 0
             let (jx, jz, yaw) = yard == .storage ? Station.jitter(repo: e.crate.repo, number: e.crate.number) : (0, 0, 0)
             let pos = SIMD3(offset.x + Double(cell.x) + side + jx, Double(level) * Hands.level, offset.y + Double(cell.y) + jz)
@@ -68,7 +72,7 @@ extension Station {
     func spot(for crate: CrateRef, toward yard: Yard) -> Spot {
         let layout = layout(of: yard)
         guard let s = layout.first(where: { $0.repo == crate.repo && $0.number == crate.number }) else {
-            let cell = yardRows(yard)(0).first ?? Cell(x: 0, y: 0)
+            let cell = yardGrids(yard)(0).first?.first ?? Cell(x: 0, y: 0)
             return Spot(area: Station.area(yard, cleared: false), station: name, owner: crate.repo, label: crate.repo, cell: cell,
                         pos: SIMD3(offset.x + Double(cell.x), 0, offset.y + Double(cell.y)))
         }
@@ -140,16 +144,47 @@ extension Station {
         }
     }
 
-    private func yardRows(_ yard: Yard) -> (Int) -> [Cell] {
+    private func yardGrids(_ yard: Yard) -> (Int) -> [[Cell]] {
         switch yard {
-        case .deck: return { $0 == 0 ? self.hall.clearedCells : self.hall.stagedCells }
+        case .deck: return { $0 == 0 ? self.hall.clearedGrid : self.hall.stagedGrid }
+        case .storage: return { _ in self.hall.storageGrid }
         case .decon:
             let back = hall.deconCells.map(\.y).max()
             let row = hall.deconCells.filter { $0.y == back }.sorted { $0.x < $1.x }
-            return { _ in row }
-        case .storage: return { _ in self.hall.storageCells }
+            return { _ in row.isEmpty ? [] : [row] }
         case .pad: return { _ in [] }
         }
+    }
+
+    static let bandOrder = [3, 1, 2, 0]
+
+    private func hallBands() -> [String: Int] {
+        var counts: [String: [Int: Int]] = [:]
+        for c in ledger.crates.values {
+            guard let s = c.bound ?? c.slot, s.yard == .storage || s.yard == .deck else { continue }
+            counts[c.repo, default: [:]][(s.column / 2) % 4, default: 0] += 1
+        }
+        return counts.mapValues { $0.max { ($0.value, -$0.key) < ($1.value, -$1.key) }!.key }
+    }
+
+    private func pile(repo: String, yard: Yard, group: Int, among held: [(repo: String, slot: Ledger.Slot)], bands: [String: Int], avoiding: Int?) -> Ledger.Slot {
+        let here = held.filter { $0.slot.yard == yard && $0.slot.group == group }
+        func height(_ c: Int) -> Int { here.filter { $0.slot.column == c }.count }
+        func next(_ c: Int) -> Ledger.Slot {
+            Ledger.Slot(yard: yard, group: group, column: c, order: (here.filter { $0.slot.column == c }.map(\.slot.order).max() ?? -1) + 1)
+        }
+        func band(_ c: Int) -> Int { (c / 2) % 4 }
+        func columns(_ b: Int) -> [Int] { [0, 1].flatMap { row in [0, 1].map { side in (row * 4 + b) * 2 + side } }.filter { $0 != avoiding } }
+        func open(_ b: Int, under limit: Int) -> Int? { columns(b).filter { height($0) < limit }.min { height($0) < height($1) } }
+        let others = Set(bands.filter { $0.key != repo }.map(\.value)).union(here.filter { $0.repo != repo }.map { band($0.slot.column) })
+        let mine = Set(here.filter { $0.repo == repo }.map { band($0.slot.column) })
+        let held = bands[repo].flatMap { mine.isEmpty || mine.contains($0) ? $0 : nil } ?? mine.min()
+        let free = Station.bandOrder.first { !others.contains($0) }
+        let home = held ?? free ?? Station.bandOrder.min { a, b in here.filter { band($0.slot.column) == a }.count < here.filter { band($0.slot.column) == b }.count }!
+        for b in [home] + mine.subtracting([home]).sorted() { if let c = open(b, under: 3) { return next(c) } }
+        let near = Station.bandOrder.filter { !others.contains($0) && !mine.contains($0) }.sorted { abs($0 - home) < abs($1 - home) }
+        for b in near { if let c = open(b, under: 3) { return next(c) } }
+        return next(open(home, under: .max) ?? columns(home)[0])
     }
 
     private func aside(in yard: Yard, above slot: YardSlot, going: Set<Int>, standing: [YardSlot], after: inout [Int: Int]) -> [Command] {

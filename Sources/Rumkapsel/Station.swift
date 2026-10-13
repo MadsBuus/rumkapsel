@@ -740,6 +740,7 @@ final class Station {
     func restore(_ s: Saved, relayout: Bool = false) {
         dug = relayout ? [] : (s.hallway ?? []).filter { !plan.plaza.contains($0) }
         ledger = s.ledger ?? Ledger()
+        if ledger.slotsDrawnBy != Ledger.slotScheme { ledger.forgetSlots() }
         ledger.forgetTransit()
         let kept = s.rooms.filter { key, _ in key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") }
         if relayout {

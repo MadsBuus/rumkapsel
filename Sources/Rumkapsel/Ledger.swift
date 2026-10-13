@@ -93,6 +93,13 @@ struct Ledger: Codable {
     }
 
     private(set) var crates: [String: Crate] = [:]
+    static let slotScheme = 2
+    var slotsDrawnBy: Int? = Ledger.slotScheme
+
+    mutating func forgetSlots() {
+        for k in crates.keys { crates[k]?.slot = nil; crates[k]?.bound = nil }
+        slotsDrawnBy = Ledger.slotScheme
+    }
 
     private static func key(_ repo: String, _ number: Int) -> String { "\(repo)|\(number)" }
 
