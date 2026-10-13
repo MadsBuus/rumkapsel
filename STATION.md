@@ -43,8 +43,8 @@ by hands: minions, who stand for the sessions and the people, for whatever still
 Outside there is neither, and work is done by **drones**: small faceted machines that fly on puffs of
 thrust, never propellers, and stand for what machines do on their own, the builds, the deploys, the
 bots. Nobody works outside and no drone comes in: a minion goes out only on a spacewalk, suited and on
-its jetpack, through the field. What crosses the hull crosses through the field or a
-lock, and the cargo lock is the hand-off: on the hall side a person is still needed, past it nobody is.
+its jetpack, through the field. What crosses the hull crosses through a field, and the pad wall's field is
+the hand-off: up to it a person is still needed, past it nobody is.
 
 - Inside, things fall, slowly: the station's gravity is low, so a crate with nothing under it settles
   rather than drops.
@@ -52,48 +52,37 @@ lock, and the cargo lock is the hand-off: on the hall side a person is still nee
   the rocket, and anything set loose would drift away.
 - The bay is inside: a shuttle lands there and stands on its berth, and minions walk to it. Space is
   only past the field.
-- Idle drones wait in a rack on the pad side of the cargo lock, and that is all they do when the pad is
-  quiet.
+- Idle drones wait in a rack on the pad by the walkway's end of the field, and that is all they do when the
+  pad is quiet.
 
 ## The yard
 
-The yard is one column six tiles wide beside the station, and work moves along it one way: in from the
-hallway at its near end, out to the pad at its far end.
+The yard is one room beside the station, five tiles wide and eight deep, with no wall inside it. Work moves
+through it one way: in from the hallway at the back, out through the field to the pad at the front.
 
-- **The hall** is one room in two zones with an amber line painted across the floor between them, no
-  wall. The hallway comes in at its near end.
-  - **Storage** is the near zone, in darker steel: merged work not yet on staging, or, for a repository
-    with no staging, waiting for its release. Just inside the door is the **intake tray**, where a
-    carrier sets down a merged crate and goes back; beside it the **crane console**.
-  - **The lab** is the far zone, in light steel inside a painted border: work on staging. Untested crates
-    stand on the **untested shelf**, every one facing the aisle or the walkway, so a tester can reach it.
-    Tested crates stand in **pods**, nearest the lock, apart from the untested ones.
-  - A **walkway** is painted straight from the door to the lab's **aisle**, and nothing stands on either:
-    carriers walk the walkway as far as the intake, testers all the way to the aisle, and the idle stand
-    in the aisle to look out through the glass.
-- **The crane** runs the length of the hall overhead. Only its trolley is drawn, gliding at ceiling
-  height with a crate on its cable and a soft light on the floor under it; its rails show only when you
-  walk the station. A minion at the console works it, one crate at a time: from the intake onto a
-  storage shelf; a staging release's crates across the line onto the untested shelf; a tested crate into
-  its pod; a cleared object out of decon through its hatch; a sealed pod onto the lock's tray at launch.
-  Because the crane reaches every stack from above, storage is packed tight with no aisles.
-- **Stacks** stand three high at most, two to a tile: six crates. More than that is counted on a plate,
-  never stacked higher.
-- **A crate's light** says where it is in the line: off in storage; blue on the untested shelf while its
-  staging deploy runs, not testable yet; amber once staging is live, waiting for a tester; green once
-  tested; red while the staging deploy has failed.
-- **Testers** work the lab in goggles, a tablet and a notepad: up to a crate, the lid up, a look inside,
-  a scan, a tick, a nod for one that passes and a frown and a second look for one that does not. With a
-  big batch two work the aisle from either end.
-- **A pod** is one tile: one repository's tested crates, six at most. A repository with more takes the
-  next tile too, side by side. Pods fill from the lock outward, so the oldest release is nearest it. A
-  repository's pods stand open while anything it would ship is untested and close, glass, lit green, once
-  all of it is: sealed. A late rider or a follow-up lands on the untested shelf and they open again.
-- **The pad wall** is glass but for the **cargo lock**, two tiles at the end over the pods: the only way
-  through to the pad. At the merge the crane sets the sealed pod on the lock's tray and it cycles out
-  whole; a repository that ships from storage goes out crate by crate the same way.
-- **Decon** is a sealed room beyond the storage zone, behind a wall: see **Decon**.
-- **The pad** is outside, graphite, under open space: rockets, and the drones' rack beside the lock.
+- **The walkway** runs down the hall's side from the hallway to the field. The **aisles** cross the hall
+  between its zones. Nothing stands on either.
+- **Three zones**, two rows of four tiles each, an aisle between them, the floor telling them apart:
+  - **Cleared**, by the field: tested work, ready to ship.
+  - **Testing**, in the middle: work on staging, untested.
+  - **Waiting**, at the back: merged work not on staging yet, or, for a repository with no staging,
+    waiting for its release.
+  Each zone's word is painted on the walkway beside it.
+- **A repository has a column**, the same in every zone: its tested pile by the field, its untested right
+  below, its waiting crates below those. The first takes the column by the walkway, the next a column away,
+  and the gaps fill only when the hall is busy. A pile grows from its first crate: beside it, in front of
+  it, then on top, three high. One that outgrows its column spills into the nearest free one.
+- **A crate's light** says where it is in the line: off while waiting; amber on the testing rows; green
+  once tested.
+- **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached by
+  stepping onto the near tile when it is clear, and with a toss from the aisle when a crate stands there:
+  the gravity is low, so the crate drifts over.
+- **A staging release** that merges sends its repository's waiting crates across to the testing rows. A
+  tester's tick sends a crate across to the cleared rows.
+- **The pad wall** is a field, the same sheet the ships fly through at the bay: it holds the air in, you see
+  the rockets through it, and a release goes out through it.
+- **Decon** is a room behind the waiting zone, entered from the walkway's back end: see **Decon**.
+- **The pad** is outside, graphite, under open space: the rockets, and the drones' rack.
 
 ## Shapes mean things
 
@@ -109,21 +98,20 @@ hallway at its near end, out to the pad at its far end.
   that waits for you has none.
 - drone: a machine at work outside the hull; it is none of the shapes above, and never carries a
   repository's colour
-- crane: the trolley gliding over the hall at ceiling height, a cable and a claw under it
-- pod: one tile of what a repository will ship, in the lab, open or sealed (see **The yard**)
 - rocket: a release on its way down to production, the planet below, where the users live. It comes in
   two pieces. The tip is the staging release, welded on the pad by drones while staging deploys. The
   **kick stage** is the production release: when one opens, drones fly it out and set it under the tip,
   and it is the burn that takes the tip down. The ring on the pad under it is its beacon: pulsing red while
   what it would ship is untested, flashing amber while its tip is welded, its repository's colour otherwise.
-  It vents only when it is fuelled and go: its kick stage under it and its pod sealed, waiting only for the
-  merge. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
+  It vents only when it is fuelled and go: its kick stage under it and everything it ships tested, waiting
+  only for the merge. A tip waiting alone stands on its own six legs, the ones it lands on at its colony;
+  they fold away as the kick stage takes it. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
 - nothing is round; everything has flat sides
 
 ## Things are heavy
 
-- A crate moves only in a minion's hands, on the crane's cable, through the cargo lock, or outside in a
-  drone's grip. Never by itself. Never through a wall, a crate, a minion or a piece of furniture.
+- A crate moves only in a minion's hands, tossed by one across a row, or pulled out by the release's
+  vortex. Never by itself. Never through a wall, a crate, a minion or a piece of furniture.
 - A crate that has been set down does not move again until someone picks it up. The layout is
   drawn around what stands there; it never shoves.
 - A crate keeps its slot until it leaves. Stacks are taken from the top and built from the floor. When
@@ -138,10 +126,10 @@ hallway at its near end, out to the pad at its far end.
   draws its own way in, out in space — a high swing round, a low sweep past the hull, a dive, a long
   shallow final — but every one threads the bay's mouth and comes through the field, which ripples where
   it passes, and goes out the same way. Its nose follows the line it is flying the whole way.
-- A rocket is loaded at the merge through the cargo lock: the crane sets a sealed pod, or a crate from
-  storage, on the lock's tray; the inner door shuts, the air goes while a scan sweeps it, the outer door
-  opens, and drones take it to the hatch and hold it there while the hatch takes it in, shrinking as it
-  goes since the rocket is far too small for it. The rocket grows a little with what it holds.
+- A rocket is loaded at the merge, all of it at once: the three drones form a ring outside the field, a
+  vortex opens from the ring to the rocket's hatch, and it pulls the release's crates off their rows one
+  after another, through the field, which ripples, and spirals them shrinking into the hold, since the
+  rocket is far too small for them. Nobody carries a release out. The rocket climbs when the vortex closes.
 - A rocket leaves only with its cargo aboard, and it does not lift off: the station has no weight to
   fight. The pad's clamps let go, its thrusters puff it clear, and only well away from the station does
   the kick stage light for the way down.
@@ -200,14 +188,14 @@ hallway at its near end, out to the pad at its far end.
 
 - A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
   floor. It is an object of unknown origin, and it waits in **decon**, a sealed room beyond the storage
-  zone with a hatch in its far wall and another in the wall to the hall, for the crane. Objects come in through the hatch, never by shuttle and never
+  zone with a hatch in its far wall. Objects come in through the hatch, never by shuttle and never
   through the bay: a drone sets them in from outside, the hatch light flashes, and that is all the fuss an update gets. They stack
   by repository like storage does, a dozen at most, small and dark with the unscreened green on the
   plate, one pile per repository; the rest are counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
-- An object whose pull request merges is cleared: the crane pulls it straight out, wherever it is in its
-  stack, and whatever was on top drops; nobody is careful with unscreened things. It comes through the
-  hatch onto a storage shelf, and from there it is a crate like any other. It waits for the release, rides
-  the crane and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
+- An object whose pull request merges is cleared: a carrier pulls it straight out, wherever it is in its
+  stack, and whatever was on top drops; nobody is careful with unscreened things. It is carried up the
+  walkway into the waiting zone, and from there it is a crate like any other. It waits for the release, rides
+  the vortex and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
   feature ships seven things. It stays grey wherever it goes, so storage still reads as "two real,
   five bumps". Nothing from decon is ever a tester's business: in the lab it counts as tested from the start.
 - An object whose pull request closes unmerged is ejected and forgotten. Nothing is carried.
@@ -269,7 +257,7 @@ hallway at its near end, out to the pad at its far end.
 - Minions never occupy the same spot and wait for each other to pass in a narrow place.
 - Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
 - When a rocket stands venting, the idle drift to the window to watch.
-- Nobody goes onto the pad. A carrier's walk toward a rocket ends at the cargo lock.
+- Nobody goes onto the pad. The field is as far as anyone walks.
 - Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
   couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
   chores when bored, a turn in the gym when the lounge gets dull; board a shuttle in the bay
@@ -311,6 +299,5 @@ Weightlessness when the station loses gravity. Enemy ships were the game's; this
 
 The station takes its work seriously and itself not at all. It has a voice: the log is the station's
 computer speaking, plainly and a little dry. Minions pee with the door open and a
-pixel patch. Testers frown into crates and tick notepads. The crane operator never looks up from the
-console. The log speaks plainly: "web: six crates across to the lab". Jokes live in the words and the routines,
+pixel patch. Testers frown into crates and tick notepads. The log speaks plainly: "web: six crates across to the lab". Jokes live in the words and the routines,
 never in the shapes.
