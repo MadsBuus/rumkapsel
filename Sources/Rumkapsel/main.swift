@@ -339,6 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         bodies.keyEquivalentModifierMask = [.command, .shift]
         let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
         ledger.keyEquivalentModifierMask = [.command, .shift]
+        develop.addItem(withTitle: "Restack the Yard", action: #selector(restackYard), keyEquivalent: "")
         develop.addItem(.separator())
         develop.addItem(withTitle: "Rehearse Launch", action: #selector(rehearseLaunch), keyEquivalent: "")
         develop.addItem(withTitle: "Rehearse Failed Launch", action: #selector(rehearseFailedLaunch), keyEquivalent: "")
@@ -382,6 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func resetView() { controller.resetView() }
+    @objc func restackYard() { controller.restackYard() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
 

@@ -460,6 +460,13 @@ extension StationController {
 enum OfficeLight { case occupied, empty, dark }
 
 extension StationController {
+    func restackYard() {
+        for station in fleet.stations.values { station.ledger.forgetSlots() }
+        fleet.save()
+        rebuildMarkers()
+        logEvent("the yard restacked")
+    }
+
     func looseCrate(_ crate: CrateRef) -> SCNNode {
         let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
         let alien = row?.alien == true
