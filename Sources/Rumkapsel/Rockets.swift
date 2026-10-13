@@ -7,9 +7,12 @@ enum RocketGeometry {
     static var apothem: Double { hullRadius * cos(.pi / 6) }
     static var hullBase: Double { 0.12 + height * 0.49 }
     static var hullHeight: Double { height * 0.4 }
-    static let cradleTop = 0.3
+    static let standHeight = 0.3
+    static let legOut = 0.62, legFolded = -0.25
+    static var legLength: Double { standHeight / cos(legOut) }
+    static func legAngle(lift: Double) -> Double { legOut + (legFolded - legOut) * min(1, max(0, lift)) }
     static var hatchInTip: SIMD3<Double> { SIMD3(apothem + 0.01, 0.12 + height * 0.6, 0) }
-    static func tipDrop(lift: Double) -> Double { (cradleTop - hullBase) * (1 - min(1, max(0, lift))) }
+    static func tipDrop(lift: Double) -> Double { (standHeight - hullBase) * (1 - min(1, max(0, lift))) }
     static func hatch(lift: Double) -> SIMD3<Double> { hatchInTip + SIMD3(0, tipDrop(lift: lift), 0) }
     static var kickGrip: Double { hullBase * 0.55 }
     static let platingSpan = 0.7

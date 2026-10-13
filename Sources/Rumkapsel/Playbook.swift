@@ -134,7 +134,7 @@ enum Playbook {
         PlaybookEntry("release", "QA approves a crate", "carried from the staged rows across the aisle to the cleared rows",
                       [("4x", 0.5), (passQA, .pickedUp(tested)), ("1x", .onStack(tested))],
                       camera: .area("yard", 2.7), tail: 6, yard: true, rooms: [], crowd: false),
-        PlaybookEntry("release", "Production PR opened", "two drones fly the kick stage in under the tip as the cradle raises it",
+        PlaybookEntry("release", "Production PR opened", "two drones fly the kick stage in under the tip as its legs fold up",
                       [("1x", 0.5), ("Release: Production opens", 12)],
                       camera: .area("pad", 3), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production PR merged", "the drones form a ring at the field and the vortex pulls web's cleared crates through it, spiralling them into the rocket",

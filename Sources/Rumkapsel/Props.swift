@@ -230,7 +230,7 @@ enum Props {
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int = 0) -> SCNNode {
         let n = SCNNode()
-        let h = RocketGeometry.height, r = RocketGeometry.radius, cradleTop = RocketGeometry.cradleTop
+        let h = RocketGeometry.height, r = RocketGeometry.radius
         let white = lit(NSColor(rgb: (0.92, 0.92, 0.95)))
         let dark = lit(NSColor(rgb: (0.2, 0.21, 0.26)))
         Detail.apply(.hull, to: white)
@@ -243,11 +243,11 @@ enum Props {
                                                           SCNMatrix4MakeTranslation(CGFloat(at.0 / unit), CGFloat(at.1 / unit), 0))
             return c
         }
-        let tip = SCNNode(), lifter = SCNNode(), cradle = SCNNode()
-        tip.name = "tip"; lifter.name = "lifter"; cradle.name = "cradle"
+        let tip = SCNNode(), lifter = SCNNode()
+        tip.name = "tip"; lifter.name = "lifter"
         let base = RocketGeometry.hullBase
         tip.setValue(base, forKey: "base")
-        n.addChildNode(lifter); n.addChildNode(tip); n.addChildNode(cradle)
+        n.addChildNode(lifter); n.addChildNode(tip)
 
         let hullR = RocketGeometry.hullRadius, hullH = RocketGeometry.hullHeight, apothem = RocketGeometry.apothem
         let rings = RocketGeometry.panels / 6, ringH = hullH / Double(rings)
@@ -358,17 +358,7 @@ enum Props {
             lifter.addChildNode(pivot)
         }
 
-        let collar = SCNNode(geometry: faceted(SCNCylinder(radius: hullR * 1.12, height: 0.05)))
-        collar.geometry!.firstMaterial = dark
-        collar.position = v3(0, cradleTop - 0.025, 0)
-        cradle.addChildNode(collar)
-        for k in 0..<3 {
-            let a = Double(k) * 2 * .pi / 3 + .pi / 3
-            let leg = SCNNode(geometry: SCNBox(width: 0.035, height: cradleTop, length: 0.035, chamferRadius: 0))
-            leg.geometry!.firstMaterial = lit(NSColor(rgb: (0.38, 0.4, 0.45)))
-            leg.position = v3(sin(a) * hullR * 1.2, cradleTop / 2, cos(a) * hullR * 1.2)
-            cradle.addChildNode(leg)
-        }
+        for k in 0..<6 { tip.addChildNode(leg(at: Double(k) * .pi / 3 + .pi / 6, hullRadius: hullR, base: base)) }
 
         let flame = SCNNode(geometry: faceted(SCNCone(topRadius: r * 0.6, bottomRadius: 0, height: 0.45)))
         flame.geometry!.firstMaterial = flat(Palette.pyramid)
@@ -381,6 +371,37 @@ enum Props {
         return n
     }
 
+    static func legs(_ tip: SCNNode, lift: Double) {
+        let angle = RocketGeometry.legAngle(lift: lift)
+        for c in tip.childNodes {
+            guard let leg = c.childNode(withName: "leg", recursively: false) else { continue }
+            leg.eulerAngles.z = CGFloat(angle)
+            leg.isHidden = lift >= 0.98
+        }
+    }
+
+    private static func leg(at a: Double, hullRadius: Double, base: Double) -> SCNNode {
+        let pivot = SCNNode()
+        pivot.eulerAngles.y = CGFloat(-a)
+        let hinge = SCNNode()
+        hinge.name = "leg"
+        hinge.position = v3(hullRadius * 0.96, base + 0.004, 0)
+        let w0 = 2 * hullRadius * sin(.pi / 6) * 0.9, w1 = w0 * 0.42, length = RocketGeometry.legLength
+        let outline = NSBezierPath()
+        outline.move(to: NSPoint(x: -w0 / 2, y: 0))
+        outline.line(to: NSPoint(x: w0 / 2, y: 0))
+        outline.line(to: NSPoint(x: w1 / 2, y: -length))
+        outline.line(to: NSPoint(x: -w1 / 2, y: -length))
+        outline.close()
+        let plate = SCNShape(path: outline, extrusionDepth: 0.012)
+        plate.firstMaterial = lit(NSColor(white: 0.06, alpha: 1))
+        let leaf = SCNNode(geometry: plate)
+        leaf.eulerAngles.y = .pi / 2
+        hinge.addChildNode(leaf)
+        pivot.addChildNode(hinge)
+        return pivot
+    }
+
     static func part(_ rocket: SCNNode, _ name: String) -> SCNNode? {
         rocket.childNodes.first { ($0.value(forKey: "part") as? String) == name }
     }
@@ -389,8 +410,8 @@ enum Props {
         guard let tip = part(rocket, "tip") else { return }
         let base = (tip.value(forKey: "base") as? Double) ?? 0
         part(rocket, "lifter")?.isHidden = !lifter
-        part(rocket, "cradle")?.isHidden = lifter
-        tip.position.y = CGFloat(lifter ? 0 : RocketGeometry.cradleTop - base)
+        legs(tip, lift: lifter ? 1 : 0)
+        tip.position.y = CGFloat(lifter ? 0 : RocketGeometry.standHeight - base)
         let whole = panels >= RocketGeometry.panels
         for c in tip.childNodes {
             let name = (c.value(forKey: "part") as? String) ?? ""

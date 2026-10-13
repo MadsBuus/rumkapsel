@@ -327,7 +327,7 @@ extension StationController {
             stage.opacity = 1
         }
         tip.position.y = CGFloat(RocketGeometry.tipDrop(lift: r.lift))
-        Props.part(v.node, "cradle")?.isHidden = r.kick == .docked
+        Props.legs(tip, lift: r.lift)
     }
 
     func play(rocket cue: Cue) {
