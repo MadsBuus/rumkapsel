@@ -86,6 +86,14 @@ extension Simulation {
         }
     }
 
+    func callOffCarriesTakenBack() {
+        for (id, job) in cargo {
+            guard case .carry(let crate, let from, _) = job.command.kind, let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number],
+                  row.heading == .deck, row.placed == .storage, row.wanted == .storage, row.movedAt == nil else { continue }
+            cancelCarry(id, backTo: from)
+        }
+    }
+
     func cancelCarry(_ id: Int, backTo from: Spot) {
         guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
         if let who = job.carrier, let m = bodies[who], m.load == .crate(crate) {

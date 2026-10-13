@@ -117,14 +117,7 @@ extension StationController {
             if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
         }
         for e in world.stationEvents() { handle(e) }
-        for station in fleet.stations.values where station.hasPad {
-            for (id, job) in cargo {
-                guard case .carry(let crate, let from, _) = job.command.kind, crate.station == station.name,
-                      let row = station.ledger[crate.repo, crate.number],
-                      row.heading == .deck, row.placed == .storage, row.wanted == .storage, row.movedAt == nil else { continue }
-                simulation.cancelCarry(id, backTo: from)
-            }
-        }
+        simulation.callOffCarriesTakenBack()
     }
 
     func rebuildMarkers() {

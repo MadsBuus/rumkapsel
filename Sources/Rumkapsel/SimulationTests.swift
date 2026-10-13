@@ -537,6 +537,17 @@ enum SimulationTests {
             expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
         }
 
+        test("a crate the board takes back to storage before it is lifted: its carry to the deck is called off") {
+            let (sim, station, _) = fixture()
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
+            expect(sim.cargo.count == 1, "one carry to the deck")
+            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            sim.callOffCarriesTakenBack()
+            expect(sim.cargo.isEmpty, "called off: \(sim.cargo.count)")
+            expect(station.ledger["web", 440]?.placed == .storage && station.ledger["web", 440]?.heading == nil, "still in storage, nowhere to go")
+        }
+
         test("a sleeper given something to do stands up where it lies before it walks anywhere") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .quarters)
