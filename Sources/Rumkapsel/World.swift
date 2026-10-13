@@ -6,7 +6,10 @@ final class World {
     private let demo: Bool
     var simulated = false
 
-    init(demo: Bool) { self.demo = demo }
+    init(demo: Bool) {
+        self.demo = demo
+        if demo { fleet.persists = false }
+    }
 
     static let holdWindow: TimeInterval = 24 * 3600
     static let crewRecent: TimeInterval = 30 * 60
