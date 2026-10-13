@@ -721,6 +721,7 @@ final class SimulatorModel: ObservableObject {
                 button("Merge PR", "…is merged", needsOpenPull),
                 button("Close PR", "…is closed unmerged", needsOpenPull),
                 button("New branch in repo", "A new office of mine in \(repo)"),
+                button("New branch, no issue", "A new office of mine in \(repo), on a branch with no issue in its name"),
             ]),
             Group(id: "Teammate (\(teammate))", note: "on the target office when it is \(teammate)'s, else on his newest branch in \(repo)", buttons: [
                 button("Teammate: New branch", "A new branch in \(repo)"),
@@ -909,6 +910,13 @@ final class SimulatorModel: ObservableObject {
             let o = addMine(repo: repo, number: n, slug: "sim-\(n)", branch: "gh-\(n)/new-work-\(n)",
                             title: "new work \(n)", activity: .coding("src"), commits: 2)
             board.append(item(repo, n, "new work \(n)", statuses.development, "me"))
+            target = o.uid
+            pushGitHub()
+            pushScan()
+        case "New branch, no issue":
+            let n = nextIssue(repo)
+            let o = addMine(repo: repo, number: n, slug: "sim-\(n)", branch: "claude/new-work-\(n)",
+                            title: "new work \(n)", activity: .coding("src"), commits: 2)
             target = o.uid
             pushGitHub()
             pushScan()

@@ -404,6 +404,10 @@ final class World {
                 }
             }
         }
+        let livedIn = Set(sessionRooms.compactMap { key -> String? in
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            return parts.count == 2 ? fleet.stations[parts[0]]?.rooms[parts[1]]?.worktree : nil
+        })
         for station in fleet.stations.values {
             for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
                 let key = roomKey(station, room)
@@ -425,7 +429,7 @@ final class World {
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                     && (cfg.project == nil || github.projectItems() != nil)
                 let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
-                let mine = room.worktree.map { Workspaces.isOpen($0) } ?? false
+                let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
                 let lan = peerOffices[key] != nil
                 let ended = cleared && !mine && !lan
                 if gone || ended || orphan {

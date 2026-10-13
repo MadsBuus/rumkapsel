@@ -28,8 +28,10 @@ says who decides. The target is [STAGES.md](STAGES.md). File references are unde
 | Board issue in development | a sign of work: linked PR, `gh-N/` branch in the feed, a peer claim or a local worktree | `.officeOpened(.board)`, `.issueStarted` | `World.swift` |
 | Neighbour's office | adopted where the neighbour put it | shuttle if under 3 min old, else fades in | `World.swift` |
 
-The office key is `task:repo#N` for a `gh-N/...` branch, `task:repo/branch` otherwise, and nothing for
-`main`, `master`, `develop` or `HEAD` (`Work.swift`).
+The office key is `task:repo#N` for a `gh-N/...` branch, `task:repo#PR` once the branch has a pull request
+(the open one, else the newest, so a merge does not rename the office), `task:repo/branch` otherwise, and
+nothing for `main`, `master`, `develop` or `HEAD` (`Work.swift`). One checkout has one office: a merged office
+left behind in a checkout whose session now lives in another office folds once its crate is hauled (`World.swift`).
 
 ### Working: minions, cones, cubes
 

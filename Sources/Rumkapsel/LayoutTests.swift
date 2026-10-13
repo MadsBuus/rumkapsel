@@ -236,11 +236,14 @@ enum LayoutTests {
                 return world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
             }
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
-            let merged = world.works.note(repo: "web", pull: 85, pullState: "MERGED")
+            world.hasPackage = { $0 == "work|task:web#85" }
+            let merged = world.works.note(repo: "web", branch: "feature/old", pull: 85, pullState: "MERGED")
+            world.works.report(merged, .ready, by: .pulls)
             world.works.report(merged, .stored, by: .pulls)
             let old = "task:web#85"
             _ = a.ensureRoom(key: old, name: "#85", repo: "web", color: Colors.repos[0], lastActive: now)
             a.rooms[old]?.worktree = cwd
+            a.rooms[old]?.branch = "feature/old"
             expect(world.stage(office: old, repo: "web") == .stored, "merged, waiting for its haul")
             _ = scan("feature/new")
             let again = scan("feature/new") + scan("feature/new")

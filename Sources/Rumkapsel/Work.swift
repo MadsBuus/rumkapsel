@@ -110,7 +110,7 @@ final class WorkBook {
         func work(branch preferred: String? = nil) -> Work {
             let branch = preferred.flatMap { branches.contains($0) ? $0 : nil } ?? branches.sorted().first
             let open = pulls.filter { $0.value == "OPEN" }.keys.min()
-            return Work(repo: repo, branch: branch, issue: branchIssue, pull: open)
+            return Work(repo: repo, branch: branch, issue: branchIssue, pull: open ?? pulls.keys.max())
         }
         var number: Int? { issue ?? branchIssue ?? pulls.keys.min() ?? crate }
         var officeKeys: [String] {

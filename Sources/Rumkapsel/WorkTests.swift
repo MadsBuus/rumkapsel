@@ -95,12 +95,16 @@ enum WorkTests {
             expect(book.find(officeKey: "task:api#5158", repo: "api") === board, "found by the office key")
         }
 
-        test("a pull request that closes stops naming the office; the branch does again") {
+        test("a merged pull request keeps naming the office; the next one on the branch takes over") {
             let book = WorkBook()
             let r = book.note(repo: "web", branch: "feature/x", pull: 9, pullState: "OPEN")
             expect(r.work().officeKey == "task:web#9", "open: by number")
             book.note(repo: "web", pull: 9, pullState: "MERGED")
-            expect(r.work().officeKey == "task:web/feature/x" && r.number == 9, "merged: the office by branch, the crate still #9")
+            expect(r.work().officeKey == "task:web#9" && r.number == 9, "merged: still #9, the session stays in it")
+            book.note(repo: "web", branch: "feature/x", pull: 10, pullState: "OPEN")
+            expect(r.work().officeKey == "task:web#10", "a new pull request on the branch: by its number")
+            book.note(repo: "web", pull: 10, pullState: "MERGED")
+            expect(r.work().officeKey == "task:web#10", "and it keeps it once merged")
         }
 
         test("two records that turn out to be one fold together, the older keeping its id") {
