@@ -333,7 +333,7 @@ Done. Two different closes:
 `Bodies.swift` is to minions what the ledger is to crates. Every half second, for every command in
 hand, it asks: is this body moving, or waiting on a fact the command named this tick
 (`Minion.waitingOn`)? A rest that has arrived, a lie-down, an act with time left, QA walking its
-rows and the airlock's cycle are steady by definition. Anything else that keeps the same phase and
+rows and a leaver's wait at the bay are steady by definition. Anything else that keeps the same phase and
 the same spot for ten station seconds is given up: `giveUp` says so in the log, puts down what is on
 the arms an arm's length ahead, and frees the body. A carry keeps its order and its id in `cargo`
 with no carrier, starting from where the crate now lies, and whoever gave it up is passed over

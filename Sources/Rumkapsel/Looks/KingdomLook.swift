@@ -62,15 +62,14 @@ struct KingdomLook: Look {
 
     func input(_ station: Station) -> SetPiece? {
         guard station.hasHangar, !station.hangarCells.isEmpty else { return nil }
-        return kept("in:\(station.name)|\(signature(station.hangarCells + station.airlockCells))") { self.builtInput(station) }
+        return kept("in:\(station.name)|\(signature(station.hangarCells))") { self.builtInput(station) }
     }
 
     private func builtInput(_ station: Station) -> SetPiece? {
         let site = Site(station)
         var piece = SetPiece()
-        let bay = Set(station.hangarCells), lock = Set(station.airlockCells)
+        let bay = Set(station.hangarCells)
         for n in [site.blob(bay, grow: 0.16, Self.stoneEdge, y: -0.02), site.blob(bay, grow: 0.05, Self.stone, y: 0.001)] { if let n { piece.add(n, as: .bay) } }
-        for n in [site.blob(lock, grow: 0.0, Self.stoneEdge, y: -0.02), site.blob(lock, grow: -0.1, Self.stone, y: 0.001)] { if let n { piece.add(n, as: .airlock) } }
         let xs = station.hangarCells.map(\.x), zs = station.hangarCells.map(\.y)
         let west = Double(xs.min()!), east = Double(xs.max()!), front = Double(zs.min()!), back = Double(zs.max()!)
         for slot in station.hangarSlots {
@@ -112,17 +111,6 @@ struct KingdomLook: Look {
             piece.add(tower, as: .bay)
         }
         return piece
-    }
-
-    func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
-        let row = SCNNode()
-        for x in spans {
-            guard let gate = Kit.node("gate", from: .castle) else { return Classic.airlockFrame(width: width, spans: spans, tint: tint) }
-            gate.eulerAngles.y = .pi / 2
-            gate.position = v3(x, 0, 0)
-            row.addChildNode(gate)
-        }
-        return (row, false)
     }
 
     func shuttle(color: NSColor) -> SCNNode {
@@ -318,8 +306,8 @@ struct KingdomLook: Look {
         return piece
     }
 
-    func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
-        guard let gate = Kit.node("gate", from: .castle) else { return Classic.hatchFrame(facing: facing) }
+    func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+        guard let gate = Kit.node("gate", from: .castle) else { return Classic.doorFrame(facing: facing) }
         gate.eulerAngles.y = facing.x == 0 ? .pi / 2 : 0
         let n = SCNNode()
         n.addChildNode(gate)
@@ -486,11 +474,7 @@ struct KingdomLook: Look {
             open.insert("\(a.x),\(a.y)|\(b.x - a.x),\(b.y - a.y)")
             open.insert("\(b.x),\(b.y)|\(a.x - b.x),\(a.y - b.y)")
         }
-        for c in station.airlockCells {
-            for d in [(0, -1), (0, 1), (1, 0), (-1, 0)] where !inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
-                open.insert("\(c.x),\(c.y)|\(d.0),\(d.1)")
-            }
-        }
+        if let door = station.bayDoor { open.insert("\(door.inside.x),\(door.inside.y)|0,1") }
         for c in station.hall.padCells {
             for d in [(1, 0), (0, 1), (0, -1)] where inside.contains(Cell(x: c.x + d.0, y: c.y + d.1)) {
                 open.insert("\(c.x + d.0),\(c.y + d.1)|\(-d.0),\(-d.1)")
@@ -1151,7 +1135,7 @@ private struct Site {
     init(_ st: Station) {
         station = st
         offset = st.offset
-        floor = Set(st.allCells).subtracting(st.airlockCells).subtracting(st.hangarCells).subtracting(st.hall.padCells)
+        floor = Set(st.allCells).subtracting(st.hangarCells).subtracting(st.hall.padCells)
         bayCenter = st.hasHangar ? st.hangarCenter : SIMD2(0, Double(st.bounds.max.y) + 12)
         quay = st.hasPad ? st.hall.padCenter : SIMD2(Double(st.bounds.min.x) - 4, 0)
         shoreline = (st.hasPad ? Double(st.hall.padCells.map(\.x).min()!) : Double(st.bounds.min.x)) + 1.55

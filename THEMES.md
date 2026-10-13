@@ -70,7 +70,7 @@ what is shared with peers.
 - **Within budget.** The desk toy runs at 30 frames a second when watched and should cost little CPU. Note
   the geometry node count a snapshot prints (the demo is about 1,050 in Classic) and the frame rate
   `RK_FPS=1` prints, and keep both in mind as a theme adds detail.
-- **The gate still holds.** The layout tests pin Classic's plan and run the yard and airlock checks for
+- **The gate still holds.** The layout tests pin Classic's plan and run the yard and bay checks for
   every theme; every test run pins Classic's words, since the scenarios expect log lines by what they say.
 
 To look at a theme without touching the running app, give a run its own support directory with a full copy
@@ -93,9 +93,9 @@ The pointer over the window shows its hover panel in a snapshot; keep it off the
 - **`Looks/Look.swift`**: the `Look` protocol, ordered by the layers. Every requirement has a default, the
   classic piece, so a look overrides only what it changes:
   - the world: `background`, `viewYaw`, `backdrop`, `ground` (asked once per station under separate worlds)
-  - the input: `input` (the bay and the airlock drawn whole as a `SetPiece`), `airlockFrame`, `shuttle`,
+  - the input: `input` (the bay drawn whole as a `SetPiece`), `shuttle`,
     `shipPose`
-  - the output: `output` (decon, storage, the deck and the pad as a `SetPiece`), `hatchFrame`, `rocket`,
+  - the output: `output` (decon, storage, the deck and the pad as a `SetPiece`), `doorFrame` (the bay's and decon's glass doors), `rocket`,
     `launch`
   - the center: `monolith`
   - the idle areas: `furnishLounge`, `furnishBath`, `furnishGym`, `bed`, handing back a `Furnishing` whose

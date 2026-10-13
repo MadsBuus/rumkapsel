@@ -56,11 +56,11 @@ replaces it and in what order.
 
 ### 3. Where the fixed blocks go
 
-The compass: **south** to the airlock and bay, **west** to the yard, **north and east** free for rooms and
+The compass: **south** to the bay, **west** to the yard, **north and east** free for rooms and
 alleys. Same roles as today, so the sources, the ledger and the scenarios keep their meaning.
 
-- **Airlock**: a 1x2 chamber at the south arm's end; one hatch, not a random one of two. **Bay**: seven wide
-  by four deep beyond it, nine berths on the honeycomb through its middle (`Station.baySlotOffsets`, five in the
+- **Bay**: seven wide by four deep right past the south arm's end, behind one glass door
+  (`Station.bayDoor`), the row beside its top kept clear (`Station.bayMargin`), nine berths on the honeycomb through its middle (`Station.baySlotOffsets`, five in the
   row toward the hatch and four set between them behind), the row by the hatch and the row behind them the lanes
   carriers walk and wait in. `bayStand` picks a berth's lane cell as the nearest bay cell clear of every berth's
   own ground, so nobody ever waits under a ship.
@@ -101,7 +101,7 @@ alleys. Same roles as today, so the sources, the ledger and the scenarios keep t
   exactly the shoulder lean `Walk.sidestep` already draws. Right of way is still not a rule (STATION.md,
   Minions), so two meeting in an alley squeeze past as they do in the corridor today; the plaza is where
   anyone waits.
-- `canStep` keeps its one door per room; the deck door, the airlock door and the hatch become single pairs.
+- `canStep` keeps its one door per room; the deck door, the bay door and the decon door are single pairs.
   `standCell` must not assume a free neighbouring aisle cell: on a one-wide hallway it steps along the
   hallway, not beside it.
 - Carries and deliveries do not change: a crate on the arms has no footprint today and keeps none.

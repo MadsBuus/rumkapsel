@@ -15,6 +15,7 @@ ns = {'__file__': os.path.join(HERE, 'floorplan.py')}; exec(open(os.path.join(HE
 
 def bake(theme, seed):
     hall, slots, quarters, fixed, mono, ring = ns['plan'](theme, seed)
+    fixed = {k: v for k, v in fixed.items() if k != "bayMargin"}
     # Everything the base must reach, traced back to the plaza through the hallway, so the base is a tree
     # rooted there and is connected by how it is built rather than by luck.
     prev, q = {}, deque()

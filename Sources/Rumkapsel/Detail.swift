@@ -3,7 +3,7 @@ import SceneKit
 import simd
 
 enum Detail {
-    enum Kind: String, CaseIterable { case hallway, office, quarters, yard, bay, airlock, hull, pod, hardcase, lid }
+    enum Kind: String, CaseIterable { case hallway, office, quarters, yard, bay, hull, pod, hardcase, lid }
 
     static let size = 512
     static let mean = 0.96
@@ -24,7 +24,6 @@ enum Detail {
         case .yard: return .yard
         case .pad: return nil
         case .bay: return .bay
-        case .airlock: return .airlock
         }
     }
 
@@ -145,13 +144,6 @@ enum Detail {
                 if abs(d - 0.38) < 0.004 { v[i] *= 0.82 }
             }
             wear(0.1)
-        case .airlock:
-            each { i, _, y in
-                let rib = (y * 16).truncatingRemainder(dividingBy: 1)
-                v[i] *= rib < 0.12 ? 0.84 : (rib < 0.2 ? 1.05 : 1)
-            }
-            each { i, x, y in if seam(x, y, cells: 1) < 0.004 { v[i] *= 0.72 } }
-            wear(0.08)
         case .pod:
             each { i, x, y in
                 let s = seam(x, y, cells: 1)

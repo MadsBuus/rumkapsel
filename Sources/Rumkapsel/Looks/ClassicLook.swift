@@ -181,14 +181,7 @@ enum Classic {
         return NSImage(cgImage: cg, size: NSSize(width: w, height: h))
     }
 
-    static func airlockFrame(width: Double, spans: [Double], tint: NSColor) -> (node: SCNNode, showsPosts: Bool) {
-        let lintel = SCNNode(geometry: SCNBox(width: width + 0.08, height: 0.08, length: 0.08, chamferRadius: 0))
-        lintel.geometry!.firstMaterial = lit(tint)
-        lintel.position = v3(0, 0.74, 0)
-        return (lintel, true)
-    }
-
-    static func hatchFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+    static func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
         let hatch = SCNNode()
         let frame = lit(NSColor(rgb: (0.55, 0.6, 0.72)))
         for side in [-1.0, 1.0] {

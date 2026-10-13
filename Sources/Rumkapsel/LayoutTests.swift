@@ -201,9 +201,9 @@ enum LayoutTests {
             let hull = StationHull(a)
             let out = a.hall.padCells.filter { hull.inside.contains($0) }
             expect(out.isEmpty, "the pad is under open space: \(cells(out))")
-            let indoors = a.hall.cells + a.hall.deconCells + a.airlockCells + a.coreCells + a.hangarCells
+            let indoors = a.hall.cells + a.hall.deconCells + a.coreCells + a.hangarCells
             let missed = indoors.filter { !hull.inside.contains($0) }
-            expect(missed.isEmpty, "the hall, decon, the passage, the bay and the hallway are indoors: \(cells(missed))")
+            expect(missed.isEmpty, "the hall, decon, the bay and the hallway are indoors: \(cells(missed))")
             for c in a.hangarCells where c.y == a.hangarCells.map(\.y).max() {
                 let foot = SIMD2(Double(c.x), Double(c.y) + 0.5)
                 expect(hull.reach(foot).distance < 0.01 && hull.reach(foot).door, "the bay's mouth is open in the hull's foot at \(c.x)")
@@ -390,18 +390,17 @@ enum LayoutTests {
                     }
                 }
             }
-            test("\(theme.title): the airlock runs through the hull and the bay hangs outside, touching the station only at the hatch") {
+            test("\(theme.title): the bay meets the end of the south hallway and touches the station only at its door") {
                 let a = fresh()
                 for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
-                let lock = Set(a.airlockCells), bay = Set(a.hangarCells)
-                expect(lock.count == Station.airlockLength, "the way into the bay is \(lock.count) tiles")
+                let bay = Set(a.hangarCells)
+                guard let door = a.bayDoor else { return expect(false, "a door into the bay") }
+                expect(bay.contains(door.bay) && a.corridorCells.contains(door.inside), "the door joins the hallway's end to the bay")
                 var inside = Set(a.corridorCells + a.coreCells + a.hall.padCells + a.hall.deckCells + a.hall.storageCells + a.hall.deconCells)
                 for r in a.rooms.values { inside.formUnion(r.cells) }
-                expect(lock.isDisjoint(with: inside), "nothing else stands in the airlock: \(cells(Array(lock.intersection(inside))))")
                 expect(bay.isDisjoint(with: inside), "nothing else stands in the bay: \(cells(Array(bay.intersection(inside))))")
-                let hatch = Set(a.airlockHatches.map(\.inside))
-                let touching = bay.flatMap(\.neighbours).filter { !bay.contains($0) && (inside.contains($0) || (lock.contains($0) && !hatch.contains($0))) }
-                expect(touching.isEmpty, "the bay touches the station only at the hatch: \(cells(touching))")
+                let touching = bay.flatMap(\.neighbours).filter { !bay.contains($0) && inside.contains($0) && $0 != door.inside }
+                expect(touching.isEmpty, "the bay touches the station only at its door: \(cells(touching))")
             }
         }
         Theme.pinnedForPlan = .classic
@@ -433,7 +432,6 @@ enum LayoutTests {
         chars[s.monolithCell] = "#"
         for c in s.hall.padCells + s.hall.deckCells + s.hall.storageCells + s.hall.deconCells { chars[c] = "=" }
         for c in s.hangarCells { chars[c] = "~" }
-        for c in s.airlockCells { chars[c] = "^" }
         let letters = Array("abcdefghijklmnopqrstuvwxyz0123456789")
         var next = 0
         let repos = Array(Set(s.rooms.values.compactMap(\.repo))).sorted()
