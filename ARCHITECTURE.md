@@ -184,8 +184,9 @@ merge launches a rocket each time a crate lands in storage (`launchOnMerge`). A 
 to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
 runs the same machine as everyone else and says so on hover.
 
-The drones (`Drones.swift`) do the pad's other work. Two of them ferry the kick stage in under a production
-rocket and away again. A rocket that arrives while its repository's staging deploy is not yet live stands
+The drones (`Drones.swift`) do the pad's other work. The kick stage needs none of them: it waits on the
+deck of the slot's lift, the tip goes down to it and the deck raises the stack (`stepKicks` moves `dock`
+0…1; `RocketGeometry` turns it into iris, tip and deck; `PadLift.swift` draws the door, shaft and deck). A rocket that arrives while its repository's staging deploy is not yet live stands
 with its tip unplated, and a drone welds it panel by panel at the pace of that deploy's usual length
 (`stepTips`).
 

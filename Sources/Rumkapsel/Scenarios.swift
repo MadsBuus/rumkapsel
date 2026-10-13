@@ -174,6 +174,26 @@ enum Scenarios {
             return rooms.count == 1 && rooms[0].key.hasPrefix("task:ios#") ? nil : "offices for the branch: \(rooms.map(\.key).sorted())"
         }),
 
+        Scenario("a hotfix goes up in its own rocket and leaves the release standing with its cargo", [
+            ("Target: ios#298", 4.8),
+            ("Release: Production opens", 16),
+            ("Release: Hotfix opens", 48),
+            ("Release: Hotfix merges", 4.8),
+        ], tail: 240, expects: [
+            .log("hotfix #298"),
+            .log("as a hotfix"),
+            .rocket(.launch, "ios"),
+            .officeMerged("task:ios#298"),
+            .carry(298, to: .storage),
+        ], floor: { sim in
+            let rockets = sim.station.simulation.rockets
+            if rockets.keys.contains(where: { $0.contains("hotfix") }) { return "the hotfix rocket is still on the pad: \(rockets.keys.sorted())" }
+            guard let release = rockets["work|ios"] else { return "the release rocket went: \(rockets.keys.sorted())" }
+            if release.isLaunching { return "the release rocket launched with the hotfix" }
+            let ledger = sim.station.world.fleet.stations["work"]?.ledger
+            return ledger?["ios", 298] == nil ? nil : "#298 is still on the floor"
+        }),
+
         Scenario("teammate branch then PR: one shuttle, one crate", [
             ("Target: api#5158", 4.8),
             ("Teammate: New branch", 48),

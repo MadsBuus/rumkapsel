@@ -112,13 +112,16 @@ Without a board there is no Cleared per crate.
 
 | Trigger | Condition | Effect | Code |
 |---|---|---|---|
-| Open production release PR | or any open release with no staging | a rocket stands by; loads if cleared | `Releases.swift` |
+| Open production release PR | or any open release with no staging | a rocket stands by and docks on its lift (9 s, Classic); loads once docked, if cleared | `Releases.swift` |
 | Work waiting, no release open | the repository ships, and not at once | a rocket stands by; loads if cleared | `Releases.swift` |
 | The rocket stands by | not cleared to load | whatever it took aboard goes back to its rows | `Releases.swift`, `Ledger.swift` |
 | Production release PR merges | | `.releaseMerged`, the launch: the vortex pulls the crates aboard, the rocket climbs | `GitHub.swift`, `Releases.swift`, `Vortex.swift`, `Rockets.swift` |
 | A new tag | ships on tags; not the first answer | the launch | `GitHub.swift` |
 | A crate lands in storage | ships on merge (a deploy keyword in a workflow on push to trunk) | a launch per merge; these repositories skip the counts | `Rockets.swift`, `Releases.swift` |
 | Board shipped column | | shipped on the record: the rocket launches; a log line | `Releases.swift`, `World.swift`, `Scene.swift` |
+| Hotfix PR opens | a PR into production from anything but the trunk, staging or a release branch | an express rocket with a red tip stands on a pad slot of its own | `GitHub.swift`, `Releases.swift` |
+| Hotfix PR merges | | its crate is hauled to storage, the vortex pulls it into the express rocket and that goes up; the release rocket keeps its cargo, and the hotfix's work ships as it climbs | `Releases.swift`, `Rockets.swift`, `Vortex.swift` |
+| Production deploy starts | | the flight flies the rocket going up, waiting while a hotfix rocket still loads | `Mission.swift` |
 
 Shipped work is deleted from the ledger (`Ledger.swift`, `Releases.swift`). Offices fold at Stored,
 never at Shipped.

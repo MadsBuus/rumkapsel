@@ -5,6 +5,7 @@ import Metal
 enum LookDev {
     static func run(out: String, shot: String) -> Never {
         if shot == "crates" { crates(out: out) }
+        if shot == "rockets" { rockets(out: out) }
         if shot == "signs" { signs(out: out) }
         if shot.hasPrefix("wall") {
             let parts = shot.split(separator: ":")
@@ -43,6 +44,50 @@ enum LookDev {
             }
             eye.simdTransform = mount.simdWorldTransform
         }
+        scene.rootNode.addChildNode(eye)
+        render(scene, from: eye, to: out)
+    }
+
+    private static func rockets(out: String) -> Never {
+        let scene = SCNScene()
+        scene.background.contents = NSColor(rgb: (0.06, 0.07, 0.1))
+        let color = NSColor(rgb: (0.86, 0.38, 0.42))
+        var row: [SCNNode] = [Props.rocket(color: color, tall: false), Props.rocket(color: color, tall: true)]
+        for n in row { Props.nameRocket(n, repo: "tattoodo-web", color: color) }
+        let flight = SCNNode()
+        let (lifter, tip) = FlightCraft.build(color: color, repo: "tattoodo-web", release: "#9002")
+        flight.addChildNode(lifter); flight.addChildNode(tip)
+        flight.scale = SCNVector3(RocketGeometry.scale, RocketGeometry.scale, RocketGeometry.scale)
+        row.append(flight)
+        for out in [0.0, 1.0] {
+            let alone = FlightCraft.build(color: color, repo: "tattoodo-web", release: "#9002").tip
+            FlightCraft.feet(alone, out: out)
+            let holder = SCNNode()
+            holder.addChildNode(alone)
+            holder.scale = SCNVector3(RocketGeometry.scale, RocketGeometry.scale, RocketGeometry.scale)
+            holder.position = SCNVector3(0, (RocketShape.standDepth - RocketShape.split) * RocketGeometry.scale + (out == 0 ? 0.25 : 0), 0)
+            let place = SCNNode()
+            place.addChildNode(holder)
+            row.append(place)
+        }
+        for (i, rocket) in row.enumerated() {
+            rocket.position = SCNVector3(-1.6 + Double(i) * 0.8, 0, 0)
+            scene.rootNode.addChildNode(rocket)
+        }
+        let floor = SCNNode(geometry: SCNPlane(width: 6, height: 2))
+        floor.geometry!.firstMaterial = lit(NSColor(rgb: (0.2, 0.21, 0.24)))
+        floor.eulerAngles.x = -.pi / 2
+        scene.rootNode.addChildNode(floor)
+        let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 1100
+        sun.look(at: SCNVector3(-1, -0.8, -0.6))
+        scene.rootNode.addChildNode(sun)
+        let fill = SCNNode(); fill.light = SCNLight(); fill.light!.type = .ambient; fill.light!.intensity = 450
+        scene.rootNode.addChildNode(fill)
+        let eye = SCNNode()
+        eye.camera = SCNCamera()
+        eye.camera!.fieldOfView = 40
+        eye.position = SCNVector3(0, 1.3, 4.6)
+        eye.look(at: SCNVector3(0, 1.0, 0), up: SCNVector3(0, 1, 0), localFront: SCNVector3(0, 0, -1))
         scene.rootNode.addChildNode(eye)
         render(scene, from: eye, to: out)
     }

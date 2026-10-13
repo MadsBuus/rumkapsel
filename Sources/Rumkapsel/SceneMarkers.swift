@@ -368,17 +368,16 @@ extension StationController {
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
         padRings = [:]
         for station in fleet.stations.values where station.hasPad {
-            let held = Dictionary(uniqueKeysWithValues: world.padOrder(station: station).compactMap { key in
-                world.releases.padSlotOf[key].map { ($0, String(key.dropFirst(station.name.count + 1))) }
-            })
+            let held = Dictionary(world.padOrder(station: station).compactMap { key in world.releases.padSlotOf[key].map { ($0, key) } },
+                                  uniquingKeysWith: { a, _ in a })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Hall.padRadius - 0.06, outerRadius: Hall.padRadius, height: 0.008)))
-                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: $0)) } ?? Props.berthIdle)
+                pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: RocketKey.parts($0).repo)) } ?? Props.berthIdle)
                 pad.opacity = held[i] == nil ? 0.25 : 0.7
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
                 pad.name = "pad:" + station.name
                 padHexRoot.addChildNode(pad)
-                if let repo = held[i] { padRings[station.name + "|" + repo] = pad }
+                if let key = held[i] { padRings[key] = pad }
             }
         }
     }

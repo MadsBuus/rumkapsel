@@ -82,7 +82,7 @@ final class World {
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
                 clearedThisPass = true
             case .shipped where t.from != nil:
-                guard let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
+                guard !releases.hotfixRecords.contains(record.id), let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
                 if github.pipeline(repoRoot: root).shipsOnTag { continue }
                 let key = info.station + "|" + info.repo
                 if !t.wasQuiet || releases.padSlotOf[key] != nil { launches.insert(key) }

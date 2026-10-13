@@ -18,7 +18,7 @@ enum WorldEvent {
     case stagingOpened(station: String, repo: String, number: Int)
     case stagingMerged(station: String, repo: String, number: Int)
     case stagingClosed(station: String, repo: String, number: Int)
-    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command)
+    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command, hotfix: Int? = nil)
     case prompt(station: String, key: String, minionId: String, count: Int)
     case crewRoster(members: [String: CrewMember])
     case deconArrived(station: String, repo: String, numbers: [Int])

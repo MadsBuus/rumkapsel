@@ -93,8 +93,8 @@ extension Simulation {
     }
 
     func vortexHatch(_ v: Vortex) -> SIMD3<Double>? {
-        guard let station = fleet.stations[v.station], let r = rockets[v.key], let at = rocketSpot(station: station, repo: r.repo) else { return nil }
-        let h = RocketGeometry.hatch(lift: r.lift)
+        guard let station = fleet.stations[v.station], let r = rockets[v.key], let at = rocketSpot(station: station, key: r.key) else { return nil }
+        let h = RocketGeometry.hatch(offset: r.tipOffset)
         return SIMD3(station.offset.x + at.x + h.x, h.y, station.offset.y + at.y + h.z)
     }
 
@@ -108,7 +108,7 @@ extension Simulation {
             }
             for (i, f) in v.flying.enumerated().reversed() where clock - f.at >= Vortex.flightSeconds {
                 v.flying.remove(at: i)
-                world.setDown(f.crate, at: world.padSpot(station: station, repo: f.crate.repo))
+                world.setDown(f.crate, at: world.padSpot(station: station, repo: f.crate.repo, key: v.key))
                 landed(f.crate, in: .pad)
             }
             if v.closedAt == nil, v.waiting.isEmpty, v.flying.isEmpty {

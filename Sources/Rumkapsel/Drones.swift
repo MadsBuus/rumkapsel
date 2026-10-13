@@ -5,6 +5,7 @@ final class PadDrone {
     let id: String
     let station: String
     let berth: Int
+    let berthYaw: Double
     var pos: SIMD3<Double>
     var vel = SIMD3<Double>(repeating: 0)
     var push = SIMD3<Double>(repeating: 0)
@@ -17,13 +18,12 @@ final class PadDrone {
     enum Task: Equatable {
         case rest
         case weld(String)
-        case ferry(String, Int)
         case vortex(String, Int)
         case home
     }
 
-    init(id: String, station: String, berth: Int, at pos: SIMD3<Double>) {
-        self.id = id; self.station = station; self.berth = berth; self.pos = pos
+    init(id: String, station: String, berth: Int, berthYaw: Double, at pos: SIMD3<Double>) {
+        self.id = id; self.station = station; self.berth = berth; self.berthYaw = berthYaw; self.pos = pos; self.yaw = berthYaw
     }
 
     var isFree: Bool { task == .rest || task == .home }
@@ -35,16 +35,15 @@ enum DroneFlight {
     static let low = 0.85, high = 2.3
     static let standOff = 0.19
     static let berthPitch = 0.3
-    static let ferrySeconds = 9.0
-    static let ferrySpread = RocketGeometry.radius + 0.13
 }
 
 extension Simulation {
     func padDrones(_ station: Station) -> [PadDrone] {
         if let d = drones[station.name] { return d }
         guard !station.hall.padCells.isEmpty, station.hall.droneRackCell != nil else { return [] }
+        let along = rack(station)?.along ?? SIMD2(1, 0)
         let made = (0..<DroneFlight.count).map { k in
-            PadDrone(id: "drone:\(station.name)#\(k)", station: station.name, berth: k, at: berth(station, k))
+            PadDrone(id: "drone:\(station.name)#\(k)", station: station.name, berth: k, berthYaw: atan2(-along.y, along.x), at: berth(station, k))
         }
         drones[station.name] = made
         return made
@@ -66,7 +65,6 @@ extension Simulation {
             let fleet = padDrones(station)
             guard !fleet.isEmpty else { continue }
             assignDrones(station, fleet)
-            stepKicks(station, fleet)
             for d in fleet {
                 fly(d, dt: dt)
                 work(d, station: station)
@@ -90,7 +88,7 @@ extension Simulation {
         }
         for r in rockets.values where r.station == station.name && r.welding {
             guard !fleet.contains(where: { $0.task == .weld(r.key) }),
-                  let at = rocketSpot(station: station, repo: r.repo),
+                  let at = rocketSpot(station: station, key: r.key),
                   let d = nearest(to: SIMD3(station.offset.x + at.x, 1, station.offset.y + at.y)) else { continue }
             d.task = .weld(r.key)
             d.weldSide = nil
@@ -117,7 +115,7 @@ extension Simulation {
             return simd_distance(p + ab * t, c)
         }
         return rockets.values.contains { r in
-            guard r.station == station.name, let at = rocketSpot(station: station, repo: r.repo) else { return false }
+            guard r.station == station.name, let at = rocketSpot(station: station, key: r.key) else { return false }
             return distance(to: at) < 0.42
         }
     }
@@ -144,8 +142,9 @@ extension Simulation {
         }
         d.push = (d.vel - before) / dt
         let ground = SIMD2(d.vel.x, d.vel.z)
-        if simd_length(ground) > 0.2 {
-            let want = atan2(ground.x, ground.y)
+        let landing = (d.task == .home && d.route.count <= 1) || d.task == .rest
+        if landing || simd_length(ground) > 0.2 {
+            let want = landing ? d.berthYaw : atan2(ground.x, ground.y)
             d.yaw += atan2(sin(want - d.yaw), cos(want - d.yaw)) * min(1, dt * 5)
         }
     }
@@ -166,10 +165,8 @@ extension Simulation {
         case .home:
             if d.route.isEmpty { d.task = .rest }
         case .weld(let key):
-            guard let r = rockets[key], r.welding, let at = rocketSpot(station: station, repo: r.repo) else { goHome(d, station: station); return }
+            guard let r = rockets[key], r.welding, let at = rocketSpot(station: station, key: r.key) else { goHome(d, station: station); return }
             weld(d, r, at: at, station: station)
-        case .ferry(let key, _):
-            if rockets[key].map({ $0.kick == .coming || $0.kick == .going }) != true { goHome(d, station: station) }
         case .vortex(let key, let slot):
             guard let v = vortices[key], v.closedAt == nil, let hatch = vortexHatch(v) else { goHome(d, station: station); return }
             let place = Vortex.ringPoint(ring: v.ring, hatch: hatch, slot: slot, at: clock)
@@ -180,12 +177,18 @@ extension Simulation {
     }
 
     private func weld(_ d: PadDrone, _ r: RocketJob, at spot: SIMD2<Double>, station: Station) {
+        guard r.kick == .docked || r.kick == .none else {
+            d.torch = false
+            if d.route.isEmpty, d.pos.y < DroneFlight.low { d.route = [SIMD3(d.pos.x, DroneFlight.low, d.pos.z)] }
+            d.weldSide = nil
+            return
+        }
         let panel = min(RocketGeometry.panels - 1, Int(r.welded))
         let ring = panel / 6, k = panel % 6
         let side = k
-        let height = RocketGeometry.ringMiddle(ring, lift: r.lift)
+        let height = RocketGeometry.ringMiddle(ring, offset: r.tipOffset)
         func point(_ s: Int) -> SIMD3<Double> {
-            let f = RocketGeometry.facing(side: s) * (RocketGeometry.apothem + DroneFlight.standOff)
+            let f = RocketGeometry.facing(side: s) * (RocketGeometry.apothem(at: RocketGeometry.ringMiddle(ring)) + DroneFlight.standOff)
             return SIMD3(station.offset.x + spot.x + f.x, height, station.offset.y + spot.y + f.y)
         }
         let face = RocketGeometry.facing(side: side)
@@ -208,123 +211,5 @@ extension Simulation {
         d.yaw = atan2(-face.x, -face.y)
         d.torch = true
         r.seam = ring * 6 + k
-    }
-
-    // MARK: the kick stage
-
-    func kickDepot(_ station: Station) -> SIMD3<Double> {
-        let pad = station.hall.padCenter
-        let deck = station.hall.deckCells.isEmpty ? pad - SIMD2(0, -1) : SIMD2(Double(station.hall.deckCells.map(\.x).reduce(0, +)) / Double(station.hall.deckCells.count),
-                                                                      Double(station.hall.deckCells.map(\.y).reduce(0, +)) / Double(station.hall.deckCells.count))
-        var out = pad - deck
-        out /= max(1e-6, simd_length(out))
-        let p = pad + out * 6
-        return SIMD3(station.offset.x + p.x, 2.6, station.offset.y + p.y)
-    }
-
-    private func kickSide(_ station: Station, at spot: SIMD2<Double>, key: String) -> SIMD2<Double> {
-        var others: [SIMD2<Double>] = []
-        for r in rockets.values where r.station == station.name && r.key != key {
-            if let at = rocketSpot(station: station, repo: r.repo) { others.append(at) }
-        }
-        let pad = Set(station.hall.padCells)
-        let ways = [SIMD2(-1.0, 0), SIMD2(0, 1), SIMD2(0, -1), SIMD2(-0.7, 0.7), SIMD2(-0.7, -0.7)]
-        func room(_ w: SIMD2<Double>) -> Double {
-            let p = spot + w * 1.0
-            guard pad.contains(Cell(x: Int(p.x.rounded()), y: Int(p.y.rounded()))) else { return -1 }
-            return others.map { o -> Double in
-                let ab = spot - p, t = max(0, min(1, simd_dot(o - p, ab) / simd_dot(ab, ab)))
-                return simd_distance(p + ab * t, o)
-            }.min() ?? 9
-        }
-        return ways.max { room($0) < room($1) } ?? ways[0]
-    }
-
-    private func kickPath(_ station: Station, at spot: SIMD2<Double>, from way: SIMD2<Double>) -> [SIMD3<Double>] {
-        let under = SIMD3(station.offset.x + spot.x, 0, station.offset.y + spot.y)
-        let beside = under + SIMD3(way.x, 0.02, way.y)
-        return [kickDepot(station), beside + SIMD3(0, 2.4, 0), beside + SIMD3(0, 0.6, 0), beside, under]
-    }
-
-    private func grip(_ foot: SIMD3<Double>, role: Int, way: SIMD2<Double>) -> SIMD3<Double> {
-        let across = SIMD2(-way.y, way.x) / max(1e-6, simd_length(way))
-        let s = (role == 0 ? -1.0 : 1.0) * DroneFlight.ferrySpread
-        return foot + SIMD3(across.x * s, RocketGeometry.kickGrip, across.y * s)
-    }
-
-    private func stepKicks(_ station: Station, _ fleet: [PadDrone]) {
-        func ease(_ t: Double) -> Double { let k = min(1, max(0, t)); return k * k * (3 - 2 * k) }
-        for r in rockets.values where r.station == station.name {
-            let key = r.key
-            let ferrying = fleet.filter { if case .ferry(let k, _) = $0.task { return k == key }; return false }
-            guard let spot = rocketSpot(station: station, repo: r.repo) else { continue }
-            if r.stage.rank >= 3 {
-                if r.kick != .docked { r.kick = .docked; r.kickAt = nil; r.lift = 1 }
-                for d in ferrying { goHome(d, station: station) }
-                continue
-            }
-            let way = r.kickWay ?? kickSide(station, at: spot, key: key)
-            let path = kickPath(station, at: spot, from: way)
-            switch r.kick {
-            case .none:
-                guard r.tall else { r.lift = max(0, r.lift - 0.02); continue }
-                let free = fleet.filter(\.isFree).sorted { simd_distance($0.pos, path[0]) < simd_distance($1.pos, path[0]) }
-                guard free.count >= 2 else { continue }
-                r.kick = .coming
-                r.kickSince = -1
-                r.kickAt = path[0]
-                r.kickWay = way
-                for (role, d) in free.prefix(2).enumerated() {
-                    d.task = .ferry(key, role)
-                    d.route = plan(d, to: grip(path[0], role: role, way: way), station: station)
-                }
-            case .docked:
-                r.lift = 1
-                guard !r.tall else { continue }
-                let free = fleet.filter(\.isFree).sorted { simd_distance($0.pos, path.last!) < simd_distance($1.pos, path.last!) }
-                guard free.count >= 2 else { continue }
-                r.kick = .going
-                r.kickSince = -1
-                r.kickAt = path.last!
-                r.kickWay = way
-                for (role, d) in free.prefix(2).enumerated() {
-                    d.task = .ferry(key, role)
-                    d.route = plan(d, to: grip(path.last!, role: role, way: way), station: station)
-                }
-            case .coming, .going:
-                let inbound = r.kick == .coming
-                if ferrying.count < 2 {
-                    for d in ferrying { goHome(d, station: station) }
-                    r.kick = inbound ? .none : .docked
-                    r.kickAt = nil
-                    r.kickWay = nil
-                    continue
-                }
-                if r.kickSince < 0 {
-                    guard ferrying.allSatisfy({ $0.route.isEmpty }) else { continue }
-                    r.kickSince = clock
-                }
-                let t = min(1, (clock - r.kickSince) / DroneFlight.ferrySeconds)
-                let along = inbound ? ease(t) : 1 - ease(t)
-                let foot = FlightLeg.sample(path, along)
-                r.kickAt = foot
-                r.lift = inbound ? ease(t / 0.55) : 1 - ease((t - 0.35) / 0.4)
-                for d in ferrying {
-                    guard case .ferry(_, let role) = d.task else { continue }
-                    let want = grip(foot, role: role, way: way)
-                    d.push = (want - d.pos) / max(1e-3, 1.0 / 30) * 0.2
-                    d.vel = .zero
-                    d.pos = want
-                    let toStage = SIMD2(foot.x - want.x, foot.z - want.z)
-                    d.yaw = atan2(toStage.x, toStage.y)
-                }
-                guard t >= 1 else { continue }
-                r.kick = inbound ? .docked : .none
-                r.kickAt = nil
-                r.kickWay = nil
-                r.lift = inbound ? 1 : 0
-                for d in ferrying { goHome(d, station: station) }
-            }
-        }
     }
 }

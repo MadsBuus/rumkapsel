@@ -8,6 +8,7 @@ final class HangarField {
     var sides: [ObjectIdentifier: Bool] = [:]
     var ripples: [(node: SCNNode, born: Double)] = []
     var struck = -10.0
+    var pane: SCNNode?
     init(node: SCNNode, sheet: SCNNode, z: Double, x0: Double, x1: Double) {
         self.node = node; self.sheet = sheet; self.z = z; self.x0 = x0; self.x1 = x1
     }

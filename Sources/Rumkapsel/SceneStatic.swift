@@ -277,8 +277,12 @@ extension StationController {
                 addGlassDoor(station, at: SIMD2(Double(door.inside.x), Double(door.inside.y) + 0.5), facing: SIMD2(0, 1))
             }
             if station.hasHangar, input == nil { buildHangar(station) }
-            for c in station.hall.padCells where output == nil {
-                addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name)
+            if output == nil, station.hasPad, Theme.forPlan.kickRises {
+                staticRoot.addChildNode(padSlab(station))
+            } else {
+                for c in station.hall.padCells where output == nil {
+                    addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name)
+                }
             }
             if station.hasPad, output == nil, let east = station.hall.padCells.map(\.x).max(),
                let y0 = station.hall.padCells.map(\.y).min(), let y1 = station.hall.padCells.map(\.y).max(),

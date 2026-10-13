@@ -550,9 +550,11 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             ground(p, NSColor(rgb: (0.24, 0.26, 0.32)))
             let spots = spread(p, 2, gap: 1.1)
             let small = Looks.current.rocket(color: amber, tall: false, cargo: 0)
+            Props.nameRocket(small, repo: "api", color: amber)
             small.position = v3(spots[0].x, 0, spots[0].y)
             scene.rootNode.addChildNode(small)
             let tall = Looks.current.rocket(color: teal, tall: true, cargo: 8)
+            Props.nameRocket(tall, repo: "tattoodo-web", color: teal)
             tall.position = v3(spots[1].x, 0, spots[1].y)
             if let own = Looks.current.hold(tall: true) { tall.addChildNode(own) }
             scene.rootNode.addChildNode(tall)

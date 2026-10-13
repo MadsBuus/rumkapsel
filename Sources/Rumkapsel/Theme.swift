@@ -22,6 +22,8 @@ enum Theme: String, CaseIterable, Identifiable {
         }
     }
 
+    var kickRises: Bool { self == .classic }
+
     var padGap: Int {
         switch self {
         case .classic, .kingdom: return 0
