@@ -56,6 +56,7 @@ final class World {
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
         var launches: Set<String> = []
         var toDeck: [String: [Int]] = [:]
+        var clearedThisPass = false
         for (record, t) in transitions {
             switch t.to {
             case .ready:
@@ -79,6 +80,7 @@ final class World {
             case .cleared where t.from != nil:
                 guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
                 events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
+                clearedThisPass = true
             case .shipped where t.from != nil:
                 guard let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
                 if github.pipeline(repoRoot: root).shipsOnTag { continue }
@@ -101,6 +103,7 @@ final class World {
             if releases.mergeLaunches.contains(key) || releases.launchedThisPass.contains(key) { continue }
             events.append(wish(.launch, station: station, repo: repo, waiting: cargoWaiting(station: station, repo: repo), cleared: true))
         }
+        if clearedThisPass { events += applyReleases() }
         return events
     }
 

@@ -25,7 +25,7 @@ struct Workflow: Codable, Equatable {
     static func detected(pipeline p: Pipeline, board: Bool) -> Workflow {
         var w = Workflow()
         w.qa = p.hasStaging ? (board ? [.board, .deploy, .pulls] : [.deploy, .pulls]) : nil
-        w.cleared = p.shipsOnMerge || p.shipsOnTag ? nil : board ? [.board, .deploy] : [.deploy, .pulls]
+        w.cleared = p.shipsOnMerge || p.shipsOnTag ? nil : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
         w.stored = board ? [.board, .pulls, .git] : [.pulls, .git]
         w.shipped = p.shipsOnMerge ? [.git] : p.shipsOnTag ? [.git, .board] : board ? [.board, .deploy, .pulls] : [.deploy, .pulls]
         return w
