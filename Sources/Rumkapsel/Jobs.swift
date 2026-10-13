@@ -20,8 +20,12 @@ extension StationController {
     }
 
     func despawn(_ m: Minion) {
-        if let key = carriedRoom(of: m) { reveal(key) }
         simulation.forget(m)
+        undraw(m)
+    }
+
+    func undraw(_ m: Minion) {
+        if let key = carriedRoom(of: m) { reveal(key) }
         mirrorLoad(m)
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }

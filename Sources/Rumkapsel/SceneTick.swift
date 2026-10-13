@@ -170,28 +170,12 @@ extension StationController {
 
     func tickMinions(dt: Double) {
         if !headless { tickGlassDoors(dt: dt) }
-        for m in Array(minions.values) {
-            guard let station = fleet.stations[m.station] else { despawn(m); continue }
+        for (m, how) in simulation.stepped {
+            guard how != .gone, simulation.bodies[m.id] != nil, let station = fleet.stations[m.station] else { undraw(m); continue }
             if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }
-            if !headless, hovered == "minion:" + m.id { continue }
-            var posed = true
-            switch simulation.stepWalk(m, station: station, dt: dt) {
-            case .waking:
-                m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)
-                continue
-            case .walking, .wondering: break
-            case .there:
-                switch simulation.stepThere(m, station: station, dt: dt) {
-                case .gone: despawn(m); continue
-                case .spent: posed = false
-                case .posed: break
-                }
-            }
-            mirrorLoad(m)
-            if posed { simulation.stepRest(m, station: station, dt: dt) }
+            if how != .waking { mirrorLoad(m) }
             m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)
-            guard posed else { continue }
-            pose(m, station: station, dt: dt)
+            if how == .posed { pose(m, station: station, dt: dt) }
         }
         for cue in simulation.drainCues() { play(cue) }
         for (id, node) in cargoNodes where simulation.cargo[id] == nil && !crateMoving(node) {

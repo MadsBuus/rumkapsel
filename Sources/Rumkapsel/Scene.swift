@@ -265,7 +265,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var padRings: [String: SCNNode] = [:]
     var droneViews: [String: DroneView] = [:]
     var puffs: [Puff] = []
-    private var lastHaulSchedule = 0.0
     static let powerWindow: TimeInterval = 2 * 3600
     var beams: [String: SCNNode] = [:]
     let infoLabel = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
@@ -314,6 +313,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hovered: String?
     var following: String?
     private var lastTick = 0.0
+    private var lastWall: Date?
     var liveTimeScale = 1.0
     var visitLog: [(kind: String, lasted: Double, planned: Double)] { simulation.visitLog }
     var clock: Double {
@@ -346,7 +346,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         set { simulation.hooks = newValue }
     }
     var headless = false
-    var simStep = 1.0 / 30
     var now: Date { simulation.now }
     var demoClock = 0.0
     var demoMerged = false
@@ -380,9 +379,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         world.github.frozen = simulated
         simulation = Simulation(world: world)
         if simulated { simulation.hooks = SimHooks() }
+        simulation.live = !simulated
         view = StationView(frame: frame, options: [SCNView.Option.preferredRenderingAPI.rawValue: SCNRenderingAPI.metal.rawValue])
         hud = SKScene(size: frame.size)
         super.init()
+        simulation.onBeat = { [weak self] in self?.beat(contracted: $0) }
+        simulation.onStep = { [weak self] in self?.drawStation(dt: $0) }
         buildScene()
         buildHUD()
         view.scene = scene
@@ -1108,19 +1110,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: tick
 
-    private var timers: [(at: Double, run: () -> Void)] = []
-    func after(_ seconds: Double, _ run: @escaping () -> Void) { timers.append((clock + seconds, run)) }
+    func after(_ seconds: Double, _ run: @escaping () -> Void) { simulation.after(seconds, run) }
 
     func tick(now: TimeInterval) {
-        let dt = min(0.1, max(0, now - lastTick))
+        let frame = max(0, now - lastTick)
         lastTick = now
-        var budget = dt * (sim == nil ? liveTimeScale : 1)
-        while budget > 1e-9 {
-            let step = min(budget, simStep)
-            budget -= step
-            stepStation(dt: step)
+        simulation.held = headless ? nil : hovered.flatMap { $0.hasPrefix("minion:") ? String($0.dropFirst(7)) : nil }
+        if sim == nil {
+            let wall = Date()
+            let dt = max(0, wall.timeIntervalSince(lastWall ?? simulation.epoch)) * liveTimeScale
+            simulation.step(dt: dt > Tempo.catchUp ? dt : min(dt, Tempo.frame))
+            lastWall = wall
+        } else {
+            simulation.step(dt: frame)
         }
-        if !headless { tickView(dt: dt) }
+        if !headless { tickView(dt: min(0.1, frame)) }
         offerSnapshot(now: now)
     }
 
@@ -1134,31 +1138,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if let snap = makeSnapshot(withGitHub: withGitHub) { peers.offer(snap) }
     }
 
-    private func stepStation(dt: Double) {
-        clock += dt
-        if !timers.isEmpty {
-            let due = timers.filter { $0.at <= clock }
-            timers.removeAll { $0.at <= clock }
-            due.forEach { $0.run() }
-        }
+    func beat(contracted: Bool) {
+        if contracted { layoutDirty = true }
+        flushScene()
+        timed("obstacles") { refreshObstacles() }
+    }
+
+    func drawStation(dt: Double) {
         if demo { tickDemo(dt: dt) }
         if Int(clock) != Int(clock - dt) { updatePower() }
         stepMission()
-        if clock - lastHaulSchedule > 0.5 {
-            lastHaulSchedule = clock
-            simulation.assignOrders()
-            simulation.stepRockets()
-            simulation.reconcileBodies()
-            if simulation.contractHallways() { layoutDirty = true }
-            flushScene()
-            timed("obstacles") { refreshObstacles() }
-            simulation.replanBlockedWalks()
-        }
-        simulation.stepShuttles()
-        simulation.stepKicks(dt: dt)
-        simulation.stepTips(dt: dt)
-        simulation.stepVortices()
-        simulation.stepDrones(dt: dt)
         if !headless {
             drawShuttles(dt: dt)
             tickHangars()

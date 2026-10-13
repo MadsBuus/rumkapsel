@@ -25,7 +25,7 @@ extension World {
     func forgetShipped(station: String, repo: String) {
         guard let st = fleet.stations[station] else { return }
         for c in st.ledger.crates(of: repo) where c.placed == .pad {
-            report(crate: c.number, repo: repo, .shipped, by: releases.mergeLaunches.contains(station + "|" + repo) ? .git : .pulls)
+            report(crate: c.number, repo: repo, .shipped, by: releases.mergeLaunches.contains(station + "|" + repo) ? .git : .pulls, at: now)
             st.ledger.forget(repo: repo, number: c.number)
         }
     }
@@ -81,7 +81,7 @@ extension World {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
             let pr = launch.pr
             let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
-            releases.hotfixLoads[key] = (hotfixRecord(repo: info.repo, pr: pr).number, Date())
+            releases.hotfixLoads[key] = (hotfixRecord(repo: info.repo, pr: pr).number, now)
             assignPads()
             events.append(.chime(pr.number))
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
@@ -110,7 +110,7 @@ extension World {
     }
 
     func hotfixCrateComing(_ key: String) -> Bool {
-        guard let load = releases.hotfixLoads[key], let n = load.crate, Date().timeIntervalSince(load.at) < 120 else { return false }
+        guard let load = releases.hotfixLoads[key], let n = load.crate, now.timeIntervalSince(load.at) < 120 else { return false }
         let p = RocketKey.parts(key)
         guard let station = fleet.stations[p.station] else { return false }
         if let row = station.ledger[p.repo, n] { return !row.stands(in: .pad) }
@@ -120,22 +120,21 @@ extension World {
     func hotfixAboard(_ key: String) {
         let p = RocketKey.parts(key)
         guard let n = releases.hotfixLoads[key]?.crate, let station = fleet.stations[p.station] else { return }
-        if let r = works.find(repo: p.repo, crate: n) { works.report(r, .shipped, by: .pulls) }
+        if let r = works.find(repo: p.repo, crate: n) { works.report(r, .shipped, by: .pulls, at: now) }
         station.ledger.forget(repo: p.repo, number: n)
     }
 
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
         guard let d = github.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
-        let merged = pr.mergedAt ?? Date()
-        guard Date().timeIntervalSince(merged) < Deployments.recent else { return [] }
+        let merged = pr.mergedAt ?? now
+        guard now.timeIntervalSince(merged) < Deployments.recent else { return [] }
         if let began = newest.startedAt, began > merged.addingTimeInterval(-120) { return [] }
-        releases.awaitingDeploy[repoRoot] = Date()
+        releases.awaitingDeploy[repoRoot] = now
         return [.deployStarted(station: station, repo: repo, production: true, expected: d.usual,
-                               release: pr.tag ? pr.title : "#\(pr.number)", elapsed: max(0, Date().timeIntervalSince(merged)))]
+                               release: pr.tag ? pr.title : "#\(pr.number)", elapsed: max(0, now.timeIntervalSince(merged)))]
     }
 
     func lostDeploys() -> [WorldEvent] {
-        let now = Date()
         var out: [WorldEvent] = []
         for (root, at) in releases.awaitingDeploy where now.timeIntervalSince(at) > Deployments.findWithin {
             releases.awaitingDeploy[root] = nil
@@ -188,10 +187,10 @@ extension World {
             launched.insert(info.station + "|" + info.repo)
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
             for r in waiting(repo: info.repo, station: station.name) {
-                works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date())
-                if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
+                works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
+                if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
             }
-            for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? Date()) }
+            for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
             releases.announced = releases.announced.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
                                        : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
@@ -228,7 +227,7 @@ extension World {
             let labelClears = !pr.untested && flow.cleared?.contains(.pulls) == true
             if labelClears {
                 for r in waiting(repo: info.repo, station: station.name) where !boardClears || r.words[.board] == nil {
-                    works.report(r, .cleared, by: .pulls)
+                    works.report(r, .cleared, by: .pulls, at: now)
                 }
             }
             let cleared = pr.isProduction && ((labelClears && !boardClears) || clearedToLoad(repo: info.repo, station: station.name))
@@ -280,9 +279,9 @@ extension World {
 
     func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) {
         if github.pipeline(repoRoot: root).shipsOnMerge { return }
-        for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? Date()) }
-        for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? Date()) }
-        for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? Date()) }
+        for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? now) }
+        for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? now) }
+        for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? now) }
         let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
@@ -291,7 +290,7 @@ extension World {
                let at = r.stagedAt, at < c.at {
                 works.report(r, .shipped, by: .git, at: c.at)
             } else if !shippedColumn.isEmpty, github.projectItems()?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {
-                works.report(r, .shipped, by: .board)
+                works.report(r, .shipped, by: .board, at: now)
             }
         }
         station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)

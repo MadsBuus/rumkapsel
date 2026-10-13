@@ -253,8 +253,8 @@ enum LayoutTests {
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
             world.hasPackage = { $0 == "work|task:web#85" }
             let merged = world.works.note(repo: "web", branch: "feature/old", pull: 85, pullState: "MERGED")
-            world.works.report(merged, .ready, by: .pulls)
-            world.works.report(merged, .stored, by: .pulls)
+            world.works.report(merged, .ready, by: .pulls, at: now)
+            world.works.report(merged, .stored, by: .pulls, at: now)
             let old = "task:web#85"
             _ = a.ensureRoom(key: old, name: "#85", repo: "web", color: Colors.repos[0], lastActive: now)
             a.rooms[old]?.worktree = cwd

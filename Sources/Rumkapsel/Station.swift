@@ -133,7 +133,7 @@ final class Room {
 
     init(key: String, name: String, repo: String?, color: RGB, cells: [Cell], lastActive: Date, openedAt: Date? = nil) {
         self.key = key; self.name = name; self.repo = repo; self.color = color; self.cells = cells; self.lastActive = lastActive
-        self.openedAt = openedAt ?? min(lastActive, Date())
+        self.openedAt = openedAt ?? lastActive
     }
 }
 
@@ -373,7 +373,7 @@ final class Station {
             "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
         ]
         guard let it = named[key] else { return false }
-        return ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture,
+        return ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture, openedAt: .distantPast,
                           shape: it.shape, preferredCells: floor.quarters[it.plan])
     }
 

@@ -1345,7 +1345,7 @@ extension StationController {
         for w in work { w() }
         var budget = seconds
         while budget > 0 {
-            let step = min(simStep, budget)
+            let step = min(simulation.substep, budget)
             budget -= step
             sim.clock += step
             tick(now: sim.clock)
@@ -1356,10 +1356,10 @@ extension StationController {
         guard let sim else { return }
         let real = sim.lastReal == 0 ? 0 : min(0.25, max(0, time - sim.lastReal))
         sim.lastReal = time
-        var budget = sim.paused ? Double(sim.steps) * simStep : real * sim.timeScale
+        var budget = sim.paused ? Double(sim.steps) * simulation.substep : real * sim.timeScale
         sim.steps = 0
         while budget > 0 {
-            let step = min(simStep, budget)
+            let step = min(simulation.substep, budget)
             budget -= step
             sim.clock += step
             tick(now: sim.clock)

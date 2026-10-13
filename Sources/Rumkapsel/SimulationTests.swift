@@ -161,7 +161,7 @@ enum SimulationTests {
             let (sim, station, _) = fixture()
             station.ledger.adopt(Ledger.Word(storage: [], deck: [430, 431, 432], cleared: [430, 431, 432]), repo: "web")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.standBy, station: "work", repo: "web"))
-            let docked = step(sim, seconds: 10, until: { sim.rockets["work|web"]?.kick == .docked }, beat: { sim.stepRockets() })
+            let docked = step(sim, seconds: 10, until: { sim.rockets["work|web"]?.kick == .docked })
             expect(docked, "the standing tip goes down onto its kick stage and the lift docks it")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.launch, station: "work", repo: "web"))
             sim.stepRockets()
@@ -175,7 +175,6 @@ enum SimulationTests {
                     station.ledger.adopt(Ledger.Word(storage: [], deck: []), repo: "web")
                     for c in station.ledger.disagreements(repo: "web") { station.ledger.snap(repo: "web", number: c.number) }
                 }
-                sim.stepRockets()
                 guard !climbed, sim.rockets["work|web"]?.phaseKind == .climb else { return }
                 climbed = true
                 climbedEarly = sim.vortices["work|web"].map { !$0.waiting.isEmpty || !$0.flying.isEmpty } ?? false
@@ -240,7 +239,7 @@ enum SimulationTests {
             station.ledger.adopt(Ledger.Word(storage: [], deck: [440, 441], cleared: [440, 441]), repo: "web")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.load(2), station: "work", repo: "web"))
-            for _ in 0..<4 { sim.stepRockets(); _ = step(sim, seconds: 0.5) }
+            _ = step(sim, seconds: 2)
             expect(sim.rockets["work|web"]?.isSteaming == true, "the rocket waiting for the merge")
             expect(sim.cargo.isEmpty && sim.vortices.isEmpty, "nothing moves before the merge")
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
@@ -369,7 +368,7 @@ enum SimulationTests {
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            _ = step(sim, seconds: 12, until: { gaveUp }, beat: { sim.reconcileBodies() })
+            _ = step(sim, seconds: 12, until: { gaveUp })
             expect(gaveUp, "said so in the log")
             expect(!m.hasLoad && m.landing?.dropped == true, "the crate is down behind it")
             expect(sim.world.crate(crate)?.carrier == nil && sim.world.isCarried(crate) == false, "off the arms in the ledger: \(String(describing: sim.world.crate(crate)?.at))")
@@ -430,7 +429,7 @@ enum SimulationTests {
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            _ = step(sim, seconds: 90, until: { m.current?.crate == nil }, beat: { sim.reconcileBodies() })
+            _ = step(sim, seconds: 90, until: { m.current?.crate == nil })
             expect(!gaveUp, "never gave up")
             expect(sim.world.crate(crate)?.area == .deck, "down on the deck: \(String(describing: sim.world.crate(crate)?.at))")
             expect(station.walkable.contains(m.cell), "and back on the floor at \(m.cell.x),\(m.cell.y)")
@@ -452,7 +451,7 @@ enum SimulationTests {
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            _ = step(sim, seconds: 30, until: { gaveUp }, beat: { sim.reconcileBodies() })
+            _ = step(sim, seconds: 30, until: { gaveUp })
             expect(gaveUp, "gave up, wedged")
             if let landing = m.landing {
                 let cell = Cell(x: Int((landing.pos.x - station.offset.x).rounded()), y: Int((landing.pos.z - station.offset.y).rounded()))
@@ -487,7 +486,7 @@ enum SimulationTests {
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            expect(step(sim, seconds: 30, until: { m.load == .crate(crate) }, beat: { sim.reconcileBodies() }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(step(sim, seconds: 30, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
 
@@ -507,7 +506,7 @@ enum SimulationTests {
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }, beat: { sim.reconcileBodies() }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
 
@@ -574,6 +573,19 @@ enum SimulationTests {
             expect(m.place == .lounge, "and then walks there")
         }
 
+        test("step(600) in one call fires every due timer and the beat") {
+            let (sim, _, _) = fixture()
+            var fired: [Double] = [], beats = 0
+            for at in [1.0, 120, 599, 700] { sim.after(at) { fired.append(at) } }
+            sim.onBeat = { _ in beats += 1 }
+            let start = sim.clock
+            sim.step(dt: 600)
+            expect(abs(sim.clock - start - 600) < 1e-6, "the clock moved by 600: \(sim.clock - start)")
+            expect(abs(sim.now.timeIntervalSince(sim.epoch) - sim.clock) < 1e-6, "and now with it")
+            expect(fired == [1, 120, 599], "every due timer fired once, in order, the later one waits: \(fired)")
+            expect(beats == 1, "one beat: \(beats)")
+        }
+
         say(failures == 0 ? "simulation: all passed" : "simulation: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -600,21 +612,13 @@ enum SimulationTests {
         return m
     }
 
-    private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }, beat: () -> Void = {}) -> Bool {
-        let dt = 1.0 / 30
+    private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }, beat: @escaping () -> Void = {}) -> Bool {
+        sim.onBeat = { _ in beat() }
+        defer { sim.onBeat = { _ in } }
         var left = seconds
-        var sinceBeat = 0.0
         while left > 0 {
-            sim.clock += dt
-            sinceBeat += dt
-            if sinceBeat >= 0.5 { sinceBeat = 0; beat() }
-            sim.stepKicks(dt: dt)
-            sim.stepTips(dt: dt)
-            sim.stepVortices()
-            sim.stepShuttles()
-            sim.stepDrones(dt: dt)
-            sim.stepBodies(dt: dt)
-            left -= dt
+            sim.step(dt: Tempo.substep)
+            left -= Tempo.substep
             if done() { return true }
         }
         return false

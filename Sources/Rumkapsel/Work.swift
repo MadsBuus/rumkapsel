@@ -149,7 +149,7 @@ final class WorkBook {
 
     var workflow: (String) -> Workflow = { _ in Workflow() }
 
-    func report(_ record: Record, _ stage: Stage, by source: Source, at: Date = Date()) {
+    func report(_ record: Record, _ stage: Stage, by source: Source, at: Date) {
         if let t = record.hear(Signal(stage: stage, by: source, at: at), workflow: workflow(record.repo)) { onTransition?(record, t) }
     }
 

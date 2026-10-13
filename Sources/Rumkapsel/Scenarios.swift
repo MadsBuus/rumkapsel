@@ -578,7 +578,7 @@ final class ScenarioRunner {
         guard index < scenarios.count else { return finish() }
         sim = SimulatorController(frame: NSRect(x: 0, y: 0, width: 1060, height: 700))
         sim?.station.headless = true
-        sim?.station.simStep = ScenarioRunner.tick
+        sim?.station.simulation.substep = ScenarioRunner.tick
         sim?.model.quiet = true
         step = 0
         simTime = 0

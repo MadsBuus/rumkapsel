@@ -51,10 +51,27 @@ enum Hands {
     static var tossSeconds: Double { setDownFirst + floatSeconds + setDownSettle }
 }
 
+enum Tempo {
+    static let substep = 1.0 / 30
+    static let beat = 0.5
+    static let catchUp = 5.0
+    static let frame = 0.25
+}
+
+enum Stepped { case waking, spent, posed, gone }
+
 final class Simulation<B: Body> {
     let world: World
     var fleet: Fleet { world.fleet }
     var clock = 0.0
+    var substep = Tempo.substep
+    var live = false
+    private var lastBeat = 0.0
+    private var timers: [(at: Double, run: () -> Void)] = []
+    var held: String?
+    private(set) var stepped: [(body: B, how: Stepped)] = []
+    var onBeat: (Bool) -> Void = { _ in }
+    var onStep: (Double) -> Void = { _ in }
     var bodies: [String: B] = [:]
     var hooks: SimHooks?
     var cargo: [Int: Cargo] = [:]
@@ -66,8 +83,8 @@ final class Simulation<B: Body> {
     var spareHallway: [String: (cells: [Cell], since: Double)] = [:]
     var flights: [Flight] = []
     var rockets: [String: RocketJob] = [:]
-    private let epoch = Date()
-    var now: Date { hooks != nil ? epoch.addingTimeInterval(clock) : Date() }
+    let epoch = Date()
+    var now: Date { live ? Date() : epoch.addingTimeInterval(clock) }
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
     private(set) var cues: [Cue] = []
     var onEvent: (WorldEvent) -> Void = { _ in }
@@ -77,6 +94,52 @@ final class Simulation<B: Body> {
         self.world = world
         world.rocketBusy = { [weak self] key in self?.rockets[key]?.isBusy ?? false }
         world.stagingUnderway = { [weak self] key in self?.staging[key].map { $0.merged && $0.deploy != .live } ?? false }
+        world.clock = { [weak self] in self?.now ?? Date() }
+    }
+
+    // MARK: time
+
+    func after(_ seconds: Double, _ run: @escaping () -> Void) { timers.append((clock + seconds, run)) }
+
+    func step(dt: Double) {
+        guard dt > 0 else { return }
+        if dt > Tempo.catchUp {
+            clock += dt - substep
+            for m in bodies.values { m.stallMark = "" }
+            tick(substep)
+            return
+        }
+        var left = dt
+        while left > 1e-9 { let s = min(left, substep); left -= s; tick(s) }
+    }
+
+    private func tick(_ dt: Double) {
+        clock += dt
+        runTimers()
+        if clock - lastBeat > Tempo.beat { lastBeat = clock; beat() }
+        stepShuttles()
+        stepKicks(dt: dt)
+        stepTips(dt: dt)
+        stepVortices()
+        stepDrones(dt: dt)
+        stepBodies(dt: dt)
+        onStep(dt)
+    }
+
+    private func runTimers() {
+        guard !timers.isEmpty else { return }
+        let due = timers.enumerated().filter { $0.element.at <= clock }
+            .sorted { ($0.element.at, $0.offset) < ($1.element.at, $1.offset) }.map(\.element)
+        timers.removeAll { $0.at <= clock }
+        due.forEach { $0.run() }
+    }
+
+    private func beat() {
+        assignOrders()
+        stepRockets()
+        reconcileBodies()
+        onBeat(contractHallways())
+        replanBlockedWalks()
     }
 
     func cue(_ c: Cue) { cues.append(c) }
@@ -185,7 +248,7 @@ final class Simulation<B: Body> {
 
     func isNight(_ station: Station) -> Bool {
         if let forced = hooks?.night { return forced }
-        let hour = Calendar.current.component(.hour, from: Date())
+        let hour = Calendar.current.component(.hour, from: now)
         return hour >= 22 || hour < 7
     }
 
@@ -697,20 +760,26 @@ final class Simulation<B: Body> {
     }
 
     func stepBodies(dt: Double) {
-        for m in Array(bodies.values) {
-            guard let station = fleet.stations[m.station] else { bodies[m.id] = nil; continue }
-            switch stepWalk(m, station: station, dt: dt) {
-            case .waking: continue
-            case .walking, .wondering: break
-            case .there:
-                switch stepThere(m, station: station, dt: dt) {
-                case .gone: bodies[m.id] = nil; continue
-                case .spent: continue
-                case .posed: break
-                }
-            }
-            stepRest(m, station: station, dt: dt)
+        stepped = []
+        for m in Array(bodies.values) where m.id != held {
+            guard let station = fleet.stations[m.station] else { forget(m); stepped.append((m, .gone)); continue }
+            stepped.append((m, stepBody(m, station: station, dt: dt)))
         }
+    }
+
+    private func stepBody(_ m: B, station: Station, dt: Double) -> Stepped {
+        switch stepWalk(m, station: station, dt: dt) {
+        case .waking: return .waking
+        case .walking, .wondering: break
+        case .there:
+            switch stepThere(m, station: station, dt: dt) {
+            case .gone: forget(m); return .gone
+            case .spent: return .spent
+            case .posed: break
+            }
+        }
+        stepRest(m, station: station, dt: dt)
+        return .posed
     }
 
     func stepRest(_ m: B, station: Station, dt: Double) {
