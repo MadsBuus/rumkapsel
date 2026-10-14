@@ -390,14 +390,17 @@ enum SimulationTests {
                        Cell(x: crateCell.x + 1, y: crateCell.y - 1), Cell(x: crateCell.x - 1, y: crateCell.y - 1)].first { station.walkable.contains($0) }
             guard let own else { return expect(false, "a floor cell diagonal to the crate") }
             m.pos = SIMD2(Double(own.x), Double(own.y))
-            for c in station.walkable where c != own && abs(c.x - crateCell.x) <= 3 && abs(c.y - crateCell.y) <= 3 {
-                station.obstacles.insert(Cell(x: c.x * Station.fine, y: c.y * Station.fine))
+            func block() {
+                for c in station.walkable where c != own && abs(c.x - crateCell.x) <= 3 && abs(c.y - crateCell.y) <= 3 {
+                    station.obstacles.insert(Cell(x: c.x * Station.fine, y: c.y * Station.fine))
+                }
             }
+            block()
             sim.assignOrders()
             var gaveUp = false
             let was = sim.onEvent
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
-            expect(step(sim, seconds: 30, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
+            expect(step(sim, seconds: 30, until: { m.load == .crate(crate) }, beat: block), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
 
@@ -472,6 +475,25 @@ enum SimulationTests {
             expect(moved < 0.05, String(format: "it stays where it lay while it rises: moved %.2f", moved))
             _ = step(sim, seconds: 30, until: { m.place == .lounge && m.path.isEmpty })
             expect(m.place == .lounge, "and then walks there")
+        }
+
+        test("night falls: a sleeping body goes to bed and sleeps there; in the morning it goes to the lounge") {
+            let (sim, _, m) = fixture()
+            m.activity = .sleeping
+            let hooks = SimHooks()
+            sim.hooks = hooks
+            var kinds: [Command.Kind] = [], said: [String] = []
+            hooks.onCommand = { c, _ in kinds.append(c.kind) }
+            sim.onEvent = { if case .log(let t) = $0 { said.append(t) } }
+            sim.setNight(true)
+            expect(said == ["night falls"], "said: \(said)")
+            expect(step(sim, seconds: 60, until: { m.path.isEmpty && m.phaseKind == .settle }), "settled")
+            expect(m.place == .quarters && m.bed != nil, "in bed in the quarters: \(m.place.words)")
+            expect(kinds.contains { if case .sleep = $0 { return true }; return false }, "asleep: \(m.words)")
+            sim.setNight(false)
+            expect(said == ["night falls", "morning"], "said: \(said)")
+            expect(step(sim, seconds: 60, until: { m.path.isEmpty && m.place == .lounge }), "up and to the lounge: \(m.place.words)")
+            expect(kinds.contains { if case .goTo(.lounge) = $0 { return true }; return false } && m.couch != nil, "on a couch: \(m.words)")
         }
 
         test("step(600) in one call fires every due timer and the beat") {

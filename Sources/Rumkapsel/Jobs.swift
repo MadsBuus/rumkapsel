@@ -29,6 +29,7 @@ extension StationController {
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
         m.queuedCones.forEach { $0.removeFromParentNode() }
+        m.queued = []
         m.weldLight?.removeFromParentNode()
         m.node.removeFromParentNode()
     }
@@ -88,11 +89,8 @@ extension StationController {
               !key.hasPrefix("kind:") else { return nil }
         let cells = station.cells(of: .room(key))
         guard let firstCell = cells.first else { return nil }
-        let written = labelCells["\(m.station)|\(key)"] ?? []
-        let full = "\(m.station)|\(key)"
-        let crated = Set(markerRoot.childNodes.filter { $0.name == "box:" + full }.map {
-            Cell(x: Int((Double($0.position.x) - station.offset.x).rounded()), y: Int((Double($0.position.z) - station.offset.y).rounded()))
-        })
+        let written = station.written[key] ?? []
+        let crated = simulation.crated(station, key)
         let clear = cells.filter { c in !crated.contains(c) && !written.contains(c) }
         let door = station.doorCell(of: key) ?? firstCell
         let nearDoor = (clear.isEmpty ? cells : clear).sorted { (abs($0.x - door.x) + abs($0.y - door.y)) < (abs($1.x - door.x) + abs($1.y - door.y)) }
@@ -101,40 +99,24 @@ extension StationController {
 
     func arrangeQueuedCones(_ m: Minion) {
         guard let (_, _, cells) = coneCells(for: m), !cells.isEmpty else { return }
-        for (i, q) in m.queuedCones.enumerated() {
-            let cell = cells[min(cells.count - 1, 1 + i)]
-            let to = v3(Double(cell.x), 0, Double(cell.y))
-            guard abs(q.position.x - to.x) > 0.01 || abs(q.position.z - to.z) > 0.01, !q.hasActions else { continue }
-            let slide = SCNAction.move(to: to, duration: 0.4); slide.timingMode = .easeInEaseOut
-            q.runAction(slide)
-        }
+        m.queued = m.queued.indices.map { cells[min(cells.count - 1, 1 + $0)] }
+        drawCones(m)
     }
 
     func addPyramid(for m: Minion, queued: Bool = false) {
         guard let (station, key, nearDoor) = coneCells(for: m) else { return }
         if !officeUp(station, key) { m.owedCones += 1; return }
         guard !nearDoor.isEmpty else { return }
-        if !queued { clearPyramids(m) }
-        let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queuedCones.count : 0)]
-        let tint = station.rooms[key].map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
-        let floorColor = station.rooms[key].map { NSColor($0.color) } ?? Palette.corridor
-        let n = Looks.current.message(color: tint, floor: floorColor) ?? Props.pyramid(color: tint, size: 0.32, floor: floorColor)
-        let ox = 0.0, oz = 0.0
-        n.position = v3(Double(cell.x) + ox, -0.35, Double(cell.y) + oz)
-        let rise = SCNAction.move(to: v3(Double(cell.x) + ox, 0, Double(cell.y) + oz), duration: 0.5)
-        rise.timingMode = .easeOut
-        n.runAction(rise)
-        n.name = "room:\(station.name)|\(key)"
-        let anchor = stationAnchors[station.name] ?? { let a = SCNNode(); a.position = v3(station.offset.x, 0, station.offset.y); propRoot.addChildNode(a); stationAnchors[station.name] = a; return a }()
-        anchor.addChildNode(n)
+        let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queued.count : 0)]
         if queued {
-            n.opacity = 0.35
-            m.queuedCones.append(n)
+            m.queued.append(cell)
+            drawCones(m)
             return
         }
-        m.pyramids.append(n)
+        clearPyramids(m)
         m.pyramidCell = cell
-        refreshObstacles()
+        drawCones(m)
+        simulation.refreshObstacles()
         if !m.isCrew && !m.isPeer && !m.isSubagent {
             simulation.post(Command(kind: .work(office: key), words: "working your message in \(m.home.name)"), for: m, rank: .message, at: cell, place: .room(key))
             return
@@ -146,13 +128,50 @@ extension StationController {
     }
 
     func clearPyramids(_ m: Minion) {
-        for p in m.pyramids {
-            let shrink = SCNAction.scale(to: 0.01, duration: 0.35); shrink.timingMode = .easeIn
-            p.runAction(.sequence([shrink, .removeFromParentNode()]))
-        }
-        m.pyramids = []
+        guard m.pyramidCell != nil || !m.pyramids.isEmpty else { return }
         m.pyramidCell = nil
-        refreshObstacles()
+        drawCones(m)
+        simulation.refreshObstacles()
+    }
+
+    func drawCones(_ m: Minion) {
+        guard let station = fleet.stations[m.station] else { return }
+        func at(_ n: SCNNode) -> Cell { Cell(x: Int(Double(n.position.x).rounded()), y: Int(Double(n.position.z).rounded())) }
+        if m.pyramids.first.map(at) != m.pyramidCell {
+            for p in m.pyramids {
+                let shrink = SCNAction.scale(to: 0.01, duration: 0.35); shrink.timingMode = .easeIn
+                p.runAction(.sequence([shrink, .removeFromParentNode()]))
+            }
+            m.pyramids = m.pyramidCell.map { [cone(station, at: $0)] } ?? []
+        }
+        while m.queuedCones.count > m.queued.count { m.queuedCones.removeLast().removeFromParentNode() }
+        for (i, cell) in m.queued.enumerated() {
+            guard i < m.queuedCones.count else {
+                let n = cone(station, at: cell)
+                n.opacity = 0.35
+                m.queuedCones.append(n)
+                continue
+            }
+            let q = m.queuedCones[i], to = v3(Double(cell.x), 0, Double(cell.y))
+            guard at(q) != cell, !q.hasActions else { continue }
+            let slide = SCNAction.move(to: to, duration: 0.4); slide.timingMode = .easeInEaseOut
+            q.runAction(slide)
+        }
+    }
+
+    private func cone(_ station: Station, at cell: Cell) -> SCNNode {
+        let room = station.room(at: cell)
+        let tint = room.map { NSColor($0.color).lighter(0.22) } ?? Palette.pyramid
+        let floorColor = room.map { NSColor($0.color) } ?? Palette.corridor
+        let n = Looks.current.message(color: tint, floor: floorColor) ?? Props.pyramid(color: tint, size: 0.32, floor: floorColor)
+        n.position = v3(Double(cell.x), -0.35, Double(cell.y))
+        let rise = SCNAction.move(to: v3(Double(cell.x), 0, Double(cell.y)), duration: 0.5)
+        rise.timingMode = .easeOut
+        n.runAction(rise)
+        n.name = "room:\(station.name)|\(room?.key ?? "")"
+        let anchor = stationAnchors[station.name] ?? { let a = SCNNode(); a.position = v3(station.offset.x, 0, station.offset.y); propRoot.addChildNode(a); stationAnchors[station.name] = a; return a }()
+        anchor.addChildNode(n)
+        return n
     }
 
     func ringBell(seed: Int) {

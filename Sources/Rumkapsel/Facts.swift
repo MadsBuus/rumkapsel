@@ -15,6 +15,7 @@ enum Zone: String, Codable, CaseIterable {
     case waiting, testing, cleared, decon
 
     var isRow: Bool { self != .decon }
+    var crateSize: Double { self == .decon ? 0.3 : 0.38 }
 
     var words: String {
         switch self {

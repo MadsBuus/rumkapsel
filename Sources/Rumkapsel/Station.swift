@@ -637,6 +637,7 @@ final class Station {
     // MARK: walking round things
 
     var obstacles: Set<Cell> = []
+    var written: [String: Set<Cell>] = [:]
     static let fine = 3
     static func sub(_ p: SIMD2<Double>) -> Cell { Cell(x: Int((p.x * Double(fine)).rounded()), y: Int((p.y * Double(fine)).rounded())) }
     static func cell(ofSub s: Cell) -> Cell { Cell(x: Int((Double(s.x) / Double(fine)).rounded()), y: Int((Double(s.y) / Double(fine)).rounded())) }

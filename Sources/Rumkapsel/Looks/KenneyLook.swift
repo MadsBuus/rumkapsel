@@ -326,10 +326,11 @@ struct KenneyLook: Look {
     }
 
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
-        guard let wall = Dressing.officeWall(room, in: station) else { return nil }
+        guard let wall = station.officeWall(room) else { return nil }
         let d = wall.out
         guard let desk = Kit.prop("desk_computer", scale: 0.8, yaw: atan2(-d.x, -d.y), color: NSColor(room.color)) else { return nil }
-        desk.position = v3(Double(wall.cell.x) + d.x * 0.36, Kit.plateTop, Double(wall.cell.y) + d.y * 0.36)
+        let at = station.desk(room, theme: .kenney) ?? SIMD2(Double(wall.cell.x), Double(wall.cell.y))
+        desk.position = v3(at.x, Kit.plateTop, at.y)
         return desk
     }
 }

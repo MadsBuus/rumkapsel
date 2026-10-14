@@ -226,16 +226,4 @@ enum Dressing {
         guard let c = station.hangarCells.max(by: { (clearance($0), $0.y, $0.x) < (clearance($1), $1.y, $1.x) }), clearance(c) > 0.9 else { return nil }
         return c
     }
-
-    static func officeWall(_ room: Room, in station: Station) -> (cell: Cell, out: SIMD2<Double>)? {
-        let cells = Set(room.cells)
-        guard let door = station.doorCell(of: room.key), let outside = station.doorOutside(of: room.key),
-              let far = room.cells.max(by: { a, b in
-                  (abs(a.x - door.x) + abs(a.y - door.y), -a.y, -a.x) < (abs(b.x - door.x) + abs(b.y - door.y), -b.y, -b.x)
-              }) else { return nil }
-        let sides = [Cell(x: far.x, y: far.y - 1), Cell(x: far.x, y: far.y + 1), Cell(x: far.x - 1, y: far.y), Cell(x: far.x + 1, y: far.y)]
-        let walls = sides.filter { !cells.contains($0) && !($0 == outside && far == door) }
-        guard let wall = walls.first(where: { station.room(at: $0) == nil && !station.isCorridor($0) }) ?? walls.first else { return nil }
-        return (far, SIMD2(Double(wall.x - far.x), Double(wall.y - far.y)))
-    }
 }

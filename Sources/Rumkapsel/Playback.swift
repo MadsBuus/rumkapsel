@@ -434,9 +434,6 @@ extension Simulation {
             }
             if !options.isEmpty { break }
         }
-        if options.isEmpty {
-            options = (st.hall.aisleCells + st.hall.walkwayCells).filter { !taken.contains(.cell($0)) }.map { (zone, $0, SIMD2(Double($0.x), Double($0.y))) }
-        }
         let at = SIMD2(near.pos.x - g.offset.x, near.pos.z - g.offset.y)
         guard let best = options.min(by: { a, b in
             (simd_distance(a.pos, at), a.pos.x, a.pos.y) < (simd_distance(b.pos, at), b.pos.x, b.pos.y)

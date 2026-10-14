@@ -12,84 +12,6 @@ extension StationController {
         return (work.title.isEmpty ? nil : work.title, work.author.map(world.crewName))
     }
 
-    func refreshObstacles() {
-        var blocked: [String: Set<Cell>] = [:]
-        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>, into: inout [String: Set<Cell>]) {
-            let (lo, hi) = node.boundingBox
-            let p = SIMD2(Double(node.position.x) - offset.x, Double(node.position.z) - offset.y)
-            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8 * Double(node.scale.x)
-            let f = Double(Station.fine)
-            for sx in Int(((p.x - r) * f).rounded())...Int(((p.x + r) * f).rounded()) {
-                for sy in Int(((p.y - r) * f).rounded())...Int(((p.y + r) * f).rounded()) { into[station, default: []].insert(Cell(x: sx, y: sy)) }
-            }
-        }
-        func mark(_ station: String, _ node: SCNNode, offset: SIMD2<Double>) { mark(station, node, offset: offset, into: &blocked) }
-        for n in markerRoot.childNodes {
-            guard let name = n.name, let colon = name.firstIndex(of: ":"), let bar = name.firstIndex(of: "|"), colon < bar else { continue }
-            let stationName = String(name[name.index(after: colon)..<bar])
-            guard let st = fleet.stations[stationName] else { continue }
-            mark(stationName, n, offset: st.offset)
-        }
-        for m in minions.values {
-            for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
-        }
-        for st in fleet.stations.values where st.hasPad {
-            for (_, r) in simulation.shownRockets(st) {
-                let at = padPosition(station: st, slot: r.slot)
-                let p = SIMD2(Double(at.x) - st.offset.x, Double(at.z) - st.offset.y)
-                let hull = 0.3, f = Double(Station.fine)
-                for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
-                    for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[st.name, default: []].insert(Cell(x: sx, y: sy)) }
-                }
-            }
-        }
-        if furnitureObstaclesAt != staticRoot.childNodes.count {
-            furnitureObstaclesAt = staticRoot.childNodes.count
-            var furniture: [String: Set<Cell>] = [:]
-            for n in staticRoot.childNodes where n.geometry != nil && !(n.geometry is SCNPlane) && (n.name ?? "").hasPrefix("room:") {
-                let (lo, hi) = n.boundingBox
-                guard Double(hi.y - lo.y) * Double(n.scale.y) > 0.03 else { continue }
-                let key = String(n.name!.dropFirst(5))
-                guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
-                var spots: [String: Set<Cell>] = [:]
-                mark(st.name, n, offset: st.offset, into: &spots)
-                let k = String(key[key.index(after: bar)...])
-                let floor = (st.rooms[k] ?? st.lingering[k]).map { Set($0.cells) }
-                let inside = (spots[st.name] ?? []).filter { floor?.contains(Station.cell(ofSub: $0)) ?? true }
-                furniture[st.name, default: []].formUnion(inside)
-            }
-            furnitureObstacles = furniture
-        }
-        for (station, cells) in furnitureObstacles { blocked[station, default: []].formUnion(cells) }
-        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("glassdoor:") {
-            let stationName = String(door.name!.dropFirst("glassdoor:".count))
-            guard let st = fleet.stations[stationName] else { continue }
-            for post in door.childNodes where post.name == "post" {
-                let f = Double(Station.fine)
-                let p = SIMD2(Double(door.position.x + post.position.x) - st.offset.x, Double(door.position.z + post.position.z) - st.offset.y)
-                blocked[stationName, default: []].insert(Cell(x: Int((p.x * f).rounded()), y: Int((p.y * f).rounded())))
-            }
-        }
-        for st in fleet.stations.values { st.obstacles = blocked[st.name] ?? [] }
-    }
-
-    func packageCell(_ station: Station, _ room: Room) -> Cell {
-        let key = roomKey(station, room)
-        if let held = packageCells[key], room.cells.contains(held) { return held }
-        let cells = farCells(station, room)
-        var coned: Set<Cell> = []
-        for m in minions.values where m.station == station.name {
-            for n in m.pyramids + m.queuedCones {
-                let x = Double(n.worldPosition.x) - station.offset.x
-                let z = Double(n.worldPosition.z) - station.offset.y
-                coned.insert(Cell(x: Int(x.rounded()), y: Int(z.rounded())))
-            }
-        }
-        let cell = cells.first { !coned.contains($0) } ?? cells.first!
-        packageCells[key] = cell
-        return cell
-    }
-
     private func relight(_ pkg: SCNNode, light: NSColor, blink: Bool, failing: Bool, size: Double) {
         if let plate = pkg.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
             plate.geometry?.firstMaterial = flat(light)
@@ -120,31 +42,8 @@ extension StationController {
                     signatures[key] = markerSignatures[key]
                     continue
                 }
-                guard room.branch != nil || world.crewBoxes[key] != nil || world.peerBoxes[key] != nil else { continue }
-                var count: Int
-                var ghosts = 0
-                var pr: PullRequest?
-                var packaged = false
-                let boxOpacity = 1.0
-                if room.branch == nil {
-                    guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
-                    if crateLeft(station, room) { continue }
-                    count = min(16, max(1, cb.count))
-                    let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
-                    let prNumber = world.crewPull(key) ?? peer?.pull
-                    let state = world.isClosed(key) ? "CLOSED" : (peer?.pullState ?? (prNumber != nil ? "OPEN" : cb.state))
-                    pr = PullRequest(number: prNumber ?? 0, title: "", state: state, reviewDecision: peer?.review ?? "", isDraft: false, url: "")
-                    pr?.checks = peer?.checks ?? ""
-                    packaged = prNumber != nil || world.isClosed(key)
-                } else {
-                    let local = world.localState(room)
-                    let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
-                    if (local.commits == 0 && dirtyFiles == 0) || crateLeft(station, room) { continue }
-                    pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                    count = world.cubes(room) ?? 0
-                    ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
-                    packaged = pr != nil
-                }
+                guard let marks = simulation.marks(station, k) else { continue }
+                let count = marks.count, ghosts = marks.ghosts, pr = marks.pull
                 let base = NSColor(room.color).lighter(0.12)
                 let status: NSColor?
                 switch (pr?.state, pr?.reviewDecision, pr?.isDraft) {
@@ -160,17 +59,16 @@ extension StationController {
                 let failing = office.look.failing
                 if office.look.dusty { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
-                let cells = farCells(station, room)
+                let cells = station.farCells(room)
                 let up = officeUp(station, room.key)
                 let packing = simulation.packing(station, room.key)
                 let held = simulation.shown[station.name]?.cubes[room.key].map { $0 < count } ?? false
                 let state: [String] = ["\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
-                                       "\(failing)", "\(packaged)", "\(up)", "\(packing)", "\(held)", "\(office.look.dusty)"]
+                                       "\(failing)", "\(marks.packaged)", "\(up)", "\(packing)", "\(held)", "\(office.look.dusty)"]
                 let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + state).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
-                if packaged {
-                    let cell = packageCell(station, room)
-                    let size = 0.38
+                if let cell = marks.package {
+                    let size = Zone.waiting.crateSize
                     let closed = pr?.state == "CLOSED"
                     let checks = pr?.checks ?? ""
                     let light: NSColor = closed || failing || checks == "failure" ? NSColor(rgb: (0.95, 0.22, 0.22))
@@ -208,32 +106,18 @@ extension StationController {
                     continue
                 }
                 drawn.forEach { $0.removeFromParentNode() }
-                var seed = stableHash(key) | 1
-                func rnd() -> Double { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Double(seed >> 11) / Double(1 << 53) }
-                var placedBoxes: [(pos: SIMD3<Double>, size: Double)] = []
                 var newest: SCNNode?
-                for i in 0..<(count + ghosts) {
+                for (i, cube) in marks.pile.enumerated() {
                     let ghost = i >= count
-                    let size = Props.cubeSizes[min(2, Int(rnd() * 3))]
-                    let shade = CGFloat(rnd() * 0.1 - 0.04)
-                    let n = Props.cube(color: color.lighter(shade), size: size, shadow: floorShadow)
+                    let n = Props.cube(color: color.lighter(CGFloat(cube.shade)), size: cube.size, shadow: floorShadow)
                     n.childNodes.forEach { $0.name = "box:" + key }
-                    let pos: SIMD3<Double>
-                    if i >= 8, let base = placedBoxes[i - 8] as (pos: SIMD3<Double>, size: Double)? {
-                        pos = SIMD3(base.pos.x + (rnd() - 0.5) * 0.06, base.pos.y + base.size / 2 + size / 2, base.pos.z + (rnd() - 0.5) * 0.06)
-                    } else {
-                        let cell = cells[(i / 3) % cells.count]
-                        let room = max(0, 0.86 - size * 1.25)
-                        pos = SIMD3(station.offset.x + Double(cell.x) + (rnd() - 0.5) * room, size / 2, station.offset.y + Double(cell.y) + (rnd() - 0.5) * room)
-                    }
-                    placedBoxes.append((pos, size))
-                    n.position = v3(pos.x, pos.y, pos.z)
-                    n.eulerAngles.y = rnd() * 0.9
+                    n.position = v3(station.offset.x + cube.pos.x, cube.pos.y, station.offset.y + cube.pos.z)
+                    n.eulerAngles.y = cube.yaw
                     n.name = "box:" + key
-                    n.opacity = !up ? 0 : (ghost ? Props.ghostOpacity : boxOpacity)
+                    n.opacity = !up ? 0 : (ghost ? Props.ghostOpacity : 1)
                     if !ghost { newest = n }
                     if failing && !ghost {
-                        let shell = Props.failingShell(size: size * 1.25)
+                        let shell = Props.failingShell(size: cube.size * 1.25)
                         shell.name = "box:" + key
                         n.addChildNode(shell)
                     }
@@ -250,7 +134,6 @@ extension StationController {
         packages = packages.filter { $0.value.parent != nil }
         packageBuilt = packageBuilt.filter { packages[$0.key] != nil }
         markerSignatures = signatures
-        refreshObstacles()
     }
 
     func rebuildBerths() {
@@ -408,16 +291,9 @@ extension StationController {
         let alien = fleet.stations[crate.station]?.facts.crates[CrateID(repo: crate.repo, number: crate.number)]?.alien == true
         let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))
         let words = crateWords(repo: crate.repo, number: crate.number)
-        return Props.package(color: color, band: NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38,
+        return Props.package(color: color, band: NSColor(rgb: (0.3, 0.32, 0.38)), size: Zone.waiting.crateSize,
                              mine: !alien && world.isMine(repo: crate.repo, number: crate.number), number: crate.number,
                              title: words.title, who: words.who)
-    }
-
-    private func crateLeft(_ station: Station, _ room: Room) -> Bool {
-        guard let repo = room.repo, let r = world.works.find(officeKey: room.key, repo: repo), let n = r.number else { return false }
-        if r.stage.map({ $0 >= .stored }) == true { return true }
-        guard let at = simulation.shown[station.name]?.crates[CrateID(repo: repo, number: n)] else { return false }
-        return at != .office(room.key)
     }
 
     private func drawCrates(_ station: Station, keep: inout Set<ObjectIdentifier>) {
@@ -512,7 +388,7 @@ extension StationController {
 
     private func officeAt(_ station: Station, _ room: String) -> SIMD3<Double> {
         let shown = simulation.shown[station.name]?.offices[room]
-        let cell = (station.rooms[room] ?? station.lingering[room]).map { packageCell(station, $0) } ?? shown?.door ?? Cell(x: 0, y: 0)
+        let cell = simulation.packageCell(station, room) ?? shown?.door ?? Cell(x: 0, y: 0)
         return SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
     }
 
@@ -553,7 +429,7 @@ extension StationController {
         let band = zone == .decon ? Palette.alienLight.darker(0.3) : zone == .cleared ? Props.passedGreen
             : zone == .testing ? Props.waitingAmber : NSColor(rgb: (0.3, 0.32, 0.38))
         let words = crateWords(repo: id.repo, number: id.number)
-        let clothes = Props.package(color: color, band: band, size: zone == .decon ? 0.3 : 0.38, mine: mine, number: id.number,
+        let clothes = Props.package(color: color, band: band, size: zone.crateSize, mine: mine, number: id.number,
                                     title: words.title, who: words.who)
         n.childNodes.forEach { $0.removeFromParentNode() }
         clothes.childNodes.forEach { n.addChildNode($0) }

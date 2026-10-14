@@ -657,11 +657,11 @@ struct KingdomLook: Look {
     func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         let o = station.offset
-        let xs = lounge.cells.map(\.x), zs = lounge.cells.map(\.y)
-        let cx = Double(xs.reduce(0, +)) / Double(xs.count), cz = Double(zs.reduce(0, +)) / Double(zs.count)
+        let xs = lounge.cells.map(\.x)
+        let spots = station.loungeSpots(lounge: lounge)
         if let fire = Kit.node("campfire-pit", from: .survival) {
             fire.scale = SCNVector3(1.8, 1.8, 1.8)
-            fire.position = v3(o.x + cx, 0, o.y + cz)
+            fire.position = v3(spots.table.x, 0, spots.table.y)
             f.props.append(fire)
         }
         for c in station.couches {
@@ -672,10 +672,10 @@ struct KingdomLook: Look {
             log.position = v3(o.x + c.x, 0, o.y + c.y)
             f.props.append(log)
         }
-        for (x, z) in [(Double(xs.min()!) - 0.28, Double(zs.min()!) - 0.28), (Double(xs.max()!) + 0.1, Double(zs.min()!) - 0.3)] {
+        for at in station.loungeBarrels(lounge: lounge) {
             guard let barrel = Kit.node("barrel", from: .pirate) else { continue }
             barrel.scale = SCNVector3(0.3, 0.3, 0.3)
-            barrel.position = v3(o.x + x, 0, o.y + z)
+            barrel.position = v3(at.x, 0, at.y)
             f.props.append(barrel)
         }
         return f
@@ -969,13 +969,14 @@ struct KingdomLook: Look {
     var writesOnFloor: Bool { false }
 
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
-        guard let wall = Dressing.officeWall(room, in: station) else { return nil }
+        guard let wall = station.officeWall(room) else { return nil }
         let key = "\(sign.number ?? -1)|\(sign.who ?? "")|\(NSColor(room.color).description)"
         let made = Self.banners[key] ?? built(banner: room, sign: sign)
         Self.banners[key] = made
         let n = made.clone()
         n.eulerAngles.y = atan2(wall.out.x, wall.out.y)
-        n.position = v3(Double(wall.cell.x) + wall.out.x * 0.34, 0, Double(wall.cell.y) + wall.out.y * 0.34)
+        let at = station.desk(room, theme: .kingdom) ?? SIMD2(Double(wall.cell.x), Double(wall.cell.y))
+        n.position = v3(at.x, 0, at.y)
         return n
     }
 

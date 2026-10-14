@@ -189,6 +189,49 @@ enum PlaybackTests {
             }
         }
 
+        test("a delivery that lands with nobody free waits on the bay floor, and is fetched once someone is") {
+            let (sim, station, a) = fixture()
+            sim.bodies = [:]
+            sim.play()
+            station.ensureRoom(key: "task:web#7", name: "#7", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            office(station, sim, .opened("task:web#7", repo: "web", via: .shuttle(for: nil)))
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 120, until: { sim.deliveries.first?.landed == true }), "the crate is set down on the bay")
+                _ = step(sim, seconds: 30)
+                expect(sim.deliveries.count == 1 && sim.shown["work"]?.offices["task:web#7"].map { phase($0.phase) } == "ordered", "it waits there, the office still ordered")
+                sim.bodies[a.id] = a
+                let built = step(sim, seconds: 180, until: { sim.shown["work"]?.offices["task:web#7"]?.phase == .built })
+                expect(built && sim.deliveries.isEmpty && !a.hasLoad, "fetched, carried and built: \(sim.lag() ?? "")")
+            }
+        }
+
+        test("an office that ends with its crate inside: the crate is carried out to storage first, then the office folds") {
+            let (sim, station, m) = fixture()
+            station.ensureRoom(key: "task:web#5", name: "#5", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            office(station, sim, .opened("task:web#5", repo: "web", via: .appear))
+            put(station, sim, "web", [5], .ready, office: "task:web#5")
+            sim.play()
+            settle(sim, m)
+            put(station, sim, "web", [5], .stored, office: "task:web#5")
+            station.removeRoom(key: "task:web#5")
+            office(station, sim, .gone("task:web#5"))
+            unchanged(sim, station) {
+                sim.play()
+                var atFold: Shown.At??
+                let done = step(sim, seconds: 120, until: {
+                    if atFold == nil, case .folding? = sim.shown["work"]?.offices["task:web#5"]?.phase { atFold = .some(shown(sim, 5)) }
+                    return sim.shown["work"]?.offices["task:web#5"] == nil && sim.cargo.isEmpty
+                })
+                expect(done && caughtUp(sim, station), "the crate in storage, the office gone: \(sim.lag() ?? "")")
+                let out: Bool
+                switch atFold {
+                case .some(.some(.hands)), .some(.some(.row)): out = true
+                default: out = false
+                }
+                expect(out, "in hands or on its row when the fold begins: \(sim.describe(atFold ?? nil))")
+            }
+        }
+
         test("an office that goes keeps its floor until its fold ends, and whoever is inside steps out before it folds") {
             let (sim, station, m) = fixture()
             sim.play()
@@ -212,6 +255,21 @@ enum PlaybackTests {
                 expect(done && !foldedWithSomeoneIn, "a stepped out first, then it folded away")
                 expect(station.lingering.isEmpty && m.place != .room("task:web#9") && sim.restPlace(m) != .room("task:web#9"), "nothing lingers and nobody is sent back in")
             }
+        }
+
+        test("a crate set down off its row is walked round, except in a lane, which it never closes") {
+            let (sim, station, _) = fixture()
+            sim.play()
+            guard let row = station.hall.storageCells.first, let lane = station.hall.aisleCells.first else { return expect(false, "a yard") }
+            func park(_ n: Int, _ c: Cell) {
+                let pos = SIMD3(station.offset.x + Double(c.x), 0, station.offset.y + Double(c.y))
+                sim.shown["work"]?.crates[CrateID(repo: "web", number: n)] = .parked(Spot(area: .storage, station: "work", owner: "web", label: "web", cell: c, pos: pos))
+            }
+            park(1, row)
+            park(2, lane)
+            sim.refreshObstacles()
+            expect(station.obstacles.contains(Cell(x: row.x * Station.fine, y: row.y * Station.fine)), "the one on the rows is an obstacle")
+            expect(!station.obstacles.contains(Cell(x: lane.x * Station.fine, y: lane.y * Station.fine)), "the one in the aisle is not")
         }
 
         test("a release merged: the vortex pulls every aboard crate in, one after another, and only then does the rocket climb") {

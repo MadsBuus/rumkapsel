@@ -70,6 +70,8 @@ class Body {
     var promptCount = 0
     var toolSeed: Int { Int(stableHash(id) % 4) }
     var pyramidCell: Cell?
+    var queued: [Cell] = []
+    var cones: [Cell] { (pyramidCell.map { [$0] } ?? []) + queued }
     var nearCone: Bool { pyramidCell.map { abs($0.x - cell.x) + abs($0.y - cell.y) <= 1 } ?? false }
     var toolCount: Int
     var title: String?

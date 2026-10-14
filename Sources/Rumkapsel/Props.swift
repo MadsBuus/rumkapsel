@@ -153,7 +153,6 @@ enum Props {
         return tick
     }
 
-    static let cubeSizes = [0.18, 0.26, 0.34]
     static let ghostOpacity = 0.38
 
     static func cube(color: NSColor, size: Double, shadow floorShadow: NSColor) -> SCNNode {

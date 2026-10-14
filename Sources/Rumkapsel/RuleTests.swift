@@ -34,10 +34,12 @@ enum RuleTests {
             expect(f.staging["web"].map { $0.number == 900 && $0.merged && $0.mergedAt == t0 } == true, "the staging release is merged")
         }
 
-        test("the board takes a crate back from testing to storage") {
+        test("the board takes a crate back: from the tested rows to QA, from QA to storage") {
             var f = stored("web", [1])
+            apply(&f, [work("web", 1, .cleared)])
+            expect(f.crates[id("web", 1)]?.place == .cleared, "on the tested rows")
             apply(&f, [work("web", 1, .qa)])
-            expect(f.crates[id("web", 1)]?.place == .testing, "across on QA")
+            expect(f.crates[id("web", 1)]?.place == .testing, "back on the untested rows")
             apply(&f, [work("web", 1, .stored)])
             expect(f.crates[id("web", 1)]?.place == .waiting && column(f, "web", 1) == 6, "back in storage in its band")
         }

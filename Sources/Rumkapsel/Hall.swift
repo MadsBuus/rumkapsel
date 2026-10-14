@@ -28,6 +28,7 @@ struct Hall {
     let deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>)
 
     var deckCells: [Cell] { clearedCells + stagedCells }
+    var lanes: Set<Cell> { Set(aisleCells + walkwayCells) }
 
     private init() {
         cells = []; walkwayCells = []; aisleCells = []; clearedCells = []; stagedCells = []; storageCells = []

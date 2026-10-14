@@ -233,10 +233,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var markerSignatures: [String: String] = [:]
     var packages: [String: SCNNode] = [:]
     var packageBuilt: [String: String] = [:]
-    var packageCells: [String: Cell] = [:]
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
-    var furnitureObstacles: [String: Set<Cell>] = [:]
-    var furnitureObstaclesAt = -1
     private var localSignature = ""
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
@@ -359,7 +356,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     static let scanWindow: TimeInterval = 14 * 24 * 3600
 
     static let inkOnTile = NSColor(rgb: (0.03, 0.03, 0.05))
-    var labelCells: [String: Set<Cell>] = [:]
 
     let padHexRoot = SCNNode()
     let padLiftRoot = SCNNode()
@@ -495,7 +491,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
-        simulation.packageCell = { [weak self] st, key in (st.rooms[key] ?? st.lingering[key]).flatMap { self?.packageCell(st, $0) } }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
@@ -684,14 +679,15 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if !m.isSubagent {
                 let want = min(5, s.queuedCount)
                 var attempts = 0
-                while m.queuedCones.count < want && attempts < 5 {
-                    let before = m.queuedCones.count
+                while m.queued.count < want && attempts < 5 {
+                    let before = m.queued.count
                     addPyramid(for: m, queued: true)
                     attempts += 1
-                    if m.queuedCones.count == before { break }
+                    if m.queued.count == before { break }
                 }
-                while m.queuedCones.count > s.queuedCount, let q = m.queuedCones.popLast() { q.removeFromParentNode() }
+                if m.queued.count > s.queuedCount { m.queued.removeLast(m.queued.count - s.queuedCount) }
                 arrangeQueuedCones(m)
+                drawCones(m)
             }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
@@ -768,7 +764,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         let ms = minions.values.filter { $0.station == station.name && !$0.isCrew && $0.state != .leaving && cfg.shared(repo: $0.home.repo) && station.rooms[$0.home.key]?.worktree != nil }.map {
             PeerSnapshot.Minion(id: String(stableHash($0.id)), office: $0.home.key, asleep: $0.activity == .sleeping, busy: $0.busy,
-                                activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.pyramids.count + $0.queuedCones.count,
+                                activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.cones.count,
                                 doing: doing($0), callsign: $0.callsign)
         }
         var knowledge: [GitHubResolver.Knowledge]?
@@ -865,10 +861,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             go(m.asleep ? restPlace(b) : (station.rooms[m.office] != nil ? .room(m.office) : .lounge))
         }
         let cones = m.asleep ? 0 : (m.cones ?? 0)
-        guard b.pyramids.count + b.queuedCones.count != cones else { return }
+        guard b.cones.count != cones else { return }
         clearPyramids(b)
-        b.queuedCones.forEach { $0.removeFromParentNode() }
-        b.queuedCones = []
+        b.queued = []
+        drawCones(b)
         guard cones > 0 else { return }
         addPyramid(for: b)
         for _ in 1..<max(1, cones) { addPyramid(for: b, queued: true) }
@@ -952,7 +948,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func promptLanded(station: String, key: String, minionId: String, count: Int) {
         guard let m = minions[minionId], !m.isSubagent, count > 0 else { return }
-        if let q = m.queuedCones.first { q.removeFromParentNode(); m.queuedCones.removeFirst() }
+        if !m.queued.isEmpty { m.queued.removeFirst() }
         addPyramid(for: m)
         arrangeQueuedCones(m)
     }
@@ -1053,7 +1049,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     func beat(contracted: Bool) {
         if contracted { layoutDirty = true }
         flushScene()
-        timed("obstacles") { refreshObstacles() }
     }
 
     func drawStation(dt: Double) {

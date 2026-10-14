@@ -58,12 +58,30 @@ private struct SimSession {
     var markers: [StationEvent: String] = [:]
 }
 
+protocol SimStation: AnyObject {
+    var world: World { get }
+    var now: Date { get }
+    var sim: SimHooks? { get }
+    var mission: Mission? { get }
+    func handle(_ events: [WorldEvent])
+    func handle(_ event: WorldEvent)
+    func after(_ seconds: Double, _ run: @escaping () -> Void)
+    func simulate(scan: ScanResult)
+    func simulateGitHub()
+    func simulate(peer: PeerSnapshot)
+    func simulatePeerLeft(_ name: String)
+    func simulateKick(roomKey key: String)
+    func simulate(_ nudge: SimNudge)
+}
+
+extension StationController: SimStation {}
+
 @MainActor
 final class SimulatorModel: ObservableObject {
     static func speedValue(_ name: String) -> Double { ["¼x": 0.25, "½x": 0.5][name] ?? Double(name.dropLast()) ?? 1 }
 
     var onReset: (() -> Void)?
-    let station: StationController
+    let station: SimStation
     private var github: GitHubResolver { station.world.github }
 
     let repos = ["web", "api", "ios"]
@@ -105,7 +123,7 @@ final class SimulatorModel: ObservableObject {
         return [s.development, s.storage, s.deck, s.cleared, s.shipped]
     }
 
-    init(station: StationController) {
+    init(station: SimStation) {
         self.station = station
         station.sim?.onEvent = { [weak self] e in
             self?.note("event", SimulatorModel.describe(e), .event(e))
@@ -818,7 +836,7 @@ final class SimulatorModel: ObservableObject {
     func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
 
     private func deployStation(_ repo: String) -> String {
-        station.world.repoRoots.values.first { $0.repo == repo }?.station ?? station.fleet.ordered.first?.name ?? "work"
+        station.world.repoRoots.values.first { $0.repo == repo }?.station ?? station.world.fleet.ordered.first?.name ?? "work"
     }
 
     func press(_ name: String) {
@@ -1117,7 +1135,7 @@ final class SimulatorModel: ObservableObject {
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
         case "Deploy: Staging starts":
-            station.world.learn(.staging(repo: repo, .deploy(.running(since: station.simulation.now, usual: 40))), repo: repo)
+            station.world.learn(.staging(repo: repo, .deploy(.running(since: station.now, usual: 40))), repo: repo)
             station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 40, release: ""))
         case "Deploy: Staging goes live", "Deploy: Staging fails":
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : .failed
@@ -1196,13 +1214,7 @@ final class SimulatorModel: ObservableObject {
         case "Meet in the hall": station.simulate(.meet)
         case "Workout": station.simulate(.workout)
         case "Wedge carrier": station.simulate(.wedge)
-        case "Hands: one free on the deck":
-            guard let st = station.fleet.stations.values.first(where: { !$0.hall.aisleCells.isEmpty }),
-                  let cell = st.hall.aisleCells.first,
-                  let m = station.minions.values.filter({ $0.isFree }).sorted(by: { $0.id < $1.id }).first
-                      ?? station.minions.values.filter({ !$0.isCrew && !$0.isPeer && !$0.isSubagent }).sorted(by: { $0.id < $1.id }).first else { return }
-            m.path = []
-            m.pos = SIMD2(Double(cell.x), Double(cell.y))
+        case "Hands: one free on the deck": station.simulate(.handFree)
 
         default:
             note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
@@ -1334,7 +1346,7 @@ final class SimHooks {
     var lastReal = 0.0
 }
 
-enum SimNudge { case bath, breather(Place), chore, lounge, meet, night(Bool?), turnIn, wedge, workout }
+enum SimNudge { case bath, breather(Place), chore, handFree, lounge, meet, night(Bool?), turnIn, wedge, workout }
 
 extension StationController {
     func stepSimulated(seconds: Double) {
@@ -1462,10 +1474,14 @@ extension StationController {
                     handle(.log("nobody at work to send for a break")); return
                 }
                 react(m, m.activity, place: place, minutes: 12.0 / 60, words: "\(m.home.name) taking a break")
+            case .handFree:
+                guard let st = fleet.stations.values.first(where: { !$0.hall.aisleCells.isEmpty }), let cell = st.hall.aisleCells.first,
+                      let m = minions.values.filter({ $0.isFree }).sorted(by: { $0.id < $1.id }).first
+                          ?? minions.values.filter({ !$0.isCrew && !$0.isPeer && !$0.isSubagent }).sorted(by: { $0.id < $1.id }).first else { return }
+                m.path = []
+                m.pos = SIMD2(Double(cell.x), Double(cell.y))
             case .night(let on):
-                sim?.night = on
-                for m in minions.values where !m.onJob { send(m, to: restPlace(m)) }
-                handle(.log(on == true ? "night falls" : on == false ? "morning" : "back on the clock"))
+                simulation.setNight(on)
             }
         }
     }

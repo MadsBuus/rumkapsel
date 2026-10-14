@@ -61,12 +61,6 @@ extension StationController {
         pane.position = v3(0, 0.35, 0)
         pane.name = "pane"
         door.addChildNode(pane)
-        for side in [-0.5, 0.5] {
-            let post = SCNNode()
-            post.position = v3(side, 0, 0)
-            post.name = "post"
-            door.addChildNode(post)
-        }
         door.position = v3(station.offset.x + p.x, 0, station.offset.y + p.y)
         door.name = "glassdoor:" + station.name
         staticRoot.addChildNode(door)
@@ -275,8 +269,14 @@ extension StationController {
             }
             let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
             if let output { addSetPiece(output, station) }
-            if let door = station.bayDoor {
-                addGlassDoor(station, at: SIMD2(Double(door.inside.x), Double(door.inside.y) + 0.5), facing: SIMD2(0, 1))
+            for door in station.glassDoors {
+                let (node, lightHeight) = addGlassDoor(station, at: door.at, facing: door.facing)
+                guard door.hatch else { continue }
+                let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
+                light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
+                light.position = v3(0, lightHeight, door.facing.y * 0.05)
+                node.addChildNode(light)
+                hatchLights[station.name] = light
             }
             if station.hasHangar, input == nil { buildHangar(station) }
             if output == nil, station.hasPad, Theme.forPlan.kickRises {
@@ -306,13 +306,6 @@ extension StationController {
                 for c in station.hall.deconCells where output == nil {
                     addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name)
                 }
-                let (hp, facing) = station.hall.deconHatch
-                let (hatch, lightHeight) = addGlassDoor(station, at: hp, facing: facing)
-                let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
-                light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
-                light.position = v3(0, lightHeight, facing.y * 0.05)
-                hatch.addChildNode(light)
-                hatchLights[station.name] = light
             }
             buildPadWall(station)
             for prop in Looks.current.dress(station: station) {
@@ -470,11 +463,11 @@ extension StationController {
         roomLabels = [:]
         ownerSigns = [:]
         floorLabels = []
-        labelCells = [:]
-        func reserve(_ key: String, _ center: SIMD2<Double>, _ half: SIMD2<Double>) {
+        for st in fleet.stations.values { st.written = [:] }
+        func reserve(_ station: Station, _ key: String, _ center: SIMD2<Double>, _ half: SIMD2<Double>) {
             let lo = center - half, hi = center + half
             for x in Int((lo.x + 0.5).rounded(.down))...Int((hi.x + 0.5).rounded(.down)) {
-                for y in Int((lo.y + 0.5).rounded(.down))...Int((hi.y + 0.5).rounded(.down)) { labelCells[key, default: []].insert(Cell(x: x, y: y)) }
+                for y in Int((lo.y + 0.5).rounded(.down))...Int((hi.y + 0.5).rounded(.down)) { station.written[key, default: []].insert(Cell(x: x, y: y)) }
             }
         }
         func add(_ node: SCNNode, yaw: Double, center: SIMD2<Double>) {
@@ -594,7 +587,7 @@ extension StationController {
                     sign.node.position.y = 0.012
                     let corner = SIMD2(Double(cx) + 0.42 - sign.width / 2, Double(maxYRow) + 0.42 - sign.height / 2)
                     add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
-                    reserve(key, corner, SIMD2(sign.width / 2, sign.height / 2))
+                    reserve(station, room.key, corner, SIMD2(sign.width / 2, sign.height / 2))
                     sign.node.name = "room:" + key
                     sign.node.opacity = CGFloat(office?.label(at: clock) ?? 1)
                     ownerSigns[key] = sign.node
@@ -642,7 +635,7 @@ extension StationController {
                     label.node.position.y = 0.02
                     add(label.node, yaw: horizontal ? 0 : .pi / 2, center: center)
                     let half = horizontal ? SIMD2(label.width / 2, label.height / 2) : SIMD2(label.height / 2, label.width / 2)
-                    reserve(key, center - SIMD2(ox, oz), half)
+                    reserve(station, room.key, center - SIMD2(ox, oz), half)
                     node = label.node
                 }
                 guard let node else { continue }
@@ -650,17 +643,6 @@ extension StationController {
                 node.opacity = CGFloat(labelBase(office?.look ?? ShownOffice.Look()) * (office?.label(at: clock) ?? 1))
                 roomLabels[key] = node
             }
-        }
-    }
-
-    func farCells(_ station: Station, _ room: Room) -> [Cell] {
-        let door = station.doorCell(of: room.key) ?? room.cells.first!
-        let written = labelCells[roomKey(station, room)] ?? []
-        return room.cells.sorted { a, b in
-            let wa = written.contains(a), wb = written.contains(b)
-            if wa != wb { return !wa }
-            let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
-            return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
         }
     }
 }

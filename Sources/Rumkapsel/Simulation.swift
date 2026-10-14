@@ -90,7 +90,8 @@ final class Simulation<B: Body> {
     var calms: [String: Calm] = [:]
     var snapped = 0
     var lastDelivery = 0
-    var packageCell: (Station, String) -> Cell? = { _, _ in nil }
+    var packageCells: [String: Cell] = [:]
+    var marked: [String: OfficeMarks] = [:]
     let epoch = Date()
     var now: Date { live ? Date() : epoch.addingTimeInterval(clock) }
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
@@ -148,6 +149,7 @@ final class Simulation<B: Body> {
         play()
         assignOrders()
         reconcileBodies()
+        refreshObstacles()
         onBeat(contractHallways())
         replanBlockedWalks()
     }
@@ -255,6 +257,12 @@ final class Simulation<B: Body> {
         if let forced = hooks?.night { return forced }
         let hour = Calendar.current.component(.hour, from: now)
         return hour >= 22 || hour < 7
+    }
+
+    func setNight(_ on: Bool?) {
+        hooks?.night = on
+        for m in bodies.values where !m.onJob { send(m, to: restPlace(m)) }
+        onEvent(.log(on == true ? "night falls" : on == false ? "morning" : "back on the clock"))
     }
 
     func restPlace(_ m: B) -> Place {
@@ -445,8 +453,13 @@ final class Simulation<B: Body> {
             }
             return n
         }
-        if let back = st.hall.backRow(cell) { return tossFrom(st, to: cell) ?? back.over }
         let rows = st.hall.crateRows
+        if let back = st.hall.backRow(cell) {
+            let stand = tossFrom(st, to: cell) ?? back.over
+            guard blocked(stand) > 0 else { return stand }
+            let beside = stand.neighbours.filter { st.walkable.contains($0) && !rows.contains($0) && blocked($0) == 0 }
+            return beside.min { abs($0.x - cell.x) + abs($0.y - cell.y) < abs($1.x - cell.x) + abs($1.y - cell.y) } ?? stand
+        }
         if blocked(cell) == 0, st.walkable.contains(cell), !rows.contains(cell) { return cell }
         let options = cell.neighbours.filter { st.walkable.contains($0) }
         let aisle = options.filter { !rows.contains($0) }

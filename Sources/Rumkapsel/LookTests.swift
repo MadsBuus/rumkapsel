@@ -46,6 +46,18 @@ enum LookTests {
                     expect(drawn[piece] == false, "the look drew a \(piece) it says nothing about")
                 }
             }
+            test("\(theme.title) furniture stands where the station says it does") {
+                let rooms = station.rooms.values.filter { !$0.key.hasPrefix("kind:") }.sorted { $0.key < $1.key }
+                let drawn = furniture(station, offices: rooms), said = station.furniture(theme, offices: rooms)
+                expect(drawn == said, "drawn but not said \(drawn.subtracting(said).sorted { ($0.x, $0.y) < ($1.x, $1.y) }.prefix(8)), said but not drawn \(said.subtracting(drawn).sorted { ($0.x, $0.y) < ($1.x, $1.y) }.prefix(8))")
+            }
+            test("\(theme.title) cones stand where the station says they do") {
+                let look = Looks.current
+                let node = look.message(color: .white, floor: .white) ?? Props.pyramid(color: .white, size: 0.32, floor: .white)
+                let c = Cell(x: 3, y: -2)
+                node.position = v3(Double(c.x), 0, Double(c.y))
+                expect(cells([node], offset: .zero) == Set(Footprint.cone(c).cells), "the cone's footprint is \(cells([node], offset: .zero).count) sub-cells")
+            }
             test("\(theme.title) letters its floor: \(claim.letters)") {
                 expect(Looks.current.writesOnFloor == claim.letters, "writesOnFloor is \(Looks.current.writesOnFloor)")
             }
@@ -82,6 +94,40 @@ enum LookTests {
             "station": !look.dress(station: station).isEmpty,
             "figure": look.figure(id: "a", crew: false, height: 0.5) != nil,
         ]
+    }
+
+    private static func furniture(_ st: Station, offices: [Room]) -> Set<Cell> {
+        let look = Looks.current
+        var out: Set<Cell> = []
+        func place(_ room: Room?, _ nodes: [SCNNode], local: Bool = false) {
+            guard let room else { return }
+            let floor = Set(room.cells)
+            out.formUnion(cells(nodes, offset: local ? .zero : st.offset).filter { floor.contains(Station.cell(ofSub: $0)) })
+        }
+        place(st.rooms["kind:lounge"], st.rooms["kind:lounge"].map { look.furnishLounge($0, in: st).props } ?? [])
+        place(st.rooms["kind:bath"], st.rooms["kind:bath"].map { look.furnishBath($0, in: st).props } ?? [])
+        place(st.rooms["kind:gym"], st.rooms["kind:gym"].map { look.furnishGym($0, in: st).props } ?? [])
+        place(st.rooms["kind:quarters"], st.beds.map { b in
+            let n = look.bed(level: b.level)
+            n.position.x += b.pos.x; n.position.z += b.pos.y
+            return n
+        }, local: true)
+        for room in offices {
+            let sign = OfficeSign(number: 101, who: "mads", name: room.name)
+            place(room, look.dress(office: room, in: st, sign: sign).map { [$0] } ?? [], local: true)
+        }
+        return out
+    }
+
+    private static func cells(_ nodes: [SCNNode], offset: SIMD2<Double>) -> Set<Cell> {
+        var out: Set<Cell> = []
+        for n in nodes where !(n.geometry is SCNPlane) {
+            let (lo, hi) = n.boundingBox
+            guard Double(hi.y - lo.y) * Double(n.scale.y) > 0.03 else { continue }
+            let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8 * Double(n.scale.x)
+            out.formUnion(Footprint(at: SIMD2(Double(n.position.x) - offset.x, Double(n.position.z) - offset.y), radius: r).cells)
+        }
+        return out
     }
 
     private static func fresh() -> Station {

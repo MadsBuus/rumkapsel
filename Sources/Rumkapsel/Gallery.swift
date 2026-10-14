@@ -488,7 +488,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
         }
         add("cubes: three sizes / uncommitted") { [self] p in
             ground(p, amber)
-            let sizes = Props.cubeSizes + [0.26]
+            let sizes = Cube.sizes + [0.26]
             for (k, spot) in spread(p, sizes.count, gap: 0.5).enumerated() {
                 let n = Props.cube(color: amber.lighter(0.12), size: sizes[k], shadow: amber.darker(0.16))
                 n.position = v3(spot.x, sizes[k] / 2, spot.y)

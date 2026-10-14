@@ -12,11 +12,11 @@ struct Furnishing {
 extension Classic {
     static func lounge(_ lounge: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
-        let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
+        let spots = station.loungeSpots(lounge: lounge)
+        let cx = spots.table.x - station.offset.x
         let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
         table.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
-        table.position = v3(station.offset.x + cx, 0.2, station.offset.y + cy)
+        table.position = v3(spots.table.x, 0.2, spots.table.y)
         for lx in [-0.4, 0.4] {
             let panel = SCNNode(geometry: SCNBox(width: 0.03, height: 0.19, length: 0.34, chamferRadius: 0))
             panel.geometry!.firstMaterial = lit(NSColor(Colors.furnitureDim))
@@ -41,10 +41,9 @@ extension Classic {
             couch.addChildNode(back)
             f.props.append(couch)
         }
-        let xs = lounge.cells.map(\.x), ys = lounge.cells.map(\.y)
         let pot = SCNNode(geometry: SCNBox(width: 0.2, height: 0.16, length: 0.2, chamferRadius: 0))
         pot.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.5, 0.35)))
-        pot.position = v3(station.offset.x + Double(xs.min()!) + 0.3, 0.08, station.offset.y + Double(ys.min()!) - 0.3)
+        pot.position = v3(spots.pot.x, 0.08, spots.pot.y)
         let stem = SCNNode(geometry: SCNBox(width: 0.03, height: 0.3, length: 0.03, chamferRadius: 0))
         stem.geometry!.firstMaterial = lit(NSColor(rgb: (0.25, 0.45, 0.28)))
         stem.position = v3(0, 0.22, 0)
@@ -60,7 +59,7 @@ extension Classic {
         f.props.append(pot)
         let shelf = SCNNode(geometry: SCNBox(width: 0.7, height: 0.32, length: 0.2, chamferRadius: 0.01))
         shelf.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
-        shelf.position = v3(station.offset.x + Double(xs.max()!) - 0.3, 0.16, station.offset.y + Double(ys.min()!) - 0.32)
+        shelf.position = v3(spots.shelf.x, 0.16, spots.shelf.y)
         for i in 0..<4 {
             let book = SCNNode(geometry: SCNBox(width: 0.08, height: 0.2, length: 0.14, chamferRadius: 0))
             book.geometry!.firstMaterial = lit(NSColor(Colors.repos[i % Colors.repos.count]))
@@ -74,7 +73,7 @@ extension Classic {
     static func bath(_ bath: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         let fx = station.bathFixtures(bath: bath)
-        let sc2 = fx.shower, tk = fx.toiletCorner, sk = fx.showerCorner
+        let tk = fx.toiletCorner, sk = fx.showerCorner
         let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
         let spot = station.bowlSpot(bath: bath)
         let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
@@ -99,7 +98,8 @@ extension Classic {
         f.props.append(bowl)
         let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
         arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-        arm.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.72, station.offset.y + Double(sc2.y) + 0.35 * sk.y)
+        let armAt = station.showerArm(bath: bath)
+        arm.position = v3(armAt.x, 0.72, armAt.y)
         let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
         nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
         nozzle.position = v3(0, -0.03, -0.1 * sk.y)
@@ -107,7 +107,8 @@ extension Classic {
         f.props.append(arm)
         let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.72, length: 0.04, chamferRadius: 0))
         pole.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        pole.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.36, station.offset.y + Double(sc2.y) + 0.45 * sk.y)
+        let poleAt = station.showerPole(bath: bath)
+        pole.position = v3(poleAt.x, 0.36, poleAt.y)
         let tap = SCNNode(geometry: SCNBox(width: 0.07, height: 0.03, length: 0.05, chamferRadius: 0))
         tap.geometry!.firstMaterial = arm.geometry!.firstMaterial
         tap.position = v3(0, 0.0, -0.04 * sk.y)
@@ -129,7 +130,8 @@ extension Classic {
         f.towel = towel
         let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
         drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
-        drain.position = v3(station.offset.x + Double(sc2.x) + 0.3 * sk.x, 0.01, station.offset.y + Double(sc2.y) + 0.25 * sk.y)
+        let drainAt = station.showerNozzle(bath: bath)
+        drain.position = v3(drainAt.x, 0.01, drainAt.y)
         f.props.append(drain)
         return f
     }

@@ -2,13 +2,14 @@
 
 ## The gate
 
-Every change runs all of it before it is committed; `./test.sh` does exactly this in a throwaway support folder, in about
-twenty seconds.
+Every change runs all of it before it is committed; `./test.sh` does exactly this, each run in a throwaway support
+folder, the three slowest beside the rest, in about ten seconds with the build. It prints every failing line and each
+suite's last line, and exits non-zero if any suite did.
 
 ```bash
 swift build --build-system native
-.build/debug/Rumkapsel --scenarios
 .build/debug/Rumkapsel --rule-tests
+.build/debug/Rumkapsel --intake-tests
 .build/debug/Rumkapsel --playback-tests
 .build/debug/Rumkapsel --sim-tests
 .build/debug/Rumkapsel --idle-tests
@@ -19,11 +20,22 @@ swift build --build-system native
 .build/debug/Rumkapsel --layout-tests
 .build/debug/Rumkapsel --spacelog-tests
 .build/debug/Rumkapsel --look-tests
+.build/debug/Rumkapsel --scenarios
 ```
 
+- `--rule-tests`: an event on given facts gives the right facts and effects; no station, no bodies.
+- `--intake-tests`: the simulator's made-up org fed to a bare `World` (scan, GitHub, board, peers), with clock jumps
+  and no stepping; a press gives the right facts, logs and events. A test fails on any refused press or give-up, and
+  unless every step it pressed was pressed.
+- `--playback-tests`: one move or sequence on a bare `Simulation<Body>`, facts byte-equal before and after.
+- `--look-tests`: per look, among its claims, that the furniture it draws covers exactly the cells
+  `Station.furniture` says, and its cone exactly `Footprint.cone`.
+- `--scenarios`: three smoke runs on the whole station (the pipeline; offices; outside work and a hotfix), each
+  failing unless the picture catches up by itself, with no watchdog snap and every row crate drawn on its slot.
+
 The native build system is named because Xcode 26.1's default lays the products out where the debug binary
-cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios staging` runs
-the scenarios whose name contains a word; `--scenarios-verbose` prints each
+cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios offices` runs
+the smoke runs whose name contains a word; `--scenarios-verbose` prints each
 scenario's whole log, facts, what is shown and bodies. For a look at the picture, `--simulator --snapshot out.png
 --simulate "Target: web#455,Open PR,Merge PR" --delay 19` renders a frame after those presses, without
 taking the keyboard; `Set: <knob> = <value>` in that list sets the board up first, and a move that

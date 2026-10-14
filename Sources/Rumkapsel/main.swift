@@ -95,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--walk-tests") { WalkTests.run() }
         if args.contains("--sim-tests") { SimulationTests.run() }
         if args.contains("--playback-tests") { PlaybackTests.run() }
+        if args.contains("--intake-tests") { IntakeTests.run() }
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
             let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
