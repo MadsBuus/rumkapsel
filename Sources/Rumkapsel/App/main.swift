@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--rule-tests") { RuleTests.run() }
         if args.contains("--work-tests") { WorkTests.run() }
         if args.contains("--deploy-tests") { DeployTests.run() }
+        if args.contains("--github-tests") { GitHubTests.run() }
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
         if args.contains("--spacelog-tests") { SpaceLogTests.run() }
@@ -100,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let i = args.firstIndex(of: "--replay"), args.count > i + 1 {
             Replay.run(args[i + 1], crate: args.firstIndex(of: "--crate").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil })
         }
+        if let i = args.firstIndex(of: "--watch-diag") { GitHubDiag.watch(seconds: args.count > i + 1 ? Double(args[i + 1]) ?? 300 : 300) }
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
             let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }

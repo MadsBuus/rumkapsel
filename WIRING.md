@@ -27,32 +27,54 @@ shown at once. Only changes after it are news.
 |---|---|---|---|
 | Sessions | `~/.claude/projects` transcripts | FSEvents on that folder, and every 5 s | `Integrations/Scanner.swift`, `Integrations/Watcher.swift` |
 | Conductor | `~/conductor/workspaces/<repo>` with a checkout at `~/dev/<repo>`, and repositories given a path in Settings | first scan | `Integrations/World.swift` |
-| Git, per checkout | commits ahead of the trunk, dirty files, the branch checked out | 60 s | `Integrations/GitHub.swift` |
+| Git, per checkout | commits ahead of the trunk, dirty files, the branch checked out | at once on a change in the repository's `.git` (FSEvents on its refs, `HEAD` and worktrees; objects excluded), else 60 s | `Integrations/GitHub.swift`, `Integrations/GitWatch.swift` |
 | Git, per repository | merges and tags for the counts; the pipeline; deploy workflows | with the releases; pipeline and workflows re-read hourly | `Integrations/GitHub.swift`, `Integrations/Pipelines.swift` |
 | Pull requests | your branch's pull request, by branch or number; the team's open list; release and hotfix pull requests | the base interval (Settings › GitHub, 5 min by default) | `Integrations/GitHub.swift`, `Integrations/PullRequests.swift` |
-| Pull request watcher | the 20 most recently updated pull requests, conditional (ETag) | 10 s, with a token | `GitHubResolver.watchPulls` |
-| Activity feed | each repository's events, conditional (ETag) | 60 s | `GitHubResolver.refreshFeed` |
-| Deploys | Actions runs on push to the staging and production branches | 15 s with a token, else the base interval; 10 s while one runs | `Integrations/GitHub.swift`, `Integrations/Deployments.swift` |
-| Board | one GitHub project, one single-select field | what moved every 20 s; the whole board at the base interval | `GitHubResolver.refreshProject`, `refreshProjectDelta` |
+| Pull request detector | the 20 most recently updated pull requests, conditional (ETag) | 5 s focused, 10 s active, 60 s idle | `GitHubResolver.detectPulls` |
+| Activity feed | each repository's events, conditional (ETag), team repositories only | 60 s (GitHub's `X-Poll-Interval`), 3 min idle | `GitHubResolver.detectFeed` |
+| Deploys | Actions runs on push to the staging and production branches, conditional (ETag) | 30 s focused, 1 min active, 2 min idle; 5 s while hot | `GitHubResolver.detectRuns`, `Integrations/Deployments.swift` |
+| Board | one GitHub project, one single-select field | the items updated since yesterday, conditional (REST, ETag): 10 s focused, 20 s active, 60 s idle, 5 s while hot; the whole board at the base interval whatever the deltas, a fresher item kept | `GitHubResolver.detectBoard`, `refreshProject` |
 | Neighbours | offices, minions, colours, GitHub knowledge | looked at twice a second and sent on a change, at least every 3 s; GitHub knowledge every 30 s | `Integrations/Peers.swift`, `Scene/Scene.swift` (`makeSnapshot`) |
 
-Every scan asks every GitHub source; each answers from its cache until its own interval is up. A failed
+Every scan asks the base-interval sources; each answers from its cache until its interval is up. A failed
 call keeps the previous answer.
 
-**Doorbells.** Something cheap that says *something moved* makes the thorough read come sooner
-(`GitHubResolver.expect`: a key asked every few seconds for a while instead of at its interval). A doorbell
-never moves work by itself.
+**Detectors.** Cheap conditional reads (`Integrations/Detectors.swift`) that say *something moved*; the
+resolver ticks them every second on its own (`GitHubResolver.watch`), each first ask jittered. A 304 costs
+nothing against the rate limit and is not parsed. Requests go out one at a time. The pace is the app's:
+**focused** when it is in front, **active** while a session worked in the last 10 minutes, else **idle**.
+A detector never polls faster than GitHub's `X-Poll-Interval`; one that gets no answer (403, 404, the
+network) backs off from 10 s, doubling to 5 min, and starts over on the next answer. A repository's owner
+is asked once before its detectors start. A detector never moves work by itself: what it hears makes the
+thorough read happen at once, and once more 15 s later (one follow-up per repository, carrying every
+change since). The open list and the releases are read at most every 15 s per repository; the rest waits
+for the follow-up.
 
-| Rings | Asks again |
+**The rate gate** (`RateGate`): out of budget (`remaining` 0) or `Retry-After`, everything waits until
+GitHub says, plus a few seconds' jitter; a secondary limit (429, or 403 "rate limit") waits a minute,
+doubling while it repeats; under 200 left, the detectors run four times slower, under 50 eight times.
+GraphQL's budget is read every 5 min from `rate_limit`; under 200, the `gh` reads wait for its reset.
+
+| Hears | Reads at once |
 |---|---|
-| a pull request opened, merged or closed in the feed | the open list, that pull request by number and branch: every 15 s for 2 min; on a merge also the releases (30 s for 5 min), the board (10 s for 2 min) and the deploys (20 s for 5 min) |
-| a push in the feed | that branch's pull request, every 30 s for 3 min |
-| a release in the feed | the releases, every 15 s for 2 min |
-| the watcher sees a pull request move | the open list and that pull request, every 5 s for 1 min; into staging or production, or merged: the releases too, and the deploys every 10 s for 5 min |
-| a board item moved | its linked pull requests, every 15 s for 2 min |
-| `gh pr create`, `gh pr merge` or `git push` in a transcript | the open list, the branch's pull request and the board; after a merge the releases; after a push the feed |
+| a pull request's `updated_at` moves (pushed, reviewed, labelled, commented) | that pull request by number and by branch, where the station follows it; a followed branch's checks every 30 s for 3 min |
+| … opened, closed or reopened | the open list too |
+| … merged, or a pull request into staging or production | the releases and the counts; the deploys hot for 5 min, the board hot for 2 min |
+| a full page of pull requests all new since the last look | the open list, the releases and every pull request the station follows |
+| a release, or a push to staging or production, in the feed (new by event id) | the releases; the deploys hot for 5 min |
+| a deploy runs | the deploys hot while it runs |
+| a board answer with a full page (100 items since yesterday) | the whole board |
+| the remote refs in a `.git` move (a push, a fetch) | that repository's detectors, rung, pulls and deploys hot for 30 s; the checkouts' commits; their branches' checks every 30 s for 3 min |
+| a commit in a `.git` | that repository's checkouts' commits and branch |
+| a checkout in one worktree | that worktree's commits and branch |
+| a tag in a `.git`, for a repository that ships on tags | the releases |
+| our own `git fetch` (its echo within 2 s) | nothing |
+| `gh pr create`, `gh pr merge` or `git push` in a transcript, Refresh GitHub, a poke | the detectors, rung, pulls and deploys hot for 30 s; the board hot for 2 min |
 | your pull request has checks pending or an approval | that pull request, every 30 s for 3 min |
-| a release merges, a deploy runs | the deploys, every 10 s |
+
+The deploys of a repository off the team (no feed) are asked at their own pace; a teammate's direct push
+to its staging or production is seen within that, a merge at once through the pull requests. Without a
+token, or before the owner is known, the deploys are read with `gh run list` at the base interval.
 
 ## Stages
 

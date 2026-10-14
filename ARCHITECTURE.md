@@ -63,9 +63,11 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `World.swift` | the model's front door: rooms, offices, crew, decon, neighbours; turns answers into reports and events |
 | `Releases.swift` | releases, hotfixes, staging releases and the counts, turned into events |
 | `PullRequests.swift` | a pull request's state: yours by branch, a teammate's from the feed, then by number, then by branch |
-| `GitHub.swift` | `GitHubResolver`: every GitHub and git read, cached, on its interval, with doorbells; the counts |
-| `GitHubHTTP.swift` | conditional REST reads with the `gh` token |
-| `GitHubDiag.swift` | `--github-diag` |
+| `GitHub.swift` | `GitHubResolver`: every GitHub and git read, cached; the detectors' reads and what a change sets off; the counts |
+| `Detectors.swift` | `Pace`; `Detector`: one change detector's cadence by pace, heat, `X-Poll-Interval`, ring and failure backoff; `RateGate`: GitHub's rate headers; `FollowUps`: the read 15 s after a change |
+| `GitHubHTTP.swift` | conditional REST reads (ETag) with the `gh` token, behind the rate gate |
+| `GitWatch.swift` | FSEvents on a repository's `.git`: a commit, a worktree's checkout, remote refs or tags moving; which worktree belongs where |
+| `GitHubDiag.swift`, `GitHubMeter.swift` | `--github-diag` and its counters |
 | `Pipelines.swift` | a repository's way to production, detected or from `.github/rumkapsel.json` |
 | `Deployments.swift` | which Actions runs are deploys, their usual length, starts and ends |
 | `Scanner.swift` | the transcripts: sessions, activity, prompts |

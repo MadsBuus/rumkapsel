@@ -440,12 +440,11 @@ final class World {
                 }
             }
             github.intervalMinutes = cfg.githubMinutes
-            if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
+            if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
+            github.watch(repoRoots.mapValues { $0.station == "work" }, board: cfg.project.map { ($0.owner, $0.number) })
             for (root, info) in repoRoots {
                 github.refreshReleases(repoRoot: root)
-                github.refreshDeploys(repoRoot: root)
-                github.watchPulls(repoRoot: root)
-                if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
+                if info.station == "work" { github.refreshOpenPRs(repoRoot: root) }
             }
             for d in github.takeDeploys() {
                 guard let info = repoRoots[d.repoRoot] else { continue }

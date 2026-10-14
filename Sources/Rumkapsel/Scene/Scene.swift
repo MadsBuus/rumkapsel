@@ -474,6 +474,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.onMove = { [weak self] dir, zoom in self?.enqueue { self?.keyMove = dir; self?.keyZoom = zoom; if dir != .zero || zoom != 0 { self?.userTookView = true } } }
         github.onUpdate = { [weak self] in self?.enqueue { self?.onGitHubUpdate() } }
+        github.front = NSApp.isActive
+        for (name, front) in [(NSApplication.didBecomeActiveNotification, true), (NSApplication.didResignActiveNotification, false)] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.github.front = front }
+        }
         view.onHold = { [weak self] held in
             guard let self else { return }
             if let w = self.walker { w.thrusting = held; self.liveTimeScale = 1 } else { self.liveTimeScale = held ? 4 : 1 }
@@ -512,7 +516,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } else if !simulated {
             rescan()
             let projects = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects").path
-            watcher = DirectoryWatcher(path: projects) { [weak self] in self?.rescan() }
+            watcher = DirectoryWatcher(path: projects) { [weak self] _ in self?.rescan() }
             timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.rescan() }
         }
     }
@@ -608,6 +612,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             return nil
         })
         handle(events)
+        github.worked = result.sessions.map(\.lastModified).max() ?? .distantPast
         let cfg = ConfigStore.shared.current
         var seen = Set<String>()
         let liveSessions = result.sessions.filter { s in
@@ -670,13 +675,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                     switch event {
                     case .prOpened:
                         logEvent("\(who) opened a pull request")
-                        if let root { github.expect("openPRs:" + root); if let b = s.branch { github.expect("pull:" + root + "@" + b) }; github.expect("projectDelta", every: 10) }
+                        if let root { github.ring(repoRoot: root) }
                     case .merged:
                         logEvent("\(who) merged")
-                        if let root { github.expect("openPRs:" + root); if let b = s.branch { github.expect("pull:" + root + "@" + b) }; github.expect("releases:" + root, for: 300, every: 30); github.expect("projectDelta", every: 10) }
+                        if let root { github.ring(repoRoot: root) }
                     case .pushed:
                         logEvent("\(who) pushed")
-                        if let root { if let b = s.branch { github.expect("pull:" + root + "@" + b, for: 180, every: 30) }; github.expect("feed:" + root, every: 20) }
+                        if let root { github.ring(repoRoot: root) }
                     case .committed: logEvent("\(who) committed")
                     case .skill: if case .skill(let name) = s.activity { logEvent("\(who) used /\(name)") }
                     case .prompt: break
@@ -1228,7 +1233,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             github.intervalMinutes = ConfigStore.shared.current.githubMinutes
         for (root, info) in world.repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
+            if info.station == "work" { github.refreshOpenPRs(repoRoot: root) }
         }
             logEvent("asking github…")
         }
