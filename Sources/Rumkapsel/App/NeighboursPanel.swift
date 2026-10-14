@@ -47,6 +47,7 @@ extension StationController {
         guard let panel = neighboursPanel else { return }
         if panel.isHidden {
             if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
+            if storyPanel?.isHidden == false { closeStory() }
             panel.isHidden = false
         } else {
             panel.isHidden = true

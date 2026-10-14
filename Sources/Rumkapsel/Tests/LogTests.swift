@@ -12,7 +12,7 @@ enum LogTests {
                 .policy(repo: "web", RepoFacts(hasStaging: true, hasCleared: true, shipsOnMerge: true, shipsOnTag: true, ships: false, shipsAtOnce: true)),
                 .policy(repo: "ios", RepoFacts()),
                 .work(WorkNews(crate: web, office: "task:web#455", stage: .qa, closed: true, quiet: true, link: "https://github.com/o/web/pull/455")),
-                .work(WorkNews(crate: ios, stage: .stored)),
+                .work(WorkNews(crate: ios, stage: .stored)), .work(WorkNews(crate: ios, stage: .cleared, by: .board)),
                 .office(.opened("task:web#455", repo: "web", via: .appear)),
                 .office(.opened("task:web#460", repo: nil, via: .fade)),
                 .office(.opened("task:api#5", repo: "api", via: .shuttle(for: "crew:leo"))),
@@ -166,6 +166,61 @@ enum LogTests {
             let story = StationController.crateStory(kept) ?? ""
             say("      hover: \(story)")
             expect(story.hasPrefix("on the deck ") && story.contains(" · on the cleared rows ") && story.contains(" · aboard since "), "the hover tells it: \(story)")
+        }
+
+        test("a crate's story: what happened, who did it, the waits between and the lead time, across midnight") {
+            let id = CrateID(repo: "web", number: 455)
+            func at(_ day: Int, _ h: Int, _ m: Int) -> Date { Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: day, hour: h, minute: m))! }
+            func crate(_ place: CrateFact.Place, _ stage: Stage) -> CrateFact { CrateFact(id: id, place: place, stage: stage, seq: 1) }
+            func work(_ stage: Stage, _ by: Source) -> Event { .work(WorkNews(crate: id, stage: stage, by: by)) }
+            let office = crate(.office("task:web#455"), .ready), stored = crate(.waiting, .stored), deck = crate(.testing, .qa)
+            let cleared = crate(.cleared, .cleared), aboard = crate(.aboard("web|release#6"), .shipped)
+            let launch = Event.launched(repo: "web", crates: [455], label: "rocket:https://github.com/o/web/pull/14090|web · develop → main · #14090 Release")
+            let steps = [
+                EventLog.Step(at: at(12, 14, 24), from: nil, to: office, event: work(.ready, .pulls)),
+                EventLog.Step(at: at(12, 16, 5), from: office, to: stored, event: work(.stored, .pulls)),
+                EventLog.Step(at: at(13, 11, 30), from: stored, to: deck, event: work(.qa, .git), staging: 14080),
+                EventLog.Step(at: at(13, 15, 30), from: deck, to: stored, event: work(.stored, .board), staging: 14080),
+                EventLog.Step(at: at(13, 23, 50), from: stored, to: deck, event: .staging(repo: "web", .merged(14081))),
+                EventLog.Step(at: at(14, 0, 20), from: deck, to: cleared, event: work(.cleared, .board)),
+                EventLog.Step(at: at(14, 10, 40), from: cleared, to: aboard, event: launch),
+                EventLog.Step(at: at(14, 10, 52), from: aboard, to: nil),
+            ]
+            let told = CrateStory.tell(steps, now: at(14, 11, 30), current: nil)
+            for line in told.lines { say("      \(line)") }
+            say("      \(told.footer ?? "")")
+            let want: [CrateStory.Line] = [
+                .step(at: "Mon 14:24", what: "pull request open, in its office", why: "its pull request"),
+                .wait("in its office 1 h 41 min"),
+                .step(at: "Mon 16:05", what: "merged, to storage", why: "its pull request"),
+                .wait("in storage 19 h 25 min"),
+                .step(at: "Tue 11:30", what: "to the deck for testing", why: "staging release #14080"),
+                .wait("on the deck 4 h"),
+                .step(at: "Tue 15:30", what: "back to storage", why: "the board"),
+                .wait("in storage 8 h 20 min"),
+                .step(at: "Tue 23:50", what: "to the deck for testing", why: "staging release #14081"),
+                .wait("on the deck 30 min"),
+                .step(at: "00:20", what: "tested, to the cleared rows", why: "the tester"),
+                .wait("on the cleared rows 10 h 20 min"),
+                .step(at: "10:40", what: "aboard web's release rocket", why: "production release #14090"),
+                .wait("aboard 12 min"),
+                .step(at: "10:52", what: "lifted off", why: ""),
+            ]
+            expect(told.lines == want, "the rows: \(told.lines.count) of \(want.count)")
+            for (a, b) in zip(told.lines, want) where a != b { expect(false, "\(a) should be \(b)") }
+            expect(told.footer == "merged to production in 1 d 18 h", "the footer: \(told.footer ?? "none")")
+
+            let waiting = CrateStory.tell(Array(steps.prefix(3)), now: at(13, 13, 40), current: deck)
+            expect(waiting.lines.last == .wait("on the deck for 2 h 10 min so far"), "the last wait runs to now: \(String(describing: waiting.lines.last))")
+            expect(waiting.footer == "on its way to production for 21 h 35 min so far", "the footer so far: \(waiting.footer ?? "none")")
+            expect(waiting.lines.first == .step(at: "Mon 14:24", what: "pull request open, in its office", why: "its pull request"), "yesterday and before carry the day")
+
+            let late = CrateStory.tell(Array(steps[2...3]), now: at(13, 16, 0), current: stored)
+            expect(late.lines.first == .step(at: "", what: "in storage", why: "before the log began"), "a story older than the log: \(String(describing: late.lines.first))")
+            expect(late.lines.last == .wait("in storage for 30 min so far") && late.footer == "on its way to production since before the log began",
+                   "\(String(describing: late.lines.last)), \(late.footer ?? "none")")
+            let quiet = CrateStory.tell([], now: at(13, 16, 0), current: stored)
+            expect(quiet.lines == [.step(at: "", what: "in storage", why: "before the log began")], "a crate the log never saw move: \(quiet.lines)")
         }
 
         test("a restart begins with a baseline and remembers today's history") {

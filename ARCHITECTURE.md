@@ -44,6 +44,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `SpaceLog.swift` | the Station Log panel's story, read from the feed, releases and board |
 | `Migration.swift` | an old save's ledger turned into facts, once |
 | `EventLog.swift` | the event log: a line per applied batch, baselines, writing, pruning, replay, each crate's history |
+| `CrateStory.swift` | a crate's story in words, from its history: a row per step, the waits between, the lead time |
 | `EventCoding.swift` | how an `Event` and the yard are written in a log line |
 
 **Rules/**: pure functions of the facts.
@@ -121,7 +122,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Looks/` | the `Look` protocol and the looks: see [THEMES.md](THEMES.md) |
 
 **App/**: `main.swift` (flags, menus, windows), `StationView.swift` (input and camera), `Settings.swift`,
-`SpaceLogPanel.swift`, `NeighboursPanel.swift`, `StationLog.swift` (`station.log`), and the tools:
+`SpaceLogPanel.swift`, `NeighboursPanel.swift`, `CrateStoryPanel.swift`, `StationLog.swift` (`station.log`), and the tools:
 `Simulator.swift`, `Playbook.swift`, `Gallery.swift`, `LookDev.swift`, `FactsDump.swift`, `BodyDump.swift`,
 `FloorDump.swift`, `Replay.swift` (`--replay`: a log file replayed and checked, or one crate's story).
 

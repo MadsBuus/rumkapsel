@@ -15,9 +15,12 @@ final class EventLog {
         var at: Date
         var from: CrateFact?
         var to: CrateFact?
-        var cause: String
+        var event: Event?
+        var baseline: String?
+        var staging: Int?
 
         var moved: Bool { from?.place != to?.place || from?.stage != to?.stage }
+        var cause: String { baseline.map { "baseline \($0)" } ?? event?.words ?? "time" }
     }
 
     struct Replayed {
@@ -56,9 +59,18 @@ final class EventLog {
     init(dir: URL?) { self.dir = dir }
 
     func record(_ events: [Event], at: Date, station: Station, yard: YardGeometry, before: Facts, effects: Int) {
-        guard let dir else { return }
         let after = station.facts
         guard after != before || events.contains(where: { $0 != .tick }) else { return }
+        let line = Line(at: at, station: station.name, events: events, effects: effects)
+        if let dir { file(line, in: dir, station: station, yard: yard, before: before, after: after) }
+        for (id, step) in EventLog.steps(line, before, after) {
+            session[station.name, default: [:]][id, default: []].append(step)
+            if let n = session[station.name]?[id]?.count, n > EventLog.kept { session[station.name]?[id]?.removeFirst(n - EventLog.kept) }
+        }
+    }
+
+    private func file(_ line: Line, in dir: URL, station: Station, yard: YardGeometry, before: Facts, after: Facts) {
+        let at = line.at
         newest = max(EventLog.day(at), newest)
         let day = newest, url = EventLog.file(dir, station.name, day)
         func baseline(_ reason: String, _ facts: Facts) {
@@ -74,13 +86,8 @@ final class EventLog {
             station.migrated = false
             prune(dir, at)
         }
-        let line = Line(at: at, station: station.name, events: events, effects: effects)
         write(line, to: url)
-        if events.contains(.restack) { baseline("restack", after) }
-        for (id, step) in EventLog.steps(line, before, after) {
-            session[station.name, default: [:]][id, default: []].append(step)
-            if let n = session[station.name]?[id]?.count, n > EventLog.kept { session[station.name]?[id]?.removeFirst(n - EventLog.kept) }
-        }
+        if line.events?.contains(.restack) == true { baseline("restack", after) }
         last[station.name] = (after, yard, day)
     }
 
@@ -273,8 +280,9 @@ final class EventLog {
         Set(before.crates.keys).union(after.crates.keys).sorted().compactMap { id in
             let a = before.crates[id], b = after.crates[id]
             guard a?.place != b?.place || a?.column != b?.column || a?.stage != b?.stage else { return nil }
-            let why = line.facts != nil ? "baseline \(line.baseline ?? "")" : cause(id, a?.place, line.events ?? [])?.words ?? "time"
-            return (id, Step(at: line.at, from: a, to: b, cause: why))
+            let event = line.facts != nil ? nil : cause(id, a?.place, line.events ?? [])
+            let staging = after.staging[id.repo].flatMap { $0.number > 0 ? $0.number : nil }
+            return (id, Step(at: line.at, from: a, to: b, event: event, baseline: line.facts != nil ? line.baseline ?? "" : nil, staging: staging))
         }
     }
 

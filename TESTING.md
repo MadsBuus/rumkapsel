@@ -34,7 +34,7 @@ a failure:
 | `layout` | the floor: same rooms give the same cells, slots, the yard, the bay, signs, facts across a save |
 | `spacelog` | the Station Log panel's story from the feed, releases and board |
 | `look` | per theme: what it draws itself, its furniture and cones on the station's footprints, its launch within the climb |
-| `log` | the event log: every event written and read back, broken lines, recorded intake runs replayed to their facts in another process, a crate's history, restarts, two writers, pruning |
+| `log` | the event log: every event written and read back, broken lines, recorded intake runs replayed to their facts in another process, a crate's history and its story, restarts, two writers, pruning |
 
 ## Smoke scenarios
 
@@ -63,6 +63,7 @@ picture that never caught up with the facts, a watchdog snap, or its own floor c
 | `--follow <minion>` | keeps the camera on a minion: its id, the word after its colon, or its home's name |
 | `--walk <seconds>` | steps into the walk after that long |
 | `--log` | opens the Station Log panel |
+| `--story web#455` | opens that crate's story panel a second before the snapshot |
 | `--no-stars` | leaves the star backdrop out |
 | `--demo` | fake sessions; `RK_DEMO_OFFICES=n` adds n offices |
 | `--simulator` | a station on its own: scanner, GitHub and network off, driven by presses through the entry points production uses |
