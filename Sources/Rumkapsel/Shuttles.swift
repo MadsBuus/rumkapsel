@@ -204,7 +204,7 @@ extension Simulation {
             guard f.station == m.station, case .flight(_, _, let s) = f.command.kind else { return nil }
             return s
         })
-        let taken = busy.union(world.truth.deliveries.values.filter { $0.station == m.station }.map(\.slot))
+        let taken = busy.union(deliveries.filter { $0.station == m.station }.map(\.slot))
         let slotIndex = (0..<count).first { !taken.contains($0) } ?? shipsInFlight(m.station) % count
         let slot = station.hangarSlots[slotIndex]
         let command = Command.flight(.takeWorker(m.id), station: m.station, slot: slotIndex, what: "a seat for \(m.home.name)")
@@ -237,7 +237,7 @@ extension Simulation {
                 return i < j
             }) { return false }
             if case .dropCrate(let order) = job,
-               self.world.truth.deliveries.values.contains(where: { $0.station == stationName && $0.slot == slot && $0.id < order }) { return false }
+               self.deliveries.contains(where: { $0.station == stationName && $0.slot == slot && $0.id < order }) { return false }
             guard let station = self.fleet.stations[stationName], slot < station.hangarSlots.count else { return true }
             let at = station.hangarSlots[slot]
             for b in self.bodies.values where b.station == stationName && hypot(b.pos.x - at.x, b.pos.y - at.y) < Station.bayKeepOff {
@@ -263,31 +263,23 @@ extension Simulation {
         if !gone.isEmpty { flights.removeAll { f in gone.contains { $0 === f } } }
     }
 
-    func startDelivery(_ m: B, roomKey: String) {
-        guard let station = fleet.stations[m.station], station.hasHangar, !station.hangarSlots.isEmpty,
-              station.rooms[roomKey] != nil else { return }
-        orderDelivery(station: station, roomKey: roomKey, for: m)
-        assignOrders()
-    }
-
-    func orderDelivery(station: Station, roomKey: String, for m: B?) {
-        guard station.hasHangar, !station.hangarSlots.isEmpty, let room = station.rooms[roomKey] else { return }
-        let repo = room.repo ?? m?.home.repo ?? ""
-        let key = "\(station.name)|\(roomKey)"
-        let slotIndex = world.truth.freeSlots(station: station.name, of: station.hangarSlots.count).first
-            ?? shipsInFlight(station.name) % station.hangarSlots.count
-        let order = world.truth.orderDelivery(station: station.name, roomKey: roomKey, slot: slotIndex, session: m?.id)
-        cue(.crateOrdered(key: key, station: station.name, slot: slotIndex, repo: repo))
+    func orderDelivery(_ station: Station, _ roomKey: String, who: String?) -> Delivery? {
+        guard station.hasHangar, !station.hangarSlots.isEmpty, let room = station.rooms[roomKey] else { return nil }
+        let held = Set(deliveries.filter { $0.station == station.name }.map(\.slot))
+        let slotIndex = (0..<station.hangarSlots.count).first { !held.contains($0) } ?? shipsInFlight(station.name) % station.hangarSlots.count
+        lastDelivery += 1
+        let order = lastDelivery
+        cue(.crateOrdered(order: order, station: station.name, slot: slotIndex, room: roomKey, color: room.color))
         let spot = station.hangarSlots[slotIndex]
         let command = Command.flight(.dropCrate(order: order), station: station.name, slot: slotIndex,
                                      what: "the office for \(room.name)")
         let style = flightStyle()
-        let flight = Flight(station: station.name, repo: repo, command: command,
+        let flight = Flight(station: station.name, repo: room.repo ?? "", command: command,
                             arrival: style.arrival, departure: style.departure,
                             at: SIMD3(spot.x, 0, spot.y), rest: Station.restOverCrate, side: style.side, mouth: station.bayMouth,
                             unloadAt: 0.8, unloadFor: 1.2) { [weak self] in
-            self?.world.truth.crateLanded(order: order)
-            self?.cue(.crateDropped(key: key, station: station.name, slot: slotIndex))
+            self?.updateDelivery(order) { $0.landed = true }
+            self?.cue(.crateDropped(order: order, station: station.name, slot: slotIndex))
         }
         let stationName = station.name
         flight.ready = { [weak self] in
@@ -298,5 +290,6 @@ extension Simulation {
             return carrier.path.isEmpty && hypot(carrier.pos.x - spot.x, carrier.pos.y - spot.y) < 1.3
         }
         launch(flight)
+        return Delivery(id: order, station: station.name, room: roomKey, slot: slotIndex, who: who, since: clock)
     }
 }

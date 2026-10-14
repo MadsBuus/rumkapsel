@@ -218,12 +218,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var openEdges: Set<String> = []
     var roomLabels: [String: SCNNode] = [:]
     var floorLabels: [(node: SCNNode, baseYaw: Double)] = []
-    var undelivered: Set<String> { world.truth.pendingOffices }
-    var packing: Set<String> = []
-    var stowHeld: Set<String> = []
+    var foldCrates: [String: SCNNode] = [:]
+    var ownerSigns: [String: SCNNode] = [:]
+    var officeParts: [String: [(node: SCNNode, base: Double?)]] = [:]
     var newestCube: [String: SCNNode] = [:]
-    var boxes: [String: SCNNode] = [:]
-    var outlines: [String: SCNNode] = [:]
+    var boxes: [Int: SCNNode] = [:]
     let beamRoot = SCNNode()
     let rocketRoot = SCNNode()
     var rocketViews: [String: RocketView] = [:]
@@ -239,7 +238,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var furnitureObstacles: [String: Set<Cell>] = [:]
     var furnitureObstaclesAt = -1
     private var localSignature = ""
-    private var pendingCrewDeliveries: [(login: String, key: String)] = []
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     private var lastBusy: [String: Double] = [:]
@@ -247,7 +245,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var knownSpine: [String: Int] = [:]
     var knownHall: [String: [Cell]] = [:]
     let peers = PeerHub()
-    var fadeIn: Set<String> = []
     private let peerRoot = SCNNode()
     var peerFigures: Int { minions.values.filter(\.isPeer).count }
     private var peerColorBook: [String: RGB] = [:]
@@ -494,10 +491,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         view.delegate = self
 
-        world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
-        simulation.packageCell = { [weak self] st, key in st.rooms[key].flatMap { self?.packageCell(st, $0) } }
+        simulation.packageCell = { [weak self] st, key in (st.rooms[key] ?? st.lingering[key]).flatMap { self?.packageCell(st, $0) } }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
@@ -575,7 +571,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
         flushScene()
-        flushDeliveries()
     }
 
     // MARK: scanning
@@ -597,9 +592,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         let now = self.now
         var homes: [String: World.MinionHome] = [:]
         for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
-        newRooms = [:]
         let events = timed("scan") { world.applyScan(result, now: now, minionHomes: homes) }
         let firstRun = events.contains { if case .worldLoaded = $0 { return true }; return false }
+        let ordered = Set(events.compactMap { e -> String? in
+            if case .office(_, .opened(_, _, .shuttle(let who?)), _) = e { return who }
+            return nil
+        })
         handle(events)
         let cfg = ConfigStore.shared.current
         var seen = Set<String>()
@@ -636,7 +634,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             let m = minions[s.id] ?? spawnMinion(s, station: stationName, home: home)
             m.freeSince = 0
-            if isNew && !s.isSubagent && newRooms[s.id] == nil && !firstRun { simulation.arriveByShuttle(m) }
+            if isNew && !s.isSubagent && !ordered.contains(s.id) && !firstRun { simulation.arriveByShuttle(m) }
             _ = reused
             if m.station != stationName { despawn(m); continue }
             m.home = home
@@ -695,9 +693,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             if m.activity == .waiting || m.activity == .sleeping { clearPyramids(m) }
 
-            if let key = newRooms[s.id], !m.onJob, !m.isSubagent, fleet.stations[stationName]?.hasHangar == true {
-                simulation.startDelivery(m, roomKey: key)
-            } else if !m.onJob {
+            if !m.onJob {
                 let place = restPlace(m)
                 if place != m.place || isNew { send(m, to: place) }
             }
@@ -729,19 +725,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 let restPlace: Place = night ? .quarters : .lounge
                 if longIdle || (i >= station.beds.count + station.couches.count) {
                     dismiss(m)
-                    if let key = carriedRoom(of: m) { reveal(key); simulation.loseLoad(m) }
                 } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
                     send(m, to: restPlace)
                 }
             }
-        }
-        let pending = Set(minions.values.compactMap { m in newRooms[m.id].map { "\(m.station)|\($0)" } })
-        for key in undelivered where !pending.contains(key) && world.truth.delivery(for: key) == nil {
-            layoutDirty = true
-            world.truth.officeDelivered(key)
-            outlines.removeValue(forKey: key)?.removeFromParentNode()
-            boxes.removeValue(forKey: key)?.removeFromParentNode()
         }
         if layoutDirty {
             flushScene(firstRun: firstRun)
@@ -806,7 +794,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         world.peerName = peers.name
         timed("peer") { handle(world.applyPeer(snap, now: now)) }
         flushScene()
-        flushDeliveries()
         placePeerMinions(snap)
     }
 
@@ -907,7 +894,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     // MARK: events
 
-    private var layoutDirty = false
+    var layoutDirty = false
     private var drawnUnchecked: [String: Bool] = [:]
     private var wasLooking = true
     var lastRebuildAt = CACurrentMediaTime()
@@ -920,9 +907,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func lightRooms() {
         for st in fleet.stations.values {
-            for room in st.rooms.values where !room.key.hasPrefix("kind:") {
-                let key = roomKey(st, room)
-                let unchecked = world.isUnchecked(st, room)
+            for (k, o) in shownOffices(st) {
+                let key = st.name + "|" + k
+                let unchecked = o.look.unchecked
                 guard drawnUnchecked[key] != unchecked else { continue }
                 drawnUnchecked[key] = unchecked
                 guard !unchecked, let tiles = roomTiles[key] else { continue }
@@ -934,8 +921,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
     var markersDirty = false
-    private var newRooms: [String: String] = [:]
-    private var peerDeliveries: [String] = []
 
     func flushScene(firstRun: Bool = false) {
         timed("yards") { handle(world.reconcileYards()) }
@@ -961,20 +946,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
     }
 
-    private func flushDeliveries() {
-        let station = fleet.station("work")
-        for roomKey in peerDeliveries {
-            let free = minions.values.filter { $0.station == station.name && !$0.isCrew && !$0.isSubagent && !$0.onJob && !$0.hasLoad && !$0.busy }
-                .min(by: { $0.freeSince > $1.freeSince })
-            if let m = free { simulation.startDelivery(m, roomKey: roomKey) } else { reveal(station.name + "|" + roomKey) }
-        }
-        peerDeliveries = []
-        for d in pendingCrewDeliveries {
-            if let m = minions["crew:" + d.login], !m.onJob { simulation.startDelivery(m, roomKey: d.key) } else { reveal(station.name + "|" + d.key) }
-        }
-        pendingCrewDeliveries = []
-    }
-
     func handle(_ events: [WorldEvent]) { for e in events { handle(e) } }
 
     private func promptLanded(station: String, key: String, minionId: String, count: Int) {
@@ -998,32 +969,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             layoutDirty = true
         case .markersChanged:
             markersDirty = true
-        case .officeOpened(let station, let key, let source, let arrival):
-            let full = station + "|" + key
-            switch arrival {
-            case .appear: break
-            case .fade: fadeIn.insert(full)
-            case .shuttle:
-                world.truth.officeOrdered(full)
-                switch source {
-                case .session(let id): newRooms[id] = key
-                case .peer: peerDeliveries.append(key)
-                case .github(let who), .board(let who): pendingCrewDeliveries.append((who, key))
-                }
-            }
-        case .officeRenamed(let station, let from, let to, let name, let session, let promoted):
-            let oldKey = "\(station)|\(from)", newKey = "\(station)|\(to)"
-            if promoted {
-                world.truth.officeOrdered(newKey)
-                newRooms[session] = to
-                logEvent("\(name): branch created, office ordered")
-            }
-            world.truth.renameOffice(from: oldKey, to: newKey)
-            if let o = outlines.removeValue(forKey: oldKey) { outlines[newKey] = o }
-            if let b = boxes.removeValue(forKey: oldKey) { boxes[newKey] = b }
-            if let m = minions[session], m.place == .room(from) { m.place = .room(to) }
-        case .officeArchived(let station, let key, let roomKey, let name, let hall, let announce, let reason):
-            archive(station: station, key: key, roomKey: roomKey, name: name, hall: hall, announce: announce, reason: reason)
+        case .office:
+            break
         case .crewRoster(let members):
             setCrewRoster(members)
         case .crewActivity(let a):
@@ -1062,15 +1009,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 logEvent("\(label): in development")
             default: break
             }
-        case .pullRequestOpened(let repo, let number, let author, let roomKey):
+        case .pullRequestOpened(let repo, let number, let author):
             logEvent("\(world.crewName(author)) opened #\(number) \(repo)")
-            if let m = minions.values.first(where: { !$0.isCrew && !$0.isSubagent && !$0.isPeer && $0.home.key == roomKey }),
-               let st = fleet.stations[m.station], let room = st.rooms[roomKey] {
-                let key = m.station + "|" + roomKey
-                packing.insert(key)
-                markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.opacity = 0 }
-                simulation.post(.pack(office: roomKey), for: m, rank: .yard, at: standCell(st, near: packageCell(st, room)), place: .room(roomKey), announce: true)
-            }
         case .issueStarted(let repo, let number, let author, _):
             logEvent("\(world.crewName(author)) started #\(number) \(repo)")
         case .deployStarted(let stationName, let repo, true, let expected, let release, let elapsed):
@@ -1148,6 +1088,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             drawVortices()
         }
         tickCrateMotions()
+        tickOffices()
         if Int(clock) % 5 == 0 && Int(clock - dt) % 5 != 0 {
             for name in world.stalePeers(olderThan: World.peerQuiet) { dropPeer(name) }
         }
@@ -1228,9 +1169,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let want = base + (flipped ? Double.pi : 0)
             if abs(Double(node.eulerAngles.y) - want) > 0.001 { node.eulerAngles.y = want }
         }
-        for (key, label) in roomLabels where !undelivered.contains(key) {
+        for (key, label) in roomLabels {
             let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            guard parts.count == 2 else { continue }
+            guard parts.count == 2, let st = fleet.stations[parts[0]], parts[1].hasPrefix("kind:") || shownOffice(st, parts[1])?.phase == .built else { continue }
             let occupied = minions.values.contains { $0.station == parts[0] && $0.place == .room(parts[1]) && $0.state != .leaving }
             let want = occupied || hovered == "room:" + key ? 1.0 : 0.5
             label.opacity += (want - Double(label.opacity)) * min(1, dt * 6)

@@ -2,14 +2,12 @@ import Foundation
 
 enum WorldEvent {
     case boardMoved(item: ProjectItem, from: String?, to: Stage)
-    case pullRequestOpened(repo: String, number: Int, author: String, roomKey: String)
+    case pullRequestOpened(repo: String, number: Int, author: String)
     case pullRequestClosed(repo: String, author: String, roomKey: String)
     case issueStarted(repo: String, number: Int, author: String, roomKey: String)
     case peerArrived(String), peerLeft(String)
 
-    case officeOpened(station: String, key: String, source: Source, arrival: Arrival)
-    case officeRenamed(station: String, from: String, to: String, name: String, session: String, promoted: Bool)
-    case officeArchived(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String)
+    case office(station: String, OfficeNews, reason: String = "")
     case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
     case releaseMerged(station: String, repo: String, number: Int, base: String, title: String, isProduction: Bool)
     case stagingOpened(station: String, repo: String, number: Int)
@@ -29,8 +27,6 @@ enum WorldEvent {
     case chime(Int)
 
     enum Stage { case development, storage, deck, cleared, shipped, other }
-    enum Source { case session(String), peer(String), github(String), board(String) }
-    enum Arrival { case shuttle, fade, appear }
 }
 
 struct CrewMember { let homeKey: String; let repo: String }

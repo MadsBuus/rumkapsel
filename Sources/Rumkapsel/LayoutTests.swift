@@ -251,7 +251,6 @@ enum LayoutTests {
                 return world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
             }
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
-            world.hasPackage = { $0 == "work|task:web#85" }
             let merged = world.works.note(repo: "web", branch: "feature/old", pull: 85, pullState: "MERGED")
             world.works.report(merged, .ready, by: .pulls, at: now)
             world.works.report(merged, .stored, by: .pulls, at: now)
@@ -262,7 +261,7 @@ enum LayoutTests {
             expect(world.stage(office: old, repo: "web") == .stored, "merged, waiting for its haul")
             _ = scan("feature/new")
             let again = scan("feature/new") + scan("feature/new")
-            let flips = again.filter { if case .officeOpened = $0 { return true }; if case .officeArchived = $0 { return true }; return false }
+            let flips = again.filter { if case .office(_, .opened, _) = $0 { return true }; if case .office(_, .gone, _) = $0 { return true }; return false }
             expect(flips.isEmpty, "no office opened and dropped scan after scan: \(flips.count)")
             expect(a.rooms[old] != nil && a.rooms.keys.contains { $0.hasSuffix("feature/new") }, "both stand: \(a.rooms.keys.sorted())")
         }

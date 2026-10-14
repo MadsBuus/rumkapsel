@@ -20,6 +20,10 @@ struct Shown: Equatable {
         }
     }
     var crates: [CrateID: At] = [:]
+    var offices: [String: ShownOffice] = [:]
+    var deliveries: [Int: Delivery] = [:]
+    var cubes: [String: Int] = [:]
+    var folds: [Int: Double] = [:]
 }
 
 enum MoveKind: Equatable { case haul, carry, park, hold }
@@ -134,29 +138,38 @@ extension Simulation {
         for c in st.facts.crates.values {
             switch c.place {
             case .office(let k): out[c.id] = .office(k)
-            case .aboard(let r): out[c.id] = .aboard(r)
-            default: if let s = spots[c.id] { out[c.id] = .row(s) }
+            case .aboard(let r): if st.hasPad { out[c.id] = .aboard(r) }
+            default: if st.hasPad, let s = spots[c.id] { out[c.id] = .row(s) }
             }
         }
         return out
     }
 
     func play() {
-        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) where st.hasPad { play(st) }
+        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) { play(st) }
     }
 
     func play(_ st: Station) {
         if played.insert(st.name).inserted { snap(st); return }
+        playCrates(st)
+        playOffices(st)
+    }
+
+    private func calm(_ st: Station) -> Calm {
+        let jobs = Set(cargo.filter { $0.value.command.crate?.station == st.name }.keys)
+            .union(ownOrders.filter { if case .pack = $0.value.command.kind { return bodies[$0.value.body]?.station == st.name }; return false }.keys)
+        return Calm(facts: st.facts, view: shown[st.name] ?? Shown(), jobs: jobs, rockets: Set(rockets.map { "\($0.key)|\($0.value.launch ?? "")" }))
+    }
+
+    private func playCrates(_ st: Station) {
         let targets = self.targets(st)
         var view = shown[st.name] ?? Shown()
         let before = view
         for (id, at) in view.crates {
             if case .falling(let to, _, let since) = at, clock - since >= Hands.settleSeconds { view.crates[id] = .row(to) }
         }
-        let calm = Calm(facts: st.facts, view: view, jobs: Set(cargo.filter { $0.value.command.crate?.station == st.name }.keys),
-                        rockets: Set(rockets.map { "\($0.key)|\($0.value.launch ?? "")" }))
-        if calms[st.name] == calm {
-            shown[st.name] = view
+        shown[st.name] = view
+        if calms[st.name] == calm(st) {
             watch(st, targets)
             return
         }
@@ -176,13 +189,12 @@ extension Simulation {
         hire(st, view, moves, blocked)
         launchPending(st, view)
         if shown[st.name] != before { cue(.redraw) }
-        calms[st.name] = Calm(facts: st.facts, view: shown[st.name] ?? Shown(), jobs: Set(cargo.filter { $0.value.command.crate?.station == st.name }.keys),
-                              rockets: Set(rockets.map { "\($0.key)|\($0.value.launch ?? "")" }))
+        calms[st.name] = calm(st)
         watch(st, targets)
     }
 
     func skip() {
-        for st in fleet.stations.values where st.hasPad {
+        for st in fleet.stations.values {
             played.insert(st.name)
             snap(st)
         }
@@ -192,9 +204,12 @@ extension Simulation {
         for (cid, job) in cargo where job.command.crate?.station == st.name { callOff(cid) }
         for (key, v) in vortices where v.station == st.name { vortices[key] = nil }
         stalls = stalls.filter { !$0.key.hasPrefix(st.name + "|") }
-        let fresh = Shown(crates: targets(st).mapValues(\.at))
-        for id in (shown[st.name]?.crates.keys).map(Array.init) ?? [] where fresh.crates[id] == nil { cue(.vanish(st.name, id)) }
-        shown[st.name] = fresh
+        var view = shown[st.name] ?? Shown()
+        let fresh = targets(st).mapValues(\.at)
+        for id in view.crates.keys where fresh[id] == nil { cue(.vanish(st.name, id)) }
+        view.crates = fresh
+        shown[st.name] = view
+        snapOffices(st)
         cue(.redraw)
     }
 
@@ -240,19 +255,23 @@ extension Simulation {
             switch e {
             case .log(let text): onEvent(.log(text))
             case .quiet(.crate(let id)): snap(st, id)
+            case .quiet(.office(let key)): snapOffice(st, key)
             case .renamed(.crate(let from), to: .crate(let to)): snap(st, from); snap(st, to)
+            case .renamed(.office(let from), to: .office(let to)): rekey(st, from: from, to: to)
+            case .renamed: break
             case .hatch: cue(.hatch(name))
             }
         }
     }
 
     func lag() -> String? {
-        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) where st.hasPad {
+        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let view = shown[st.name] ?? Shown()
             let targets = self.targets(st)
             for id in Set(targets.keys).union(view.crates.keys).sorted() where view.crates[id] != targets[id]?.at {
                 return "\(id) shown \(describe(view.crates[id])), fact \(describe(targets[id]?.at))"
             }
+            if let lag = officeLag(st) { return lag }
         }
         if let job = cargo.values.min(by: { $0.command.id < $1.command.id }) { return "still carrying: \(job.command.words)" }
         return nil
@@ -301,6 +320,10 @@ extension Simulation {
         case (nil, nil), (.hands?, _), (.vortex?, _):
             return
         case (nil, .row(let s)?):
+            if let k = st.facts.offices.first(where: { $0.value.crate == id })?.key, let o = shown[st.name]?.offices[k] {
+                if o.phase == .built, !pack(st, k) { view.crates[id] = .office(k) }
+                return
+            }
             guard ground.free(s, for: id) else { return }
             ground.held[s.slot] = id
             ground.rows.insert(s.slot)
@@ -310,6 +333,9 @@ extension Simulation {
                 view.crates[id] = .row(s)
                 cue(.appear(st.name, id))
             }
+        case (nil, .office(let k)?):
+            guard shown[st.name]?.offices[k]?.phase == .built else { return }
+            if !pack(st, k) { view.crates[id] = .office(k) }
         case (nil, let w?):
             view.crates[id] = w.at
         case (_, nil):
@@ -349,8 +375,10 @@ extension Simulation {
     private func officeSpot(_ st: Station, _ key: String, _ id: CrateID) -> Spot? {
         if let job = cargo.values.first(where: { $0.crate == id && $0.command.crate?.station == st.name }),
            case .carry(_, let from, _) = job.command.kind { return from }
-        guard let room = st.rooms[key], let cell = packageCell(st, key) ?? st.doorCell(of: key) ?? room.cells.first else { return nil }
-        return Spot(area: .office, station: st.name, owner: key, label: room.name, cell: cell,
+        let office = shown[st.name]?.offices[key]
+        guard let name = st.rooms[key]?.name ?? office?.name,
+              let cell = packageCell(st, key) ?? st.doorCell(of: key) ?? office?.door ?? office?.cells.first else { return nil }
+        return Spot(area: .office, station: st.name, owner: key, label: name, cell: cell,
                     pos: SIMD3(st.offset.x + Double(cell.x), 0, st.offset.y + Double(cell.y)))
     }
 

@@ -56,6 +56,7 @@ extension Simulation {
     }
 
     func forget(_ m: B) {
+        abandon(m)
         let dropped = m.current?.crate != nil ? dropLoad(m) : nil
         for (id, c) in cargo where c.carrier == m.id {
             cargo[id]?.carrier = nil
@@ -86,16 +87,16 @@ extension Simulation {
                     pos: SIMD3(station.offset.x + Double(cell.x), 0.09, station.offset.y + Double(cell.y)))
     }
 
-    func bayCrate(_ order: StationTruth.DeliveryOrder, station: Station) -> (at: SIMD2<Double>, height: Double) {
+    func bayCrate(_ order: Delivery, station: Station) -> (at: SIMD2<Double>, height: Double) {
         (station.hangarSlots[min(order.slot, station.hangarSlots.count - 1)], 0.09)
     }
 
     func replanDeliveries() {
         for m in bodies.values {
-            guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = world.truth.deliveries[id] else { continue }
+            guard case .deliverOffice(let id) = m.current?.kind, let station = fleet.stations[m.station], let order = delivery(id) else { continue }
             if !m.hasLoad {
                 walk(m, to: station.bayStand(slot: order.slot))
-            } else if let slot = officeCrateSlot(station: station, roomKey: order.roomKey) { walk(m, to: slot.cell) }
+            } else if let slot = officeCrateSlot(station: station, roomKey: order.room) { walk(m, to: slot.cell) }
         }
     }
 
@@ -112,16 +113,16 @@ extension Simulation {
             }
             if clock < m.phaseUntil { return .spent }
             if let id = m.current?.id { ownOrders[id] = nil }
+            if case .stow(let office)? = m.current?.kind { stowed(station, office) }
             finish(m)
             send(m, to: m.place)
             return .spent
         case .deliverOffice(let id):
-            guard let order = world.truth.deliveries[id] else {
+            guard let order = delivery(id) else {
                 loseLoad(m)
                 finish(m); return .spent
             }
-            let r = order.roomKey
-            let key = order.key
+            let r = order.room
             let slot = officeCrateSlot(station: station, roomKey: r)
             switch m.phaseKind {
             case .walk:
@@ -145,20 +146,17 @@ extension Simulation {
                 advance(m); return .spent
             case .lift:
                 guard liftDue(m) else { return .spent }
-                if m.load == nil { m.load = .office(key) }
+                if m.load == nil { m.load = .office(id) }
                 if clock < m.phaseUntil { return .spent }
+                guard let slot else { return .spent }
                 advance(m)
-                if let slot { walk(m, to: station.doorOutside(of: r) ?? slot.cell) } else { loseLoad(m); cue(.reveal(key)); finish(m) }
+                walk(m, to: station.doorOutside(of: r) ?? slot.cell)
                 return .spent
             case .haul:
                 advance(m); return .spent
             default:
-                guard let slot, m.hasLoad else {
-                    loseLoad(m)
-                    cue(.reveal(key))
-                    finish(m)
-                    return .spent
-                }
+                guard let slot else { return .spent }
+                guard m.hasLoad else { finish(m); return .spent }
                 let spot = SIMD2(slot.pos.x - station.offset.x, slot.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
                     guard atArmsLength(m, of: spot, dt: dt) else { return .spent }
@@ -169,7 +167,7 @@ extension Simulation {
                 if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                 if clock < m.phaseUntil { return .spent }
                 putDown(m, on: slot)
-                cue(.reveal(key))
+                unfold(id)
                 finish(m)
                 return .spent
             }
@@ -180,8 +178,8 @@ extension Simulation {
                 return .spent
             }
             if clock < m.phaseUntil { return .spent }
-            cue(.packed("\(m.station)|\(office)"))
             if let id = m.current?.id { ownOrders[id] = nil }
+            packed(station, office)
             finish(m)
             send(m, to: m.place)
             return .spent

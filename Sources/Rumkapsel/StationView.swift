@@ -176,7 +176,7 @@ extension StationController {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         enqueue { [self] in
-            for station in fleet.stations.values { station.relayOffices() }
+            for station in fleet.stations.values { station.relayOffices(); world.touch(station) }
             fleet.save()
             handle([.layoutChanged])
             flushScene()

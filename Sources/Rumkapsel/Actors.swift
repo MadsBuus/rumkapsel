@@ -103,20 +103,19 @@ extension StationController {
         }
     }
 
-    func crateOrdered(key: String, station name: String, slot: Int, repo: String) {
+    func crateOrdered(_ order: Int, station name: String, slot: Int, room: String, color: RGB) {
         guard let station = fleet.stations[name], let anchor = hangarAnchors[name], slot < station.hangarSlots.count else { return }
         let local = station.hangarSlots[slot] - station.hangarCenter
-        let color = station.rooms[String(key.dropFirst(name.count + 1))]?.color ?? fleet.color(forRepo: repo)
         let box = Looks.current.crate(color: NSColor(color)) ?? Props.crate(color: NSColor(color))
         box.position = v3(local.x, 0.09, local.y)
         box.opacity = 0
-        box.name = "room:" + key
+        box.name = "room:\(name)|\(room)"
         anchor.addChildNode(box)
-        boxes[key] = box
+        boxes[order] = box
     }
 
-    func crateDropped(key: String, station name: String, slot: Int) {
-        guard let station = fleet.stations[name], let box = boxes[key], slot < station.hangarSlots.count else { return }
+    func crateDropped(_ order: Int, station name: String, slot: Int) {
+        guard let station = fleet.stations[name], let box = boxes[order], slot < station.hangarSlots.count else { return }
         let local = station.hangarSlots[slot] - station.hangarCenter
         box.opacity = 1
         box.position = v3(local.x, 0.42, local.y)

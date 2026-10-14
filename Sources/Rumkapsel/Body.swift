@@ -18,7 +18,7 @@ class Body {
     var phaseUntil = 0.0
     enum Load: Equatable {
         case crate(CrateRef)
-        case office(String)
+        case office(Int)
     }
     var load: Load?
     var hasLoad: Bool { load != nil }

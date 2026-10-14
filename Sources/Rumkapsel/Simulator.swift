@@ -1233,14 +1233,21 @@ final class SimulatorModel: ObservableObject {
     nonisolated static func describe(_ e: WorldEvent) -> String {
         switch e {
         case .boardMoved(let it, let from, let to): return "boardMoved \(it.repo)#\(it.number) \(from ?? "—") -> \(to)"
-        case .pullRequestOpened(let repo, let n, let who, _): return "pullRequestOpened \(repo)#\(n) by \(who)"
+        case .pullRequestOpened(let repo, let n, let who): return "pullRequestOpened \(repo)#\(n) by \(who)"
         case .pullRequestClosed(let repo, let who, let key): return "pullRequestClosed \(repo) \(who) \(key)"
         case .issueStarted(let repo, let n, let who, _): return "issueStarted \(repo)#\(n) by \(who)"
         case .peerArrived(let n): return "peerArrived \(n)"
         case .peerLeft(let n): return "peerLeft \(n)"
-        case .officeOpened(let st, let key, let src, let arrival): return "officeOpened \(st)|\(key) \(src) \(arrival)"
-        case .officeRenamed(_, let from, let to, _, _, let promoted): return "officeRenamed \(from) -> \(to)\(promoted ? " promoted" : "")"
-        case .officeArchived(_, let key, _, _, _, _, let why): return "officeArchived \(key) (\(why))"
+        case .office(let st, let news, let why):
+            let what: String
+            switch news {
+            case .opened(let key, _, .shuttle(let who)): what = "opened \(st)|\(key) by shuttle for \(who ?? "anyone")"
+            case .opened(let key, _, let via): what = "opened \(st)|\(key) \(via)"
+            case .renamed(let from, let to): what = "renamed \(st)|\(from) -> \(to)"
+            case .status(let key, _, let merged, let closedAt): what = "status \(st)|\(key)\(merged ? " merged" : "")\(closedAt == nil ? "" : " closed")"
+            case .gone(let key): what = "gone \(st)|\(key)"
+            }
+            return "office " + what + (why.isEmpty ? "" : " (\(why))")
         case .crewRoster(let m): return "crewRoster \(m.keys.sorted().joined(separator: ","))"
         case .crewActivity(let a): return "crewActivity \(a.login) \(a.kind) \(a.label)"
         case .crewHidden: return "crewHidden"

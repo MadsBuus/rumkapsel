@@ -5,7 +5,7 @@ extension StationController {
     private func owner(_ station: Station, _ c: Cell) -> String? {
         if let m = owners[station.name] { return m[c] }
         var m: [Cell: String] = [:]
-        for (key, room) in station.rooms { for c in room.cells { m[c] = key } }
+        for (room, _) in drawnRooms(station) { for c in room.cells { m[c] = room.key } }
         for c in station.corridorCells where station.isCorridor(c) { m[c] = "corridor" }
         for c in station.coreCells { m[c] = "corridor" }
         for c in station.hall.deconCells { m[c] = "kind:decon" }
@@ -216,10 +216,12 @@ extension StationController {
         owners = [:]
         staticRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomTiles = [:]
+        officeParts = [:]
         openEdges = []
         for station in fleet.stations.values {
-            for room in station.rooms.values {
-                guard let d = station.doorCell(of: room.key), let o = station.doorOutside(of: room.key) else { continue }
+            for (room, office) in drawnRooms(station) {
+                guard let d = office.map({ $0.door }) ?? station.doorCell(of: room.key),
+                      let o = office.map({ $0.outside }) ?? station.doorOutside(of: room.key) else { continue }
                 openEdges.insert("\(station.name):\(d.x),\(d.y)|\(o.x),\(o.y)")
                 openEdges.insert("\(station.name):\(o.x),\(o.y)|\(d.x),\(d.y)")
             }
@@ -359,34 +361,36 @@ extension StationController {
                 staticRoot.addChildNode(b)
             }
 
-            for room in station.rooms.values {
+            for (room, office) in drawnRooms(station) {
                 let key = roomKey(station, room)
+                let look = office?.look ?? ShownOffice.Look()
                 var tiles: [SCNNode] = []
+                var parts: [(node: SCNNode, base: Double?)] = []
                 let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
-                let light = officeLight(station, room)
+                let light = officeLight(station, room, dark: look.dark)
                 roomLight[key] = light
                 roomPower[key] = light != .dark
-                let failing = world.checksFailing(room)
-                let dusty = world.isDusty(room)
+                let failing = look.failing
+                let dusty = look.dusty
                 let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))
-                let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
-                let provisional = world.isProvisional(station, room)
-                let unchecked = world.isUnchecked(station, room)
+                let base = officeBase(room, remote: look.remote)
+                let full = look.remote ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
+                let provisional = look.provisional
+                let unchecked = look.unchecked
+                let door = office.map { $0.door } ?? station.doorCell(of: room.key)
                 let ordered = room.cells.sorted { (a, b) in
-                    let da = abs(a.x - (station.doorCell(of: room.key)?.x ?? a.x)) + abs(a.y - (station.doorCell(of: room.key)?.y ?? a.y))
-                    let db = abs(b.x - (station.doorCell(of: room.key)?.x ?? b.x)) + abs(b.y - (station.doorCell(of: room.key)?.y ?? b.y))
+                    let da = abs(a.x - (door?.x ?? a.x)) + abs(a.y - (door?.y ?? a.y))
+                    let db = abs(b.x - (door?.x ?? b.x)) + abs(b.y - (door?.y ?? b.y))
                     return da != db ? da < db : (a.y, a.x) < (b.y, b.x)
                 }
                 let tiled = Int((Double(ordered.count) * progress).rounded())
-                let rimmed = Looks.current.rimsOffices && !room.key.hasPrefix("kind:") && !unchecked && !provisional
-                let pending = undelivered.contains(key)
+                let rimmed = Looks.current.rimsOffices && office != nil && !unchecked && !provisional
+                let shown = office.map { $0.label(at: clock) } ?? 1
                 for (i, c) in ordered.enumerated() {
-                    let color = i < tiled || progress == 0 ? officeTone(officeBase(station, room), light) : subfloor
+                    let color = i < tiled || progress == 0 ? officeTone(base, light) : subfloor
                     let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
-                    if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: officeBase(station, room)) }
-                    if pending { t.opacity = 0; t.position.y = 0.003 }
-                    else if unchecked { t.opacity = CGFloat(StationController.unlitOffice) }
-                    else if provisional { t.opacity = 0.38 }
+                    if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: base) }
+                    if let office { t.opacity = CGFloat(tileBase(look) * office.tile(c, at: clock)) }
                     tiles.append(t)
                     if failing || dusty {
                         let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
@@ -397,20 +401,24 @@ extension StationController {
                         if failing {
                             overlay.opacity = 0.15
                             overlay.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.5, duration: 0.7), .fadeOpacity(to: 0.12, duration: 0.9)])))
+                            parts.append((overlay, nil))
                         } else {
-                            overlay.opacity = 0.28
+                            overlay.opacity = CGFloat(0.28 * shown)
+                            parts.append((overlay, 0.28))
                         }
+                        overlay.isHidden = shown < 1 && failing
                         staticRoot.addChildNode(overlay)
                     }
                 }
                 roomTiles[key] = tiles
-                if !pending, !room.key.hasPrefix("kind:"), let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, in: station)) {
+                if let office, office.up, let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, who: look.who)) {
                     prop.position.x += station.offset.x; prop.position.z += station.offset.y
                     prop.name = "room:" + roomKey(station, room)
-                    if provisional { prop.opacity = 0.38 }
+                    prop.opacity = CGFloat((provisional ? 0.38 : 1) * shown)
+                    parts.append((prop, provisional ? 0.38 : 1))
                     staticRoot.addChildNode(prop)
                 }
-                if provisional || world.isLocalLive(station, room), !pending {
+                if provisional || look.live, office?.up == true {
                     let cellSet = Set(room.cells)
                     for c in room.cells {
                         for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] where !cellSet.contains(Cell(x: c.x + dx, y: c.y + dy)) {
@@ -418,14 +426,15 @@ extension StationController {
                             edge.geometry!.firstMaterial = flat(full.lighter(0.25))
                             edge.position = v3(station.offset.x + Double(c.x) + Double(dx) * 0.48, 0.006, station.offset.y + Double(c.y) + Double(dy) * 0.48)
                             edge.name = "room:" + key
+                            edge.opacity = CGFloat(shown)
+                            parts.append((edge, 1))
                             staticRoot.addChildNode(edge)
                         }
                     }
                 }
-                outlines.removeValue(forKey: key)?.removeFromParentNode()
+                if office != nil { officeParts[key] = parts }
             }
         }
-        for (key, o) in outlines where !undelivered.contains(key) { o.removeFromParentNode(); outlines[key] = nil }
         groundRoot.childNodes.forEach { $0.removeFromParentNode() }
         if headless {
         } else {
@@ -435,11 +444,6 @@ extension StationController {
         rebuildBerths()
         rebuildPadHexes()
         timed("markers") { rebuildMarkers() }
-        for key in fadeIn {
-            for t in roomTiles[key] ?? [] { let o = t.opacity; t.opacity = 0; t.runAction(.fadeOpacity(to: o, duration: 2.5)) }
-            if let l = roomLabels[key] { let o = l.opacity; l.opacity = 0; l.runAction(.fadeOpacity(to: o, duration: 2.5)) }
-        }
-        fadeIn = []
 
         lastRebuildAt = CACurrentMediaTime()
         (targetFocus, targetHalf) = frame(for: shownStations)
@@ -447,10 +451,9 @@ extension StationController {
         fleet.save()
     }
 
-    private func sign(for room: Room, in station: Station) -> OfficeSign {
+    private func sign(for room: Room, who: String?) -> OfficeSign {
         let digits = room.name.drop { !$0.isNumber }.prefix { $0.isNumber }
-        return OfficeSign(number: Int(digits), who: world.occupant(of: roomKey(station, room)),
-                          name: StationController.displayName(room))
+        return OfficeSign(number: Int(digits), who: who, name: StationController.displayName(room))
     }
 
     private static func displayName(_ room: Room) -> String {
@@ -465,6 +468,7 @@ extension StationController {
     private func rebuildLabels() {
         labelRoot.childNodes.forEach { $0.removeFromParentNode() }
         roomLabels = [:]
+        ownerSigns = [:]
         floorLabels = []
         labelCells = [:]
         func reserve(_ key: String, _ center: SIMD2<Double>, _ half: SIMD2<Double>) {
@@ -555,7 +559,7 @@ extension StationController {
                 return placed.contains { !(hi.x <= $0.min.x || lo.x >= $0.max.x || hi.y <= $0.min.y || lo.y >= $0.max.y) }
             }
             enum Side { case south, north, east, west }
-            for room in station.rooms.values.sorted(by: { $0.key < $1.key }) {
+            for (room, office) in drawnRooms(station) {
                 let text = StationController.displayName(room)
                 if room.key.hasPrefix("kind:") {
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
@@ -577,7 +581,7 @@ extension StationController {
                 var node: SCNNode?
 
                 var stamped: Set<Cell> = []
-                if let who = world.occupant(of: key) {
+                if let who = office?.look.who {
                     let maxYRow = room.cells.map(\.y).max()!
                     let cx = room.cells.filter { $0.y == maxYRow }.map(\.x).max()!
                     var run = 0
@@ -592,6 +596,8 @@ extension StationController {
                     add(sign.node, yaw: 0, center: corner + SIMD2(ox, oz))
                     reserve(key, corner, SIMD2(sign.width / 2, sign.height / 2))
                     sign.node.name = "room:" + key
+                    sign.node.opacity = CGFloat(office?.label(at: clock) ?? 1)
+                    ownerSigns[key] = sign.node
                     let from = Int((Double(cx) + 0.42 - sign.width + 0.5).rounded(.down))
                     stamped = Set((from...cx).map { Cell(x: $0, y: maxYRow) })
                 }
@@ -641,7 +647,7 @@ extension StationController {
                 }
                 guard let node else { continue }
                 node.name = "room:" + key
-                if undelivered.contains(key) { node.opacity = 0 } else if world.isProvisional(station, room) { node.opacity = 0.55 }
+                node.opacity = CGFloat(labelBase(office?.look ?? ShownOffice.Look()) * (office?.label(at: clock) ?? 1))
                 roomLabels[key] = node
             }
         }

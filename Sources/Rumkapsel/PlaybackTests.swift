@@ -156,6 +156,64 @@ enum PlaybackTests {
             }
         }
 
+        test("an office by shuttle: delivered, carried to its door, unfolded, built; one gone mid-delivery folds where it lies") {
+            let (sim, station, m) = fixture()
+            sim.play()
+            settle(sim, m)
+            station.ensureRoom(key: "task:web#7", name: "#7", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            office(station, sim, .opened("task:web#7", repo: "web", via: .shuttle(for: m.id)))
+            unchanged(sim, station) {
+                var seen: [String] = []
+                var carried = false
+                let done = step(sim, seconds: 180, until: {
+                    if let p = sim.shown["work"]?.offices["task:web#7"]?.phase, seen.last != phase(p) { seen.append(phase(p)) }
+                    if case .office? = m.load { carried = true }
+                    return sim.shown["work"]?.offices["task:web#7"]?.phase == .built
+                })
+                expect(done && seen == ["ordered", "unfolding", "built"], "ordered, unfolded, built: \(seen)")
+                expect(carried, "on a's arms from the bay to the door")
+                expect(sim.deliveries.isEmpty && !m.hasLoad && sim.lag() == nil, "nothing left of the delivery: \(sim.lag() ?? "")")
+            }
+            station.ensureRoom(key: "task:web#8", name: "#8", repo: "web", color: RGB(r: 0.9, g: 0.5, b: 0.3), lastActive: Date())
+            office(station, sim, .opened("task:web#8", repo: "web", via: .shuttle(for: m.id)))
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 120, until: { m.hasLoad }), "the second office on a's arms")
+            }
+            station.removeRoom(key: "task:web#8")
+            office(station, sim, .gone("task:web#8"))
+            unchanged(sim, station) {
+                let gone = step(sim, seconds: 5, until: { sim.shown["work"]?.offices["task:web#8"] == nil })
+                expect(gone && sim.deliveries.isEmpty, "the office and its delivery are gone at once")
+                expect(!m.hasLoad && m.landing?.dropped == true, "the crate is set down where a stood, to fold there")
+                expect(sim.lag() == nil && sim.snapped == 0, "caught up by itself: \(sim.lag() ?? "")")
+            }
+        }
+
+        test("an office that goes keeps its floor until its fold ends, and whoever is inside steps out before it folds") {
+            let (sim, station, m) = fixture()
+            sim.play()
+            station.ensureRoom(key: "task:web#9", name: "#9", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            office(station, sim, .opened("task:web#9", repo: "web", via: .appear))
+            sim.play()
+            sim.send(m, to: .room("task:web#9"))
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            expect(station.rooms["task:web#9"]?.cells.contains(m.cell) == true, "a stands in the office")
+            station.removeRoom(key: "task:web#9")
+            office(station, sim, .gone("task:web#9"))
+            unchanged(sim, station) {
+                sim.play()
+                var foldedWithSomeoneIn = false
+                let done = step(sim, seconds: 30, until: {
+                    guard let o = sim.shown["work"]?.offices["task:web#9"] else { return true }
+                    if case .folding = o.phase, Set(o.cells).contains(m.cell) { foldedWithSomeoneIn = true }
+                    expect(station.lingering["task:web#9"] != nil && station.walkable.isSuperset(of: o.cells), "the shown floor stays walkable")
+                    return false
+                })
+                expect(done && !foldedWithSomeoneIn, "a stepped out first, then it folded away")
+                expect(station.lingering.isEmpty && m.place != .room("task:web#9") && sim.restPlace(m) != .room("task:web#9"), "nothing lingers and nobody is sent back in")
+            }
+        }
+
         for seed in PlaybackTests.busySeeds {
             test("a busy yard, seed \(seed): 400 rounds of news between short steps; the picture catches up by itself, never on air") {
                 busy(seed: UInt64(seed), rounds: 400)
@@ -208,12 +266,26 @@ enum PlaybackTests {
         _ = Rules.apply([.policy(repo: repo, staged)] + news, at: sim.now, to: &station.facts, yard: station.yard)
     }
 
+    private static func office(_ station: Station, _ sim: Simulation<Body>, _ news: OfficeNews) {
+        _ = Rules.apply([.office(news)], at: sim.now, to: &station.facts, yard: station.yard)
+    }
+
+    private static func phase(_ p: ShownOffice.Phase) -> String {
+        switch p {
+        case .ordered: return "ordered"
+        case .unfolding: return "unfolding"
+        case .fading: return "fading"
+        case .built: return "built"
+        case .folding: return "folding"
+        }
+    }
+
     private static func shown(_ sim: Simulation<Body>, _ number: Int) -> Shown.At? {
         sim.shown["work"]?.crates[CrateID(repo: "web", number: number)]
     }
 
     private static func caughtUp(_ sim: Simulation<Body>, _ station: Station) -> Bool {
-        sim.cargo.isEmpty && sim.shown[station.name] == Shown(crates: sim.targets(station).mapValues(\.at))
+        sim.cargo.isEmpty && sim.shown[station.name]?.crates == sim.targets(station).mapValues(\.at)
     }
 
     private static func unsupported(_ sim: Simulation<Body>) -> [String] {

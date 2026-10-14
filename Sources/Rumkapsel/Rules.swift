@@ -8,11 +8,19 @@ struct WorkNews: Equatable {
     var quiet = false
 }
 
+enum OfficeNews: Equatable {
+    case opened(String, repo: String?, via: OfficeFact.Via)
+    case renamed(from: String, to: String)
+    case status(String, crate: CrateID?, merged: Bool, closedAt: Date?)
+    case gone(String)
+}
+
 enum StagingNews: Equatable { case opened(Int), merged(Int), closed(Int), deploy(StagingFact.Deploy) }
 
 enum Event: Equatable {
     case policy(repo: String, RepoFacts)
     case work(WorkNews)
+    case office(OfficeNews)
     case decon(repo: String, open: [Int], quiet: Bool = false)
     case deconClosed(CrateID)
     case renumbered(from: CrateID, to: CrateID)
@@ -23,7 +31,7 @@ enum Event: Equatable {
     case tick
 }
 
-enum Subject: Hashable { case crate(CrateID) }
+enum Subject: Hashable { case crate(CrateID), office(String) }
 
 enum Effect: Equatable {
     case log(String)
@@ -49,6 +57,8 @@ enum Rules {
                 }
             case .work(let news):
                 work(news, now, &f, g, &fx, &arrived)
+            case .office(let news):
+                office(news, &f, g, &fx)
             case .decon(let repo, let open, let quiet):
                 let new = Set(open).sorted().filter { f.crates[CrateID(repo: repo, number: $0)] == nil }
                 guard !new.isEmpty else { continue }
@@ -101,6 +111,13 @@ enum Rules {
         }
         normalize(&f, at: now, yard: g)
         return fx
+    }
+
+    static func officeEnds(_ o: OfficeFact, now: Date, mine: Bool, lan: Bool) -> String? {
+        guard !mine, !lan else { return nil }
+        if o.merged { return "merged" }
+        if let at = o.closedAt, now.timeIntervalSince(at) > closedFor { return "closed, not merged" }
+        return nil
     }
 
     static func place(_ stage: Stage, _ r: RepoFacts, office: String?, old: CrateFact.Place?) -> CrateFact.Place? {
@@ -163,6 +180,29 @@ enum Rules {
         guard moved else { return }
         if news.quiet { fx.append(.quiet(.crate(id))) }
         else if let zone = to?.zone { arrived[id.repo, default: [:]][zone, default: []].append(id.number) }
+    }
+
+    private static func office(_ news: OfficeNews, _ f: inout Facts, _ g: YardGeometry, _ fx: inout [Effect]) {
+        switch news {
+        case .opened(let key, let repo, let via):
+            guard f.offices[key] == nil else { return }
+            f.offices[key] = OfficeFact(key: key, repo: repo, via: via)
+            if via == .appear { fx.append(.quiet(.office(key))) }
+        case .renamed(let from, let to):
+            guard from != to else { return }
+            for c in f.crates.values where c.place == .office(from) { f.crates[c.id]?.place = .office(to) }
+            guard let o = f.offices.removeValue(forKey: from) else { return }
+            if f.offices[to] == nil { f.offices[to] = o.keyed(to) }
+            fx.append(.renamed(.office(from), to: .office(to)))
+        case .status(let key, let crate, let merged, let closedAt):
+            guard var o = f.offices[key] else { return }
+            o.crate = crate; o.merged = merged
+            o.closedAt = closedAt.map { at in o.closedAt.map { min($0, at) } ?? at }
+            f.offices[key] = o
+        case .gone(let key):
+            guard f.offices.removeValue(forKey: key) != nil else { return }
+            for c in f.crates.values.filter({ $0.place == .office(key) }).sorted(by: { $0.id < $1.id }) { put(c.id, nil, &f, g) }
+        }
     }
 
     private static func staging(_ repo: String, _ news: StagingNews, _ f: inout Facts) {

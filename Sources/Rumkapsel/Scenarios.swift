@@ -49,19 +49,17 @@ struct Expect {
     static func arrived(_ number: Int, in zone: Zone) -> Expect {
         event("arrived #\(number) in \(zone)") { if case .log(let t) = $0 { return t.contains("#\(number)") && t.hasSuffix(" to \(zone.words)") }; return false }
     }
-    static func officeOpened(_ keyPrefix: String, _ arrival: WorldEvent.Arrival, board: String? = nil, peer: String? = nil) -> Expect {
-        event("officeOpened \(keyPrefix)… \(arrival)\(board.map { " board(\($0))" } ?? "")\(peer.map { " peer(\($0))" } ?? "")") {
-            guard case .officeOpened(_, let key, let source, let how) = $0, key.hasPrefix(keyPrefix), how == arrival else { return false }
-            switch source {
-            case .board(let who): return board == nil || board == who
-            case .peer(let who): return peer == nil || peer == who
-            default: return board == nil && peer == nil
-            }
+    static func officeOpened(_ keyPrefix: String, _ via: OfficeFact.Via? = nil, shuttle: Bool = false) -> Expect {
+        let how = via.map { " \($0)" } ?? (shuttle ? " by shuttle" : "")
+        return event("office opened \(keyPrefix)…\(how)") {
+            guard case .office(_, .opened(let key, _, let how), _) = $0, key.hasPrefix(keyPrefix) else { return false }
+            if shuttle, case .shuttle = how { return true }
+            return !shuttle && (via == nil || via == how)
         }
     }
-    static func officeArchived(_ key: String, reason: String) -> Expect {
-        event("officeArchived \(key) (\(reason))") {
-            if case .officeArchived(_, let k, _, _, _, _, let why) = $0 { return k == key && why == reason }; return false
+    static func officeGone(_ key: String, reason: String) -> Expect {
+        event("office gone \(key) (\(reason))") {
+            if case .office(let st, .gone(let k), let why) = $0 { return st + "|" + k == key && why == reason }; return false
         }
     }
     static func crewActivity(_ login: String, _ kind: String) -> Expect {
@@ -168,8 +166,7 @@ enum Scenarios {
         ], tail: 192, hold: 60, expects: [
             .carry(to: .waiting),
         ], floor: { sim in
-            let reopened = Scenario.count(sim, .officeOpened("task:ios/claude/", .appear), after: "Merge PR")
-                + Scenario.count(sim, .officeOpened("task:ios/claude/", .shuttle), after: "Merge PR")
+            let reopened = Scenario.count(sim, .officeOpened("task:ios/claude/"), after: "Merge PR")
             if reopened > 0 { return "an office opened for the branch after the merge" }
             let rooms = sim.station.world.fleet.stations["work"]?.rooms.values.filter { $0.branch?.hasPrefix("claude/new-work-") == true } ?? []
             return rooms.count == 1 && rooms[0].key.hasPrefix("task:ios#") ? nil : "offices for the branch: \(rooms.map(\.key).sorted())"
@@ -199,10 +196,10 @@ enum Scenarios {
             ("Teammate: New branch", 48),
             ("Teammate: Open PR", 4.8),
         ], tail: 192, hold: 60, expects: [
-            .officeOpened("task:api#", .shuttle, board: "leo"),
-            .crewActivity("leo", "branch_create"),
             .flight,
+            .officeOpened("task:api#", .shuttle(for: "crew:leo")),
             .deliverOffice(by: "leo"),
+            .crewActivity("leo", "branch_create"),
             .crewActivity("leo", "pr_open"),
         ], floor: { sim in
             let flights = Scenario.count(sim, .flight)
@@ -219,7 +216,7 @@ enum Scenarios {
         ], floor: { sim in
             let fetching = sim.station.minions.values.filter { if case .deliverOffice = $0.current?.kind { return true }; return false }
             if !fetching.isEmpty { return "\(fetching.map(\.home.name).joined(separator: ", ")) still fetching from the bay" }
-            let left = sim.station.world.truth.deliveries.values.map(\.key)
+            let left = sim.station.simulation.deliveries.map(\.room)
             return left.isEmpty ? nil : "crates left on the bay floor: \(left.sorted().joined(separator: ", "))"
         }),
 
@@ -415,10 +412,23 @@ enum Scenarios {
             ("GitHub: Poll", 32),
         ], tail: 32, expects: [
             .log("pull request closed, not merged"),
-            .officeArchived("work|task:api#5140", reason: "pull request closed"),
+            .officeGone("work|task:api#5140", reason: "pull request closed"),
         ], forbids: [
             .carry(5140, to: .waiting),
         ]),
+
+        Scenario("a teammate's pull request merges: its crate is carried out of the office to storage, then the office folds", [
+            ("Target: api#5140", 0),
+            ("Teammate: Merge PR", 4.8),
+        ], tail: 192, expects: [
+            .officeGone("work|task:api#5140", reason: "pull request closed"),
+            .carry(5140, to: .waiting),
+        ], floor: { sim in
+            guard let st = sim.station.world.fleet.stations["work"] else { return "no station" }
+            if st.rooms["task:api#5140"] != nil || sim.station.simulation.shown["work"]?.offices["task:api#5140"] != nil { return "the office still stands" }
+            if !st.lingering.isEmpty { return "a folded office is still walkable: \(st.lingering.keys.sorted())" }
+            return Scenario.fact(sim, "api", 5140)?.zone == .waiting ? nil : "#5140 is not in storage"
+        }),
 
         Scenario("a bot's pull request: an object in decon, merged, cleared into storage", [
             ("Target: ios#298", 0),
@@ -429,7 +439,7 @@ enum Scenarios {
             .log(Words.current.clearedDecon),
             .carry(to: .waiting),
         ], forbids: [
-            .officeOpened("task:ios#", .shuttle),
+            .officeOpened("task:ios#", shuttle: true),
         ], floor: { sim in
             let st = sim.station.world.fleet.stations["work"]!
             if Scenario.crates(sim, [.decon], "ios") > 0 { return "an object is still in decon" }
@@ -473,7 +483,7 @@ enum Scenarios {
             ("Peer: Arrive", 96),
             ("Peer: Leave", 4.8),
         ], tail: 96, hold: 60, expects: [
-            .officeOpened("task:web#460", .fade, peer: "kim"),
+            .officeOpened("task:web#460", .fade),
             .peerLeft("kim"),
             .peerArrived("kim"),
             .peerLeft("kim"),
@@ -486,7 +496,7 @@ enum Scenarios {
             ("Target: web#460", 0),
             ("Peer: Kick office", 4.8),
         ], tail: 128, expects: [
-            .officeArchived("work|task:web#460", reason: "kicked"),
+            .officeGone("work|task:web#460", reason: "kicked"),
             .log("kicked #460 artist tags off the station"),
         ]),
 
@@ -604,7 +614,7 @@ final class ScenarioRunner {
     }
 
     private func quiet(_ station: StationController) -> Bool {
-        !station.world.placementsLeft && station.world.truth.pendingOffices.isEmpty && station.world.truth.deliveries.isEmpty
+        !station.world.placementsLeft && station.world.fleet.stations.values.allSatisfy { station.simulation.officeLag($0) == nil }
             && station.simulation.flights.isEmpty && station.simulation.cargo.isEmpty && station.minions.values.allSatisfy { $0.path.isEmpty }
     }
 

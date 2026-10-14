@@ -49,6 +49,10 @@ extension Simulation {
         var out: [Opening] = []
         for (id, o) in ownOrders where !o.held {
             guard let m = bodies[o.body] else { continue }
+            if let turn = o.command.chore, ownOrders.contains(where: { other in
+                guard other.key != id, other.value.body == o.body, let t = other.value.command.chore else { return false }
+                return other.value.held || (t, other.value.postedAt, other.key) < (turn, o.postedAt, id)
+            }) { continue }
             out.append(Opening(work: .own(id), rank: o.rank, station: m.station, at: o.at, postedAt: o.postedAt, only: o.body))
         }
         for (id, job) in cargo where job.carrier == nil {
@@ -57,12 +61,12 @@ extension Simulation {
             out.append(Opening(work: .carry(id), rank: rank(of: job.command), station: crate.station, at: from.cell,
                                postedAt: job.postedAt, gaveUp: job.gaveUp, prefer: job.prefer))
         }
-        for order in world.truth.deliveries.values {
-            guard let station = fleet.stations[order.station], station.rooms[order.roomKey] != nil,
+        for order in deliveries {
+            guard let station = fleet.stations[order.station], station.facts.offices[order.room] != nil, station.rooms[order.room] != nil,
                   !bodies.values.contains(where: { if case .deliverOffice(let id)? = $0.current?.kind { return id == order.id }; return false }) else { continue }
-            let crew = order.session.flatMap { bodies[$0] }?.isCrew == true
+            let crew = order.who.flatMap { bodies[$0] }?.isCrew == true && clock - order.since < Delivery.patience
             out.append(Opening(work: .delivery(order.id), rank: .yard, station: order.station, at: station.bayStand(slot: order.slot),
-                               postedAt: Double(order.id), gaveUp: order.gaveUp, only: crew ? order.session : nil, prefer: crew ? nil : order.session))
+                               postedAt: Double(order.id), gaveUp: order.gaveUp, only: crew ? order.who : nil, prefer: order.who))
         }
         for station in fleet.stations.values where qaWanted(station) {
             guard !bodies.values.contains(where: { $0.station == station.name && $0.isQA }), let at = station.hall.deckCells.first else { continue }
@@ -148,6 +152,21 @@ extension Simulation {
         assignOrders()
     }
 
+    func dropOrders(at place: Place) {
+        for (id, o) in ownOrders where o.place == place { drop(id) }
+    }
+
+    func moveOrders(from old: String, to new: String) {
+        for (id, o) in ownOrders where o.place == .room(old) || o.command.office == old {
+            let command = o.command.moved(from: old, to: new)
+            let place = o.place == .room(old) ? Place.room(new) : o.place
+            var moved = OwnOrder(command: command, body: o.body, rank: o.rank, at: o.at, place: place, postedAt: o.postedAt, announce: o.announce)
+            moved.held = o.held
+            ownOrders[id] = moved
+            if let m = bodies[o.body], m.current?.id == id { m.current = command }
+        }
+    }
+
     private func drop(_ id: Int) {
         guard let o = ownOrders.removeValue(forKey: id) else { return }
         cue(.ownDropped(o.body, o.command))
@@ -206,7 +225,7 @@ extension Simulation {
             cargo[id]?.carrier = m.id
             m.path = route(m, to: standCell(station, near: from.cell))
         case .delivery(let id):
-            guard let order = world.truth.deliveries[id], let room = station.rooms[order.roomKey] else { return false }
+            guard let order = delivery(id), let room = station.rooms[order.room] else { return false }
             start(m, .deliverOffice(order: id, name: room.name), announce: false)
             guard case .deliverOffice = m.current?.kind else { return false }
             m.place = .hangar

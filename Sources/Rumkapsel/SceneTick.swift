@@ -22,6 +22,7 @@ extension StationController {
             let station = fleet.station(stationName)
             let h = Home.from(repo: a.0, branch: a.3, cwd: a.1)
             station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
+            world.learn(.opened(h.key, repo: h.repo, via: .appear), station: stationName)
             let s = SessionInfo(id: "demo-\(i)", cwd: a.1, repo: a.0, repoRoot: nil, owner: nil, lastModified: Date(), activity: a.2, area: nil,
                                 title: nil, branch: a.3, toolCount: 0, isSubagent: i == 2, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
             let m = spawnMinion(s, station: stationName, home: h)
@@ -37,6 +38,7 @@ extension StationController {
                 let repo = repos[i % repos.count]
                 let h = Home.from(repo: repo, branch: "gh-\(900 + i)/demo-office-\(i)", cwd: "\(home)/conductor/workspaces/\(repo)/demo\(i)")
                 work.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
+                world.learn(.opened(h.key, repo: h.repo, via: .appear), station: work.name)
             }
         }
         rebuildStatic()
@@ -82,14 +84,13 @@ extension StationController {
                 let station = fleet.station("work")
                 let h = Home.from(repo: "tattoodo-web", branch: "gh-470/artist-search", cwd: cwd)
                 station.ensureRoom(key: h.key, name: h.name, repo: h.repo, color: fleet.color(forRepo: h.repo), lastActive: Date())
-                world.truth.officeOrdered("work|\(h.key)")
+                world.learn(.opened(h.key, repo: h.repo, via: .shuttle(for: "demo-new")), station: "work")
                 rebuildStatic()
                 for mm in minions.values where !mm.onJob { send(mm, to: mm.place) }
                 let s = SessionInfo(id: "demo-new", cwd: cwd, repo: "tattoodo-web", repoRoot: nil, owner: nil, lastModified: Date(), activity: .coding("app"), area: nil,
                                     title: nil, branch: "gh-470/artist-search", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:])
                 let m = spawnMinion(s, station: "work", home: h)
                 m.busy = true; m.activity = .coding("app")
-                simulation.startDelivery(m, roomKey: h.key)
             }
         }
     }
@@ -176,6 +177,7 @@ extension StationController {
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for cue in simulation.drainCues() { play(cue) }
+        if layoutDirty { flushScene() }
     }
 
     func mirrorLoad(_ m: Minion) {
@@ -230,12 +232,17 @@ extension StationController {
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
         case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }
-        case .reveal(let key): reveal(key)
-        case .foldCrate(let key):
-            if let crate = boxes.removeValue(forKey: key) {
-                let fold = SCNAction.scale(to: 0.01, duration: 0.35); fold.timingMode = .easeIn
-                crate.runAction(.sequence([fold, .removeFromParentNode()]))
+        case .floor: layoutDirty = true
+        case .built(let key):
+            for m in minions.values where m.station + "|" + m.home.key == key && m.owedCones > 0 {
+                for _ in 0..<m.owedCones { addPyramid(for: m) }
+                m.owedCones = 0
             }
+        case .folds(let key):
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { return }
+            for m in minions.values where m.station == parts[0] && m.home.key == parts[1] { clearPyramids(m) }
+            stationAnchors[parts[0]]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
         case .stow(let id):
             guard let m = minions[id], let (cube, box) = m.stowing else { return }
             let key: String? = { if case .stow(let office)? = m.current?.kind { return m.station + "|" + office }; return nil }()
@@ -248,10 +255,7 @@ extension StationController {
             moveCrate(cube, legs: [MotionLeg(to: at, seconds: 0.6, ease: .easeIn)]) { [weak self, weak box, weak m] in
                 self?.drone.thud()
                 box?.opacity = 1
-                if let self, let key {
-                    self.stowHeld.remove(key)
-                    self.newestCube[key]?.opacity = 1
-                }
+                if let self, let key { self.newestCube[key]?.opacity = 1 }
                 cube.removeFromParentNode()
                 m?.stowing = nil
             }
@@ -269,20 +273,15 @@ extension StationController {
             }
         case .ownDropped(let id, let c):
             switch c.kind {
-            case .pack(let office):
-                guard let m = minions[id] else { return }
-                packing.remove(m.station + "|" + office)
+            case .pack:
                 markersDirty = true
-            case .stow(let office):
+            case .stow:
                 guard let m = minions[id] else { return }
-                let key = m.station + "|" + office
-                stowHeld.remove(key)
-                newestCube[key]?.opacity = 1
+                markersDirty = true
                 if let (cube, _) = m.stowing { cube.removeFromParentNode(); m.stowing = nil }
             default: break
             }
         case .packed(let key):
-            packing.remove(key)
             if let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }) {
                 pkg.opacity = 1
                 let at = SIMD3(Double(pkg.position.x), Double(pkg.position.y), Double(pkg.position.z))
@@ -294,8 +293,8 @@ extension StationController {
         case .appear(let station, let id): appearing.insert("\(station)|\(id.repo)|\(id.number)")
         case .vanish(let station, let id): vanish(station, id)
         case .sweep(let up): drone.sweep(up: up)
-        case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
-        case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)
+        case .crateOrdered(let order, let station, let slot, let room, let color): crateOrdered(order, station: station, slot: slot, room: room, color: color)
+        case .crateDropped(let order, let station, let slot): crateDropped(order, station: station, slot: slot)
         case .rocketLoading, .liftOff, .steam, .rocketGone: play(rocket: cue)
         }
     }

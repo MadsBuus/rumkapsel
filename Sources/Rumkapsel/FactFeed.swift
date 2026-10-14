@@ -11,6 +11,14 @@ final class FactFeed {
 
 extension World {
     func learn(_ event: Event, repo: String? = nil) { feed.pending.append((repo, event)) }
+    func learn(_ news: OfficeNews, station name: String) {
+        guard let station = fleet.stations[name] else { return }
+        let effects = Rules.apply([.office(news)], at: now, to: &station.facts, yard: station.yard)
+        feed.unsaved = true
+        onOffices(station, effects)
+    }
+
+    func touch(_ station: Station) { onOffices(station, []) }
 
     func learn(_ record: WorkBook.Record, _ t: Transition) {
         guard let n = record.number else { return }
@@ -47,7 +55,7 @@ extension World {
         let routed = Set(repoRoots.values.map(\.repo))
         feed.pending = Array(news.filter { $0.repo.map { !routed.contains($0) } ?? false }.suffix(FactFeed.unrouted))
         var out: [(station: String, effects: [Effect])] = []
-        for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station.hasPad {
+        for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             let roots = repoRoots.filter { $0.value.station == station.name }.sorted { $0.key < $1.key }
             let repos = Set(roots.map(\.value.repo))
             var events: [Event] = []
@@ -57,7 +65,10 @@ extension World {
             }
             events += news.filter { $0.repo.map(repos.contains) ?? true }.map(\.event)
             let before = station.facts
-            out.append((station.name, Rules.apply(events + [.tick], at: now, to: &station.facts, yard: station.yard)))
+            var effects = Rules.apply(events + [.tick], at: now, to: &station.facts, yard: station.yard)
+            let drift = officeDrift(station)
+            if !drift.isEmpty { effects += Rules.apply(drift, at: now, to: &station.facts, yard: station.yard) }
+            out.append((station.name, effects))
             if station.facts != before { feed.unsaved = true }
             shipAboardMerges(station, now: now)
         }
@@ -67,6 +78,15 @@ extension World {
             fleet.save()
         }
         return out
+    }
+
+    func officeDrift(_ station: Station) -> [Event] {
+        let rooms = station.rooms.values.filter { !$0.key.hasPrefix("kind:") }
+        let known = Set(rooms.map(\.key))
+        let opened = rooms.filter { station.facts.offices[$0.key] == nil }.sorted { $0.key < $1.key }.map { OfficeNews.opened($0.key, repo: $0.repo, via: .appear) }
+        let gone = station.facts.offices.keys.filter { !known.contains($0) }.sorted().map { OfficeNews.gone($0) }
+        for news in opened + gone { StationLog.write("facts", "\(station.name): \(news), set from the rooms: no word came for it") }
+        return (opened + gone).map { .office($0) }
     }
 
     private func shipAboardMerges(_ station: Station, now: Date) {

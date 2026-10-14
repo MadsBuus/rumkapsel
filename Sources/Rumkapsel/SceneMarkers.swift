@@ -52,7 +52,8 @@ extension StationController {
                 guard let bar = key.firstIndex(of: "|"), let st = fleet.stations[String(key[..<bar])] else { continue }
                 var spots: [String: Set<Cell>] = [:]
                 mark(st.name, n, offset: st.offset, into: &spots)
-                let floor = st.rooms[String(key[key.index(after: bar)...])].map { Set($0.cells) }
+                let k = String(key[key.index(after: bar)...])
+                let floor = (st.rooms[k] ?? st.lingering[k]).map { Set($0.cells) }
                 let inside = (spots[st.name] ?? []).filter { floor?.contains(Station.cell(ofSub: $0)) ?? true }
                 furniture[st.name, default: []].formUnion(inside)
             }
@@ -110,8 +111,15 @@ extension StationController {
         var keep: Set<ObjectIdentifier> = []
         var signatures: [String: String] = [:]
         for station in fleet.stations.values {
-            for room in station.rooms.values where room.branch != nil || world.crewBoxes[roomKey(station, room)] != nil || world.peerBoxes[roomKey(station, room)] != nil {
+            for (k, office) in shownOffices(station) {
+                let room = office.room(k)
                 let key = roomKey(station, room)
+                if case .folding = office.phase {
+                    for n in markerRoot.childNodes where n.name == "box:" + key { keep.insert(ObjectIdentifier(n)) }
+                    signatures[key] = markerSignatures[key]
+                    continue
+                }
+                guard room.branch != nil || world.crewBoxes[key] != nil || world.peerBoxes[key] != nil else { continue }
                 var count: Int
                 var ghosts = 0
                 var pr: PullRequest?
@@ -119,7 +127,7 @@ extension StationController {
                 let boxOpacity = 1.0
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
-                    if world.haulOrdered(office: key) || crateLeft(station, room) { continue }
+                    if crateLeft(station, room) { continue }
                     count = min(16, max(1, cb.count))
                     let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
                     let prNumber = world.crewPull(key) ?? peer?.pull
@@ -130,9 +138,9 @@ extension StationController {
                 } else {
                     let local = world.localState(room)
                     let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
-                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) || crateLeft(station, room) { continue }
+                    if (local.commits == 0 && dirtyFiles == 0) || crateLeft(station, room) { continue }
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
-                    count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
+                    count = world.cubes(room) ?? 0
                     ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
                     packaged = pr != nil
                 }
@@ -148,14 +156,16 @@ extension StationController {
                 default: status = NSColor(rgb: (0.4, 0.82, 0.45))
                 }
                 var color = status.map { $0.mixed(with: base, 0.15) } ?? base
-                let failing = world.checksFailing(room)
-                if world.isDusty(room) { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
+                let failing = office.look.failing
+                if office.look.dusty { color = color.mixed(with: NSColor(rgb: (0.55, 0.55, 0.6)), 0.55) }
                 let floorShadow = NSColor(room.color).darker(0.16)
                 let cells = farCells(station, room)
-                let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + [
-                    "\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
-                    "\(failing)", "\(packaged)", "\(undelivered.contains(key))", "\(packing.contains(key))", "\(stowHeld.contains(key))", "\(world.isDusty(room))",
-                ]).joined(separator: "|")
+                let up = officeUp(station, room.key)
+                let packing = simulation.packing(station, room.key)
+                let held = simulation.shown[station.name]?.cubes[room.key].map { $0 < count } ?? false
+                let state: [String] = ["\(count)", "\(ghosts)", pr?.state ?? "", pr?.reviewDecision ?? "", "\(pr?.isDraft ?? false)", pr?.checks ?? "",
+                                       "\(failing)", "\(packaged)", "\(up)", "\(packing)", "\(held)", "\(office.look.dusty)"]
+                let signature = (["\(station.offset.x),\(station.offset.y)"] + cells.map { "\($0.x),\($0.y)" } + state).joined(separator: "|")
                 let drawn = markerRoot.childNodes.filter { $0.name == "box:" + key }
                 if packaged {
                     let cell = packageCell(station, room)
@@ -186,7 +196,7 @@ extension StationController {
                     let at = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     if p.position.x != at.x || p.position.z != at.z { p.position = at }
                     relight(p, light: light, blink: blink, failing: failing, size: size)
-                    p.opacity = undelivered.contains(key) || packing.contains(key) ? 0 : 1
+                    p.opacity = !up || packing ? 0 : 1
                     keep.insert(ObjectIdentifier(p))
                     lastBoxCount[key] = 1
                     continue
@@ -219,7 +229,7 @@ extension StationController {
                     n.position = v3(pos.x, pos.y, pos.z)
                     n.eulerAngles.y = rnd() * 0.9
                     n.name = "box:" + key
-                    n.opacity = undelivered.contains(key) ? 0 : (ghost ? Props.ghostOpacity : boxOpacity)
+                    n.opacity = !up ? 0 : (ghost ? Props.ghostOpacity : boxOpacity)
                     if !ghost { newest = n }
                     if failing && !ghost {
                         let shell = Props.failingShell(size: size * 1.25)
@@ -230,14 +240,7 @@ extension StationController {
                     keep.insert(ObjectIdentifier(n))
                 }
                 newestCube[key] = newest
-                if stowHeld.contains(key) { newest?.opacity = 0 }
-                if let last = lastBoxCount[key], count > last, room.branch != nil, let box = newest,
-                   let m = minions.values.first(where: { $0.station == station.name && $0.home.key == room.key && !$0.isPeer && !$0.isSubagent }) {
-                    stowHeld.insert(key)
-                    box.opacity = 0
-                    let at = Cell(x: Int((Double(box.position.x) - station.offset.x).rounded()), y: Int((Double(box.position.z) - station.offset.y).rounded()))
-                    simulation.post(.stow(office: room.key), for: m, rank: .yard, at: standCell(station, near: at), place: .room(room.key), announce: true)
-                }
+                if held { newest?.opacity = 0 }
                 lastBoxCount[key] = count + ghosts
             }
             if station.hasPad { drawCrates(station, keep: &keep) }
@@ -275,9 +278,9 @@ extension StationController {
             let coming = f.phaseKind == .approach || f.phaseKind == .descend
             lit["\(f.station)|\(slot)"] = BerthLight(color: fleet.color(forRepo: f.repo), beat: coming)
         }
-        for order in world.truth.deliveries.values {
+        for order in simulation.deliveries {
             let key = "\(order.station)|\(order.slot)"
-            guard lit[key] == nil, let station = fleet.stations[order.station], let room = station.rooms[order.roomKey] else { continue }
+            guard lit[key] == nil, let station = fleet.stations[order.station], let room = station.rooms[order.room] else { continue }
             lit[key] = BerthLight(color: room.color, beat: false)
         }
         guard lit != berthLit else { return }
@@ -322,15 +325,15 @@ extension StationController {
         light.runAction(.sequence([on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.3), off, .wait(duration: 0.3), on, .wait(duration: 0.6), off]))
     }
 
-    func officeBase(_ station: Station, _ room: Room) -> NSColor {
-        let full = world.isRemoteOnly(station, room) ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
+    func officeBase(_ room: Room, remote: Bool) -> NSColor {
+        let full = remote ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
         return room.key.hasPrefix("proj:") ? full.dimmed(0.86) : full
     }
 
-    func officeLight(_ station: Station, _ room: Room) -> OfficeLight {
+    func officeLight(_ station: Station, _ room: Room, dark: Bool) -> OfficeLight {
         if room.key.hasPrefix("kind:") { return .occupied }
         if minions.values.contains(where: { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }) { return .occupied }
-        if world.peerDim(roomKey(station, room)) { return .dark }
+        if dark { return .dark }
         return now.timeIntervalSince(room.lastActive) < StationController.powerWindow ? .empty : .dark
     }
 
@@ -345,13 +348,14 @@ extension StationController {
 
     func updatePower() {
         for station in fleet.stations.values {
-            for room in station.rooms.values where !room.key.hasPrefix("kind:") {
+            for (k, office) in shownOffices(station) where office.phase == .built {
+                let room = office.room(k)
                 let key = roomKey(station, room)
-                let light = officeLight(station, room)
+                let light = officeLight(station, room, dark: office.look.dark)
                 guard let was = roomLight[key], was != light else { if roomLight[key] == nil { roomLight[key] = light }; continue }
                 roomLight[key] = light
                 roomPower[key] = light != .dark
-                let base = officeBase(station, room)
+                let base = officeBase(room, remote: office.look.remote)
                 let from = officeTone(base, was), to = officeTone(base, light)
                 for t in roomTiles[key] ?? [] {
                     t.removeAction(forKey: "light")
@@ -406,8 +410,9 @@ extension StationController {
     }
 
     private func crateLeft(_ station: Station, _ room: Room) -> Bool {
-        guard let repo = room.repo, let n = world.works.find(officeKey: room.key, repo: repo)?.number,
-              let at = simulation.shown[station.name]?.crates[CrateID(repo: repo, number: n)] else { return false }
+        guard let repo = room.repo, let r = world.works.find(officeKey: room.key, repo: repo), let n = r.number else { return false }
+        if r.stage.map({ $0 >= .stored }) == true { return true }
+        guard let at = simulation.shown[station.name]?.crates[CrateID(repo: repo, number: n)] else { return false }
         return at != .office(room.key)
     }
 
@@ -439,7 +444,7 @@ extension StationController {
                     crateNodes[key] = pkg
                     crateLooks[key] = nil
                     keep.insert(ObjectIdentifier(pkg))
-                } else if let n = crateNodes[key] ?? (world.haulOrdered(office: office) ? crateNode(station, id, zone: .waiting, at: officeAt(station, room), yaw: 0) : nil) {
+                } else if let n = crateNodes[key] ?? (station.facts.crates[id]?.place != .office(room) ? crateNode(station, id, zone: .waiting, at: officeAt(station, room), yaw: 0) : nil) {
                     rack(n)
                     let to = officeAt(station, room)
                     if !crateMoving(n), simd_distance(position(n), to) > 0.001 { n.position = v3(to.x, to.y, to.z) }
@@ -502,7 +507,8 @@ extension StationController {
     private func position(_ n: SCNNode) -> SIMD3<Double> { SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z)) }
 
     private func officeAt(_ station: Station, _ room: String) -> SIMD3<Double> {
-        let cell = station.rooms[room].map { packageCell(station, $0) } ?? station.doorCell(of: room) ?? Cell(x: 0, y: 0)
+        let shown = simulation.shown[station.name]?.offices[room]
+        let cell = (station.rooms[room] ?? station.lingering[room]).map { packageCell(station, $0) } ?? shown?.door ?? Cell(x: 0, y: 0)
         return SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
     }
 

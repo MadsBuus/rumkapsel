@@ -182,6 +182,30 @@ struct Command {
         return Command(id: id, kind: .carry(crate: crate, from: spot, to: zone), words: words)
     }
 
+    var office: String? {
+        switch kind {
+        case .pack(let o), .stow(let o), .work(let o): return o
+        default: return nil
+        }
+    }
+
+    var chore: Int? {
+        switch kind {
+        case .pack: return 0
+        case .stow: return 1
+        default: return nil
+        }
+    }
+
+    func moved(from old: String, to new: String) -> Command {
+        switch kind {
+        case .pack(let o) where o == old: return Command(id: id, kind: .pack(office: new), words: words)
+        case .stow(let o) where o == old: return Command(id: id, kind: .stow(office: new), words: words)
+        case .work(let o) where o == old: return Command(id: id, kind: .work(office: new), words: words)
+        default: return self
+        }
+    }
+
     func reworded(_ words: String) -> Command {
         Command(id: id, kind: kind, words: words)
     }
@@ -283,50 +307,5 @@ extension Place {
             default: return key.split(separator: ":").last.map(String.init) ?? key
             }
         }
-    }
-}
-
-struct StationTruth {
-    private(set) var pendingOffices: Set<String> = []
-    struct DeliveryOrder: Equatable {
-        let id: Int
-        let station: String
-        var roomKey: String
-        let slot: Int
-        let session: String?
-        var landed = false
-        var gaveUp: Set<String> = []
-        var key: String { station + "|" + roomKey }
-    }
-    private(set) var deliveries: [Int: DeliveryOrder] = [:]
-    private var nextDelivery = 1
-    // MARK: offices
-
-    mutating func officeOrdered(_ key: String) { pendingOffices.insert(key) }
-    @discardableResult
-    mutating func officeDelivered(_ key: String) -> Bool {
-        for (id, d) in deliveries where d.key == key { deliveries[id] = nil }
-        return pendingOffices.remove(key) != nil
-    }
-    func isPending(_ key: String) -> Bool { pendingOffices.contains(key) }
-    mutating func renameOffice(from old: String, to new: String) {
-        if pendingOffices.remove(old) != nil { pendingOffices.insert(new) }
-        let parts = new.split(separator: "|", maxSplits: 1).map(String.init)
-        for (id, d) in deliveries where d.key == old && parts.count == 2 { deliveries[id]?.roomKey = parts[1] }
-    }
-
-    // MARK: deliveries
-
-    mutating func orderDelivery(station: String, roomKey: String, slot: Int, session: String?) -> Int {
-        let id = nextDelivery; nextDelivery += 1
-        deliveries[id] = DeliveryOrder(id: id, station: station, roomKey: roomKey, slot: slot, session: session)
-        return id
-    }
-    mutating func crateLanded(order id: Int) { deliveries[id]?.landed = true }
-    mutating func fetchGivenUp(order id: Int, by who: String) { deliveries[id]?.gaveUp.insert(who) }
-    func delivery(for key: String) -> DeliveryOrder? { deliveries.values.first { $0.key == key } }
-    func freeSlots(station: String, of count: Int) -> [Int] {
-        let held = Set(deliveries.values.filter { $0.station == station }.map(\.slot))
-        return (0..<count).filter { !held.contains($0) }
     }
 }

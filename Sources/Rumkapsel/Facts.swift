@@ -81,6 +81,36 @@ struct CrateFact: Codable, Equatable {
     }
 }
 
+struct OfficeFact: Codable, Equatable {
+    enum Via: Equatable { case appear, fade, shuttle(for: String?) }
+
+    let key: String
+    var repo: String?
+    var crate: CrateID?
+    var merged = false
+    var closedAt: Date?
+    var via: Via = .appear
+
+    init(key: String, repo: String?, via: Via = .appear) { self.key = key; self.repo = repo; self.via = via }
+
+    func keyed(_ key: String) -> OfficeFact {
+        var o = OfficeFact(key: key, repo: repo, via: via)
+        o.crate = crate; o.merged = merged; o.closedAt = closedAt
+        return o
+    }
+
+    enum CodingKeys: String, CodingKey { case key, repo, crate, merged, closedAt }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(String.self, forKey: .key)
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        crate = try c.decodeIfPresent(CrateID.self, forKey: .crate)
+        merged = try c.decodeIfPresent(Bool.self, forKey: .merged) ?? false
+        closedAt = try c.decodeIfPresent(Date.self, forKey: .closedAt)
+    }
+}
+
 struct StagingFact: Codable, Equatable {
     var number: Int
     var merged = false
@@ -116,6 +146,7 @@ struct Facts: Codable, Equatable {
     var repos: [String: RepoFacts] = [:]
     var crates: [CrateID: CrateFact] = [:]
     var homes: [String: Int] = [:]
+    var offices: [String: OfficeFact] = [:]
     var staging: [String: StagingFact] = [:]
     var launches: [RocketID: Date] = [:]
 
@@ -128,6 +159,7 @@ struct Facts: Codable, Equatable {
         repos = try c.decodeIfPresent([String: RepoFacts].self, forKey: .repos) ?? [:]
         crates = try c.decodeIfPresent([CrateID: CrateFact].self, forKey: .crates) ?? [:]
         homes = try c.decodeIfPresent([String: Int].self, forKey: .homes) ?? [:]
+        offices = try c.decodeIfPresent([String: OfficeFact].self, forKey: .offices) ?? [:]
         staging = try c.decodeIfPresent([String: StagingFact].self, forKey: .staging) ?? [:]
         launches = try c.decodeIfPresent([RocketID: Date].self, forKey: .launches) ?? [:]
         nextSeq = max(nextSeq, (crates.values.map(\.seq).max() ?? -1) + 1)

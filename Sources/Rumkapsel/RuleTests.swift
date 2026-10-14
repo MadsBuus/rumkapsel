@@ -271,6 +271,56 @@ enum RuleTests {
             expect(released(f.crates[id("web", 1)], "web"), "still aboard: \(String(describing: f.crates[id("web", 1)]?.place))")
         }
 
+        test("an office opens by shuttle, its crate packs in it, a rename keeps the crate, and its going takes the crate along") {
+            var f = Facts()
+            let opened = apply(&f, [.policy(repo: "web", staged), .office(.opened("task:web#5", repo: "web", via: .shuttle(for: "s")))])
+            expect(f.offices["task:web#5"]?.via == .shuttle(for: "s") && opened.isEmpty, "known, not news to snap: \(opened)")
+            apply(&f, [work("web", 5, .ready, office: true), .office(.status("task:web#5", crate: id("web", 5), merged: false, closedAt: nil))])
+            let fx = apply(&f, [.office(.renamed(from: "task:web#5", to: "task:web#5b"))])
+            expect(f.offices["task:web#5"] == nil && f.offices["task:web#5b"]?.crate == id("web", 5), "the office and its crate under the new key: \(f.offices.keys.sorted())")
+            expect(f.crates[id("web", 5)]?.place == .office("task:web#5b"), "the crate stands in the renamed office")
+            expect(fx == [.renamed(.office("task:web#5"), to: .office("task:web#5b"))], "the picture re-keys it: \(fx)")
+            let quiet = apply(&f, [.office(.opened("task:web#9", repo: "web", via: .appear))])
+            expect(quiet == [.quiet(.office("task:web#9"))], "a first answer appears quietly: \(quiet)")
+            apply(&f, [.office(.gone("task:web#5b"))])
+            expect(f.offices["task:web#5b"] == nil && f.crates[id("web", 5)] == nil, "gone, and no crate left in an office that is not there")
+            let encoded = try? JSONEncoder().encode(f)
+            let back = encoded.flatMap { try? JSONDecoder().decode(Facts.self, from: $0) }
+            expect(back?.offices["task:web#9"]?.via == .appear && back?.offices.count == 1, "saved without how it came")
+        }
+
+        test("a rename the facts already hold under the new key still takes the crate along, and the old key's going drops nothing") {
+            var f = Facts()
+            apply(&f, [.office(.opened("task:web#5", repo: "web", via: .appear)), .office(.opened("task:web#5b", repo: "web", via: .appear)),
+                       .policy(repo: "web", staged), work("web", 5, .ready, office: true)])
+            apply(&f, [.office(.renamed(from: "task:web#5", to: "task:web#5b"))])
+            expect(f.crates[id("web", 5)]?.place == .office("task:web#5b"), "the crate moved to the new key: \(String(describing: f.crates[id("web", 5)]?.place))")
+            apply(&f, [.office(.gone("task:web#5"))])
+            expect(f.crates[id("web", 5)] != nil && f.offices.keys.sorted() == ["task:web#5b"], "nothing dropped: \(f.offices.keys.sorted())")
+            var g = Facts()
+            apply(&g, [.policy(repo: "web", staged), work("web", 6, .ready, office: true)])
+            apply(&g, [.office(.renamed(from: "task:web#6", to: "task:web#6b"))])
+            expect(g.crates[id("web", 6)]?.place == .office("task:web#6b"), "with no office fact, the crate still follows the rename")
+        }
+
+        test("an office ends on its facts: merged and not mine at once, mine and a neighbour's stay, closed after ten minutes") {
+            var o = OfficeFact(key: "task:web#5", repo: "web")
+            expect(Rules.officeEnds(o, now: t0, mine: false, lan: false) == nil, "open: stays")
+            o.merged = true
+            expect(Rules.officeEnds(o, now: t0, mine: false, lan: false) == "merged", "merged and not mine: ends at once")
+            expect(Rules.officeEnds(o, now: t0, mine: true, lan: false) == nil, "mine: stays")
+            expect(Rules.officeEnds(o, now: t0, mine: false, lan: true) == nil, "a neighbour's on the LAN: stays")
+            o.merged = false
+            o.closedAt = t0
+            expect(Rules.officeEnds(o, now: t0 + 540, mine: false, lan: false) == nil, "closed nine minutes: stays")
+            expect(Rules.officeEnds(o, now: t0 + 660, mine: false, lan: false) == "closed, not merged", "closed past ten minutes: ends")
+            expect(Rules.officeEnds(o, now: t0 + 660, mine: true, lan: false) == nil, "closed but mine: stays")
+            var f = Facts()
+            apply(&f, [.office(.opened("task:web#5", repo: "web", via: .appear)),
+                       .office(.status("task:web#5", crate: id("web", 5), merged: false, closedAt: t0))])
+            expect(f.offices["task:web#5"]?.closedAt == t0 && f.offices["task:web#5"]?.crate == id("web", 5), "the status is the source's word")
+        }
+
         if failures > 0 { print("rules: \(failures) failed"); exit(1) }
         print("rules: all passed")
         exit(0)

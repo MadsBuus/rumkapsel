@@ -104,6 +104,10 @@ enum Playbook {
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
         PlaybookEntry("office", "Commit", "cube stowed on the office floor", at([("Set: session = coding", 1), ("Commit", 1)]),
                       camera: .follow(who, 4), tail: 12, rooms: [], crowd: false),
+        PlaybookEntry("office", "New office by shuttle", "a shuttle sets leo's new office down in the bay as a crate, he carries it to the door and the office unfolds from there",
+                      [("Target: api#5158", 6), ("Teammate: New branch", 4), ("Teammate: Open PR", 30)], camera: .whole(2.0), tail: 6, bay: true, rooms: []),
+        PlaybookEntry("office", "Office folds", "kim's office is kicked off: the floor rolls up toward the door into a crate that sinks away",
+                      [("Target: web#460", 6), ("Peer: Kick office", 8)], camera: .whole(2.0), tail: 6, rooms: []),
         PlaybookEntry("office", "Session ends", "minion leaves, office stays", at([("Set: session = coding", 1), ("Session ends", 2)]),
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
 

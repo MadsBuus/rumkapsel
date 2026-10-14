@@ -20,8 +20,9 @@ enum Cue {
     case towel(String, station: String, taken: Bool)
     case hop(String)
     case clearCones(String)
-    case reveal(String)
-    case foldCrate(String)
+    case floor
+    case built(String)
+    case folds(String)
     case stow(String)
     case ownTaken(String, Command)
     case ownDropped(String, Command)
@@ -31,8 +32,8 @@ enum Cue {
     case appear(String, CrateID)
     case vanish(String, CrateID)
     case sweep(up: Bool)
-    case crateOrdered(key: String, station: String, slot: Int, repo: String)
-    case crateDropped(key: String, station: String, slot: Int)
+    case crateOrdered(order: Int, station: String, slot: Int, room: String, color: RGB)
+    case crateDropped(order: Int, station: String, slot: Int)
     case rocketLoading(key: String)
     case liftOff(key: String)
     case steam(key: String)
@@ -94,6 +95,7 @@ final class Simulation<B: Body> {
     var stirred: [String: (view: Shown, at: Double)] = [:]
     var calms: [String: Calm] = [:]
     var snapped = 0
+    var lastDelivery = 0
     var packageCell: (Station, String) -> Cell? = { _, _ in nil }
     let epoch = Date()
     var now: Date { live ? Date() : epoch.addingTimeInterval(clock) }
@@ -107,6 +109,8 @@ final class Simulation<B: Body> {
         world.rocketBusy = { [weak self] key in self?.rockets[key]?.isBusy ?? false }
         world.stagingUnderway = { [weak self] key in self?.staging[key].map { $0.merged && $0.deploy != .live } ?? false }
         world.clock = { [weak self] in self?.now ?? Date() }
+        world.onOffices = { [weak self] st, effects in self?.officesChanged(st, effects) }
+        world.onLoaded = { [weak self] in self?.loaded() }
     }
 
     // MARK: time
@@ -244,6 +248,7 @@ final class Simulation<B: Body> {
     // MARK: rest and walks
 
     func dismiss(_ m: B) {
+        abandon(m)
         m.state = .leaving
         post(.leave, for: m, rank: .leaving, at: m.cell, place: .hangar)
     }
@@ -262,7 +267,9 @@ final class Simulation<B: Body> {
     }
 
     func restPlace(_ m: B) -> Place {
-        Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
+        let place = Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
+        if case .room(let key) = place, let st = fleet.stations[m.station], !standing(st, key) { return .lounge }
+        return place
     }
 
     func resettle(_ station: Station) {
@@ -284,6 +291,7 @@ final class Simulation<B: Body> {
     func send(_ m: B, to place: Place) {
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
+        if case .room(let key) = place, !standing(station, key) { return send(m, to: .lounge) }
         if place != .quarters {
             rouse(m)
             m.bed = nil; m.napping = false

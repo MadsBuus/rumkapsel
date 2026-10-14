@@ -142,6 +142,8 @@ final class Station {
     var hasHangar = true { didSet { forgetFloorPlan() } }
     var hasPad = true { didSet { forgetFloorPlan() } }
     private(set) var rooms: [String: Room] = [:]
+    private(set) var lingering: [String: Room] = [:]
+    private var lingeringAt: [Cell: String] = [:]
     private(set) var dug: [Cell] = [] { didSet { forgetFloorPlan() } }
     private var dugSet: Set<Cell> { Set(dug) }
     var spineHalfLength: Int { usedSlots.count }
@@ -316,8 +318,16 @@ final class Station {
     var dugCells: [Cell] { dug }
 
     func room(at cell: Cell) -> Room? {
-        guard let key = occupied[cell] else { return nil }
-        return rooms[key]
+        if let key = occupied[cell] { return rooms[key] }
+        return lingeringAt[cell].flatMap { lingering[$0] }
+    }
+
+    func linger(_ shown: [String: Room]) {
+        guard Set(shown.keys) != Set(lingering.keys) || shown.contains(where: { lingering[$0.key]?.cells != $0.value.cells }) else { return }
+        lingering = shown
+        lingeringAt = [:]
+        for (key, r) in shown { for c in r.cells { lingeringAt[c] = key } }
+        forgetFloorPlan()
     }
 
     func isCorridor(_ c: Cell) -> Bool { c != plan.monolith && blocks.hallway.contains(c) }
@@ -331,6 +341,7 @@ final class Station {
         w.formUnion(hall.deconCells)
         w.formUnion(corridorCells)
         for r in rooms.values { w.formUnion(r.cells) }
+        for r in lingering.values { w.formUnion(r.cells) }
         walkableCache = w
         return w
     }
@@ -352,7 +363,7 @@ final class Station {
         case .room("kind:pad"): return hall.padCells
         case .room("kind:storage"): return hall.walkwayCells
         case .room("kind:deck"): return hall.aisleCells.isEmpty ? hall.padCells : hall.aisleCells
-        case .room(let key): return rooms[key]?.cells ?? []
+        case .room(let key): return (rooms[key] ?? lingering[key])?.cells ?? []
         }
     }
 
@@ -401,7 +412,7 @@ final class Station {
 
     func doorCell(of key: String) -> Cell? {
         if let d = doorCache[key] { return d }
-        guard let r = rooms[key] else { return nil }
+        guard let r = rooms[key] ?? lingering[key] else { return nil }
         let candidates = r.cells.filter { $0.neighbours.contains(where: isCorridor) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let d = candidates.first ?? r.cells.first
         if let d { doorCache[key] = d }
@@ -610,7 +621,7 @@ final class Station {
             for n in c.neighbours where mine.contains(n) && !seen.contains(n) { seen.insert(n); prev[n] = c; queue.append(n) }
         }
         var needed = Set<Cell>()
-        for key in rooms.keys.sorted() {
+        for key in Set(rooms.keys).union(lingering.keys).sorted() {
             guard var c = doorOutside(of: key), mine.contains(c) else { continue }
             guard seen.contains(c) else { return [] }
             while mine.contains(c), needed.insert(c).inserted, let p = prev[c] { c = p }

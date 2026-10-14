@@ -25,18 +25,12 @@ extension StationController {
     }
 
     func undraw(_ m: Minion) {
-        if let key = carriedRoom(of: m) { reveal(key) }
         mirrorLoad(m)
         m.carried?.removeFromParentNode()
         m.pyramids.forEach { $0.removeFromParentNode() }
         m.queuedCones.forEach { $0.removeFromParentNode() }
         m.weldLight?.removeFromParentNode()
         m.node.removeFromParentNode()
-    }
-
-    func carriedRoom(of m: Minion) -> String? {
-        if case .deliverOffice(let id) = m.current?.kind { return world.truth.deliveries[id]?.key }
-        return nil
     }
 
     // MARK: the simulation's side of a body
@@ -70,10 +64,14 @@ extension StationController {
                         m.wakeUntil > 0 ? "waking" : nil, m.busy ? "busy" : nil, m.isCrew ? "crew" : nil, m.wedged ? "wedged" : nil].compactMap { $0 }
             StationLog.write("dump", "\(m.home.name) [\(m.station)]: \(job) at \(m.cell.x),\(m.cell.y) path \(m.path.count)\(spot) \(more.joined(separator: ", "))")
         }
-        StationLog.write("dump", "boxes on the floor: \(boxes.keys.sorted().joined(separator: ", "))")
-        StationLog.write("dump", "pending offices: \(world.truth.pendingOffices.sorted().joined(separator: ", "))")
-        for d in world.truth.deliveries.values.sorted(by: { $0.id < $1.id }) {
-            StationLog.write("dump", "delivery \(d.id): \(d.key) slot \(d.slot) \(d.landed ? "on the floor" : "in the air") for \(d.session ?? "-")")
+        StationLog.write("dump", "boxes on the floor: \(boxes.keys.sorted().map(String.init).joined(separator: ", "))")
+        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
+            for (key, o) in (simulation.shown[st.name]?.offices ?? [:]).sorted(by: { $0.key < $1.key }) where o.phase != .built {
+                StationLog.write("dump", "office \(st.name)|\(key): \(o.phase)\(st.facts.offices[key] == nil ? ", gone from the facts" : "")")
+            }
+        }
+        for d in simulation.deliveries {
+            StationLog.write("dump", "delivery \(d.id): \(d.station)|\(d.room) slot \(d.slot) \(d.landed ? "on the floor" : "in the air") for \(d.who ?? "-")")
         }
         for s in simulation.flights { StationLog.write("dump", "shuttle: \(s.command.words) phase \(s.phaseKind)") }
         for st in fleet.stations.values {
@@ -83,99 +81,6 @@ extension StationController {
             }
         }
         for (id, job) in cargo { StationLog.write("dump", "cargo \(id): \(job.command.words) carrier \(job.carrier ?? "none") aim \(job.aim.cell.x),\(job.aim.cell.y) at \(String(format: "%.2f,%.2f", job.aim.pos.x, job.aim.pos.z))") }
-    }
-
-    func archive(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String) {
-        for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
-        stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
-        world.forgetOffice(key)
-        world.truth.officeDelivered(key)
-        outlines.removeValue(forKey: key)?.removeFromParentNode()
-        boxes.removeValue(forKey: key)?.removeFromParentNode()
-        if announce {
-            let st = fleet.stations[station]
-            let tiles = roomTiles[key] ?? []
-            let ox = st?.offset.x ?? 0, oz = st?.offset.y ?? 0
-            func cellOf(_ t: SCNNode) -> Cell { Cell(x: Int((Double(t.position.x) - ox).rounded()), y: Int((Double(t.position.z) - oz).rounded())) }
-            let tileCells = tiles.map(cellOf)
-            var door: Cell? = tileCells.first
-            if let h = hall, let d = tileCells.first(where: { abs($0.x - h.x) + abs($0.y - h.y) == 1 }) { door = d }
-            let color = tiles.first?.geometry?.firstMaterial?.diffuse.contents as? NSColor
-            let ghost = SCNNode()
-            for t in tiles { t.removeFromParentNode(); ghost.addChildNode(t) }
-            if let l = roomLabels[key] { l.removeFromParentNode(); ghost.addChildNode(l); roomLabels[key] = nil; l.runAction(.fadeOut(duration: 0.4)) }
-            for b in markerRoot.childNodes where b.name == "box:" + key {
-                b.runAction(.sequence([.scale(to: 0.01, duration: 0.5), .removeFromParentNode()]))
-            }
-            propRoot.addChildNode(ghost)
-            func dist(_ t: SCNNode) -> Double {
-                guard let door else { return 0 }
-                let c = cellOf(t)
-                return Double(abs(c.x - door.x) + abs(c.y - door.y))
-            }
-            let furthest = tiles.map(dist).max() ?? 0
-            var last = 0.0
-            for t in tiles {
-                let at = 0.5 + (furthest - dist(t)) * 0.1
-                last = max(last, at + 0.5)
-                t.runAction(.sequence([.wait(duration: at), .fadeOut(duration: 0.6)]))
-            }
-            if let st, let color, let door {
-                let hex = Props.crate(color: color)
-                hex.position = v3(st.offset.x + Double(door.x), 0.09, st.offset.y + Double(door.y))
-                hex.scale = SCNVector3(0.01, 0.01, 0.01)
-                ghost.addChildNode(hex)
-                let grow = SCNAction.scale(to: 1, duration: 0.35); grow.timingMode = .easeOut
-                let sink = SCNAction.moveBy(x: 0, y: -3, z: 0, duration: 1.6); sink.timingMode = .easeIn
-                hex.runAction(.sequence([.wait(duration: last - 0.2), grow, .wait(duration: 0.4), sink]))
-                last += 0.35 + 0.4 + 1.6
-            }
-            ghost.runAction(.sequence([.wait(duration: last), .removeFromParentNode()]))
-            if let hall, let st {
-                for m in minions.values where m.station == station && m.place == .room(roomKey) {
-                    m.path = st.path(from: m.pos, to: hall)
-                    m.place = .core
-                    m.nextWanderAt = clock + 4
-                    m.strollUntil = clock + 8
-                }
-            }
-            logEvent("archived: \(name)" + (reason.isEmpty ? "" : " · \(reason)"))
-        }
-        roomTiles[key] = nil
-    }
-
-    func reveal(_ key: String) {
-        let parts0 = key.split(separator: "|", maxSplits: 1).map(String.init)
-        let station0 = parts0.count == 2 ? fleet.stations[parts0[0]] : nil
-        let door = station0?.doorCell(of: parts0[1])
-        if let crate = boxes.removeValue(forKey: key) {
-            let fold = SCNAction.scale(to: 0.01, duration: 0.35); fold.timingMode = .easeIn
-            crate.runAction(.sequence([fold, .removeFromParentNode()]))
-        }
-        if let o = outlines.removeValue(forKey: key) { o.runAction(.sequence([.fadeOut(duration: 0.4), .removeFromParentNode()])) }
-        guard world.truth.officeDelivered(key) else { return }
-        var furthest = 0.0
-        for t in roomTiles[key] ?? [] {
-            let cx = Double(t.position.x) - (station0?.offset.x ?? 0), cz = Double(t.position.z) - (station0?.offset.y ?? 0)
-            let d = door.map { abs(cx - Double($0.x)) + abs(cz - Double($0.y)) } ?? 0
-            furthest = max(furthest, d)
-            t.opacity = 0
-            t.runAction(.sequence([.wait(duration: 0.3 + d * 0.1), .fadeIn(duration: 0.6)]))
-        }
-        let after = 0.3 + furthest * 0.1 + 0.5
-        roomLabels[key]?.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.5)]))
-        self.after(after) { [weak self] in
-            guard let self else { return }
-            for m in self.minions.values where m.station + "|" + m.home.key == key && m.owedCones > 0 {
-                for _ in 0..<m.owedCones { self.addPyramid(for: m) }
-                m.owedCones = 0
-            }
-        }
-        markerRoot.childNodes.filter { $0.name == "box:" + key }.forEach { $0.runAction(.sequence([.wait(duration: after), .fadeIn(duration: 0.4)])) }
-        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-        if parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] {
-            logEvent("new office: \(room.name)")
-        }
     }
 
     func coneCells(for m: Minion) -> (station: Station, key: String, cells: [Cell])? {
@@ -207,7 +112,7 @@ extension StationController {
 
     func addPyramid(for m: Minion, queued: Bool = false) {
         guard let (station, key, nearDoor) = coneCells(for: m) else { return }
-        if undelivered.contains(m.station + "|" + key) { m.owedCones += 1; return }
+        if !officeUp(station, key) { m.owedCones += 1; return }
         guard !nearDoor.isEmpty else { return }
         if !queued { clearPyramids(m) }
         let cell = nearDoor[min(nearDoor.count - 1, queued ? 1 + m.queuedCones.count : 0)]

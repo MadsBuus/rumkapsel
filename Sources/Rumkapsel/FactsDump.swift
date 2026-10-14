@@ -14,6 +14,14 @@ extension StationController {
             let repos = world.repoRoots.values.filter { $0.station == station.name }.map(\.repo)
             let view = simulation.shown[station.name] ?? Shown()
             let spots = Layout.spots(station.facts, station.yard)
+            for key in Set(station.facts.offices.keys).union(view.offices.keys).sorted() where repo == nil || station.facts.offices[key]?.repo == repo {
+                let o = station.facts.offices[key]
+                let fact = o.map { "\($0.crate.map(\.description) ?? "no crate")\($0.merged ? ", merged" : "")\($0.closedAt.map { ", closed \(when($0))" } ?? "")" } ?? "no fact"
+                say("  office \(key): \(fact) · shown \(view.offices[key].map { "\($0.phase)" } ?? "nowhere")")
+            }
+            for d in view.deliveries.values.sorted(by: { $0.id < $1.id }) {
+                say("  delivery \(d.id) for \(d.room): slot \(d.slot), \(d.landed ? "on the bay floor" : "in the shuttle"), fetched by \(d.who ?? "anyone")")
+            }
             for name in Set(repos).union(station.facts.crates.keys.map(\.repo)).sorted() where repo == nil || name == repo {
                 let root = world.repoRoots.first { $0.value.repo == name && $0.value.station == station.name }?.key
                 let cargo = root.flatMap { github.cargo(repoRoot: $0) }

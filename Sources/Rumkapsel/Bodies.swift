@@ -19,7 +19,6 @@ extension Simulation {
             let why = m.waitingOn.map { "waited \(Int(limit)) s on \($0)" } ?? "stood \(Int(limit)) s at \(m.cell.x),\(m.cell.y) in \(m.phaseKind)\(blocked)"
             giveUp(m, c, why: why)
         }
-        queueDeliveries()
     }
 
     func giveUp(_ m: B, _ c: Command, why: String) {
@@ -37,7 +36,7 @@ extension Simulation {
             finish(m)
         case .deliverOffice(let id):
             if m.hasLoad { dropLoad(m) }
-            if world.truth.deliveries[id] != nil { world.truth.crateLanded(order: id); world.truth.fetchGivenUp(order: id, by: m.id) }
+            updateDelivery(id) { $0.landed = true; $0.gaveUp.insert(m.id) }
             finish(m)
         case .react:
             crewRested(m)
@@ -50,21 +49,6 @@ extension Simulation {
                 m.fixture = nil
                 m.drying = false
                 finish(m)
-            }
-        }
-    }
-
-    func queueDeliveries() {
-        for station in fleet.stations.values {
-            for order in world.truth.deliveries.values where order.station == station.name && order.landed && station.rooms[order.roomKey] == nil {
-                cue(.foldCrate(order.key))
-                world.truth.officeDelivered(order.key)
-                onEvent(.log("the office for \(order.roomKey) is gone: \(Words.current.foldsAway)"))
-            }
-            for key in world.truth.pendingOffices where key.hasPrefix(station.name + "|") && world.truth.delivery(for: key) == nil {
-                let roomKey = String(key.dropFirst(station.name.count + 1))
-                guard station.rooms[roomKey] != nil else { continue }
-                orderDelivery(station: station, roomKey: roomKey, for: bodies.values.first { $0.station == station.name && $0.home.key == roomKey })
             }
         }
     }
