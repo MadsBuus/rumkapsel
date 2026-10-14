@@ -39,37 +39,11 @@ struct ReleasePR: Equatable {
     let mergedAt: Date?
     var production: Bool? = nil
     var staging: Bool? = nil
-    var isProduction: Bool { production ?? (base == ConfigStore.shared.current.productionBranch) }
-    var isStaging: Bool {
-        if let staging { return staging }
-        let name = ConfigStore.shared.current.stagingBranch
-        return !name.isEmpty && base == name
-    }
+    var isProduction: Bool { production ?? (base == Pipeline.productionName) }
+    var isStaging: Bool { staging ?? (base == Pipeline.stagingName) }
     var untested: Bool { labels.contains { $0.lowercased().contains("untested") } }
     var tag = false
     var hotfix = false
-}
-
-struct Pipeline: Equatable {
-    var trunk: String
-    var staging: String
-    var production: String
-    var releaseBranches: [String] = PipelineDetection.defaultReleaseBranches
-    var boardColumns: Bool? = nil
-    var source: String = "settings"
-    var why: String = ""
-    var ship: String = "release"
-    var shipsOnMerge: Bool { ship == "merge" }
-    var shipsOnTag: Bool { ship == "tag" }
-    var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
-    var hasStaging: Bool { !staging.isEmpty }
-    func isReleaseHead(_ head: String) -> Bool {
-        head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
-    }
-    static var configured: Pipeline {
-        let c = ConfigStore.shared.current
-        return Pipeline(trunk: c.trunkBranch, staging: c.stagingBranch, production: c.productionBranch)
-    }
 }
 
 struct FeedEvent: Equatable, Codable {
@@ -260,6 +234,7 @@ final class GitHubResolver {
     }
     private var cargo: [String: Cargo] = [:]
     private var pipelines: [String: Pipeline] = [:]
+    private var branchesOnGitHub: [String: Set<String>] = [:]
     private var pipelineCheckedAt: [String: Date] = [:]
     private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
 
@@ -611,7 +586,24 @@ final class GitHubResolver {
 
     func detectedPipeline(repoRoot: String) -> Pipeline {
         lock.lock(); defer { lock.unlock() }
-        return pipelines[repoRoot] ?? .configured
+        return pipelines[repoRoot] ?? .unread
+    }
+
+    var signedIn: Bool? { frozen ? true : http.signedIn }
+
+    func pipelineRead(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pipelines[repoRoot] != nil }
+
+    func githubBranches(repoRoot: String) -> Set<String>? { lock.lock(); defer { lock.unlock() }; return branchesOnGitHub[repoRoot] }
+
+    private func defaultBranch(_ repoRoot: String) -> String? {
+        if nameWithOwner(repoRoot: repoRoot) == nil { learnOwner(repoRoot) }
+        if let owner = nameWithOwner(repoRoot: repoRoot), let a = http.get("repos/\(owner)", key: repoRoot + "#repo"),
+           let o = try? JSONSerialization.jsonObject(with: a.data) as? [String: Any], let b = o["default_branch"] as? String, !b.isEmpty {
+            return b
+        }
+        guard let out = run(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd: repoRoot),
+              let ref = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), ref.hasPrefix("origin/") else { return nil }
+        return String(ref.dropFirst(7))
     }
 
     func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
@@ -1094,15 +1086,24 @@ final class GitHubResolver {
         queue.async { [self] in
             let countBegan = Date()
             var found: [ReleasePR] = []
-            let cfg = ConfigStore.shared.current
+            let remote = Discovery.githubRemote(repoRoot) || nameWithOwner(repoRoot: repoRoot) != nil
+            if remote { http.askToken() }
             var remoteBranches = Set<String>()
             if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
                 for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
             }
-            lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; lock.unlock()
-            let detected: Pipeline
-            if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.source != "settings" {
-                detected = cached
+            remoteBranches.remove("HEAD")
+            lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; if !remote { branchesOnGitHub[repoRoot] = nil }; lock.unlock()
+            var settled: Pipeline?
+            if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.remote == remote {
+                settled = cached
+            } else if !remote {
+                var local = Set<String>()
+                if let out = run(["git", "branch", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+                    for line in text.split(separator: "\n") { local.insert(line.trimmingCharacters(in: .whitespaces)) }
+                }
+                settled = PipelineDetection.detect(branches: local, merges: [], file: nil, remote: false)
+                lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock()
             } else {
                 var merges: [PipelineDetection.Merge] = []
                 var answered = false
@@ -1114,22 +1115,32 @@ final class GitHubResolver {
                         return PipelineDetection.Merge(base: b, head: h)
                     }
                 }
-                let file = run(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
-                    .flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
-                let names = (cfg.trunkBranch, cfg.stagingBranch, cfg.productionBranch)
-                var read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names)
-                if read.production.isEmpty, file?.ship == nil, workflowsDeploy(onPushTo: read.trunk, repoRoot: repoRoot) {
-                    read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, deploysOnPush: true)
-                } else if read.production.isEmpty, file?.ship == nil, !GitHubResolver.tags(repoRoot: repoRoot, run: run).isEmpty {
-                    read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, names: names, tagged: true)
+                let asked = runReporting(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
+                let file = asked.data.flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
+                let fileFailed = asked.data == nil && !asked.err.contains("404")
+                let named = defaultBranch(repoRoot)
+                let probe = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered)
+                var deploys = false, tagged = false
+                if file?.ship == nil, probe.production.isEmpty || probe.source == "branches" {
+                    deploys = workflowsDeploy(onPushTo: probe.trunk, repoRoot: repoRoot)
+                    tagged = !deploys && PipelineDetection.tagged(GitHubResolver.tags(repoRoot: repoRoot, run: run), now: Date())
                 }
-                detected = read
-                if answered { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
+                let read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered,
+                                                    deploysOnPush: deploys, tagged: tagged)
+                if let out = run(["git", "ls-remote", "--heads", "origin"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+                    let heads = Set(text.split(separator: "\n").compactMap { $0.split(separator: "\t").last.map(String.init) }
+                        .filter { $0.hasPrefix("refs/heads/") }.map { String($0.dropFirst(11)) })
+                    lock.lock(); branchesOnGitHub[repoRoot] = heads; lock.unlock()
+                }
+                let failed = !answered || fileFailed
+                settled = PipelineDetection.settle(cached: cached, read: read, failed: failed)
+                if !failed { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
             }
+            let detected = settled ?? .unread
             let pipe = detected.overridden(by: Pipeline.override(forRoot: repoRoot))
             let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
             var foundHotfixes: [ReleasePR] = []
-            let bases = [stagingBranch, productionBranch].filter { !$0.isEmpty }
+            let bases = pipe.remote ? [stagingBranch, productionBranch].filter { !$0.isEmpty } : []
             func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
             for base in bases {
                 guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
@@ -1238,9 +1249,9 @@ final class GitHubResolver {
             }
             let hotfixesChanged = hotfixes[repoRoot]?.0 != foundHotfixes
             hotfixes[repoRoot] = (foundHotfixes, Date())
-            let pipelineChanged = pipelines[repoRoot] != detected
+            let pipelineChanged = settled.map { pipelines[repoRoot] != $0 } ?? (pipelines[repoRoot] != nil)
             let changed = previous != found || hotfixesChanged || cargo[repoRoot] != newCargo || pipelineChanged
-            pipelines[repoRoot] = detected
+            pipelines[repoRoot] = settled
             newCargo.exact = exact
             newCargo.at = countBegan
             cargo[repoRoot] = newCargo
@@ -1363,11 +1374,9 @@ final class GitHubResolver {
         inFlight.insert("c:" + worktree)
         lock.unlock()
         queue.async { [self] in
-            var base = "origin/HEAD"
-            let trunk = ConfigStore.shared.current.trunkBranch
-            for candidate in ["origin/" + trunk, "origin/develop", "origin/main", "origin/master"] where run(["git", "rev-parse", "--verify", "--quiet", candidate], cwd: worktree) != nil {
-                base = candidate; break
-            }
+            let trunk = GitWatch.link(ofWorktree: worktree).map { detectedPipeline(repoRoot: $0.root).trunk } ?? ""
+            let candidates = (trunk.isEmpty ? ["origin/HEAD"] : ["origin/" + trunk, "origin/HEAD"]) + Pipeline.trunkNames.map { "origin/" + $0 }
+            let base = candidates.first { run(["git", "rev-parse", "--verify", "--quiet", $0], cwd: worktree) != nil } ?? "origin/HEAD"
             var isPushed = false
             var onBranch: String?
             if let out = run(["git", "branch", "--show-current"], cwd: worktree),
@@ -1463,8 +1472,10 @@ final class GitHubResolver {
         }
     }
 
-    private func run(_ args: [String], cwd: String) -> Data? {
-        guard FileManager.default.fileExists(atPath: cwd), args.first != "gh" || http.ghOpen else { return nil }
+    private func run(_ args: [String], cwd: String) -> Data? { runReporting(args, cwd: cwd, errors: false).data }
+
+    private func runReporting(_ args: [String], cwd: String, errors: Bool = true) -> (data: Data?, err: String) {
+        guard FileManager.default.fileExists(atPath: cwd), args.first != "gh" || http.ghOpen else { return (nil, "") }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = args
@@ -1472,15 +1483,16 @@ final class GitHubResolver {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
         p.environment = env
-        let out = Pipe()
+        let out = Pipe(), err = Pipe()
         p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
+        p.standardError = errors ? err : FileHandle.nullDevice
+        do { try p.run() } catch { return (nil, "") }
         let data = out.fileHandleForReading.readDataToEndOfFile()
+        let said = errors ? String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "" : ""
         p.waitUntilExit()
         GitHubMeter.ran(args, ok: p.terminationStatus == 0, bytes: data.count)
         if args.starts(with: ["git", "fetch"]) { lock.lock(); fetchedAt[cwd] = Date(); lock.unlock() }
-        return p.terminationStatus == 0 ? data : nil
+        return (p.terminationStatus == 0 ? data : nil, said)
     }
 }
 
@@ -1490,7 +1502,7 @@ extension GitHubResolver {
     func simulationReset() {
         guard frozen else { return }
         lock.lock()
-        openPRs = [:]; feeds = [:]; releases = [:]; cargo = [:]; pulls = [:]; commits = [:]
+        openPRs = [:]; feeds = [:]; releases = [:]; cargo = [:]; pulls = [:]; commits = [:]; pipelines = [:]
         pushed = [:]; dirty = [:]; owners = [:]; project = nil
         projectMoves = []; pendingLaunches = []; stateChanges = []; me = nil
         lock.unlock()

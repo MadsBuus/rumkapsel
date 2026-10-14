@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--deploy-tests") { DeployTests.run() }
         if args.contains("--github-tests") { GitHubTests.run() }
         if args.contains("--pipeline-tests") { PipelineTests.run() }
+        if args.contains("--setup-tests") { SetupTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
         if args.contains("--spacelog-tests") { SpaceLogTests.run() }
         if args.contains("--look-tests") { LookTests.run() }
@@ -138,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         window.isReleasedWhenClosed = false
 
         controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)
+        controller.onChangeRepo = { [weak self] repo in self?.showSettings(repo: repo) }
         window.contentView = controller.view
         if !Scripted.run { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.controller.prepareFlight() } }
         controller.viewSize = controller.view.bounds.size
@@ -196,6 +198,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 guard let station = self?.simulator?.station ?? self?.controller else { return }
                 station.enqueue { station.openStory(id) }
             }
+        }
+        if let i = args.firstIndex(of: "--card"), args.count > i + 1 {
+            let names = args[i + 1].split(separator: ",").map(String.init)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let station = self?.simulator?.station ?? self?.controller else { return }
+                station.enqueue { station.world.announce(new: names) }
+            }
+        }
+        if let i = args.firstIndex(of: "--settings"), args.count > i + 1 {
+            let repo = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 2)) { [weak self] in self?.showSettings(repo: repo) }
         }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
@@ -276,6 +289,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 else if playbookMode { playbook?.snapshot(to: name) }
                 else if let sim = simulator { sim.snapshot(to: name) }
                 else { controller.snapshot(to: name) }
+                if let view = settingsWindow?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: url.deletingPathExtension().path + "-settings.png"))
+                }
                 guard k + 1 == frames else { return }
                 if let sim = simulator {
                     FileHandle.standardError.write(("--- board ---\n" + sim.model.boardLines.joined(separator: "\n") + "\n").data(using: .utf8)!)
@@ -526,11 +543,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    @objc func openSettings() {
+    @objc func openSettings() { showSettings(repo: nil) }
+
+    func showSettings(repo: String?) {
         settingsModel.config = ConfigStore.shared.current
         settingsModel.knownRepos = controller.knownRepos
         settingsModel.details = controller.repoDetails
         settingsModel.people = controller.seenPeople
+        settingsModel.problems = controller.setupProblems
+        let roots = settingsModel.details.compactMap { name, d in d.path.map { (name, $0) } }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let counts = roots.map { ($0.0, Discovery.worktrees(of: $0.1).count) }
+            DispatchQueue.main.async { for (name, n) in counts { self?.settingsModel.details[name]?.worktrees = n } }
+        }
+        if let repo { settingsModel.tab = 1; settingsModel.selected = repo }
         settingsModel.launchAtLogin = SMAppService.mainApp.status == .enabled
         if settingsWindow == nil {
             let view = SettingsView(model: settingsModel,

@@ -61,6 +61,7 @@ struct CrateFact: Codable, Equatable {
     var seq: Int
     var column: Int?
     var closedAt: Date?
+    var storedAt: Date?
 
     var cleared: Bool { alien || (stage.map { $0 >= .cleared } ?? false) }
     var zone: Zone? { place.zone }
@@ -79,6 +80,7 @@ struct CrateFact: Codable, Equatable {
         seq = try c.decodeIfPresent(Int.self, forKey: .seq) ?? 0
         column = try c.decodeIfPresent(Int.self, forKey: .column)
         closedAt = try c.decodeIfPresent(Date.self, forKey: .closedAt)
+        storedAt = try c.decodeIfPresent(Date.self, forKey: .storedAt)
     }
 }
 

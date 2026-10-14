@@ -179,6 +179,70 @@ enum IntakeTests {
             expect(station(rig).rooms["task:api#5158"] != nil && station(rig).facts.offices["task:api#5158"] != nil, "the office stays")
         }
 
+        test("a plain repository: main only, pull requests, no board, release tags: an office, the crate in storage on merge, up on a tag") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            let rig = Rig(), github = rig.world.github
+            let base = NSTemporaryDirectory() + "rumkapsel-plain-\(UUID().uuidString)"
+            let root = base + "/notes", cwd = base + "/notes-tidy"
+            for d in [root, cwd] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            let branch = "claude/tidy"
+            let pipeline = PipelineDetection.detect(branches: ["main", branch], merges: [.init(base: "main", head: "claude/older")], file: nil,
+                                                    defaultBranch: "main", tagged: true)
+            expect(pipeline.shipsOnTag && pipeline.trunk == "main", "detected as shipping on tags from main: \(pipeline.ship), \(pipeline.trunk)")
+            github.inject(login: "me")
+            github.inject(owner: "me/notes", for: root)
+            github.inject(pipeline: pipeline, for: root)
+            github.inject(cargo: GitHubResolver.Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: []), for: root)
+            github.inject(openPRs: [], for: root)
+            github.inject(releases: [], for: root)
+            func scan() {
+                let s = SessionInfo(id: "plain-1", cwd: cwd, repo: "notes", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                                    area: nil, title: nil, branch: branch, toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 1,
+                                    queuedCount: 0, eventMarkers: [:])
+                rig.simulate(scan: ScanResult(sessions: [s]))
+            }
+            func pull(_ state: String) {
+                github.inject(pull: PullRequest(number: 12, title: "tidy the notes", state: state, reviewDecision: "", isDraft: false, url: "https://example.invalid/notes/12"),
+                              for: branch, repoRoot: root)
+                github.inject(openPRs: state == "OPEN" ? [OpenPR(number: 12, title: "tidy the notes", author: "me", isBot: false, branch: branch,
+                                                                  url: "https://example.invalid/notes/12", createdAt: rig.now)] : [], for: root)
+                rig.simulateGitHub()
+                scan()
+            }
+            scan()
+            rig.advance(16)
+            expect(station(rig).rooms.keys.contains { $0.hasPrefix("task:notes") }, "an office for the session: \(station(rig).rooms.keys.sorted())")
+            pull("OPEN")
+            rig.advance(32)
+            expect(station(rig).facts.offices["task:notes#12"]?.crate == CrateID(repo: "notes", number: 12), "its crate packed in the office: \(station(rig).facts.offices.keys.sorted())")
+            pull("MERGED")
+            rig.advance(32)
+            expect(place(rig, "notes", 12) == .waiting, "#12 in storage on the merge: \(describe(place(rig, "notes", 12)))")
+            expect(!station(rig).facts.rockets.values.contains { $0.repo == "notes" }, "no rocket stands by: it ships on a tag")
+            let tag = ReleasePR(number: 0, title: "v1.0", base: "main", head: "v1.0", state: "MERGED", url: "https://example.invalid/notes/releases/tag/v1.0",
+                                labels: [], mergedAt: rig.now, production: true, staging: false, tag: true)
+            github.inject(releases: [tag], for: root, merged: [tag])
+            rig.simulateGitHub()
+            rig.advance(10)
+            expect(launchedWith(rig, "notes", 12), "#12 went up in a rocket on the tag: \(describe(place(rig, "notes", 12)))")
+        }
+
+        test("today's flow, detected: develop, staging and production; staging takes the stored crates, the release takes the deck up") {
+            let (rig, sim) = org([])
+            let detected = PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                                    merges: (0..<20).map { .init(base: "develop", head: "gh-\($0)/work") }
+                                                        + Array(repeating: .init(base: "staging", head: "develop"), count: 3)
+                                                        + Array(repeating: .init(base: "production", head: "staging"), count: 3),
+                                                    file: nil, defaultBranch: "develop")
+            for (root, info) in rig.world.repoRoots where info.repo == "web" { rig.world.github.inject(pipeline: detected, for: root) }
+            then(rig, sim, [("Target: web#455", 0), ("Release: Staging opens", 80), ("Release: Staging merges", 10)])
+            expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "#440 and #441 on the deck: \(describe(place(rig, "web", 440))), \(describe(place(rig, "web", 441)))")
+            then(rig, sim, [("Release: Production opens", 48), ("Release: Mark tested", 96), ("Release: Production merges", 10)])
+            expect([430, 431, 440, 441].allSatisfy { launchedWith(rig, "web", $0) }, "the deck went up: \([430, 431, 440, 441].map { describe(place(rig, "web", $0)) })")
+        }
+
         say(failures == 0 ? "intake: all passed" : "intake: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

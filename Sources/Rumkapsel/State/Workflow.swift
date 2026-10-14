@@ -5,9 +5,6 @@ struct Workflow: Codable, Equatable {
     var qa: [Source]? = [.board, .deploy, .pulls]
     var cleared: [Source]? = [.board, .deploy, .pulls]
     var shipped: [Source] = [.board, .deploy, .pulls, .git]
-    var outside: Outside = .bots
-
-    enum Outside: String, Codable { case bots, strangers, nobody }
 
     func inLine(_ stage: Stage) -> [Source]? {
         switch stage {
@@ -40,8 +37,21 @@ struct Workflow: Codable, Equatable {
             ("QA", qa.map(list) ?? "none: stored goes straight to the rocket"),
             ("Cleared when", cleared.map(list) ?? "always: the rocket never waits"),
             ("Shipped when", list(shipped)),
-            ("Outside work", outside == .bots ? "bots" : outside == .strangers ? "bots and anyone not on the team" : "nobody"),
         ]
+    }
+}
+
+extension Workflow {
+    private enum Retired: String, CodingKey { case outside }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(stored, forKey: .stored)
+        try c.encode(qa, forKey: .qa)
+        try c.encode(cleared, forKey: .cleared)
+        try c.encode(shipped, forKey: .shipped)
+        var old = encoder.container(keyedBy: Retired.self)
+        try old.encode("bots", forKey: .outside)
     }
 }
 

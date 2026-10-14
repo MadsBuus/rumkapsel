@@ -83,7 +83,7 @@ extension World {
     func policy(root: String, repo: String, station: String) -> RepoFacts {
         let p = github.pipeline(repoRoot: root), w = workflow(repo: repo)
         return RepoFacts(hasStaging: stagingIsDeck(station: station, repo: repo), hasCleared: w.has(.cleared), shipsOnMerge: p.shipsOnMerge,
-                         shipsOnTag: p.shipsOnTag, ships: !w.shipped.isEmpty, shipsAtOnce: p.shipsAtOnce)
+                         shipsOnTag: p.shipsOnTag, ships: p.ships && !w.shipped.isEmpty, shipsAtOnce: p.shipsAtOnce)
     }
 
     private func renumbered() -> [(repo: String?, event: Event)] {
@@ -107,7 +107,7 @@ extension World {
             let roots = repoRoots.filter { $0.value.station == station.name }.sorted { $0.key < $1.key }
             let repos = Set(roots.map(\.value.repo))
             var events: [Event] = []
-            for (root, info) in roots {
+            for (root, info) in roots where github.pipelineRead(repoRoot: root) {
                 let r = policy(root: root, repo: info.repo, station: station.name)
                 if station.facts.repos[info.repo] != r { events.append(.policy(repo: info.repo, r)) }
             }

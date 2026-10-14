@@ -31,6 +31,10 @@ final class GitHubHTTP {
 
     var hasToken: Bool { lock.lock(); defer { lock.unlock() }; return token != nil }
 
+    var signedIn: Bool? { lock.lock(); defer { lock.unlock() }; return token != nil ? true : askedAt == .distantPast ? nil : false }
+
+    func askToken() { _ = currentToken() }
+
     var open: Bool { lock.lock(); defer { lock.unlock() }; return gate.open(Date()) }
 
     var ghOpen: Bool { lock.lock(); defer { lock.unlock() }; return gate.ghOpen(Date()) }

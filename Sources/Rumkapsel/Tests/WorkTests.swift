@@ -168,11 +168,11 @@ enum WorkTests {
             expect(r.hear(Signal(stage: .qa, by: .board, at: at(1)), workflow: w) == nil && r.stage == .stored, "QA is not a stage here")
             expect(r.hear(Signal(stage: .cleared, by: .board, at: at(2)), workflow: w) == nil, "nor cleared")
             expect(r.hear(Signal(stage: .shipped, by: .git, at: at(3)), workflow: w)?.to == .shipped, "shipped is")
-            let tags = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: "tag"), board: false)
+            let tags = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: .tag), board: false)
             expect(tags.qa == nil && tags.shipped == [.git, .board], "ships on tags: no QA, git says shipped")
             let ours = Workflow.detected(pipeline: Pipeline(trunk: "develop", staging: "staging", production: "production"), board: true)
             expect(ours.qa?.first == .board && ours.cleared?.first == .board, "with a board and staging, the board is first in line")
-            let merges = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: "merge"), board: false)
+            let merges = Workflow.detected(pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: .merge), board: false)
             expect(merges.qa == nil && merges.cleared == nil && merges.shipped == [.git], "every merge ships: nothing to clear")
         }
 

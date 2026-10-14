@@ -25,6 +25,21 @@ enum PlaybackTests {
             }
         }
 
+        test("a day-old crate of a repository that doesn't ship fades from its row: no carry, the facts untouched by playback") {
+            let (sim, station, m) = fixture()
+            _ = Rules.apply([.policy(repo: "web", RepoFacts(ships: false)), .work(WorkNews(crate: CrateID(repo: "web", number: 8), office: nil, stage: .stored, quiet: true))],
+                            at: sim.now, to: &station.facts, yard: station.yard)
+            sim.play()
+            guard case .row? = shown(sim, 8) else { return expect(false, "on its row: \(sim.describe(shown(sim, 8)))") }
+            settle(sim, m)
+            _ = Rules.apply([.tick], at: sim.now.addingTimeInterval(Rules.unshippedFor + 60), to: &station.facts, yard: station.yard)
+            expect(station.facts.crates[CrateID(repo: "web", number: 8)] == nil, "gone from the facts")
+            let facts = bytes(station.facts)
+            sim.play()
+            expect(shown(sim, 8) == nil && sim.cargo.isEmpty && m.current?.crate == nil, "faded where it stood, nobody carries it: \(sim.describe(shown(sim, 8)))")
+            expect(bytes(station.facts) == facts, "playback never writes a fact")
+        }
+
         test("top first: a buried crate's blocker is carried off before it, and every stack is built from the floor") {
             let (sim, station, a) = fixture()
             let b = body("b", sim: sim, station: station)

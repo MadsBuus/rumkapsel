@@ -376,6 +376,8 @@ extension StationController {
             if !headless { placePlanets() }
             if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
             if storyOf != nil, clock - storyClock > 5 { drawStory() }
+            drawCard()
+            drawSetupCheck()
             updateNeighbours()
         }
 

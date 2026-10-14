@@ -26,7 +26,7 @@ shown at once. Only changes after it are news.
 | Source | Reads | Cadence | Code |
 |---|---|---|---|
 | Sessions | `~/.claude/projects` transcripts | FSEvents on that folder, and every 5 s | `Integrations/Scanner.swift`, `Integrations/Watcher.swift` |
-| Conductor | `~/conductor/workspaces/<repo>` with a checkout at `~/dev/<repo>`, and repositories given a path in Settings | first scan | `Integrations/World.swift` |
+| Discovery | Conductor's workspaces (`~/conductor/workspaces/<repo>/*`, each joined to its repository, else `~/dev/<repo>`), and repositories watched in Settings | first scan | `Integrations/Discovery.swift`, `Integrations/World.swift` |
 | Git, per checkout | commits ahead of the trunk, dirty files, the branch checked out | at once on a change in the repository's `.git` (FSEvents on its refs, `HEAD` and worktrees; objects excluded), else 60 s | `Integrations/GitHub.swift`, `Integrations/GitWatch.swift` |
 | Git, per repository | merges and tags for the counts; the pipeline; deploy workflows | with the releases; pipeline and workflows re-read hourly | `Integrations/GitHub.swift`, `Integrations/Pipelines.swift` |
 | Pull requests | your branch's pull request, by branch or number; the team's open list; release and hotfix pull requests | the base interval (Settings › GitHub, 5 min by default) | `Integrations/GitHub.swift`, `Integrations/PullRequests.swift` |
@@ -120,28 +120,80 @@ Settings › Repositories:
 | Does it go through **QA**? | board · deployments · pull requests | **no**: stored goes straight to the rocket |
 | When is it **cleared**? | board · deployments · pull requests | **always**: the rocket never waits |
 | When has it **shipped**? | board · deployments · pull requests · git | |
-| Whose pull requests are **outside** work? | bots · bots and anyone not on the team · nobody | |
 
 "Pull requests" covers releases: a staging release, a production release without the `untested` label,
-a merge. Deployments are listed but report nothing, and only bots go to decon whatever the outside
-answer says ([ROADMAP.md](ROADMAP.md)).
+a merge. Deployments are listed but report nothing ([ROADMAP.md](ROADMAP.md)). Outside work is a bot's
+pull request, always (see **Outside work**).
 
 Detected: no staging means no QA; a repository that ships on merge or on tags has no Cleared; without a
 board, the board is left out of every answer.
 
+## Repositories: where they come from
+
+One repository per git repository, named after its main checkout's folder; a worktree joins its
+repository (its `.git` file points into the main checkout's `.git/worktrees/`), never a new one.
+
+- **Sessions**: any folder a Claude session runs in, wherever it is, that is inside a git checkout
+  (`Integrations/Scanner.swift`).
+- **Conductor**: each repository with workspaces under `~/conductor/workspaces/<repo>/`, joined to the
+  repository its workspaces belong to, else `~/dev/<repo>` (`Discovery.conductor`).
+- **Watched**: a folder picked in Settings › Repositories › Watch a repository…, any folder inside a
+  checkout, saved as the repository's `path` (`Discovery.root(of:)`).
+- **Worktrees**: `git worktree list` says how many more checkouts a repository has (Settings).
+
+A repository is **new** when it is not in `seen-repos.json` in the support folder and its config has no
+entry. The first launch of a build that has the file fills it with every repository there is, so an
+upgrade shows nothing; every repository registered after that goes in at once, so one removed and found
+again is not new. A new one gets the detected answers at once and a card on the station saying them
+(`App/SetupCard.swift`, words in `Integrations/Setup.swift`): "New repository: web", "Ships from production
+through staging · not shared". Several at once share one card, four lines and then "and N more". "Looks
+right" and "Change…" (which opens its page in Settings) write `answered` into its config entry; a card left
+alone stays until answered and does not come back after a restart. Answering never resets the station.
+
+**Settings and the repository disagree**: once a repository's way to production has been read
+successfully, every answer set by hand (trunk, how it ships, the release branch, the testing phase) that
+differs from what was read, or names a branch GitHub does not have, is a line on the same card
+(`Setup.disagreements`): "tattoodo-web: your settings say it merges into develop, but the repository
+merges into main." "Use the repository's" clears the answers set by hand; "Keep mine" saves those lines
+as `kept` in the repository's entry, and the same disagreement is never asked again. A failed read never
+asks. New repositories go first.
+
+**The setup check** (`Setup.problems`), after the first scan: on the empty yard (the middle of the window
+when there is no station yet) in station words, and in Settings › General with the command to run. No
+repositories yet; every repository hidden; the GitHub CLI not on the `PATH` the app uses, or not signed in
+("The station can't reach GitHub yet: see Settings"); no repository on GitHub ("notes isn't on GitHub, so it
+never ships"); a branch set by hand that GitHub does not have (`git ls-remote`, read with the way to
+production).
+
 ## The way to production
 
-Read from what the repository did (`Integrations/Pipelines.swift`): the branch most work merges into is
-the trunk, the branch releases end in is production, and a branch released onward into production is
-staging. With no history the names decide: `develop`, else `main` or `master`; `staging` where it
-exists; `production`, else `master` or `main`. A `.github/rumkapsel.json` on the default branch says it
-for everyone and wins. Releases come from the trunk, from staging, or from a release or hotfix branch.
+Read from what the repository has (`Integrations/Pipelines.swift`, `PipelineDetection.detect`), per
+repository, and hourly again:
 
-- **Ships on merge**: no releases, and a workflow that deploys on every push to the trunk. Each merged
-  crate goes straight up in a rocket of its own.
-- **Ships on tags**: no release branch and no such workflow, but it tags what it ships. What the trunk
-  has that the newest tag (by date, and a version) has not waits in storage; no rocket stands by, and a
-  new tag launches one.
+- **Trunk**: GitHub's default branch (`repos/{owner}/{repo}`, conditional), else `origin/HEAD`, unless it
+  is `staging` or `production`; where most pull requests merge wins over both. While the history is
+  unread, `develop`, `main` or `master` go before the default branch.
+- **Testing phase**: on when a `staging` branch exists; with release history, the branch released onward
+  into production.
+- **How it ships**, the first that holds: a **production** branch (`production`, else `master` or `main`
+  when not the trunk, or the branch releases end in) ships by release pull requests; a workflow that
+  deploys on every push to the trunk **ships on merge**; a version tag (`v1.2`, `1.2.3`) from the last
+  year **ships on tags**, pushed tags alone, no GitHub Release needed; else it **doesn't ship**: merged
+  crates wait in storage and no rocket stands by. A `master` or `main` guessed as production by its name
+  alone, with no release into it, gives way to a deploy on push or to tags.
+- **A read that fails** (the merged pull requests, or `.github/rumkapsel.json` other than a 404) keeps
+  the way already known; with none known, nothing is stored and the next scan asks again. A way known
+  from before the repository gained or lost its GitHub remote is not kept.
+- **No GitHub remote**: local work only, nothing asked of GitHub.
+
+A `.github/rumkapsel.json` on the default branch says it for everyone and wins. Settings › Repositories
+answers each question by hand (trunk, how it ships and its release branch, the testing phase and its
+branch); an answer left alone stays detected. Until a repository's way is read, its facts keep what they
+had (`.policy` waits). Releases come from the trunk, from staging, or from a release or hotfix branch.
+
+- **Ships on merge**: each merged crate goes straight up in a rocket of its own.
+- **Ships on tags**: what the trunk has that the newest tag (by date, and a version) has not waits in
+  storage; no rocket stands by, and a new tag launches one.
 
 ## Triggers, stage by stage
 
@@ -252,7 +304,8 @@ or `webhook`.
 | Branches that are not work | `main`, `master`, `develop`, `HEAD` | `State/Work.swift` |
 | Release branch patterns | `release*`, `hotfix*` | `Integrations/Pipelines.swift` |
 | Issue branch pattern | `gh-<N>/...` | `State/Work.swift` |
-| Default branch names | `develop`, `staging`, `production` | `Integrations/Config.swift` |
+| Default branch names | `develop`, `main`, `master`; `staging`; `production` | `Integrations/Pipelines.swift` |
+| Ships on tags | a version tag from the last 365 days | `Integrations/Pipelines.swift` |
 | Board field | `Status` | `Integrations/Config.swift` |
 | Board columns | In Development, Ready for staging, QA, Ready to ship, Shipped | `Integrations/Config.swift` |
 | Untested release | any label containing "untested" | `Integrations/GitHub.swift` |
@@ -265,3 +318,4 @@ or `webhook`.
 | Neighbour's offices held | 24 h | `Integrations/World.swift` |
 | Offices shared | worked in within 12 h | `Scene/Scene.swift` |
 | Closed crate kept | 10 min | `Rules/Rules.swift` |
+| Stored crate kept, repository that doesn't ship | 24 h | `Rules/Rules.swift` |

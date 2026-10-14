@@ -45,7 +45,7 @@ enum Effect: Equatable {
 }
 
 enum Rules {
-    static let closedFor: TimeInterval = 600, launchedFor: TimeInterval = 600
+    static let closedFor: TimeInterval = 600, launchedFor: TimeInterval = 600, unshippedFor: TimeInterval = 24 * 3600
 
     static func apply(_ events: [Event], at now: Date, to f: inout Facts, yard g: YardGeometry) -> [Effect] {
         var fx: [Effect] = []
@@ -83,6 +83,7 @@ enum Rules {
                 if f.crates[to] == nil {
                     f.crates[from] = nil
                     f.crates[to] = CrateFact(id: to, place: c.place, stage: c.stage, alien: c.alien, seq: c.seq, column: c.column, closedAt: c.closedAt)
+                    f.crates[to]?.storedAt = c.storedAt
                     fx.append(.renamed(.crate(from), to: .crate(to)))
                 } else {
                     put(from, nil, &f, g)
@@ -104,7 +105,9 @@ enum Rules {
             case .restack:
                 Layout.relayout(&f, yard: g)
             case .tick:
-                break
+                for c in f.crates.values.sorted(by: { $0.id < $1.id }) where c.place == .waiting && !f.repo(c.id.repo).ships {
+                    if let at = c.storedAt, now.timeIntervalSince(at) > unshippedFor { put(c.id, nil, &f, g) }
+                }
             }
         }
         for repo in arrived.keys.sorted() {
@@ -140,6 +143,7 @@ enum Rules {
     }
 
     static func normalize(_ f: inout Facts, at now: Date, yard g: YardGeometry) {
+        for c in f.crates.values where (c.place == .waiting) != (c.storedAt != nil) { f.crates[c.id]?.storedAt = c.place == .waiting ? now : nil }
         let expired = f.crates.values.filter { $0.closedAt.map { now.timeIntervalSince($0) >= closedFor } ?? false }.map(\.id)
         for id in expired.sorted() { put(id, nil, &f, g) }
         for r in f.rockets.values.sorted(by: { $0.id < $1.id }) {

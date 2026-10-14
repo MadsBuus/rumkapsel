@@ -13,7 +13,7 @@ How the station is checked, and the tools for looking at it. The rules under tes
 
 It builds with `./build.sh fast`, then runs every suite and the smoke scenarios, each in a throwaway
 support folder, the scenarios, playback and intake beside the rest, so at most four processes at once.
-About nine seconds with the build. It prints every failing line (`FAIL`, `not so`) and each suite's last
+About twelve seconds with the build. It prints every failing line (`FAIL`, `not so`) and each suite's last
 line, the scenarios' results, `gate: Ns`, and exits non-zero if any suite or scenario failed. Run it
 before every commit.
 
@@ -23,7 +23,7 @@ a failure:
 | Suite | Checks |
 |---|---|
 | `rule` | an event on given facts gives the right facts and effects; no station, no bodies |
-| `intake` | the simulator's presses against a bare `World`, the clock jumped, no stepping: the right facts, log lines and events; fails on a refused press or a give-up |
+| `intake` | the simulator's presses against a bare `World`, the clock jumped, no stepping: the right facts, log lines and events; fails on a refused press or a give-up. Also a plain repository (main only, pull requests, no board, tags) and today's develop, staging and production flow, each as detected |
 | `playback` | one move or sequence on a bare `Simulation<Body>`, facts byte-equal before and after |
 | `sim` | bodies: sends, visits, the gym, the board's preemption, give-ups, the bay, night, `step(600)` |
 | `idle` | what an empty board leaves a body to, and the idle clock |
@@ -31,7 +31,8 @@ a failure:
 | `work` | a branch, an issue and a pull request as one piece of work, and its office key |
 | `deploy` | which Actions runs are deploys, their usual length, starts and ends |
 | `github` | conditional reads (a 304 is no news), a 401's token hold-off, the rate gate (budget, secondary limits, stretch, GraphQL), detector cadences, backoff and `X-Poll-Interval`, follow-ups, the pace, which moved pull request reads what, feed events by id, a whole board never undoing a fresher item, the board's and the feed's REST answers, the `.git` watcher on a scratch repository and its worktree; no network |
-| `pipeline` | a repository's way to production from its merges and branch names |
+| `pipeline` | a repository's way to production from its merges, branch names, GitHub's default branch, tags, workflows and remote; a default branch that is `staging` or `production`; unread history; a guessed `master` against tags; a failed read keeping what was known; answers set by hand |
+| `setup` | the new-repository card's words, one, several and capped; the setup check in both voices; an old config's retired fields read once; a config written here read by a copy of the old `AppConfig`; an unreadable config kept, a bad repository entry alone, unknown keys round-tripped, the `.bak`; answering the card changing nothing; settings and repository disagreeing (lines, agreement, a failed read, Keep mine, Use the repository's); discovery on a scratch repository and its worktree; Conductor stubs, stale worktrees and the `~/dev` fallback |
 | `layout` | the floor: same rooms give the same cells, slots, the yard, the bay, signs, facts across a save |
 | `spacelog` | the Station Log panel's story from the feed, releases and board |
 | `look` | per theme: what it draws itself, its furniture and cones on the station's footprints, its launch within the climb |
@@ -65,6 +66,8 @@ picture that never caught up with the facts, a watchdog snap, or its own floor c
 | `--walk <seconds>` | steps into the walk after that long |
 | `--log` | opens the Station Log panel |
 | `--story web#455` | opens that crate's story panel a second before the snapshot |
+| `--card web,api` | shows the new-repository card for those repositories, as if new |
+| `--settings <repo>` | opens Settings at that repository; with `--snapshot`, writes `<out>-settings.png` beside it |
 | `--no-stars` | leaves the star backdrop out |
 | `--demo` | fake sessions; `RK_DEMO_OFFICES=n` adds n offices |
 | `--simulator` | a station on its own: scanner, GitHub and network off, driven by presses through the entry points production uses |
