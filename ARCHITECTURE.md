@@ -1,349 +1,248 @@
 # How rumkapsel is put together
 
-Three layers, and the seams between them are where bugs have hidden.
+The rule the code is cut by: `(event, facts) → (new facts, effects)`, at once and the same every time.
+Everything that moves on screen is playback, catching the picture up to the facts. Skipping it is
+`shown := facts`. Playback never writes a fact.
 
-## 1. Sources
+```
+ Integrations   sources read and cache; World turns what they say into reports and events
+      │  Event + now
+      ▼
+ Rules          Rules.apply(events, now, &facts, yard) → [Effect]      pure: no clock, no bodies, no scene
+      │  Facts (per station, saved)          Effects: log, quiet, renamed, hatch
+      ▼
+ Layout         Layout.spots(facts, yard) → where every crate belongs      pure
+      ▼
+ Playback       Simulation: shown vs facts → moves → order board → bodies → `shown`
+      ▼
+ Scene          draws `shown`, the bodies and the flights; HUD and log read the facts and effects
+```
 
-Each polls one thing and caches the answer. None of them knows about the picture.
+What each source says and how often is [WIRING.md](WIRING.md); what things may do is
+[STATION.md](STATION.md). Everything is one SwiftPM target, `Sources/Rumkapsel/`, in seven folders.
 
-| Source | File | Asks | How often |
-|---|---|---|---|
-| Sessions | `Scanner.swift` | `~/.claude/projects`: who is working where, on which branch | every 5 s and on file change |
-| GitHub | `GitHub.swift` | per-branch pull request, team open PRs, activity feed, release PRs, commits ahead | 5 min (feed 2 min, commits 1 min) |
-| Board | `GitHub.swift` (`refreshProject`) | the project's Status per issue, via GraphQL | 5 min, shared with peers |
-| Peers | `Peers.swift` | other rumkapsels on the LAN: their claimed offices, minions, GitHub answers | every 3 s |
+## The folders
 
-A failed call keeps the previous answer. A source's **first** answer is taken quietly: whatever it holds
-already existed. `readyRepos` tracks which repositories have answered; only changes after that are events.
+**State/**: the values the rest share.
 
-## 2. Model and diffs
+| File | What it is |
+|---|---|
+| `Facts.swift` | the facts: `Facts`, `CrateFact` and its `Place`, `Zone`, `OfficeFact`, `RocketFact`, `StagingFact`, `RepoFacts` |
+| `Stages.swift` | `Stage`, `Source`, `Signal`, `Transition`, and `Record.hear`, the priority rules |
+| `Work.swift` | `Work`, one piece of work's names and office key, and `WorkBook`, a record per work with every alias |
+| `Workflow.swift` | a repository's answers per stage |
+| `Station.swift` | cells, colours, rooms, the `Station` (rooms, hallway, pathfinding, facts, saving) and the `Fleet` |
+| `Plan.swift` | the plaza and the two fixed arms, to the yard and the bay |
+| `Floorplan.swift` | a baked plan: the quarters, the hallway lit at start, the office slots; `OfficePlacement` |
+| `BakedPlans.swift` | the plans baked by `floor/bake.py`, per theme |
+| `Hall.swift` | the yard's geometry: walkway, aisles, the three zones' grids, decon, the pad, its slots and field |
+| `Hull.swift` | the hull round the station |
+| `Fixtures.swift` | where the bath's and lounge's fixtures stand |
+| `OfficeMarks.swift` | an office's package cell and cube pile |
+| `Obstacles.swift` | footprints, and what a walk goes round |
+| `Theme.swift` | `Theme`, `Vocabulary`, `Words` |
+| `SpaceLog.swift` | the Station Log panel's story, read from the feed, releases and board |
+| `Migration.swift` | an old save's ledger turned into facts, once |
 
-`Station.swift` holds the floor plan: rooms keyed by branch (`task:repo#N` for `gh-N/...` branches), fixed
-rooms (`kind:...`), the hall, doorways, and pathfinding on a 3x3 grid per cell around props. The hallway's
-skeleton and the office slots are a `Floorplan` (`Floorplan.swift`), drawn offline (`floor/`), baked, and
-picked from the station's name: the quarters, the hallway lit before anything opens, and a hundred office
-slots in rings out from the monolith, each with the run of hallway that first reaches it. A new office takes
-a free slot and lights its run (`takeSlot`). Which slot is a setting (`OfficePlacement`): the next one out
-in rings, or the one nearest its repository's other offices, a repository's first office going to an inner
-slot clear of the others. Either way ties go to the earlier slot, so two machines with the same rooms
-choose alike; whoever opens an office places it, and peers adopt the cells. `Fleet` arranges
-stations and saves the layout (`fleet-v25.json`).
+**Rules/**: pure functions of the facts.
 
-The hall is a value (`Hall.swift`), worked out from where the hallway's west arm ends: one room five cells
-wide and eight deep, a walkway down one side, and three zones of crate rows, cleared, staged and storage,
-each two rows of four tiles with its own grid, an aisle between each zone and the next. Decon lies behind
-storage. Across the pad wall, past the pad field, is the pad, with the drone rack at its edge.
+| File | What it is |
+|---|---|
+| `Rules.swift` | `Event`, `Effect`, `Rules.apply`: crates, offices, decon, staging; `normalize` |
+| `RocketRules.swift` | releases, hotfixes, launches, ships-on-merge rockets, go, pad slots |
+| `Layout.swift` | `YardGeometry`, `YardSpot`, `Layout`: homes, columns, spots, relayout |
+| `FactFeed.swift` | intake: `World.learn`, batching, routing to a station, the save throttle |
 
-`World.swift` owns that floor plan and the diffs. `applyScan`, `applyGitHub`, `applyPeer` and `dropPeer` take
-one fresh answer each, compare it with what was known, change the model, and hand back `WorldEvent`s
-(`Events.swift`): an office opened or archived, a board column change, a pull request opened or closed, a peer
-arriving. Counts in the yard are reconciled, not snapped: crates that reach QA are carried across by
-minions (`stationEvents`, `carryToDeck`), and only what is not carried is redrawn (`reconcile`).
+**Integrations/**: the sources, and `World`.
 
-One thing the model cannot see for itself, whether an office has a package on its floor, the scene lends it
-as a closure (`hasPackage`); whether a rocket is mid-load the simulation answers (`rocketBusy`).
+| File | What it is |
+|---|---|
+| `World.swift` | the model's front door: rooms, offices, crew, decon, neighbours; turns answers into reports and events |
+| `Releases.swift` | releases, hotfixes, staging releases and the counts, turned into events |
+| `PullRequests.swift` | a pull request's state: yours by branch, a teammate's from the feed, then by number, then by branch |
+| `GitHub.swift` | `GitHubResolver`: every GitHub and git read, cached, on its interval, with doorbells; the counts |
+| `GitHubHTTP.swift` | conditional REST reads with the `gh` token |
+| `GitHubDiag.swift` | `--github-diag` |
+| `Pipelines.swift` | a repository's way to production, detected or from `.github/rumkapsel.json` |
+| `Deployments.swift` | which Actions runs are deploys, their usual length, starts and ends |
+| `Scanner.swift` | the transcripts: sessions, activity, prompts |
+| `Watcher.swift` | FSEvents on a folder |
+| `Workspaces.swift` | whether a checkout is still open |
+| `Peers.swift` | `PeerSnapshot` and `PeerHub`: Bonjour, the links, the heartbeat |
+| `Config.swift` | `AppConfig` (`config.json`), `ConfigStore`, the support folder |
+| `Events.swift` | `WorldEvent`: what World hands the scene that is not a fact: log lines, prompts, crew, deploys |
 
-Rules that keep the place steady:
+**Playback/**: the `Simulation`, which owns the clock, the bodies and `shown`.
 
-- An update re-plans, it never resets. After the floor changes, `resettle` leaves settled minions alone and
-  lets walkers keep their destination.
-- The yard layout is drawn from the ledger's rows (`Station.layout(of:)`, `Yard.swift`): every crate keeps the place its row records,
-  so a carrier is sent to the place its crate will occupy and nothing jumps when the layout redraws.
-- A peer's office is adopted where the peer put it, with a dig to reach it if need be. When both machines
-  placed the same room before hearing each other, the lower peer name's cells stand and the other side
-  takes them, hallway dug under them given back, so a shared station converges within one round.
-- Offices exist because of a checkout, a pushed branch, or a pull request. A closed issue never makes one,
-  whatever column the board left it in. The board column only says how
-  solid an office is. Unclaimed offices clear once their repository has answered; a peer's are held a day.
-- A merged office that clears while its session lingers is retired for the day; the minion waits in the lounge.
+| File | What it is |
+|---|---|
+| `Simulation.swift` | the clock, step, tick and beat, timers, orders, rest, walks; `Cargo`, `Cue`, `Hands`, `Tempo` |
+| `Playback.swift` | `Shown`, the crate diff, moves, physical order, parking, skip and snap, the crate watchdog |
+| `Offices.swift` | shown offices: arrival, delivery, fold, stows, packs, the office watchdog |
+| `Rockets.swift` | `RocketGeometry` and shown rockets: arrival, dock, weld, vent, launch, climb, the rocket watchdog |
+| `Vortex.swift` | the vortex: the ring, the crates pulled, the close |
+| `Drones.swift` | the pad drones: rack, weld, vortex ring |
+| `Shuttles.swift` | flights: arrival and departure styles, legs, the bay |
+| `Board.swift` | the order board: `Rank`, openings, own orders, who takes what, preemption |
+| `Carries.swift` | the hands: lift, carry, set-down, deliveries, stows, packs; `Patience` |
+| `Bodies.swift` | the body reconciler: stalls given up |
+| `Body.swift` | `Body`: one body's state |
+| `Minion.swift` | `Minion`, the app's body, with its figure |
+| `Commands.swift` | `Command` (kind, phases, words), `Spot`, `CrateRef` |
+| `Walk.swift` | stepping along a path, and passing |
+| `Idle.swift` | the idle clock, the pick after an order, roam spots |
+| `Routines.swift` | what a body does with its hands and wears, per activity |
+| `Callsigns.swift` | callsigns for the bubble |
+| `CrateMotion.swift` | crate arcs on the station clock |
 
-## 3. Scene
+**Scene/**: SceneKit. `StationController` is one class in extensions.
 
-`Scene.swift` renders the model and consumes events once each in `handle(_:)`, deciding the cue: a shuttle,
-a haul, a fade, a log line. It reads state through `world` and never writes the model behind its back. The
-tick moves minions along their paths and plays their poses. It never re-derives "what just happened" from raw
-data. A rebuild is not immediate: `handle` marks the floor or the props dirty and `flushScene` redraws once,
-after the caller has finished placing its workers.
+| File | What it is |
+|---|---|
+| `Scene.swift` | the controller: scene graph, input wiring, the frame tick, `WorldEvent` glue, the peer snapshot |
+| `SceneStatic.swift` | the floor, walls and the names on it |
+| `SceneMarkers.swift` | crates, cones, pad rings, berth and office lights |
+| `SceneTick.swift` | the per-frame minion loop, poses, cues, the demo |
+| `OfficeView.swift` | offices drawn from what playback shows |
+| `Actors.swift` | shuttles and rockets drawn from the flights and shown rockets |
+| `PadLift.swift`, `PadWall.swift` | the pad lift; the pad wall's field and the drone rack |
+| `DronesView.swift`, `VortexView.swift`, `HangarView.swift` | drones, the vortex, the bay's field and berths |
+| `Props.swift` | shared props: crates, packages, cones, cubes, the classic rocket |
+| `RocketShape.swift` | the one rocket shape, for the station and the flight |
+| `Mission.swift`, `FlightCraft.swift`, `Colony.swift`, `Planets.swift`, `Plating.swift` | the deploy flight: cameras and clock, its rocket, colonies, planets, baked plating |
+| `FirstPerson.swift` | walking the station |
+| `HUD.swift` | the overlay: hover lines, bubbles, the corner log, links |
+| `Jobs.swift` | minions spawned and despawned, the seam to the simulation's orders, the state dump |
+| `Signs.swift` | direction signs at hallway junctions |
+| `Walls.swift`, `Detail.swift`, `Suits.swift` | baked wall panels, surface detail, suits |
+| `Drone.swift` | the music |
+| `Looks/` | the `Look` protocol and the looks: see [THEMES.md](THEMES.md) |
 
-Shapes mean things: a hexagon is a packed office, a cube is a piece of work, a square strapped crate is a pull
-request, a pyramid is a session input. Nothing is round.
+**App/**: `main.swift` (flags, menus, windows), `StationView.swift` (input and camera), `Settings.swift`,
+`SpaceLogPanel.swift`, `NeighboursPanel.swift`, `StationLog.swift` (`station.log`), and the tools:
+`Simulator.swift`, `Playbook.swift`, `Gallery.swift`, `LookDev.swift`, `FactsDump.swift`, `BodyDump.swift`,
+`FloorDump.swift`.
 
-The station apart from the picture is `Simulation` (`Simulation.swift`, no SceneKit): the clock, the bodies
-and the orders they run, the walks (`Walk.swift`), the rest, the idle life (`Idle.swift`), the hands, the
-carries, deliveries, stows and packs (`Carries.swift`), the body reconciler (`Bodies.swift`), the order
-board (`Board.swift`), the shuttles (`Shuttles.swift`), the rockets (`Rockets.swift`), the pad drones
-(`Drones.swift`) and the vortex (`Vortex.swift`). It is generic over the body:
-`Simulation<Minion>` in the app, `Simulation<Body>` under `--sim-tests`. A frame is three steps per body,
-`stepWalk`, `stepThere` and `stepRest`, and a step each for the rockets, the shuttles, the rocket tips, the
-vortices and the drones; the scene runs them and draws after. What the scene shows once, a flush, a fidget,
-a hop, a landing, a reveal, a rocket's flame, is a `Cue` the simulation hands back and the scene plays at
-the end of the frame. A body's pose is a fact on the body, lying, seated, on the bench, and so is its load: a
-crate by number or an office's crate by key, with `landing` saying where it left the arms. The scene mirrors
-that each frame (`mirrorLoad`): the node is lifted when the load appears, sent down its arc when the
-set-down phase begins, and put where the landing says when the load goes; a crate under way is a `Cargo` on
-the simulation and a node on the scene, by command id. A flight (`Flight`), a rocket (`RocketJob`), a pad
-drone (`PadDrone`) and a vortex (`Vortex`) are the same shape: the simulation keeps where they are and what
-they hold, the scene keeps a view per one (`ShuttleView`, `RocketView`, `DroneView`, `VortexView`) and places
-it from those facts. Where the
-fixtures stand is the station's (`Fixtures.swift`).
+**Tests/**: the suites and the smoke scenarios, run by flag from the one executable: see
+[TESTING.md](TESTING.md).
 
-The scene is split by reason to change, all of it one `StationController` in extensions: `Scene.swift` holds the
-shared helpers, every stored property, `buildScene`, the scan and event glue and the outer tick; `StationView.swift`
-the input view and the camera it moves; `SceneStatic.swift` the floor, walls and the names written on it;
-`SceneMarkers.swift` the crates, cones, the due rings, steam and power, and `restackYard`; `SceneTick.swift` the per-frame
-worker loop and the demo clock, the load mirror, the cues and the pose; `Jobs.swift` the hauls the events
-order, the crew, and the seam through which the scene asks the simulation for orders and walks by their old
-names; `HUD.swift` the overlay; `Minion.swift` one worker's figure on its `Body`; `Actors.swift` the ship and
-rocket nodes drawn from the simulation's flights and rockets; `DronesView.swift` and `VortexView.swift` the
-drones and the vortex with the crates it pulls; `PadWall.swift` the pad field and the drone rack.
+## Who writes what
 
-## Debts
+| Thing | Written by | Read by |
+|---|---|---|
+| `WorkBook` records | World, from the sources | World, to make `.work` events |
+| `Station.facts` | `Rules.apply` only | playback, the HUD, the log, saving |
+| `Station.rooms` (cells, hallway) | World, through `ensureRoom`, `renameRoom`, `removeRoom` | rules (keys), playback, the scene |
+| `Simulation.shown`, `cargo`, vortices, flights | playback | the scene |
+| bodies | the simulation | the scene |
 
-- Every actor runs one `Command` at a time with a phase index (`Commands.swift`), so "what am I doing now"
-  has a single owner: minions, the crew, the shuttles and the rockets alike. What is left outside it:
-  `place`, `activity` and the wander timers still steer a worker's day.
-- What is still on a timer is pure decoration, nothing the model can read: the steam emitter puffing off a
-  loaded rocket, the flame and the twelve-second climb of a lift-off, the shower drops, the weld light, the
-  ghost of an archived room sinking through the floor. None of it decides anything.
-- `makeSnapshot` still lives in the scene, because what goes on the wire includes box counts and lit rooms
-  that only the scene knows. The ingest side (`applyPeer`) is in the model, where compatibility matters most.
-- Three decisions are still the scene's, and they are what keeps a scenario needing a `StationController`
-  (TESTING.md, Change 4): the event glue in `Scene.handle`, the obstacles read off the props' boxes, and the
-  stows ordered from inside the redraw.
-- `Spot` carries a world position, so the scene's geometry leaks a little into the model side. Left alone
-  on purpose: fixing it would touch every consumer of a spot for no change in behaviour.
+Seams: rules take value types and a `now` and touch nothing else. `Layout` has no cache: every caller works
+spots out from the facts, so nothing can disagree with them. Playback reads facts and writes `shown`. The
+scene reads `shown`, bodies and facts and writes nothing back.
 
-## Where this is going
+## The model clock
 
-Agreed direction, in the order things flow. Not all of it exists yet.
+`Simulation.step(dt:)` owns time; the scene only draws (`onStep`, `onBeat`).
 
-1. **Sources** poll and cache, each on its own cadence: local git every few seconds, the board once a
-   minute, feeds and PR lists with conditional requests so an unchanged answer costs nothing, per-branch
-   detail batched and only for branches that exist here or moved in the feed. A push, a feed event, a
-   peer's fresher answer or a conflict re-asks that one entity at once. Three setups feed the same facts:
-   a project board, plain GitHub pull requests, or local git with tags and homemade release scripts.
-2. **Facts** are one entity-keyed map: offices by branch key, crates by repository and number, peers by
-   name. Sources write deltas; each field has an authority (the remote for a branch's existence, the PR
-   for its state, the board for its stage, the scanner for who works here) and freshness decides between
-   copies of the same authority. A weaker source fills a field the authority has not spoken on, never
-   overrides it. Disagreement is not an event; it schedules a re-ask of the authority. This is the peer
-   boundary too: what goes over the LAN is facts.
-3. **Diffing** happens on write, per entity: old value, new value, zero or one event. No sweeps. A
-   source's first answer, per slice, is quiet.
-4. **World state** applies events and holds intent: this office exists and is solid, this crate belongs on
-   the deck. It is what gets persisted.
-5. **Reconciliation** compares intent with **station truth**, the second state: which crate is on which
-   slot, which office is delivered, who carries what. It issues **commands** as values: carry crate 5210
-   from storage slot 3 to deck slot 1, deliver office X by shuttle. A command has phases, each marked
-   interruptible or not (walking yes, holding mid-lift no, setting down no), and a "must be true by" after
-   which the reconciler lets the change appear in place rather than lag the world.
-6. **Actors** execute commands over time: minions, shuttles, rockets, crates. Animations live here. A
-   new command replaces the old one at the next interruptible phase; a command whose target vanished
-   cancels itself and the actor sets down what it holds.
-7. **Completions** write station truth only, never facts: "5210 landed", "office X connected". That is
-   what keeps a source snap from undoing what a minion just did.
+- A step runs in substeps of 1/30 s (`Tempo.substep`). Each runs the timers (`Simulation.after`), the beat
+  every half second, then shuttles, rockets, vortices, drones and bodies, then `onStep` for the scene.
+- The beat: `World.settle(tick: true)` (rules, with `.tick`), `play()`, the board hands out orders, the
+  body reconciler, obstacles, the scene's flush, re-planned walks.
+- A `dt` over five seconds (`Tempo.catchUp`) jumps the clock and skips: the picture shows the facts and
+  nothing replays.
+- `now`: live in the app, the wall clock; simulated everywhere else (scenarios, the simulator, the
+  playbook, tests), a fixed epoch plus the station clock. Facts are stamped with `now`, so holding space,
+  which multiplies the app's `dt` by four, speeds the picture and never the facts.
+- In the app a frame plays at most a quarter second (`Tempo.frame`), unless the gap is long enough to skip.
 
-Steps 4 to 7 exist for crates, described in the next section. `Commands.swift` holds `Command` (a kind, a
-phase list with each phase marked interruptible or not, and words for humans) and
-`StationTruth` (offices ordered and their deliveries, whose crates wait in the bay). Where
-each crate is, on both the source's side and the station's, is its row in the station's `Ledger`. The
-station issues carries (`Yard.swift`: `carryToDeck`, `carryToTested`, `carryToStorage`, `carryFromDecon`),
-the scene glue in `Jobs.swift` passes them to the simulation, the order board (`Board.swift`) hands each to
-the nearest free body by rank, and the scene keeps the crate's node by command id for the arms. Bodies
-execute one command at a time:
-a new one replaces the old at the next interruptible phase, at most one waits, a carry can only be redirected
-to another destination for the crate already on the arms, and a command whose target vanished sets down what
-it holds where it stands.
+## Saving and loading
 
-Every crate that moves by hand goes through one lift and one set-down (`Hands` in `Simulation.swift`, the
-constants with `startLift`/`lift` and `startSetDown`/`setDown`/`release`): an arm's length away and facing
-it, a crouch whose posture comes from how high the crate stands, the crate up past the chest and onto the
-arms, and out of the arms onto its slot turned the way the layout will draw it. The office delivery uses the
-same pair, so a new office's crate is set down on the far cell its package will occupy and only then does
-the office fade in round it. The arcs are crate motions on the station clock (`CrateMotion`) and so are the
-phases, both derived from the same durations, so the posture and the motion cannot drift apart. A crate on the arms is
-drawn once, in the hands: the yard it left leaves it out, and the yard it is bound for holds its place
-without drawing it.
+- `fleet-v25.json` in the support folder holds per station its dug hallway, its rooms and its facts (without
+  launched rockets and the crates aboard them), plus the repository colours.
+- The facts are saved on a beat at most every five seconds once they have changed (`FactFeed.saveEvery`).
+- On load: the saved facts, or, from a save that has none, `Facts.migrate` of the old ledger, once: every
+  crate placed by where it stood, the busiest repository first, laid out afresh. Facts of another
+  `Facts.scheme` are laid out afresh. A save that cannot be read is kept beside it as
+  `fleet-v25.unreadable-<time>.json`, and what it held starts afresh.
+- After loading, rooms and office facts are reconciled (`officeDrift`) and the picture is snapped to the
+  facts: nothing half-done resumes.
+- Elsewhere in the support folder: `config.json`, `board.json` (the board, its owners and which
+  repositories use it), `station.log` (rolled at 4 MB).
 
-Shuttles, rockets and the crew run commands too (`Shuttles.swift`, `Rockets.swift`). A `Flight` flies one
-`.flight` command — `bringWorker`, `takeWorker` or `dropCrate` — through approach, descend, unload, rise and leave. Each phase is one
-`FlightLeg`: the waypoints of that leg, its seconds and its easing, sampled as a rounded-off curve, so an
-`Arrival` and a `Departure` drawn per ship are the whole of how it flies. The ship's heading is the tangent
-of that curve, which is what the scene turns it onto. The unload writes truth:
-the worker steps out, or the office crate stands in the bay, which is what lets a carrier's `deliverOffice`
-go from approach to lift. A `RocketJob`, one per station and repository, runs `.rocket` stages: stand by,
-load, steam, launch. They move forward, except that a rocket not yet launching stands by again when it is no
-longer cleared. `World.applyReleases` (`Releases.swift`) reads the launch queue and the open releases and
-hands out those stages as commands — untested stands by, cleared loads and steams, merged launches — and
-gives each rocket a pad slot (`assignPads`). A rocket told to stand by sends whatever the ledger had aboard
-back to its rows (`Ledger.unload`). The launch opens a vortex (`Vortex.swift`): the three pad drones ring a
-point outside the pad field, and the release's crates are pulled off their rows one at a time, up, across
-and spiralling into the rocket's hatch, each landing on the pad in the ledger as it goes in. The rocket
-climbs when the vortex closes; a rocket with nothing to pull climbs at once. A repository that ships on
-merge launches a rocket each time a crate lands in storage (`launchOnMerge`). A teammate's reaction
-to a push, a review, a comment or a branch is a `.react` command with its own until-time, so a crew minion
-runs the same machine as everyone else and says so on hover.
+## Intake
 
-The drones (`Drones.swift`) do the pad's other work. The kick stage needs none of them: it waits on the
-deck of the slot's lift, the tip goes down to it and the deck raises the stack (`stepKicks` moves `dock`
-0…1; `RocketGeometry` turns it into iris, tip and deck; `PadLift.swift` draws the door, shaft and deck). A rocket that arrives while its repository's staging deploy is not yet live stands
-with its tip unplated, and a drone welds it panel by panel at the pace of that deploy's usual length
-(`stepTips`).
+- `World.learn(event, repo:)` queues an event and settles at once, unless inside `World.batch`, which a scan,
+  a GitHub answer, a neighbour's snapshot and a kick each are; the batch settles once at its end.
+- Settling routes each event to the station holding its repository; events for a repository no station holds
+  yet wait (up to 500). It adds `.policy` where a repository's `RepoFacts` changed, merges launches of one
+  repository (`FactFeed.together`), and calls `Rules.apply`. Up to four rounds, so what one round routes
+  the next applies.
+- Office news go straight to `Rules.apply` for their station (`World.learn(_:station:)`).
+- A record's transition becomes a `.work` event (`World.learn(record, transition)`); a quiet first word
+  is a quiet event. A record whose number changes is `.renumbered`, and its crate keeps its place.
+- On the tick, rooms that have no office fact, and office facts with no room, are set right and logged
+  under `facts` (`officeDrift`).
 
-Debugging: hovering a minion pauses it and shows its current command in words, and the same words go
-in the log when the command is issued.
+## Playback
 
-## Station truth against a source that runs behind
+`Shown`, per station: crates (in an office, on a row, parked, in hands, in the vortex, aboard, falling),
+offices, deliveries, cube counts, rockets, and the rockets that have flown.
 
-Steps 4, 5 and 7 above, for crates. Every crate a station knows is one row in one ledger (`Ledger.swift`,
-kept on the `Station` and saved with it). The row has the source's side, `wanted`, the yard the board or
-git history says it belongs to, with the source's own time for that word; and the station's side, `placed`,
-the yard the station has it in, `at`, where it physically is (a slot or someone's arms), `slot`,
-the place it holds in its yard, and `bound`, the place spoken for ahead of it while a carry is under way.
-Sources write only through `adopt`; completions write only through `landed` and the set-down, and a carry
-records its own landing when it sets the crate down. The counts the HUD, the rockets and the rings read are
-read off `placed` and kept nowhere; `Station.layout(of:)` (`Yard.swift`) draws from the rows and gives a
-place to any crate that has none. Each repository piles in its own band of columns, the same band in
-storage and on the staging rows. Saved slots drawn under another `Ledger.slotScheme` are forgotten on load
-and drawn again, and Develop > Restack the Yard does the same on demand (`restackYard`). `StationTruth` is
-what is left besides: the offices ordered and their deliveries.
+- `play(station)` runs on every beat and every change of facts: crates, offices, rockets. The first play
+  of a station snaps it. It does nothing when facts, picture and jobs are as it left them (`Calm`).
+- **The crate diff** compares `shown` with the targets from `Layout.spots`. What needs hands becomes a
+  move: a **haul** out of an office, a **carry** between zones, a **park** to set a blocker aside, a
+  **hold** to lift one up while its pile is sorted. What needs none is shown directly: a crate that appears,
+  one that falls in from the decon hatch, one that settles a level (`falling`, `Hands.settleSeconds`), one
+  that fades.
+- **Physical order.** A move is offered on the board only when nothing blocks it: no crate shown above it
+  (decon excepted), and its place free with a standing crate under it. A blocker with no move of its own
+  is parked at the nearest free spot no target uses, or held up, one at a time. A cycle is broken by
+  holding one. A blocker takes the rank of what it blocks.
+- **Ranks** on the board, low to high: idle, tidy, crew, desk, QA, yard, release, message, leaving. A
+  carry to the cleared rows is `release`; between zones, `yard`; within one zone, a stray going home,
+  `tidy`.
+- Moves become `Cargo` on the board (`hire`); a body takes one at a safe point. Lifting puts the crate in
+  `hands`; setting down shows it on its row or parked. When the facts change, an unlifted move is called
+  off or re-aimed, a lifted one re-aimed or set down where it was going, and the next play goes on from
+  there.
+- **Skip and snap**: `skip()` snaps every station; `snap(station)` calls off its carries, drops its vortices
+  and shows the targets; `snap(station, crate)` does one crate and whatever stands on its spot. Used on
+  load, on a long `dt`, for a quiet effect, from Develop › Skip to the Facts, and by the watchdog.
+- **The watchdog**: a crate, office or rocket shown off its fact whose mark has not changed for 90 s
+  (`Patience.waitLimit`; a rocket waits for its deploy's usual length when longer) is snapped, logged under
+  `playback`, and counted (`Simulation.snapped`). `Simulation.lag()` says what is behind.
 
-A word from the source is news for a crate only if it is newer than the station's own move of it
-(`movedAt`). A board item carries when it last moved, so an answer older than a landing is stale for
-that crate however fresh the poll, and a word older than the one already held (a peer's lagging copy)
-is not news either. A source with no times of its own, git history, is believed again the moment it
-agrees with what the station did. Nothing decides by the clock.
+**Offices.** An office in the facts and not shown arrives by its `via`: built at once, fading in, or by a
+delivery (a flight drops the hexagon crate, a carrier takes it to the doorway, it unfolds). It waits for
+any office still folding on its cells. An office shown and gone from the facts folds once no crate is shown
+in it, no haul comes from it and nobody is inside. Unfolding, fading and folding are functions of the
+station clock (`ShownOffice.tile`, `label`, `crate`), so a skip ends them and a capture shows them. Stows
+and packs are posted to the office's own minion as the cube and crate counts catch up.
 
-Disagreement is a queue, not an event. Storage to deck is carried: a crate's QA transition orders one
-carry per crate, by the number the source named, with whatever stands on it and is staying moved aside
-first (`stationEvents`, `carryToDeck`); a staging release that merges carries every storage crate of its
-repository to the staged rows, board or no board (`stagingMerged`, `stageCargo`). `reconcile`
-(`Releases.swift`) takes the source's answer into the ledger, then redraws the crates the two sides still
-disagree about where the source says, once, and never a deck crate while a release is under way
-(`releaseUnderway`). A crate already under way is left to its carrier. A storage-to-deck carry whose
-crate the board has since put back is cancelled (`callOffCarriesTakenBack`): not lifted yet, the crate
-stays; on the arms, it walks back. It runs from `flushScene` and after each GitHub answer, never from the
-drawing, and `rebuildMarkers` adopts what stands: only what is new is built and what is gone taken away.
+**Rockets.** A rocket in the facts appears once its slot is clear of shown rockets. `dock` eases toward 1
+when docked or launched over `RocketGeometry.dockSeconds` (9 s), at once in a look whose kick stage does
+not rise; `RocketGeometry` turns it into iris, tip and deck. The tip is welded from the staging fact. It
+vents when go and docked. Launched and docked, it opens a vortex for every crate whose fact is aboard it;
+it climbs once the vortex has closed with nothing pending, on the station clock for the look's
+`launchSeconds`, then is flown. The deploy flight itself is the scene's (`Mission.swift`), started by deploy
+events.
 
-A carry names a yard, nothing more (`Command.carry(crate:from:to: Yard)`). The job holds the aim: a
-place asked for when the order is taken, which the yard then holds for the crate (`bound`); asked for
-again with the crate up on the arms, against the stack as it stands that moment; grounded at set-down,
-when `bound` becomes `slot`. One aside routine serves every planner. A carry that stalls is given up by
-the body reconciler and goes back in the queue from where the crate lies; nothing is ever set down by a
-clock. A carrier with carries of its repository queued behind it hurries, and says so. A carry carries
-its own rank (`Cargo.rank`), and the order board hands out the highest-ranked opening first: a carry onto
-the cleared rows outranks one into storage.
+## Obstacles
 
-`--ledger-tests` feeds a ledger facts in every order, board before release, release before board, stale
-after fresh, A then B then A, and holds it to: every crate in one yard at most, a move outranking any
-older word from the source, wanted equal to placed once the source has said something newer.
+`Simulation.obstacles(station)`, on every beat: crates as shown (rows, falling, office packages, parked off
+the lanes), office packages and cube piles, cones from the bodies that own them, shown rockets, the
+furniture each look draws (`Station.furniture(theme:offices:)`, held equal to what is drawn by
+`--look-tests`), and the glass doors' posts. The planner also walks round standing bodies (`crowd`).
 
-Station time is one value, `StationController.now`: the wall clock in the app, the simulated clock in a
-simulator. Everything on the station that judges freshness against "now", a session's idleness, a peer's
-snapshot, a landing's time in the ledger, reads it, and the simulator stamps its facts with it. A frame
-that takes long, a route that searches the whole floor say, can therefore never age a session or make a
-landing look older than a board move. The route search itself reads the hall, the doorways between areas
-and the room doors from caches built once per floor plan.
+## Neighbours
 
-## Faster feedback from GitHub
-
-Step 1 above, the first part of it. Three things make the station notice sooner, and one keeps it
-honest. The **board delta**: every twenty seconds one small search asks for the board's items updated
-since the newest change it knows of, less a minute for the index, and merges them into the board it
-holds (`refreshProjectDelta`). A board grows, Shipped most of all, and reading all of it was four pages
-of a hundred; the delta is a handful of items, and the whole read is the backstop on the five-minute
-cadence. The **feed as doorbell**: each repository's activity feed is asked once a minute, the pace
-GitHub asks for, on a conditional request with the ETag it gave last time, so a quiet repository
-answers 304 and costs nothing against the budget; what the feed has that it did not have last time
-names what to ask about next. **Expecting a change** (`GitHubResolver.expect`): a key is asked every
-few seconds instead of on its cadence for a while when something says it is about to change: a
-pull request seen opened, merged or closed in the feed, its number and branch; a push, whose checks
-will run; a merge, the releases; a board item that moved, its linked pull requests; a local signal
-in a transcript, `gh pr create` or `gh pr merge` or `git push`, which re-asks the authority at once
-and never moves anything itself; an open pull request with checks pending or an approval standing.
-The setting "Ask GitHub every N minutes" still governs the slow cadence of the heavy asks.
-
-`--github-diag [seconds]` runs the poller alone against the real settings and checkouts and prints
-every ask and every answer that changed, which is how this was checked: the whole board once, the
-delta every twenty seconds, feeds once a minute answering 304, the rest on the backstop. The
-environment variable `RUMKAPSEL_SUPPORT` points a second copy of the app at its own save folder.
-Not done from step 1: conditional requests for the pull request lists, one GraphQL for a repository's
-open pull requests and releases together, and the events an org-level feed would carry, which this
-token does not see.
-
-## Staging releases
-
-A staging release (a pull request into the staging branch) is a fact of its own: `ReleasePR.isStaging`
-sits beside `isProduction`, and `applyStaging` (`Releases.swift`) diffs each repository's release list into
-`.stagingOpened`, `.stagingMerged` and `.stagingClosed`. The first answer per repository is quiet.
-
-The simulation keeps one `StagingBatch` per station and repository (`Staging.swift`): the release's number,
-whether it merged, and how its staging deploy stands, unheard, running, live or failed. A merge carries every
-crate of the repository standing in storage to the staged rows, one carry each, whatever the board says
-(`stageCargo`). A close without merging forgets the batch and moves nothing. While a merged batch's deploy
-is not yet live, a rocket that stands up for the repository is welded rather than whole, and the
-repository is put first for a pad slot.
-
-## Carries know the stack
-
-Done. `Station.layout(of:)` hands out slots with a `column` — one square of floor, half a cell wide — and a
-`level` counted from the floor, and `Spot` carries that level and the slot's yaw along with the
-position. Storage jitter is seeded per crate rather than per place in the pile, so a crate keeps its
-own nudge and turn wherever it lands.
-
-- A crate is picked from the top of its stack, and every carry names its crate by number. Where a
-  crate lower in a stack must move, storage to the deck or the untested row to the tested one, whatever
-  stands on it and is staying is moved aside first, one carry each to a fresh column of its
-  repository's in the same yard (`aside`), and the wanted crate's carry waits on them: a command lists
-  the commands that must finish before it (`after`), and the scheduler holds it back until they are
-  gone.
-- A crate on a back row, with no floor beside it, is reached across the row in front. Where that row
-  is taken the minion stands in the aisle beyond and floats the crate over, on the way up and on the
-  way down alike (`tossFrom`, `Hall.backRow`).
-- Pickup and set-down are height-aware. The minion stands an arm's length away, facing the stack, and
-  the posture follows the height: level 0 a crouch, level 1 a lean at waist height, level 2 and up a
-  reach with the head back. A crate off the floor comes up past the chest; one taken off a stack goes
-  straight overhead.
-- Set-down lands on the exact slot the layout will draw: position, level and yaw, so the redraw after
-  landing changes nothing. `grounded` keeps stacks bottom-up — a slot with air under it drops to the
-  lowest free level of its column, counting a crate already on someone's arms as gone.
-- The office package is picked off the office floor the same way and lands on the repository's next
-  free slot in storage, top of a stack or a new one.
-
-Still owed, the set-down by level as Mads wants it: level 0, crouch and set it down carefully;
-level 1, waist height, almost a slide forward onto the top; level 2, raise it above the head and slide it
-in; higher, a little jump up, then slide it on. Pickup mirrors each. Today's lean and reach are the
-placeholder. Also owed: one crate size everywhere, office, yard and in hand (the office crate no longer
-grows with the work in it; the cubes show that), and no spin on release: the crate keeps its world
-rotation when it leaves the hands and turns to the slot's yaw over the set-down. And a crate is heavy:
-it stays in the hands all the way down to the slot, the posture does the lowering, release is the last
-thing, and nothing moves it afterwards, neither an action nor the redraw. Pickup the same in reverse.
-
-## Closed, not merged
-
-Done. Two different closes:
-
-- **An issue's pull request closed without merging.** The work goes nowhere: not storage, not the deck.
-  The crate in its office turns red and sits there for ten minutes, then fades out. After that the office
-  clears the way a merged one does: a teammate's archives, one's own retires while the session lingers.
-- **A staging release closed without merging.** Those crates are still merged work waiting for a release,
-  and nothing has moved them yet: they stay in storage, and `.stagingClosed` only forgets the batch.
-
-## Bodies
-
-`Bodies.swift` is to minions what the ledger is to crates. Every half second, for every command in
-hand, it asks: is this body moving, or waiting on a fact the command named this tick
-(`Minion.waitingOn`)? A rest that has arrived, a lie-down, an act with time left, QA walking its
-rows and a leaver's wait at the bay are steady by definition. Anything else that keeps the same phase and
-the same spot for ten station seconds is given up: `giveUp` says so in the log, puts down what is on
-the arms an arm's length ahead, and frees the body. A carry keeps its order and its id in `cargo`
-with no carrier, starting from where the crate now lies, and whoever gave it up is passed over
-while anyone else is free. A new office's crate goes back on the bay list, and `queueDeliveries`
-hands it to the next free minion, the session's own worker first; a pending office with no crate,
-no ship and nobody fetching has its shuttle ordered again. The scenario runner fails any run in
-which a minion gives up unless the scenario says it means to provoke one.
-
-Ownership is enforced at one door: `send(_:to:)` refuses a body with anything but rest in hand.
-The refresh, the floor flush and the panel all go through it, so none of them can move a body on
-paper under a job or a visit; a visit's own end finishes it first, then sends the body back.
-
+Bonjour `_rumkapsel._tcp`, one JSON `PeerSnapshot` per line, `version` 2; any other version is ignored.
+It carries the station's name, start and send time, whether the link works both ways; its offices (key,
+name, repository, branch, colour, cells, pushed, started, last active, boxes, dim, the pull request's
+number, state, review and checks), only those checked out on that machine in shared repositories; its
+minions (a hashed id, office, asleep, busy, activity, waiting, cones, what it is doing, callsign); every 30
+s its GitHub knowledge (open pull requests and recent feed per repository) and the board; and its
+repository colour slots. The scene makes it (`makeSnapshot`); `World.applyPeer` takes it in: rooms adopted
+on the neighbour's cells (the lower name's cells win a dispute), `.office` news, Inbound by neighbour, and
+colours from the lower name. `dropPeer` holds a vanished neighbour's offices for a day.

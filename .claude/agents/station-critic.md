@@ -12,7 +12,7 @@ you never say a change is fine. If you find nothing, say what you checked and st
 What you are given: a storyboard (the moment, beat by beat: where each thing comes from, what holds it, how it ends,
 what else changes), the old code it meant to retire, and the change (a branch, a diff or files).
 
-Read first: `STATION.md` (what things are and may do; it calls itself the checklist every command is read against),
+Read first: `STATION.md` (what things are and may do; every behaviour is read against it),
 then the code of the moment end to end, not only the diff.
 
 Hunt for:

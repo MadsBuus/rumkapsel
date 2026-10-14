@@ -2,7 +2,7 @@ from PIL import Image, ImageDraw
 import sys
 import os; HERE = os.path.dirname(os.path.abspath(__file__))
 ns={'__file__': os.path.join(HERE, 'floorplan.py')}; exec(open(os.path.join(HERE, 'floorplan.py')).read(), ns)
-# The game's own palette, sampled off its screens (LAYOUT.md).
+# The game's own palette, sampled off its screens.
 BG   = (0x0E,0x11,0x17)   # space
 CORR = (0x81,0x65,0x5B)   # hallway floor
 DARK = (0x43,0x42,0x42)   # a room that is not lit yet
