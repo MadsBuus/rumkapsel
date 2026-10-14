@@ -353,6 +353,8 @@ final class PlaybookController {
         sim.seed(crowd: entry.crowd)
         let hands: [(String, PlaybookWait)] = [("", .bodiesUp), ("GitHub: Poll", .rocketOnPad), ("Hands: one free on the deck", .bodyOnDeck)]
         let moves = (entry.yard ? hands : []) + entry.moves
+        let tempo: Set<String> = ["1x", "4x", "16x", "Pause", "Resume", ""]
+        let subject = moves.lastIndex { !tempo.contains($0.0) } ?? moves.count
         var next = 0, pressedAt = 0.0, waited = 0.0
         script.append(Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
@@ -376,6 +378,7 @@ final class PlaybookController {
                     return
                 }
                 let name = moves[next].0
+                if next == subject { self.station.simulation.skip() }
                 if !name.isEmpty {
                     FileHandle.standardError.write("playbook \(entry.name): \(String(format: "%.2f", waited))s press \(name)\n".data(using: .utf8)!)
                     self.sim.press(name == "1x" ? self.model.speed : name)
