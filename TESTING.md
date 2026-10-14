@@ -30,6 +30,7 @@ a failure:
 | `walk` | stepping along a path and passing |
 | `work` | a branch, an issue and a pull request as one piece of work, and its office key |
 | `deploy` | which Actions runs are deploys, their usual length, starts and ends |
+| `github` | conditional reads (a 304 is no news), a 401's token hold-off, the rate gate (budget, secondary limits, stretch, GraphQL), detector cadences, backoff and `X-Poll-Interval`, follow-ups, the pace, which moved pull request reads what, feed events by id, a whole board never undoing a fresher item, the board's and the feed's REST answers, the `.git` watcher on a scratch repository and its worktree; no network |
 | `pipeline` | a repository's way to production from its merges and branch names |
 | `layout` | the floor: same rooms give the same cells, slots, the yard, the bay, signs, facts across a save |
 | `spacelog` | the Station Log panel's story from the feed, releases and board |
@@ -85,7 +86,8 @@ picture that never caught up with the facts, a watchdog snap, or its own floor c
 | `kill -USR1 <pid>` | writes the state to `station.log` |
 | `--replay <file.jsonl>` | replays an event log file from its first baseline and checks it against each later baseline, then the next day's file or the saved facts; prints OK or the first difference |
 | `--replay <file.jsonl> --crate repo#n` | that crate's story: a line per change of its fact, with the event that caused it |
-| `--github-diag [seconds] [--repo <path>]` | runs the GitHub poller alone against the real settings for 120 s (or the seconds given) and prints every ask and every answer that changed |
+| `--github-diag [seconds] [--repo <path>]` | runs the GitHub poller alone against the real settings for 120 s (or the seconds given), paced as focused; prints every ask and every answer that changed, then per endpoint the calls, 200s, 304s, bytes and the hourly pace, and the rate used. Run it on a scratch `RUMKAPSEL_SUPPORT` |
+| `--watch-diag [seconds]` | runs the real `World` and resolver headless for 300 s (or the seconds given) in three paces, in front, as the sessions say, idle: every detector change, follow-up, heat, `.git` change and event, and the counters per pace. Run it on a scratch `RUMKAPSEL_SUPPORT` with `shareOnLAN` off |
 | `--dump-floor <theme>`, `--dump-colors` | the fixed floor as JSON for `floor/`; the repository colours |
 | `--bake-plating`, `--bake-walls`, `--bake-detail`, `--bake-suits` | bake the textures into `Resources/` |
 

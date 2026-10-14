@@ -11,14 +11,11 @@ and are not started unasked.
 2. **The launch cam.** A fixed pad and one launch clock, taken from the climb. A patch exists.
 3. **The tip's colour band** at the thruster belt, and dark legs. A patch exists.
 4. **A crate-focused replay.** One crate's story from the event log, played back in the scene.
-5. **Watching each repository's `.git`** with FSEvents, so a commit, a fetch or a merge is seen at once.
-6. **GitHub reads, measured and cheaper.** Counters in `--github-diag`; every read conditional (ETag),
-   honouring GitHub's poll-interval and rate headers; GraphQL batching of what is read per repository.
-7. **One `Source` protocol** for intake, so every source reports the same way.
-8. **The last scene glue into playback.** Office floor labels give way to the model's office cells;
+5. **One `Source` protocol** for intake, so every source reports the same way.
+6. **The last scene glue into playback.** Office floor labels give way to the model's office cells;
    neighbours' minions driven by playback.
-9. **A give-up never drops a crate in the yard's lanes.** Then crates in the lanes can be obstacles.
-10. **Later: neighbours share facts and events** instead of offices and GitHub answers.
+7. **A give-up never drops a crate in the yard's lanes.** Then crates in the lanes can be obstacles.
+8. **Later: neighbours share facts and events** instead of offices and GitHub answers.
 
 ## Walking and bodies
 

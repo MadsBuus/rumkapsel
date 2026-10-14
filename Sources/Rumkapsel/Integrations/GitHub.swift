@@ -82,6 +82,7 @@ struct FeedEvent: Equatable, Codable {
     let title: String?
     let url: String?
     let detail: String
+    var id: String? = nil
 }
 
 struct ProjectItem: Equatable, Codable {
@@ -90,11 +91,28 @@ struct ProjectItem: Equatable, Codable {
     let title: String
     let status: String
     let assignees: [String]
-    let prURLs: [String]
+    var prURLs: [String]
     let url: String
     var updatedAt: Date? = nil
     var state: String = "OPEN"
     var isClosed: Bool { state == "CLOSED" }
+}
+
+extension ProjectItem {
+    init?(rest o: [String: Any], status field: Int) {
+        guard o["content_type"] as? String == "Issue", let c = o["content"] as? [String: Any], let number = c["number"] as? Int,
+              let repo = (c["repository"] as? [String: Any])?["name"] as? String ?? (c["repository_url"] as? String)?.split(separator: "/").last.map(String.init)
+        else { return nil }
+        let fields = o["fields"] as? [[String: Any]] ?? []
+        let status = ((fields.first { $0["id"] as? Int == field }?["value"] as? [String: Any])?["name"] as? [String: Any])?["raw"] as? String ?? ""
+        let pulls = (fields.first { $0["data_type"] as? String == "linked_pull_requests" }?["value"] as? [[String: Any]] ?? [])
+            .filter { $0["state"] as? String == "open" }.compactMap { $0["html_url"] as? String }
+        self.init(repo: repo, number: number, title: c["title"] as? String ?? "", status: status,
+                  assignees: (c["assignees"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String },
+                  prURLs: pulls, url: c["html_url"] as? String ?? "",
+                  updatedAt: (o["updated_at"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
+                  state: (c["state"] as? String ?? "open").uppercased())
+    }
 }
 
 struct OpenPR: Equatable, Codable {
@@ -126,6 +144,7 @@ final class GitHubResolver {
     var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
 
     private var answeredLive: Set<String> = []
+    private var failedAt: [String: Date] = [:]
     func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
     private var fromCache: Set<String> = []
 
@@ -133,8 +152,6 @@ final class GitHubResolver {
         lock.lock(); defer { lock.unlock() }
         return openPRs[repoRoot]?.0
     }
-
-    var holdUntil = Date.distantPast
 
     private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
 
@@ -186,19 +203,22 @@ final class GitHubResolver {
     func refreshOpenPRs(repoRoot: String) {
         if frozen { return }
         lock.lock()
-        if Date() < holdUntil { lock.unlock(); return }
         let remembered = fromCache.remove(repoRoot) != nil
         if !remembered, let (_, at) = openPRs[repoRoot],
-           Date().timeIntervalSince(at) < gate("openPRs:" + repoRoot, base: interval) { lock.unlock(); return }
-        if inFlight.contains("o:" + repoRoot) { lock.unlock(); return }
+           Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if inFlight.contains("o:" + repoRoot) || Date().timeIntervalSince(failedAt["o:" + repoRoot] ?? .distantPast) < 60 { lock.unlock(); return }
         inFlight.insert("o:" + repoRoot)
         lock.unlock()
         trace("ask openPRs \(repoRoot)")
         queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("o:" + repoRoot); lock.unlock() }
+            defer { if landed("o:" + repoRoot) { refetchOpenPRs(repoRoot) } }
             let iso = ISO8601DateFormatter()
             var found: [OpenPR] = []
-            guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else { trace("openPRs \(repoRoot) failed"); return }
+            guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else {
+                trace("openPRs \(repoRoot) failed")
+                lock.lock(); failedAt["o:" + repoRoot] = Date(); lock.unlock()
+                return
+            }
             if let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
                 let stale = Date().addingTimeInterval(-14 * 24 * 3600)
                 for o in arr {
@@ -419,10 +439,10 @@ final class GitHubResolver {
     func refreshProject(owner: String, number: Int) {
         if frozen { return }
         lock.lock()
-        if Date() < holdUntil { trace("project held until \(holdUntil)"); lock.unlock(); return }
-        if let (_, at) = project, Date().timeIntervalSince(at) < interval { lock.unlock(); return }
+        if Date().timeIntervalSince(projectFullAt) < interval { lock.unlock(); return }
         if inFlight.contains("project") { lock.unlock(); return }
         inFlight.insert("project")
+        projectFullAt = Date()
         lock.unlock()
         trace("ask project (whole board)")
         queue.async { [self] in
@@ -462,90 +482,53 @@ final class GitHubResolver {
         }
     }
 
-    private var deltaAt = Date.distantPast
-    private var deltaSince: Date?
+    private lazy var projectFullAt = project?.1 ?? .distantPast
+    private var boardFields: (status: Int, pulls: Int?)?
 
-    private var deltaPage = 0
-
-    func refreshProjectDelta(owner: String, number: Int) {
-        if frozen { return }
+    private func detectBoard(owner: String, number: Int) {
+        let key = "watch:board"
+        let base = "orgs/\(owner)/projectsV2/\(number)"
+        lock.lock(); var fields = boardFields; lock.unlock()
+        if fields == nil {
+            guard let answer = ask(key, base + "/fields") else { return }
+            guard let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]],
+                  let status = arr.first(where: { $0["name"] as? String == ConfigStore.shared.current.statusField })?["id"] as? Int
+            else { tune(key) { $0.failed() }; trace("board: no \(ConfigStore.shared.current.statusField) field"); return }
+            fields = (status, arr.first { $0["data_type"] as? String == "linked_pull_requests" }?["id"] as? Int)
+            lock.lock(); boardFields = fields; lock.unlock()
+        }
+        guard let fields else { return }
+        let day = DateFormatter()
+        day.dateFormat = "yyyy-MM-dd"; day.timeZone = TimeZone(identifier: "UTC"); day.locale = Locale(identifier: "en_US_POSIX")
+        let since = day.string(from: Date().addingTimeInterval(-24 * 3600))
+        let ids = ([fields.status] + (fields.pulls.map { [$0] } ?? [])).map(String.init).joined(separator: ",")
+        guard let answer = ask(key, base + "/items?per_page=100&fields=\(ids)&q=updated:%3E%3D\(since)", cache: base + "/items"), answer.changed,
+              let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
+        if arr.count >= 100 {
+            trace("board: a full page since \(since), reading the whole board")
+            lock.lock(); projectFullAt = .distantPast; lock.unlock()
+            refreshProject(owner: owner, number: number)
+            return
+        }
+        let fresh = arr.compactMap { ProjectItem(rest: $0, status: fields.status) }
         lock.lock()
-        guard let (items, at) = project else { lock.unlock(); return }
-        if Date() < holdUntil { lock.unlock(); return }
-        if Date().timeIntervalSince(deltaAt) < gate("projectDelta", base: 20) { lock.unlock(); return }
-        if inFlight.contains("projectDelta") { lock.unlock(); return }
-        inFlight.insert("projectDelta")
-        deltaAt = Date()
-        let since = (deltaSince ?? items.compactMap(\.updatedAt).max() ?? at).addingTimeInterval(-60)
+        guard let (current, _) = project else { lock.unlock(); return }
+        var merged = current
+        var moved: [(ProjectItem, String?)] = []
+        for var f in fresh {
+            if let i = merged.firstIndex(where: { $0.repo == f.repo && $0.number == f.number }) {
+                if fields.pulls == nil { f.prURLs = merged[i].prURLs }
+                if merged[i] != f { if merged[i].status != f.status { moved.append((f, merged[i].status)) }; merged[i] = f }
+            } else { merged.append(f); moved.append((f, nil)) }
+        }
+        let changed = merged != current
+        if changed { project = (merged, Date()); projectMoves += moved }
+        for it in fresh { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
         lock.unlock()
-        let iso = ISO8601DateFormatter()
-        trace("ask project delta since \(iso.string(from: since))")
-        queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("projectDelta"); lock.unlock() }
-            let fieldName = GitHubResolver.quoted(ConfigStore.shared.current.statusField)
-            let query = """
-            { search(query: "project:\(owner)/\(number) updated:>=\(iso.string(from: since))", type: ISSUE, first: 50) { nodes { ... on Issue {
-              number title url state repository { name } assignees(first: 5) { nodes { login } }
-              closedByPullRequestsReferences(first: 5) { nodes { url state } }
-              projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }
-            """
-            var nodes: [[String: Any]] = []
-            if let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
-               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
-               let found = ((obj["data"] as? [String: Any])?["search"] as? [String: Any])?["nodes"] as? [[String: Any]] { nodes += found }
-            let shipped = ConfigStore.shared.current.statuses.shipped
-            let live = items.filter { shipped.isEmpty || $0.status != shipped }.sorted { ($0.repo, $0.number) < ($1.repo, $1.number) }
-            if !live.isEmpty {
-                let page = 100
-                let start = min(deltaPage * page, max(0, live.count - 1)) / page * page
-                deltaPage = (start / page + 1) * page < live.count ? start / page + 1 : 0
-                let batch = live[start..<min(live.count, start + page)]
-                let fields = """
-                number title url repository { name } assignees(first: 5) { nodes { login } }
-                closedByPullRequestsReferences(first: 5) { nodes { url state } }
-                projectItems(first: 5) { nodes { updatedAt project { number } fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } } } }
-                """
-                let parts = batch.enumerated().map { i, it in
-                    "i\(i): repository(owner: \"\(owner)\", name: \"\(it.repo)\") { issue(number: \(it.number)) { \(fields) } }"
-                }
-                trace("ask project items \(batch.count) of \(live.count) not shipped")
-                if let out = run(["gh", "api", "graphql", "-f", "query={ " + parts.joined(separator: " ") + " }"], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
-                   let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let data = obj["data"] as? [String: Any] {
-                    for (_, v) in data { if let issue = (v as? [String: Any])?["issue"] as? [String: Any] { nodes.append(issue) } }
-                }
-            }
-            var fresh: [ProjectItem] = []
-            for content in nodes {
-                guard let n = content["number"] as? Int, let repo = (content["repository"] as? [String: Any])?["name"] as? String,
-                      let pis = (content["projectItems"] as? [String: Any])?["nodes"] as? [[String: Any]],
-                      let mine = pis.first(where: { ($0["project"] as? [String: Any])?["number"] as? Int == number }) else { continue }
-                let status = (mine["fieldValueByName"] as? [String: Any])?["name"] as? String ?? ""
-                let assignees = ((content["assignees"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
-                let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
-                    .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
-                fresh.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
-                                         prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (mine["updatedAt"] as? String).flatMap(iso.date(from:)), state: content["state"] as? String ?? "OPEN"))
-            }
-            lock.lock()
-            guard let (current, _) = project else { lock.unlock(); return }
-            var merged = current
-            var moved: [(ProjectItem, String?)] = []
-            for f in fresh {
-                if let i = merged.firstIndex(where: { $0.repo == f.repo && $0.number == f.number }) {
-                    if merged[i] != f { if merged[i].status != f.status { moved.append((f, merged[i].status)) }; merged[i] = f }
-                } else { merged.append(f); moved.append((f, nil)) }
-            }
-            if let newest = fresh.compactMap(\.updatedAt).max() { deltaSince = max(deltaSince ?? .distantPast, newest) }
-            let changed = merged != current
-            if changed { project = (merged, Date()); projectMoves += moved }
-            for it in fresh { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
-            lock.unlock()
-            trace("project delta: \(fresh.count) item(s), \(moved.count) moved")
-            if changed {
-                saveBoard(merged, at: Date())
-                for (it, _) in moved { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { expect("pull#:\(it.repo)#\(n)", for: 120, every: 15) } } }
-                DispatchQueue.main.async { self.onUpdate?() }
-            }
+        trace("board: \(fresh.count) item(s) updated since \(since), \(moved.count) moved")
+        if changed {
+            saveBoard(merged, at: Date())
+            DispatchQueue.main.async { self.onUpdate?() }
         }
     }
 
@@ -553,9 +536,12 @@ final class GitHubResolver {
         lock.lock()
         guard at > (project?.1 ?? .distantPast) else { lock.unlock(); return }
         let previous = project?.0
-        if let previous {
-            let before = Dictionary(previous.map { ("\($0.repo)#\($0.number)", $0.status) }, uniquingKeysWith: { a, _ in a })
-            for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
+        let held = Dictionary((previous ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
+        let items = items.map { it in
+            held["\(it.repo)#\(it.number)"].flatMap { h in (h.updatedAt ?? .distantPast) > (it.updatedAt ?? .distantPast) ? h : nil } ?? it
+        }
+        if previous != nil {
+            for it in items where held["\(it.repo)#\(it.number)"]?.status != it.status { projectMoves.append((it, held["\(it.repo)#\(it.number)"]?.status)) }
         }
         let changed = previous != items
         project = (items, at)
@@ -565,11 +551,8 @@ final class GitHubResolver {
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
-    private var pullsSeen: [String: [Int: String]] = [:]
-    private var pullsWatchedAt: [String: Date] = [:]
     private var deployNewest: [String: DeployRun] = [:]
     private var deployUsual: [String: TimeInterval] = [:]
-    private var deploysRead: [String: Date] = [:]
     private var deployWatchedSince: [String: Date] = [:]
     private var deployWorkflows: [String: (names: Set<String>, at: Date)] = [:]
     private var pendingDeploys: [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] = []
@@ -654,91 +637,170 @@ final class GitHubResolver {
         return [(p.staging, false), (p.production, true)].filter { !$0.branch.isEmpty }
     }
 
-    func refreshDeploys(repoRoot: String) {
-        if frozen { return }
-        lock.lock()
-        let slow = owners[repoRoot] != nil && http.hasToken ? 15 : interval
-        if let at = deploysRead[repoRoot], Date().timeIntervalSince(at) < gate("deploys:" + repoRoot, base: slow) { lock.unlock(); return }
-        if inFlight.contains("d:" + repoRoot) || pipelines[repoRoot] == nil { lock.unlock(); return }
-        inFlight.insert("d:" + repoRoot)
-        lock.unlock()
+    private var runsSeen: [String: String] = [:]
+    private var runsFallbackAt: [String: Date] = [:]
+
+    private func detectRuns(_ repoRoot: String) {
+        let key = repoRoot + "#watch:runs"
+        lock.lock(); let known = pipelines[repoRoot] != nil; let owner = owners[repoRoot]; lock.unlock()
+        guard known else { return }
+        let branches = deployBranches(pipeline(repoRoot: repoRoot))
+        let workflows = branches.map { deployingWorkflows(branch: $0.branch, repoRoot: repoRoot) }
+        let shape = "\(branches.map(\.branch))|\(workflows.map { $0.sorted() })"
+        var all: [DeployRun]
+        if let owner, let answer = ask(key, "repos/\(owner)/actions/runs?event=push&per_page=60") {
+            lock.lock(); let same = runsSeen[repoRoot] == shape; runsSeen[repoRoot] = shape; lock.unlock()
+            guard answer.changed || !same, let o = try? JSONSerialization.jsonObject(with: answer.data) as? [String: Any],
+                  let arr = o["workflow_runs"] as? [[String: Any]] else { return }
+            all = arr.compactMap(DeployRun.init(api:))
+        } else if owner == nil || !http.hasToken {
+            lock.lock()
+            let due = Date().timeIntervalSince(runsFallbackAt[repoRoot] ?? .distantPast) >= interval
+            if due { runsFallbackAt[repoRoot] = Date() }
+            lock.unlock()
+            guard due, let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
+                                      "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
+                  let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
+            all = arr.compactMap(DeployRun.init(json:))
+        } else { return }
+        var running = false, ended = false
+        for ((branch, production), deploying) in zip(branches, workflows) {
+            let key = repoRoot + "|" + branch
+            let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deploying)
+            lock.lock()
+            if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
+            let first = deployNewest[key] == nil
+            if deployWatchedSince[key] == nil { deployWatchedSince[key] = Date() }
+            let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date(), watchingSince: deployWatchedSince[key])
+            let usual = Deployments.usual(runs)
+            deployUsual[key] = usual
+            if let newest = runs.first {
+                deployNewest[key] = newest
+                let age = newest.startedAt.map { Date().timeIntervalSince($0) } ?? 0
+                running = running || newest.running && age < max(3 * usual, 1800)
+            }
+            for c in changes {
+                pendingDeploys.append((repoRoot, production, c, usual))
+                if case .ended = c { ended = true }
+            }
+            lock.unlock()
+            for c in changes { trace("deploy \(branch) \(c)") }
+        }
+        tune(key) { if running { $0.heat(for: 60, Date()) } else if ended { $0.cool() } }
+        lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
+        if any { DispatchQueue.main.async { self.onUpdate?() } }
+    }
+
+    struct Seen: Equatable { let updated: String; let open: Bool; let merged: Bool }
+    private var pullsSeen: [String: [Int: Seen]] = [:]
+
+    private func detectPulls(_ repoRoot: String) {
+        guard let owner = nameWithOwner(repoRoot: repoRoot),
+              let answer = ask(repoRoot + "#watch:pulls", "repos/\(owner)/pulls?state=all&sort=updated&direction=desc&per_page=20"), answer.changed,
+              let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
         let p = pipeline(repoRoot: repoRoot)
-        queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("d:" + repoRoot); deploysRead[repoRoot] = Date(); lock.unlock() }
-            var running = false, ended = false
-            var all: [DeployRun]
-            lock.lock(); let owner = owners[repoRoot]; lock.unlock()
-            if let owner, let answer = http.get("repos/\(owner)/actions/runs?event=push&per_page=60") {
-                guard let o = try? JSONSerialization.jsonObject(with: answer.data) as? [String: Any],
-                      let arr = o["workflow_runs"] as? [[String: Any]] else { return }
-                all = arr.compactMap(DeployRun.init(api:))
-            } else {
-                guard let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
-                                     "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
-                all = arr.compactMap(DeployRun.init(json:))
-            }
-            for (branch, production) in deployBranches(p) {
-                let key = repoRoot + "|" + branch
-                let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deployingWorkflows(branch: branch, repoRoot: repoRoot))
-                lock.lock()
-                if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
-                let first = deployNewest[key] == nil
-                if deployWatchedSince[key] == nil { deployWatchedSince[key] = Date() }
-                let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date(), watchingSince: deployWatchedSince[key])
-                let usual = Deployments.usual(runs)
-                deployUsual[key] = usual
-                if let newest = runs.first {
-                    deployNewest[key] = newest
-                    let age = newest.startedAt.map { Date().timeIntervalSince($0) } ?? 0
-                    running = running || newest.running && age < max(3 * usual, 1800)
-                }
-                for c in changes {
-                    pendingDeploys.append((repoRoot, production, c, usual))
-                    if case .ended = c { ended = true }
-                }
-                lock.unlock()
-                for c in changes { trace("deploy \(branch) \(c)") }
-            }
-            if running { expect("deploys:" + repoRoot, for: 60, every: 10) }
-            else if ended { lock.lock(); expected["deploys:" + repoRoot] = nil; lock.unlock() }
-            lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
-            if any { DispatchQueue.main.async { self.onUpdate?() } }
+        lock.lock(); let before = pullsSeen[repoRoot]; let team = watched[repoRoot] == true; lock.unlock()
+        let (now, due, moved) = GitHubResolver.pullsMoved(arr, before: before, releasesInto: [p.staging, p.production], team: team)
+        for m in moved { trace("watch: #\(m.number) moved (\(m.head) → \(m.base)) at \(m.updated)") }
+        if due.all { trace("watch: more than a page moved in \(repoRoot), reading all it follows") }
+        lock.lock(); pullsSeen[repoRoot] = now; lock.unlock()
+        if due != FollowUps.Due() { fetch(due, repoRoot: repoRoot) }
+    }
+
+    static func pullsMoved(_ arr: [[String: Any]], before: [Int: Seen]?, releasesInto bases: [String], team: Bool)
+        -> (seen: [Int: Seen], due: FollowUps.Due, moved: [(number: Int, head: String, base: String, updated: String)]) {
+        var now: [Int: Seen] = [:]
+        var due = FollowUps.Due()
+        var moved: [(number: Int, head: String, base: String, updated: String)] = []
+        for o in arr {
+            guard let n = o["number"] as? Int, let updated = o["updated_at"] as? String else { continue }
+            let seen = Seen(updated: updated, open: o["state"] as? String == "open", merged: o["merged_at"] is String)
+            now[n] = seen
+            guard let before, before[n] != seen else { continue }
+            let was = before[n]
+            let base = (o["base"] as? [String: Any])?["ref"] as? String ?? ""
+            let head = (o["head"] as? [String: Any])?["ref"] as? String ?? ""
+            moved.append((n, head, base, updated))
+            due.pulls.insert(FollowUps.Pull(number: n, branch: head))
+            if was?.open != seen.open { due.team = team }
+            if (!base.isEmpty && bases.contains(base)) || (seen.merged && was?.merged != true) { due.releasing = true }
+        }
+        if let before, !before.isEmpty, arr.count >= 20, !now.contains(where: { before[$0.key] == $0.value }) { due.all = true }
+        return (now, due, moved)
+    }
+
+    private var followUps = FollowUps()
+    private var heavyAt: [String: Date] = [:]
+
+    private func fetch(_ due: FollowUps.Due, repoRoot: String, again: Bool = true) {
+        var due = due
+        lock.lock()
+        if due.all {
+            due.team = watched[repoRoot] == true
+            due.releasing = true
+            for k in pullsByNumber.keys where k.hasPrefix(repoRoot + "#") { if let n = Int(k.dropFirst(repoRoot.count + 1)) { due.pulls.insert(.init(number: n, branch: "")) } }
+            for k in pulls.keys where k.hasPrefix(repoRoot + "@") { due.pulls.insert(.init(number: 0, branch: String(k.dropFirst(repoRoot.count + 1)))) }
+        }
+        let heavy = (due.team || due.releasing) && (!again || Date().timeIntervalSince(heavyAt[repoRoot] ?? .distantPast) >= FollowUps.after)
+        if heavy { heavyAt[repoRoot] = Date() }
+        if due.releasing, again {
+            tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
+            tuneLocked("watch:board") { $0.heat(for: 120, Date()) }
+        }
+        let later = again && followUps.note(repoRoot, due)
+        lock.unlock()
+        if due.releasing, again { trace("hot \(repoRoot): deploys for \(Int(Deployments.findWithin))s, the board for 120s") }
+        for p in due.pulls { refetch(pull: p.number, branch: p.branch, repoRoot: repoRoot) }
+        if heavy, due.team { refetchOpenPRs(repoRoot) }
+        if heavy, due.releasing { refetchReleases(repoRoot) }
+        guard later else { return }
+        watching.asyncAfter(deadline: .now() + FollowUps.after) { [self] in
+            lock.lock(); let d = followUps.take(repoRoot); lock.unlock()
+            guard let d else { return }
+            trace("follow-up \(repoRoot): \(d.pulls.count) pull(s)\(d.team ? ", the open list" : "")\(d.releasing ? ", the releases" : "")")
+            fetch(d, repoRoot: repoRoot, again: false)
         }
     }
 
-    func watchPulls(repoRoot: String) {
-        if frozen { return }
+    private var rerun = Set<String>()
+
+    private func staleLocked(_ flight: String) { if inFlight.contains(flight) { rerun.insert(flight) } }
+
+    private func landed(_ flight: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        inFlight.remove(flight)
+        return rerun.remove(flight) != nil
+    }
+
+    private func refetchOpenPRs(_ repoRoot: String) {
         lock.lock()
-        guard let owner = owners[repoRoot], Date().timeIntervalSince(pullsWatchedAt[repoRoot] ?? .distantPast) >= 10,
-              !inFlight.contains("w:" + repoRoot) else { lock.unlock(); return }
-        inFlight.insert("w:" + repoRoot)
-        pullsWatchedAt[repoRoot] = Date()
+        if let prs = openPRs[repoRoot] { openPRs[repoRoot] = (prs.0, .distantPast) }
+        staleLocked("o:" + repoRoot)
         lock.unlock()
-        let p = pipeline(repoRoot: repoRoot)
-        queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("w:" + repoRoot); lock.unlock() }
-            guard let answer = http.get("repos/\(owner)/pulls?state=all&sort=updated&direction=desc&per_page=20"), answer.changed,
-                  let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
-            lock.lock(); let before = pullsSeen[repoRoot]; lock.unlock()
-            var now: [Int: String] = [:]
-            for o in arr {
-                guard let n = o["number"] as? Int, let updated = o["updated_at"] as? String else { continue }
-                now[n] = updated
-                guard let before, before[n] != updated else { continue }
-                let base = (o["base"] as? [String: Any])?["ref"] as? String ?? ""
-                let head = (o["head"] as? [String: Any])?["ref"] as? String ?? ""
-                trace("watch: #\(n) moved (\(head) → \(base))")
-                expect("openPRs:" + repoRoot, for: 60, every: 5)
-                expect("pull#:" + repoRoot + "#\(n)", for: 60, every: 5)
-                if !head.isEmpty { expect("pull:" + repoRoot + "@" + head, for: 60, every: 5) }
-                if base == p.staging || base == p.production || (o["merged_at"] as? String) != nil {
-                    expect("releases:" + repoRoot, for: 60, every: 5)
-                    expect("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
-                }
-            }
-            lock.lock(); pullsSeen[repoRoot] = now; lock.unlock()
+        refreshOpenPRs(repoRoot: repoRoot)
+    }
+
+    private func refetchReleases(_ repoRoot: String) {
+        lock.lock()
+        if let r = releases[repoRoot] { releases[repoRoot] = (r.0, .distantPast) }
+        staleLocked("r:" + repoRoot)
+        lock.unlock()
+        refreshReleases(repoRoot: repoRoot)
+    }
+
+    private func refetch(pull n: Int, branch: String, repoRoot: String) {
+        let numbered = repoRoot + "#\(n)", branched = repoRoot + "@" + branch
+        lock.lock()
+        let byNumber = n > 0 ? pullsByNumber[numbered] : nil, byBranch = branch.isEmpty ? nil : pulls[branched]
+        if let byNumber { pullsByNumber[numbered] = (byNumber.0, .distantPast); staleLocked(numbered) }
+        if let byBranch {
+            pulls[branched] = (byBranch.0, .distantPast)
+            staleLocked(branched)
+            expected["pull:" + branched] = (Date().addingTimeInterval(180), 30)
         }
+        lock.unlock()
+        if byNumber != nil { refresh(pull: n, repoRoot: repoRoot) }
+        if byBranch != nil { refresh(branch: branch, repoRoot: repoRoot) }
     }
 
     private func deployingWorkflows(branch: String, repoRoot: String) -> Set<String> {
@@ -774,155 +836,240 @@ final class GitHubResolver {
         return feeds[repoRoot]?.0
     }
 
-    private var feedETags: [String: String] = [:]
+    private func detectFeed(_ repoRoot: String) {
+        lock.lock(); let who = !askedWho; askedWho = true; lock.unlock()
+        if who {
+            if let a = http.get("user"), let o = try? JSONSerialization.jsonObject(with: a.data) as? [String: Any], let login = o["login"] as? String {
+                lock.lock(); let changed = me != login; me = login; lock.unlock()
+                if changed { ConfigStore.shared.update { $0.viewerLogin = login } }
+            } else { lock.lock(); askedWho = false; lock.unlock() }
+        }
+        guard let owner = nameWithOwner(repoRoot: repoRoot), let answer = ask(repoRoot + "#watch:feed", "repos/\(owner)/events?per_page=100") else { return }
+        guard answer.changed else {
+            lock.lock(); if let old = feeds[repoRoot] { feeds[repoRoot] = (old.0, Date()) }; lock.unlock()
+            return
+        }
+        guard var arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
+        if arr.count == 100, let more = http.get("repos/\(owner)/events?per_page=100&page=2"),
+           let next = try? JSONSerialization.jsonObject(with: more.data) as? [[String: Any]] { arr += next }
+        let events = GitHubResolver.feedEvents(arr)
+        lock.lock()
+        let known = feeds[repoRoot]?.0
+        let changed = known != events
+        feeds[repoRoot] = (events, Date())
+        var learned = false
+        if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+            for e in events where !e.isBot {
+                guard let n = e.prNumber else { continue }
+                let opened = e.kind == "pr_open" || e.kind == "issue_open"
+                if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
+            }
+        }
+        let board = learned ? project : nil
+        lock.unlock()
+        if let (items, at) = board { saveBoard(items, at: at) }
+        let p = pipeline(repoRoot: repoRoot)
+        if GitHubResolver.fresh(events, since: known).contains(where: { e in
+            e.kind == "release" || e.kind == "push" && !(e.branch ?? "").isEmpty && [p.staging, p.production].contains(e.branch ?? "")
+        }) { fetch(FollowUps.Due(releasing: true), repoRoot: repoRoot) }
+        if changed { DispatchQueue.main.async { self.onUpdate?() } }
+    }
 
-    func refreshFeed(repoRoot: String) {
+    static func fresh(_ events: [FeedEvent], since known: [FeedEvent]?) -> [FeedEvent] {
+        let seen = Set((known ?? []).compactMap(\.id))
+        guard !seen.isEmpty else { return [] }
+        return events.filter { $0.id.map { !seen.contains($0) } ?? false }
+    }
+
+    static func feedEvents(_ arr: [[String: Any]]) -> [FeedEvent] {
+        let iso = ISO8601DateFormatter()
+        var events: [FeedEvent] = []
+        for e in arr {
+            guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
+            let actor = (e["actor"] as? [String: Any])?["login"] as? String ?? "?"
+            let isBot = GitHubResolver.isBot(actor)
+            let payload = e["payload"] as? [String: Any] ?? [:]
+            let pr = payload["pull_request"] as? [String: Any]
+            let prNumber = pr?["number"] as? Int
+            let prBranch = (pr?["head"] as? [String: Any])?["ref"] as? String
+            func add(_ kind: String, branch: String?, detail: String = "") {
+                events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: kind, branch: branch, prNumber: prNumber,
+                                        title: pr?["title"] as? String, url: pr?["html_url"] as? String, detail: detail, id: e["id"] as? String))
+            }
+            switch e["type"] as? String ?? "" {
+            case "PushEvent":
+                let ref = (payload["ref"] as? String ?? "").replacingOccurrences(of: "refs/heads/", with: "")
+                let n = (payload["commits"] as? [[String: Any]])?.count ?? (payload["size"] as? Int ?? 1)
+                add("push", branch: ref, detail: "\(max(1, n))")
+            case "PullRequestEvent":
+                let action = payload["action"] as? String ?? ""
+                let merged = (pr?["merged"] as? Bool ?? false) || action == "merged"
+                if action == "opened" || action == "reopened" { add("pr_open", branch: prBranch) }
+                else if action == "closed" || action == "merged" { add(merged ? "pr_merge" : "pr_close", branch: prBranch) }
+            case "PullRequestReviewEvent":
+                add("review", branch: prBranch, detail: ((payload["review"] as? [String: Any])?["state"] as? String ?? "").lowercased())
+            case "PullRequestReviewCommentEvent":
+                add("comment", branch: prBranch)
+            case "IssueCommentEvent":
+                if let issue = payload["issue"] as? [String: Any], issue["pull_request"] != nil { add("comment", branch: nil) }
+            case "CreateEvent":
+                if payload["ref_type"] as? String == "branch" { add("branch_create", branch: payload["ref"] as? String) }
+            case "DeleteEvent":
+                if payload["ref_type"] as? String == "branch" { add("branch_delete", branch: payload["ref"] as? String) }
+            case "IssuesEvent":
+                if payload["action"] as? String == "opened", let issue = payload["issue"] as? [String: Any] {
+                    events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: "issue_open", branch: nil, prNumber: issue["number"] as? Int,
+                                            title: issue["title"] as? String, url: issue["html_url"] as? String, detail: "", id: e["id"] as? String))
+                }
+            case "ReleaseEvent":
+                add("release", branch: nil, detail: ((payload["release"] as? [String: Any])?["tag_name"] as? String) ?? "")
+            default: break
+            }
+        }
+        return events
+    }
+
+    // MARK: watching
+
+    private var isFront = false
+    private var lastWork = Date.distantPast
+    private var pinned: Pace?
+    var front: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return isFront }
+        set { lock.lock(); isFront = newValue; lock.unlock() }
+    }
+    var worked: Date {
+        get { lock.lock(); defer { lock.unlock() }; return lastWork }
+        set { lock.lock(); lastWork = newValue; lock.unlock() }
+    }
+    var pace: Pace {
+        get { lock.lock(); defer { lock.unlock() }; return paceLocked(Date()) }
+        set { lock.lock(); pinned = newValue; lock.unlock() }
+    }
+    private func paceLocked(_ now: Date) -> Pace { pinned ?? .of(front: isFront, worked: lastWork, now: now) }
+
+    private var watched: [String: Bool] = [:]
+    private var board: (owner: String, number: Int)?
+    private var detectors: [String: Detector] = [:]
+    private var gits: [String: GitWatch] = [:]
+    private var ticker: DispatchSourceTimer?
+    private var fetchedAt: [String: Date] = [:]
+    private let watching = DispatchQueue(label: "rumkapsel.github.watch", qos: .utility, attributes: .concurrent)
+
+    func watch(_ roots: [String: Bool], board: (owner: String, number: Int)?) {
         if frozen { return }
         lock.lock()
-        if Date() < holdUntil { lock.unlock(); return }
-        if let (_, at) = feeds[repoRoot], Date().timeIntervalSince(at) < gate("feed:" + repoRoot, base: 60) { lock.unlock(); return }
-        if inFlight.contains("f:" + repoRoot) { lock.unlock(); return }
-        inFlight.insert("f:" + repoRoot)
+        watched = roots
+        self.board = board
+        for gone in gits.keys where roots[gone] == nil { gits[gone] = nil }
+        let fresh = roots.keys.filter { gits[$0] == nil }
+        if ticker == nil {
+            let t = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "rumkapsel.github.tick"))
+            t.schedule(deadline: .now() + .milliseconds(Int.random(in: 0...1000)), repeating: 1)
+            t.setEventHandler { [weak self] in self?.tick() }
+            t.resume()
+            ticker = t
+        }
         lock.unlock()
-        trace("ask feed \(repoRoot)")
-        queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("f:" + repoRoot); lock.unlock() }
-            if !askedWho, let out = run(["gh", "api", "user", "--jq", ".login"], cwd: repoRoot),
-               let login = String(data: out, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !login.isEmpty {
-                lock.lock(); askedWho = true; let changed = me != login; me = login; lock.unlock()
-                if changed { ConfigStore.shared.update { $0.viewerLogin = login } }
-            }
-            var owner = nameWithOwner(repoRoot: repoRoot)
-            if owner == nil, let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
-               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let n = obj["nameWithOwner"] as? String {
-                learned(owner: n, repoRoot: repoRoot)
-                owner = n
-            }
-            guard let owner else { return }
-            let iso = ISO8601DateFormatter()
-            var events: [FeedEvent] = []
-            lock.lock(); let etag = feedETags[repoRoot]; lock.unlock()
-            for page in 1...2 {
-                let arr: [[String: Any]]
-                if page == 1 {
-                    var args = ["gh", "api", "-i", "repos/\(owner)/events?per_page=100&page=1"]
-                    if let etag { args += ["-H", "If-None-Match: \(etag)"] }
-                    guard let (_, raw) = runRaw(args, cwd: repoRoot), let (status, headers, body) = GitHubResolver.split(raw) else { return }
-                    if status == 304 {
-                        trace("feed \(repoRoot) unchanged (304)")
-                        lock.lock(); if let old = feeds[repoRoot] { feeds[repoRoot] = (old.0, Date()) }; lock.unlock()
-                        return
-                    }
-                    guard status == 200, let parsed = try? JSONSerialization.jsonObject(with: body) as? [[String: Any]] else { return }
-                    if let tag = headers["etag"] { lock.lock(); feedETags[repoRoot] = tag; lock.unlock() }
-                    arr = parsed
-                } else {
-                    guard let out = run(["gh", "api", "repos/\(owner)/events?per_page=100&page=\(page)"], cwd: repoRoot),
-                          let parsed = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { break }
-                    arr = parsed
-                }
-                for e in arr {
-                    guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
-                    let actorObj = e["actor"] as? [String: Any]
-                    let actor = actorObj?["login"] as? String ?? "?"
-                    let isBot = GitHubResolver.isBot(actor)
-                    let payload = e["payload"] as? [String: Any] ?? [:]
-                    let pr = payload["pull_request"] as? [String: Any]
-                    let prNumber = pr?["number"] as? Int
-                    let prTitle = pr?["title"] as? String
-                    let prURL = pr?["html_url"] as? String
-                    let prBranch = (pr?["head"] as? [String: Any])?["ref"] as? String
-                    func add(_ kind: String, branch: String?, detail: String = "") {
-                        events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: kind, branch: branch, prNumber: prNumber,
-                                                title: prTitle, url: prURL, detail: detail))
-                    }
-                    switch e["type"] as? String ?? "" {
-                    case "PushEvent":
-                        let ref = (payload["ref"] as? String ?? "").replacingOccurrences(of: "refs/heads/", with: "")
-                        let n = (payload["commits"] as? [[String: Any]])?.count ?? (payload["size"] as? Int ?? 1)
-                        add("push", branch: ref, detail: "\(max(1, n))")
-                    case "PullRequestEvent":
-                        let action = payload["action"] as? String ?? ""
-                        let merged = (pr?["merged"] as? Bool ?? false) || action == "merged"
-                        if action == "opened" || action == "reopened" { add("pr_open", branch: prBranch) }
-                        else if action == "closed" || action == "merged" { add(merged ? "pr_merge" : "pr_close", branch: prBranch) }
-                    case "PullRequestReviewEvent":
-                        add("review", branch: prBranch, detail: ((payload["review"] as? [String: Any])?["state"] as? String ?? "").lowercased())
-                    case "PullRequestReviewCommentEvent":
-                        add("comment", branch: prBranch)
-                    case "IssueCommentEvent":
-                        if let issue = payload["issue"] as? [String: Any], issue["pull_request"] != nil { add("comment", branch: nil) }
-                    case "CreateEvent":
-                        if payload["ref_type"] as? String == "branch" { add("branch_create", branch: payload["ref"] as? String) }
-                    case "DeleteEvent":
-                        if payload["ref_type"] as? String == "branch" { add("branch_delete", branch: payload["ref"] as? String) }
-                    case "IssuesEvent":
-                        if payload["action"] as? String == "opened", let issue = payload["issue"] as? [String: Any] {
-                            events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: "issue_open", branch: nil, prNumber: issue["number"] as? Int,
-                                                    title: issue["title"] as? String, url: issue["html_url"] as? String, detail: ""))
-                        }
-                    case "ReleaseEvent":
-                        add("release", branch: nil, detail: ((payload["release"] as? [String: Any])?["tag_name"] as? String) ?? "")
-                    default: break
-                    }
-                }
-                if arr.count < 100 { break }
-            }
-            lock.lock()
-            let known = feeds[repoRoot]?.0
-            let changed = known != events
-            feeds[repoRoot] = (events, Date())
-            var learned = false
-            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
-                for e in events where !e.isBot {
-                    guard let n = e.prNumber else { continue }
-                    let opened = e.kind == "pr_open" || e.kind == "issue_open"
-                    if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
-                }
-            }
-            let board = learned ? project : nil
-            lock.unlock()
-            if let (items, at) = board { saveBoard(items, at: at) }
-            if let known {
-                let newest = known.map(\.at).max() ?? .distantPast
-                for e in events where e.at > newest {
-                    switch e.kind {
-                    case "pr_open", "pr_merge", "pr_close":
-                        expect("openPRs:" + repoRoot, for: 120, every: 15)
-                        if let n = e.prNumber { expect("pull#:" + repoRoot + "#\(n)", for: 120, every: 15) }
-                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 120, every: 15) }
-                        if e.kind == "pr_merge" {
-                            expect("releases:" + repoRoot, for: 300, every: 30); expect("projectDelta", for: 120, every: 10)
-                            expect("deploys:" + repoRoot, for: 300, every: 20)
-                        }
-                    case "push":
-                        if let b = e.branch { expect("pull:" + repoRoot + "@" + b, for: 180, every: 30) }
-                    case "release":
-                        expect("releases:" + repoRoot, for: 120, every: 15)
-                    default: break
-                    }
-                }
-            }
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+        for root in fresh {
+            let w = GitWatch(root: root) { [weak self] change in self?.heard(change, repoRoot: root) }
+            lock.lock(); gits[root] = w; lock.unlock()
         }
     }
 
-    private static func split(_ raw: Data) -> (Int, [String: String], Data)? {
-        guard let sep = raw.range(of: Data("\r\n\r\n".utf8)) ?? raw.range(of: Data("\n\n".utf8)) else { return nil }
-        guard let head = String(data: raw[..<sep.lowerBound], encoding: .utf8) else { return nil }
-        let lines = head.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" }).map(String.init)
-        guard let first = lines.first, let status = Int(first.split(separator: " ").dropFirst().first ?? "") else { return nil }
-        var headers: [String: String] = [:]
-        for l in lines.dropFirst() {
-            guard let c = l.firstIndex(of: ":") else { continue }
-            headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
+    private func tick() {
+        let now = Date()
+        guard !frozen, http.open else { return }
+        let stretch = http.stretch
+        lock.lock()
+        let pace = paceLocked(now)
+        var due: [(key: String, run: () -> Void)] = []
+        func check(_ key: String, _ fresh: Detector, _ run: @escaping () -> Void) {
+            var d = detectors[key] ?? fresh
+            if detectors[key] == nil { d.start(now, pace: pace, jitter: .random(in: 0...3)) }
+            guard d.due(now, pace: pace, stretch: stretch), !inFlight.contains(key) else { detectors[key] = d; return }
+            d.asking(now)
+            detectors[key] = d
+            inFlight.insert(key)
+            due.append((key, run))
         }
-        return (status, headers, raw[sep.upperBound...])
+        for (root, team) in watched {
+            check(root + "#watch:runs", .runs) { self.detectRuns(root) }
+            guard owners[root] != nil else {
+                check(root + "#watch:owner", Detector(every: [300, 300, 300])) { self.learnOwner(root) }
+                continue
+            }
+            check(root + "#watch:pulls", .pulls) { self.detectPulls(root) }
+            if team { check(root + "#watch:feed", .feed) { self.detectFeed(root) } }
+        }
+        if let b = board, project != nil { check("watch:board", .board) { self.detectBoard(owner: b.owner, number: b.number) } }
+        check("watch:limits", Detector(every: [300, 300, 300])) { self.http.readLimits() }
+        lock.unlock()
+        for d in due { watching.async { [self] in d.run(); lock.lock(); inFlight.remove(d.key); lock.unlock() } }
+    }
+
+    private func ask(_ key: String, _ path: String, cache: String? = nil) -> GitHubHTTP.Answer? {
+        let answer = http.get(path, key: cache)
+        let failed = answer == nil && http.open
+        tune(key) { if let answer { $0.heard(pollInterval: answer.pollInterval) } else if failed { $0.failed() } }
+        if failed { trace("\(key): no answer, next try in \(Int(detector(key)?.backoff ?? 0))s") }
+        return answer
+    }
+
+    private func detector(_ key: String) -> Detector? { lock.lock(); defer { lock.unlock() }; return detectors[key] }
+
+    private func tune(_ key: String, _ change: (inout Detector) -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        tuneLocked(key, change)
+    }
+
+    private func tuneLocked(_ key: String, _ change: (inout Detector) -> Void) {
+        guard var d = detectors[key] else { return }
+        change(&d)
+        detectors[key] = d
+    }
+
+    func ring(repoRoot: String) {
+        lock.lock(); defer { lock.unlock() }
+        ringLocked(repoRoot: repoRoot)
+    }
+
+    private func ringLocked(repoRoot: String?) {
+        let now = Date()
+        for k in detectors.keys where repoRoot.map({ k.hasPrefix($0 + "#watch:") }) ?? true {
+            detectors[k]?.ring()
+            if k.hasSuffix("#watch:pulls") || k.hasSuffix("#watch:runs") { detectors[k]?.heat(for: 30, now) }
+        }
+        tuneLocked("watch:board") { $0.heat(for: 120, now) }
+    }
+
+    private func heard(_ change: GitChange, repoRoot: String) {
+        let now = Date()
+        lock.lock()
+        let echo = now.timeIntervalSince(fetchedAt[repoRoot] ?? .distantPast) < 2
+        let links = commits.keys.compactMap { w in GitWatch.link(ofWorktree: w).flatMap { $0.root == repoRoot ? (w, $0.name) : nil } }
+        let hit = links.filter { change.local || change.remote || ($0.1.map(change.worktrees.contains) ?? false) }.map(\.0)
+        for w in hit { if let c = commits[w] { commits[w] = (c.0, .distantPast) }; staleLocked("c:" + w) }
+        if change.remote, !echo {
+            ringLocked(repoRoot: repoRoot)
+            for (w, _) in links { if let b = checkedOut[w] { expected["pull:" + repoRoot + "@" + b] = (now.addingTimeInterval(180), 30) } }
+        }
+        lock.unlock()
+        trace("git \(repoRoot): \(change.local ? "commit or checkout " : "")\(change.worktrees.isEmpty ? "" : "worktree \(change.worktrees.sorted()) ")\(change.remote ? "remote refs " : "")\(change.tags ? "tags " : "")\(echo ? "(our fetch) " : "")→ \(hit.count) checkout(s)")
+        for w in hit { refreshCommits(worktree: w) }
+        if change.tags, !echo, pipeline(repoRoot: repoRoot).shipsOnTag { fetch(FollowUps.Due(releasing: true), repoRoot: repoRoot) }
+    }
+
+    private func learnOwner(_ repoRoot: String) {
+        guard let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
+              let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let n = obj["nameWithOwner"] as? String else { return }
+        learned(owner: n, repoRoot: repoRoot)
     }
 
     func invalidate(repoRoot: String) {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
+        ringLocked(repoRoot: repoRoot)
         for k in pulls.keys where k.hasPrefix(repoRoot + "@") { pulls[k] = (pulls[k]!.0, old) }
         if let r = releases[repoRoot] { releases[repoRoot] = (r.0, old) }
     }
@@ -930,6 +1077,7 @@ final class GitHubResolver {
     func invalidate() {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
+        ringLocked(repoRoot: nil)
         pulls = pulls.mapValues { ($0.0, old) }
         commits = commits.mapValues { ($0.0, old) }
         releases = releases.mapValues { ($0.0, old) }
@@ -938,7 +1086,7 @@ final class GitHubResolver {
     func refreshReleases(repoRoot: String) {
         if frozen { return }
         lock.lock()
-        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < gate("releases:" + repoRoot, base: interval) { lock.unlock(); return }
+        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
         inFlight.insert("r:" + repoRoot)
         lock.unlock()
@@ -1075,7 +1223,7 @@ final class GitHubResolver {
             let previous = releases[repoRoot]?.0 ?? []
             for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
                 pendingLaunches.append((repoRoot, pr))
-                expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
+                tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
             }
             if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
                 pendingLaunches.append((repoRoot, tag))
@@ -1085,7 +1233,7 @@ final class GitHubResolver {
                     let was = before.first { $0.number == pr.number }
                     guard was?.state == "OPEN" || (was == nil && (pr.mergedAt ?? .distantPast) > at) else { continue }
                     pendingHotfixes.append((repoRoot, pr))
-                    expectLocked("deploys:" + repoRoot, for: Deployments.findWithin, every: 10)
+                    tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
                 }
             }
             let hotfixesChanged = hotfixes[repoRoot]?.0 != foundHotfixes
@@ -1098,7 +1246,9 @@ final class GitHubResolver {
             cargo[repoRoot] = newCargo
             releases[repoRoot] = (found, Date())
             inFlight.remove("r:" + repoRoot)
+            let again = rerun.remove("r:" + repoRoot) != nil
             lock.unlock()
+            if again { refetchReleases(repoRoot) }
             if pipelineChanged {
                 trace("pipeline \(repoRoot): \(pipe.trunk) → \(pipe.staging.isEmpty ? "-" : pipe.staging) → \(pipe.production.isEmpty ? "-" : pipe.production) · \(pipe.source): \(pipe.why)")
             }
@@ -1108,21 +1258,7 @@ final class GitHubResolver {
 
     private let queue = DispatchQueue(label: "rumkapsel.github", qos: .utility, attributes: .concurrent)
 
-    // MARK: expecting a change
-
     private var expected: [String: (until: Date, every: TimeInterval)] = [:]
-
-    func expect(_ key: String, for seconds: TimeInterval = 120, every: TimeInterval = 15) {
-        lock.lock(); defer { lock.unlock() }
-        expectLocked(key, for: seconds, every: every)
-    }
-
-    private func expectLocked(_ key: String, for seconds: TimeInterval, every: TimeInterval) {
-        let until = Date().addingTimeInterval(seconds)
-        if let e = expected[key], e.until > until, e.every <= every { return }
-        expected[key] = (until, every)
-        trace("expect \(key) every \(Int(every))s for \(Int(seconds))s")
-    }
 
     private func gate(_ key: String, base: TimeInterval) -> TimeInterval {
         if let e = expected[key] {
@@ -1173,13 +1309,13 @@ final class GitHubResolver {
         if frozen { return }
         let key = repoRoot + "#\(number)"
         lock.lock()
-        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < gate("pull#:" + key, base: interval) { lock.unlock(); return }
+        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
         if inFlight.contains(key) { lock.unlock(); return }
         inFlight.insert(key)
         lock.unlock()
         trace("ask pull \(key)")
         queue.async { [self] in
-            defer { lock.lock(); inFlight.remove(key); lock.unlock() }
+            defer { if landed(key) { refetch(pull: number, branch: "", repoRoot: repoRoot) } }
             guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,closingIssuesReferences"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
             var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
@@ -1254,8 +1390,11 @@ final class GitHubResolver {
             pushed[worktree] = isPushed
             dirty[worktree] = changed
             checkedOut[worktree] = onBranch
-            inFlight.remove("c:" + worktree)
             lock.unlock()
+            if landed("c:" + worktree) {
+                lock.lock(); commits[worktree] = (n, .distantPast); lock.unlock()
+                refreshCommits(worktree: worktree)
+            }
             if changedResult { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
@@ -1276,12 +1415,7 @@ final class GitHubResolver {
         trace("ask pull \(key)")
 
         queue.async { [self] in
-            if nameWithOwner(repoRoot: repoRoot) == nil,
-               let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
-               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
-               let n = obj["nameWithOwner"] as? String {
-                learned(owner: n, repoRoot: repoRoot)
-            }
+            if nameWithOwner(repoRoot: repoRoot) == nil { learnOwner(repoRoot) }
             var pr: PullRequest?
             func parse(_ o: [String: Any]) -> PullRequest {
                 var checks = ""
@@ -1313,8 +1447,8 @@ final class GitHubResolver {
             lock.lock()
             if !answered, let old = pulls[key] {
                 pulls[key] = (old.0, Date().addingTimeInterval(60 - interval))
-                inFlight.remove(key)
                 lock.unlock()
+                if landed(key) { refetch(pull: 0, branch: branch, repoRoot: repoRoot) }
                 return
             }
             let changed = pulls[key]?.0 != pr
@@ -1323,19 +1457,14 @@ final class GitHubResolver {
             if let pr, pr.state == "OPEN", pr.checks == "pending" || pr.reviewDecision == "APPROVED" {
                 expected["pull:" + key] = (Date().addingTimeInterval(180), 30)
             }
-            inFlight.remove(key)
             lock.unlock()
+            if landed(key) { refetch(pull: 0, branch: branch, repoRoot: repoRoot) }
             if changed { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
 
     private func run(_ args: [String], cwd: String) -> Data? {
-        guard let (status, data) = runRaw(args, cwd: cwd), status == 0 else { return nil }
-        return data
-    }
-
-    private func runRaw(_ args: [String], cwd: String) -> (Int32, Data)? {
-        guard FileManager.default.fileExists(atPath: cwd) else { return nil }
+        guard FileManager.default.fileExists(atPath: cwd), args.first != "gh" || http.ghOpen else { return nil }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = args
@@ -1349,7 +1478,9 @@ final class GitHubResolver {
         do { try p.run() } catch { return nil }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return (p.terminationStatus, data)
+        GitHubMeter.ran(args, ok: p.terminationStatus == 0, bytes: data.count)
+        if args.starts(with: ["git", "fetch"]) { lock.lock(); fetchedAt[cwd] = Date(); lock.unlock() }
+        return p.terminationStatus == 0 ? data : nil
     }
 }
 
