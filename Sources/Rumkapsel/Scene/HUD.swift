@@ -375,6 +375,7 @@ extension StationController {
             layoutLegend(active: active, busy: busy, waiting: waiting, asleep: asleep)
             if !headless { placePlanets() }
             if spaceLogButton != nil, clock - spaceLogClock > 10 { spaceLogClock = clock; countUnreadSpaceLog() }
+            if storyOf != nil, clock - storyClock > 5 { drawStory() }
             updateNeighbours()
         }
 
@@ -425,7 +426,7 @@ extension StationController {
             infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("decon:"), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let repo = String(h.split(separator: "|")[1])
-            infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click to open"
+            infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click for its story"
         } else if h.hasPrefix("decon:") {
             let name = String(h.dropFirst(6))
             let waiting = fleet.stations[name]?.facts.count(.decon) ?? 0
@@ -441,7 +442,7 @@ extension StationController {
             parts.append(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging")
             let station = String(h.split(separator: "|")[0].split(separator: ":", maxSplits: 1).last ?? "")
             if let story = StationController.crateStory(world.log.history(station, CrateID(repo: repo, number: n))) { parts.append(story) }
-            parts.append("click to open")
+            parts.append("click for its story")
             infoLabel.text = parts.joined(separator: " · ")
         } else if h.hasPrefix("storage:") {
             let name = String(h.dropFirst(8).split(separator: "|").first ?? "")
@@ -484,32 +485,12 @@ extension StationController {
     private static let hoverClock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
 
     private static func stepWords(_ s: EventLog.Step) -> String {
-        let w = Words.current
         guard let to = s.to else { return "gone" }
-        if s.from?.place == to.place, let stage = to.stage {
-            switch stage {
-            case .inbound, .working: return "working"
-            case .ready: return "pull request open"
-            case .stored: return "merged"
-            case .qa: return "in QA"
-            case .cleared: return "tested"
-            case .shipped: return "shipped"
-            }
-        }
-        switch to.place {
-        case .office: return "in its \(w.office)"
-        case .waiting: return "in \(w.inStorage)"
-        case .testing: return "on \(w.theDeck)"
-        case .cleared: return "on \(w.testedRow)"
-        case .decon: return "in \(w.inDecon)"
-        case .aboard: return w.aboard
-        }
+        return s.from?.place == to.place ? CrateStory.what(s) : CrateStory.place(to)
     }
 
-    func openCargo(named name: String) {
-        let parts = name.split(separator: "|").map(String.init)
-        guard parts.count == 3, let n = Int(parts[2]), n > 0 else { return }
-        let repo = parts[1]
+    func openCrate(_ id: CrateID) {
+        let repo = id.repo, n = id.number
         if let item = github.projectItems()?.first(where: { $0.repo == repo && $0.number == n }), let url = URL(string: item.url) {
             DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             return

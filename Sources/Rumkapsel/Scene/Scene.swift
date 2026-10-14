@@ -306,6 +306,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var neighboursButton: NeighboursButton?
     var neighboursPanel: NeighboursPanel?
     var neighboursOpen = false
+    var storyPanel: CrateStoryPanel?
+    var storyOf: (station: String, id: CrateID)?
+    var storyClock = 0.0
     var hovered: String?
     var following: String?
     private var lastTick = 0.0
@@ -392,19 +395,21 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node, floor in
             let n = node?.name ?? ""
             self?.enqueue {
                 if n.hasPrefix("minion:") { self?.poke(minionId: String(n.dropFirst(7))) }
                 else if ["room:", "box:", "rocket:"].contains(where: n.hasPrefix) { self?.open(named: n) }
+                else if let (_, id) = StationController.crate(named: n) { self?.openCrate(id) }
                 else if let floor, self?.walker == nil { self?.stepIn(at: floor) }
             }
         }
         view.onClick = { [weak self] node in
             if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
             let n = node?.name ?? ""
+            if StationController.crate(named: n) == nil && !n.hasPrefix("box:") { self?.closeStory() }
             if n.hasPrefix("minion:") {
                 let id = String(n.dropFirst(7))
                 self?.enqueue { if self?.walker != nil { self?.ride(minionId: id) } else { self?.follow(minionId: id) } }
@@ -412,8 +417,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             self?.enqueue { self?.following = nil }
             guard !n.isEmpty else { return }
-            if (n.hasPrefix("storage:") || n.hasPrefix("deck:") || n.hasPrefix("decon:")), n.split(separator: "|").count == 3 { self?.enqueue { self?.openCargo(named: n) } }
-            guard n.hasPrefix("box:") || n.hasPrefix("rocket:") else { return }
+            if StationController.crate(named: n) != nil || n.hasPrefix("box:") {
+                self?.enqueue {
+                    if let (station, id) = self?.storyCrate(named: n) { self?.openStory(station, id) } else { self?.open(named: n) }
+                }
+                return
+            }
+            guard n.hasPrefix("rocket:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
         view.onContextMenu = { [weak self] node, event in self?.showContextMenu(for: node?.name, event: event) }
@@ -480,6 +490,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 enqueue { self.walkEscape() }
                 if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
                 if neighboursPanel?.isHidden == false { toggleNeighbours() }
+                if storyPanel?.isHidden == false { closeStory() }
             case "l": toggleSpaceLog()
             case "n": toggleNeighbours()
             case "g": refreshGitHub()
@@ -494,6 +505,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
+        installStory()
         if !simulated { Bulkhead.prepare() }
         if demo {
             seedDemo()

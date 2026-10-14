@@ -2,7 +2,7 @@ import Foundation
 
 private enum Field: String, CodingKey {
     case e, repo, facts, crate, office, stage, closed, quiet, link, key, via, by = "for", from, to, merged, closedAt, open, n, deploy
-    case production, label, hotfix, crates, keep
+    case production, label, hotfix, crates, keep, source
 }
 
 extension CrateID {
@@ -46,6 +46,7 @@ extension Event: Codable {
             try c.encode(w.stage.name, forKey: .stage)
             if w.closed { try c.encode(true, forKey: .closed) }
             if !w.link.isEmpty { try c.encode(w.link, forKey: .link) }
+            try c.encodeIfPresent(w.by?.rawValue, forKey: .source)
         case .office(.opened(let key, let repo, let via)):
             try put("officeOpened", repo: repo)
             try c.encode(key, forKey: .key)
@@ -124,7 +125,8 @@ extension Event: Codable {
             self = .policy(repo: try text(.repo), try c.decode(RepoFacts.self, forKey: .facts))
         case "work":
             self = .work(WorkNews(crate: try crate(.crate), office: try c.decodeIfPresent(String.self, forKey: .office), stage: try Stage(name: text(.stage)),
-                                  closed: try flag(.closed), quiet: try flag(.quiet), link: try c.decodeIfPresent(String.self, forKey: .link) ?? ""))
+                                  closed: try flag(.closed), quiet: try flag(.quiet), link: try c.decodeIfPresent(String.self, forKey: .link) ?? "",
+                                  by: try c.decodeIfPresent(String.self, forKey: .source).flatMap(Source.init(rawValue:))))
         case "officeOpened":
             let via: OfficeFact.Via
             switch try text(.via) {
@@ -178,7 +180,7 @@ extension Event: Codable {
         func list(_ numbers: [Int]) -> String { numbers.sorted().map { "#\($0)" }.joined(separator: ", ") }
         switch self {
         case .policy(let repo, _): return "policy \(repo)"
-        case .work(let w): return "work \(w.crate) \(w.stage.name)" + (w.closed ? " closed" : "") + (w.office.map { " in \($0)" } ?? "")
+        case .work(let w): return "work \(w.crate) \(w.stage.name)" + (w.closed ? " closed" : "") + (w.office.map { " in \($0)" } ?? "") + (w.by.map { " by \($0)" } ?? "")
         case .office(.opened(let key, _, _)): return "office \(key) opened"
         case .office(.renamed(let from, let to)): return "office \(from) renamed \(to)"
         case .office(.status(let key, _, let merged, _)): return "office \(key) status" + (merged ? " merged" : "")

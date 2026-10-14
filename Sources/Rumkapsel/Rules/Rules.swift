@@ -7,6 +7,7 @@ struct WorkNews: Equatable {
     var closed = false
     var quiet = false
     var link = ""
+    var by: Source?
 }
 
 enum OfficeNews: Equatable {

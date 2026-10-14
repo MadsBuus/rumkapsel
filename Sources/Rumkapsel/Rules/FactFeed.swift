@@ -68,7 +68,7 @@ extension World {
         guard let n = record.number else { return }
         let crate = CrateID(repo: record.repo, number: n)
         feed.numbered[record.id] = crate
-        var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil)
+        var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil, by: t.by)
         if t.to == .stored, let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key, github.pipeline(repoRoot: root).shipsOnMerge {
             news.link = waitingURL(repo: record.repo)
         }

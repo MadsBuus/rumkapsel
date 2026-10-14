@@ -189,6 +189,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--log") {
             DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 3)) { [self] in controller.toggleSpaceLog() }
         }
+        if let i = args.firstIndex(of: "--story"), args.count > i + 1, let id = try? CrateID(text: args[i + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 1)) { [weak self] in
+                guard let station = self?.simulator?.station ?? self?.controller else { return }
+                station.enqueue { station.openStory(id) }
+            }
+        }
         let galleryMode = args.contains("--gallery")
         if galleryMode { openGallery() }
         let playbookMode = args.contains("--playbook")
