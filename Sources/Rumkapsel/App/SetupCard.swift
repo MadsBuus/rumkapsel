@@ -3,6 +3,8 @@ import SceneKit
 import SpriteKit
 
 struct SetupCardFacts: Equatable {
+    enum Kind: Equatable { case new, mismatch }
+    var kind = Kind.new
     let repos: [String]
     let lines: [String]
     let colors: [String: RGB]
@@ -16,7 +18,7 @@ extension StationController {
         let card = SetupCard(frame: NSRect(x: view.bounds.width - SetupCard.width - 16, y: view.bounds.height - 200, width: SetupCard.width, height: 120))
         card.autoresizingMask = [.minXMargin, .minYMargin]
         card.isHidden = true
-        card.onAnswer = { [weak self] repos, change in self?.enqueue { self?.answerCard(repos, change: change) } }
+        card.onAnswer = { [weak self] facts, second in self?.enqueue { self?.answerCard(facts, second: second) } }
         view.addSubview(card)
         setupCard = card
     }
@@ -27,9 +29,15 @@ extension StationController {
     }
 
     func drawCard() {
-        let repos = cardRepos()
-        let facts = SetupCardFacts(repos: repos, lines: Setup.card(repos.map(world.setup(repo:))),
+        var repos = cardRepos()
+        var facts = SetupCardFacts(repos: repos, lines: Setup.card(repos.map(world.setup(repo:))),
                                    colors: Dictionary(uniqueKeysWithValues: repos.map { ($0, fleet.color(forRepo: $0)) }), room: viewSize)
+        if repos.isEmpty, !demo {
+            let found = world.mismatches.filter { !answeredCards.contains("mismatch:" + $0.repo) }
+            repos = found.map(\.repo)
+            facts = SetupCardFacts(kind: .mismatch, repos: repos, lines: Setup.mismatchCard(found.flatMap(\.lines)),
+                                   colors: Dictionary(uniqueKeysWithValues: repos.map { ($0, fleet.color(forRepo: $0)) }), room: viewSize)
+        }
         guard facts != cardFacts else { return }
         cardFacts = facts
         DispatchQueue.main.async { [self] in
@@ -39,11 +47,26 @@ extension StationController {
         }
     }
 
-    func answerCard(_ repos: [String], change: Bool) {
-        answeredCards.formUnion(repos)
-        if !demo, !world.simulated { ConfigStore.shared.update(byUser: true) { c in for r in repos { c.repos[r, default: .init()].answered = true } } }
+    func answerCard(_ facts: SetupCardFacts, second: Bool) {
+        let repos = facts.repos
+        switch facts.kind {
+        case .new:
+            answeredCards.formUnion(repos)
+            if !demo, !world.simulated { ConfigStore.shared.update(byUser: true) { c in for r in repos { c.repos[r, default: .init()].answered = true } } }
+            if second, let first = repos.first { DispatchQueue.main.async { [self] in onChangeRepo?(first) } }
+        case .mismatch:
+            let lines = Dictionary(uniqueKeysWithValues: world.mismatches.map { ($0.repo, $0.lines) })
+            answeredCards.formUnion(repos.map { "mismatch:" + $0 })
+            if !demo, !world.simulated {
+                ConfigStore.shared.update(byUser: true) { c in
+                    for r in repos {
+                        guard let o = c.repos[r] else { continue }
+                        c.repos[r] = second ? { var k = o; k.kept = (o.kept ?? []) + (lines[r] ?? []); return k }() : o.usingRepository
+                    }
+                }
+            }
+        }
         drawCard()
-        if change, let first = repos.first { DispatchQueue.main.async { [self] in onChangeRepo?(first) } }
     }
 
     func cardTakes(point p: NSPoint) -> Bool {
@@ -96,8 +119,8 @@ final class SetupCard: NSView {
     private let text = NSTextField(wrappingLabelWithString: "")
     private let yes = NSButton(title: "Looks right", target: nil, action: nil)
     private let change = NSButton(title: "Change…", target: nil, action: nil)
-    private var repos: [String] = []
-    var onAnswer: (([String], Bool) -> Void)?
+    private var facts: SetupCardFacts?
+    var onAnswer: ((SetupCardFacts, Bool) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -128,11 +151,13 @@ final class SetupCard: NSView {
     override func mouseUp(with event: NSEvent) {}
     override func rightMouseDown(with event: NSEvent) {}
 
-    @objc private func looksRight() { onAnswer?(repos, false) }
-    @objc private func changeIt() { onAnswer?(repos, true) }
+    @objc private func looksRight() { if let facts { onAnswer?(facts, false) } }
+    @objc private func changeIt() { if let facts { onAnswer?(facts, true) } }
 
     func show(_ f: SetupCardFacts, top: CGFloat, right: CGFloat) {
-        repos = f.repos
+        facts = f
+        yes.title = f.kind == .new ? "Looks right" : "Use the repository's"
+        change.title = f.kind == .new ? "Change…" : "Keep mine"
         let out = NSMutableAttributedString()
         let lead = NSMutableParagraphStyle(); lead.paragraphSpacing = 6
         let row = NSMutableParagraphStyle(); row.paragraphSpacing = 3
@@ -145,7 +170,7 @@ final class SetupCard: NSView {
             let s = NSMutableAttributedString(string: line + (i == f.lines.count - 1 ? "" : "\n"), attributes: attrs)
             for repo in f.repos {
                 let r = (line as NSString).range(of: repo)
-                if r.location != NSNotFound, head ? f.repos.count == 1 : r.location == 0 { s.addAttribute(.foregroundColor, value: color(repo), range: r) }
+                if r.location != NSNotFound, head ? f.kind == .new && f.repos.count == 1 : r.location == 0 { s.addAttribute(.foregroundColor, value: color(repo), range: r) }
             }
             out.append(s)
         }

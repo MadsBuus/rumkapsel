@@ -77,6 +77,46 @@ enum Setup {
         return out
     }
 
+    static func phrase(_ s: Ships) -> String {
+        switch s {
+        case .release: return "ships from a release branch"
+        case .tag: return "ships on tags"
+        case .merge: return "ships on every merge"
+        case .never: return "doesn't ship"
+        }
+    }
+
+    static func disagreements(_ repo: String, own o: AppConfig.RepoOverride?, detected d: Pipeline?, onGitHub: Set<String>?) -> [String] {
+        guard let o, o.setsPipeline, let d, d.remote else { return [] }
+        var out: [String] = []
+        func say(_ mine: String, _ theirs: String) { out.append("\(repo): your settings say it \(mine), but the repository \(theirs).") }
+        func missing(_ b: String) -> Bool { onGitHub.map { !$0.contains(b) } ?? false }
+        if let t = o.trunk, !t.isEmpty {
+            if missing(t) { say("merges into \(t)", "has no branch \(t) on GitHub") } else if t != d.trunk { say("merges into \(t)", "merges into \(d.trunk)") }
+        }
+        if let s = o.ships, s != d.ship { say(phrase(s), phrase(d.ship)) }
+        if (o.ships ?? d.ship) == .release, let p = o.production, !p.isEmpty {
+            if missing(p) { say("releases into \(p)", "has no branch \(p) on GitHub") }
+            else if d.ship == .release, p != d.production { say("releases into \(p)", "releases into \(d.production)") }
+        }
+        if let s = o.staging {
+            if s.isEmpty {
+                if d.hasStaging { say("has no testing phase", "tests on \(d.staging)") }
+            } else if missing(s) {
+                say("tests on \(s)", "has no branch \(s) on GitHub")
+            } else if s != d.staging {
+                say("tests on \(s)", d.hasStaging ? "tests on \(d.staging)" : "has no testing branch")
+            }
+        }
+        return out.filter { !(o.kept ?? []).contains($0) }
+    }
+
+    static func mismatchCard(_ lines: [String]) -> [String] {
+        guard !lines.isEmpty else { return [] }
+        let more = lines.count - shownOnCard
+        return ["Your settings and the repository disagree"] + lines.prefix(shownOnCard) + (more > 0 ? ["and \(more) more, in Settings"] : [])
+    }
+
     static func sentence(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
 }
 
@@ -91,6 +131,16 @@ extension World {
             r.missing = set.compactMap { role, b in b.flatMap { !$0.isEmpty && !on.contains($0) ? "\(role) \($0)" : nil } }
         }
         return r
+    }
+
+    var mismatches: [(repo: String, lines: [String])] {
+        let cfg = ConfigStore.shared.current
+        return repoRoots.sorted(by: { $0.value.repo < $1.value.repo }).compactMap { root, info in
+            guard cfg.shown(repo: info.repo), github.pipelineRead(repoRoot: root) else { return nil }
+            let lines = Setup.disagreements(info.repo, own: cfg.repos[info.repo], detected: github.detectedPipeline(repoRoot: root),
+                                            onGitHub: github.githubBranches(repoRoot: root))
+            return lines.isEmpty ? nil : (info.repo, lines)
+        }
     }
 
     var setupCheck: Setup.Check {

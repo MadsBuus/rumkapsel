@@ -19,8 +19,15 @@ struct AppConfig: Codable, Equatable {
         var staging: String?
         var workflow: Workflow?
         var answered: Bool?
+        var kept: [String]?
 
         var setsPipeline: Bool { trunk != nil || ships != nil || production != nil || staging != nil }
+
+        var usingRepository: RepoOverride {
+            var o = self
+            o.trunk = nil; o.ships = nil; o.production = nil; o.staging = nil; o.kept = nil
+            return o
+        }
     }
     var repos: [String: RepoOverride] = [:]
     var crewNames: [String: String] = [:]
@@ -83,6 +90,7 @@ struct AppConfig: Codable, Equatable {
         for (name, r) in c.repos {
             var bare = r
             bare.answered = nil
+            bare.kept = nil
             c.repos[name] = bare == RepoOverride() ? nil : bare
         }
         return c
@@ -90,7 +98,7 @@ struct AppConfig: Codable, Equatable {
 }
 
 extension AppConfig.RepoOverride {
-    enum CodingKeys: String, CodingKey { case shown, share, color, path, trunk, ships, production, staging, workflow, answered }
+    enum CodingKeys: String, CodingKey { case shown, share, color, path, trunk, ships, production, staging, workflow, answered, kept }
     private enum Retired: String, CodingKey { case station, crew, branches }
     private struct Branches: Decodable { var trunk: String; var staging: String; var production: String }
 
@@ -109,6 +117,7 @@ extension AppConfig.RepoOverride {
         staging = read(.staging)
         workflow = read(.workflow)
         answered = read(.answered)
+        kept = read(.kept)
         if !setsPipeline, let b = (try? old.decodeIfPresent(Branches.self, forKey: .branches)) ?? nil {
             trunk = b.trunk.isEmpty ? nil : b.trunk
             staging = b.staging
@@ -128,6 +137,7 @@ extension AppConfig.RepoOverride {
         try c.encodeIfPresent(staging, forKey: .staging)
         try c.encodeIfPresent(workflow, forKey: .workflow)
         try c.encodeIfPresent(answered, forKey: .answered)
+        try c.encodeIfPresent(kept, forKey: .kept)
         var old = encoder.container(keyedBy: Retired.self)
         try old.encode(shown ? "auto" : "hidden", forKey: .station)
         try old.encode(true, forKey: .crew)
@@ -172,7 +182,7 @@ enum ConfigFile {
         for (name, entry) in fresh["repos"] as? [String: Any] ?? [:] {
             var merged = (before[name] as? [String: Any] ?? [:]).filter { !retired.contains($0.key) }
             for (k, v) in entry as? [String: Any] ?? [:] { merged[k] = v }
-            for k in ["color", "path", "trunk", "ships", "production", "staging", "workflow", "answered"] where (entry as? [String: Any])?[k] == nil { merged[k] = nil }
+            for k in ["color", "path", "trunk", "ships", "production", "staging", "workflow", "answered", "kept"] where (entry as? [String: Any])?[k] == nil { merged[k] = nil }
             repos[name] = merged
         }
         out["repos"] = repos

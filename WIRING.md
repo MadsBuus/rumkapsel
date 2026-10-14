@@ -150,6 +150,14 @@ through staging · not shared". Several at once share one card, four lines and t
 right" and "Change…" (which opens its page in Settings) write `answered` into its config entry; a card left
 alone stays until answered and does not come back after a restart. Answering never resets the station.
 
+**Settings and the repository disagree**: once a repository's way to production has been read
+successfully, every answer set by hand (trunk, how it ships, the release branch, the testing phase) that
+differs from what was read, or names a branch GitHub does not have, is a line on the same card
+(`Setup.disagreements`): "tattoodo-web: your settings say it merges into develop, but the repository
+merges into main." "Use the repository's" clears the answers set by hand; "Keep mine" saves those lines
+as `kept` in the repository's entry, and the same disagreement is never asked again. A failed read never
+asks. New repositories go first.
+
 **The setup check** (`Setup.problems`), after the first scan: on the empty yard (the middle of the window
 when there is no station yet) in station words, and in Settings › General with the command to run. No
 repositories yet; every repository hidden; the GitHub CLI not on the `PATH` the app uses, or not signed in
@@ -310,3 +318,4 @@ or `webhook`.
 | Neighbour's offices held | 24 h | `Integrations/World.swift` |
 | Offices shared | worked in within 12 h | `Scene/Scene.swift` |
 | Closed crate kept | 10 min | `Rules/Rules.swift` |
+| Stored crate kept, repository that doesn't ship | 24 h | `Rules/Rules.swift` |

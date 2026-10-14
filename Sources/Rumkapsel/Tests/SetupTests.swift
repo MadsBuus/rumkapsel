@@ -45,6 +45,37 @@ enum SetupTests {
             expect(station(Setup.Check(repos: [missing], signedIn: true)) == ["web: the testing branch qa isn't on GitHub: see Settings."], "a branch set by hand that is gone")
         }
 
+        test("hand-set and detected disagree: one line each, in station words; agreement and a hiccup say nothing") {
+            let own = AppConfig.RepoOverride(trunk: "develop")
+            let main = Pipeline(trunk: "main", staging: "", production: "", source: "history", ship: .tag)
+            let lines = Setup.disagreements("tattoodo-web", own: own, detected: main, onGitHub: ["main", "develop"])
+            expect(lines == ["tattoodo-web: your settings say it merges into develop, but the repository merges into main."], "got \(lines)")
+            expect(Setup.mismatchCard(lines) == ["Your settings and the repository disagree"] + lines, "the card: \(Setup.mismatchCard(lines))")
+            expect(Setup.disagreements("web", own: AppConfig.RepoOverride(trunk: "main"), detected: main, onGitHub: ["main"]).isEmpty, "agreement says nothing")
+            expect(Setup.disagreements("web", own: own, detected: nil, onGitHub: nil).isEmpty, "no successful read, no card")
+            expect(Setup.disagreements("web", own: AppConfig.RepoOverride(share: true), detected: main, onGitHub: nil).isEmpty, "nothing set by hand, nothing to disagree")
+            let gone = Setup.disagreements("web", own: AppConfig.RepoOverride(trunk: "main", ships: .release, production: "live", staging: "qa"), detected: main, onGitHub: ["main"])
+            expect(gone == ["web: your settings say it ships from a release branch, but the repository ships on tags.",
+                            "web: your settings say it releases into live, but the repository has no branch live on GitHub.",
+                            "web: your settings say it tests on qa, but the repository has no branch qa on GitHub."], "a branch missing on GitHub counts: \(gone)")
+            let tested = Setup.disagreements("web", own: AppConfig.RepoOverride(staging: ""), detected: tattoodo, onGitHub: nil)
+            expect(tested == ["web: your settings say it has no testing phase, but the repository tests on staging."], "got \(tested)")
+        }
+
+        test("Keep mine is remembered for that disagreement; Use the repository's clears what was set by hand") {
+            let main = Pipeline(trunk: "main", staging: "", production: "", source: "history", ship: .tag)
+            var own = AppConfig.RepoOverride(share: true, trunk: "develop")
+            own.kept = Setup.disagreements("web", own: own, detected: main, onGitHub: nil)
+            expect(Setup.disagreements("web", own: own, detected: main, onGitHub: nil).isEmpty, "kept: never asked again")
+            var moved = main; moved.trunk = "trunk"
+            expect(Setup.disagreements("web", own: own, detected: moved, onGitHub: nil).count == 1, "a new disagreement is asked")
+            let cleared = own.usingRepository
+            expect(!cleared.setsPipeline && cleared.kept == nil && cleared.share, "the hand answers gone, the rest kept: \(cleared)")
+            var c = AppConfig(); c.repos["web"] = AppConfig.RepoOverride(trunk: "develop")
+            var kept = c; kept.repos["web"]?.kept = ["x"]
+            expect(kept.withoutAnswers == c.withoutAnswers, "keeping changes nothing the station draws from")
+        }
+
         test("the card lists at most four, then how many more") {
             let six = (1...6).map { Setup.Repo(name: "r\($0)", pipeline: tags) }
             let card = Setup.card(six)
