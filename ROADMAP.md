@@ -10,8 +10,7 @@ and are not started unasked.
    is about animates.
 2. **The launch cam.** A fixed pad and one launch clock, taken from the climb. A patch exists.
 3. **The tip's colour band** at the thruster belt, and dark legs. A patch exists.
-4. **An event log.** Append-only and timestamped, so history can be replayed, and one crate's story
-   replayed on its own.
+4. **A crate-focused replay.** One crate's story from the event log, played back in the scene.
 5. **Watching each repository's `.git`** with FSEvents, so a commit, a fetch or a merge is seen at once.
 6. **GitHub reads, measured and cheaper.** Counters in `--github-diag`; every read conditional (ETag),
    honouring GitHub's poll-interval and rate headers; GraphQL batching of what is read per repository.

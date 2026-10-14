@@ -198,6 +198,13 @@ struct Facts: Codable, Equatable {
         nextSeq = max(nextSeq, (crates.values.map(\.seq).max() ?? -1) + 1)
     }
 
+    var persisted: Facts {
+        var f = self
+        f.rockets = f.rockets.filter { !$0.value.launched }
+        f.crates = f.crates.filter { if case .aboard = $0.value.place { return false }; return true }
+        return f
+    }
+
     mutating func take() -> Int { defer { nextSeq += 1 }; return nextSeq }
 
     func repo(_ name: String) -> RepoFacts { repos[name] ?? RepoFacts() }

@@ -6,8 +6,11 @@ final class World {
     private let demo: Bool
     var simulated = false
 
+    let log: EventLog
+
     init(demo: Bool) {
         self.demo = demo
+        log = EventLog(dir: demo ? nil : EventLog.home)
         if demo { fleet.persists = false }
     }
 
@@ -125,7 +128,10 @@ final class World {
     private var knewAlready: Bool { github.hasAnswers }
 
     func reset() {
+        fleet.save()
+        Fleet.writing.sync {}
         fleet.removeAllStations()
+        log.forget()
         repoRoots = [:]
         readyRepos = []
         didLoadLayout = false
@@ -272,7 +278,7 @@ final class World {
         for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             for o in station.facts.offices.values { if let at = o.closedAt { closedAt["\(station.name)|\(o.key)"] = at } }
             let drift = officeDrift(station)
-            if !drift.isEmpty { _ = Rules.apply(drift, at: now, to: &station.facts, yard: station.yard) }
+            if !drift.isEmpty { _ = apply(drift, at: now, to: station) }
         }
         onLoaded()
     }

@@ -261,7 +261,7 @@ enum IntakeTests {
     private static func say(_ text: String) { FileHandle.standardError.write((text + "\n").data(using: .utf8)!) }
 }
 
-private final class Rig: SimStation {
+final class Rig: SimStation {
     let model = Simulation<Body>(world: World(demo: true))
     var world: World { model.world }
     var sim: SimHooks? { model.hooks }

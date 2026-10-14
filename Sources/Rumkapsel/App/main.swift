@@ -41,7 +41,7 @@ enum WindowPlace {
 }
 
 enum Scripted {
-    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-facts" || $0 == "--dump-bodies" || $0.hasSuffix("-tests") }
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-facts" || $0 == "--dump-bodies" || $0 == "--replay" || $0.hasSuffix("-tests") }
 }
 
 @MainActor
@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--sim-tests") { SimulationTests.run() }
         if args.contains("--playback-tests") { PlaybackTests.run() }
         if args.contains("--intake-tests") { IntakeTests.run() }
+        if args.contains("--log-tests") { LogTests.run() }
+        if let i = args.firstIndex(of: "--replay"), args.count > i + 1 {
+            Replay.run(args[i + 1], crate: args.firstIndex(of: "--crate").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil })
+        }
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
             let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
@@ -582,6 +586,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     @objc func toggleFloat() { setFloat(window.level != .floating) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        guard let world = controller?.world else { return }
+        world.fleet.save()
+        Fleet.writing.sync {}
+        world.log.flush()
+    }
 }
 
 MainActor.assumeIsolated {

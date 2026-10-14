@@ -439,6 +439,8 @@ extension StationController {
             if let title = work?.title, !title.isEmpty { parts.append(title) }
             if let author = work?.author { parts.append("by " + world.crewName(author) + (author == github.myLogin() ? " · yours" : "")) }
             parts.append(h.hasPrefix("deck:") ? "on staging, waiting for production" : "merged, waiting for staging")
+            let station = String(h.split(separator: "|")[0].split(separator: ":", maxSplits: 1).last ?? "")
+            if let story = StationController.crateStory(world.log.history(station, CrateID(repo: repo, number: n))) { parts.append(story) }
             parts.append("click to open")
             infoLabel.text = parts.joined(separator: " · ")
         } else if h.hasPrefix("storage:") {
@@ -468,6 +470,39 @@ extension StationController {
             infoLabel.text = String(h.dropFirst(8)) + " · " + Words.current.monolithHover
         } else {
             infoLabel.text = ""
+        }
+    }
+
+    static func crateStory(_ history: [EventLog.Step]) -> String? {
+        let steps = history.filter(\.moved).suffix(3)
+        guard !steps.isEmpty else { return nil }
+        return steps.enumerated().map { i, s in
+            "\(stepWords(s)) \(i == steps.count - 1 ? "since " : "")\(hoverClock.string(from: s.at))"
+        }.joined(separator: " · ")
+    }
+
+    private static let hoverClock: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm"; return f }()
+
+    private static func stepWords(_ s: EventLog.Step) -> String {
+        let w = Words.current
+        guard let to = s.to else { return "gone" }
+        if s.from?.place == to.place, let stage = to.stage {
+            switch stage {
+            case .inbound, .working: return "working"
+            case .ready: return "pull request open"
+            case .stored: return "merged"
+            case .qa: return "in QA"
+            case .cleared: return "tested"
+            case .shipped: return "shipped"
+            }
+        }
+        switch to.place {
+        case .office: return "in its \(w.office)"
+        case .waiting: return "in \(w.inStorage)"
+        case .testing: return "on \(w.theDeck)"
+        case .cleared: return "on \(w.testedRow)"
+        case .decon: return "in \(w.inDecon)"
+        case .aboard: return w.aboard
         }
     }
 
