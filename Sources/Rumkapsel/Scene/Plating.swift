@@ -11,7 +11,7 @@ enum Plating {
         let src = sourceRoot
         return FileManager.default.fileExists(atPath: src.path) ? src : nil
     }()
-    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/Plating")
 
     private static var cache: [UInt64: Maps] = [:]

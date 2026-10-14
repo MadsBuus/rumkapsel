@@ -31,7 +31,7 @@ enum Detail {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Detail"), FileManager.default.fileExists(atPath: r.path) { return r }
         return FileManager.default.fileExists(atPath: sourceRoot.path) ? sourceRoot : nil
     }()
-    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/Detail")
 
     private static let lock = NSLock()

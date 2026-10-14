@@ -24,7 +24,7 @@ enum Kit {
 
     static let root: URL? = {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Kenney"), FileManager.default.fileExists(atPath: r.path) { return r }
-        let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Resources/Kenney")
         return FileManager.default.fileExists(atPath: src.path) ? src : nil
     }()

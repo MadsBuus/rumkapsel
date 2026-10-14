@@ -94,7 +94,7 @@ def bake(theme, seed):
 
 def write(plans):
     """BakedPlans.swift, its header kept, a plan per seed in the order picked."""
-    path = os.path.join(HERE, '..', 'Sources', 'Rumkapsel', 'BakedPlans.swift')
+    path = os.path.join(HERE, '..', 'Sources', 'Rumkapsel', 'State', 'BakedPlans.swift')
     src = open(path).read()
     head = src[:src.index('enum BakedPlans {')]
     def cs(cells): return ';'.join(f'{x},{y}' for x, y in sorted(map(tuple, cells)))

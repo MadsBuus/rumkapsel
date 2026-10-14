@@ -53,7 +53,7 @@ enum Bulkhead {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Walls"), FileManager.default.fileExists(atPath: r.path) { return r }
         return FileManager.default.fileExists(atPath: sourceRoot.path) ? sourceRoot : nil
     }()
-    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/Walls")
     private static func file(_ style: Style, _ k: Int, _ map: String) -> String { "wall-\(style.rawValue)-\(k)-\(map).png" }
 

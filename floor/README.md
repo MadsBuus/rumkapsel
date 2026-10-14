@@ -1,6 +1,6 @@
 # Drawing the floor
 
-The station's floor is drawn here, offline, and baked into `Sources/Rumkapsel/BakedPlans.swift`. Nothing in
+The station's floor is drawn here, offline, and baked into `Sources/Rumkapsel/State/BakedPlans.swift`. Nothing in
 the app plans a floor at run time any more: it reads a baked plan and lights slots as offices arrive.
 
     .build/debug/Rumkapsel --dump-floor classic > floor/classic.json

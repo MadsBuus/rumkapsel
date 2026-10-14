@@ -6,7 +6,7 @@ enum Planets {
 
     static let root: URL? = {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Planets"), FileManager.default.fileExists(atPath: r.path) { return r }
-        let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let src = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Resources/Planets")
         return FileManager.default.fileExists(atPath: src.path) ? src : nil
     }()

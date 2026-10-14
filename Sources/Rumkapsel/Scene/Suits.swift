@@ -37,7 +37,7 @@ enum Suit {
         if let r = Bundle.main.resourceURL?.appendingPathComponent("Suits"), FileManager.default.fileExists(atPath: r.path) { return r }
         return FileManager.default.fileExists(atPath: sourceRoot.path) ? sourceRoot : nil
     }()
-    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let sourceRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Resources/Suits")
     private static func file(_ part: Part, _ kind: Kind) -> String { "suit-\(kind.rawValue)-\(part).png" }
     private static func load(_ part: Part, _ kind: Kind) -> NSImage? { root.flatMap { NSImage(contentsOf: $0.appendingPathComponent(file(part, kind))) } }
