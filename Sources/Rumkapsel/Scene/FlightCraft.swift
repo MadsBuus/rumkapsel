@@ -72,7 +72,9 @@ enum FlightCraft {
         n.addChildNode(bands(shape.profile(from: shape.split, to: shape.panelTop, steps: 5), material: plates, closeBottom: true, closeTop: false))
         let nose = hotfix ? Materials.plated(seed: 31, tint: paint(RocketShape.hotfixRed)) : plates
         n.addChildNode(bands(shape.profile(from: shape.panelTop, to: shape.height, steps: 6), material: nose, closeBottom: false, closeTop: false))
-        for a in shape.legBearings { n.addChildNode(RocketShape.leg(at: a, scale: 1, segments: 4, material: Materials.plated(seed: 41, tint: paint(color)))) }
+        n.addChildNode(bands(shape.profile(from: shape.bandLow, to: shape.bandHigh, steps: 2).map { ($0.y, $0.r * 1.006) },
+                             material: Materials.plated(seed: 41, tint: paint(color)), closeBottom: false, closeTop: false))
+        for a in shape.legBearings { n.addChildNode(RocketShape.leg(at: a, scale: 1, segments: 4, material: Materials.plated(seed: 41, tint: paint(RocketShape.legColor)))) }
         let engine = SCNNode(geometry: round(SCNCone(topRadius: shape.engineTop, bottomRadius: shape.engineBottom, height: shape.engineHeight)))
         engine.geometry!.firstMaterial = Materials.bell
         engine.position = v3(0, shape.split - shape.engineHeight / 2, 0)

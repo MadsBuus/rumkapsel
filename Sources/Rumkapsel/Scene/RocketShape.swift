@@ -9,6 +9,9 @@ enum RocketShape {
     static var panelTop: Double { y(0.72) }
     static var hatchHeight: Double { y(0.52) }
     static var rcsHeight: Double { y(0.64) }
+    static var bandLow: Double { rcsHeight - 0.075 }
+    static var bandHigh: Double { rcsHeight + 0.075 }
+    static let legColor = NSColor(rgb: (0.06, 0.063, 0.075))
 
     static func r(_ y: Double) -> Double {
         let t = (y - base) / length

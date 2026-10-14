@@ -295,7 +295,11 @@ enum Props {
         for a in RocketShape.rcsBearings {
             tip.addChildNode(RocketShape.thruster(at: a, scale: s, surface: { RocketGeometry.hullRadius(at: $0) }, hull: white, nozzle: dark))
         }
-        for a in RocketShape.legBearings { tip.addChildNode(RocketShape.leg(at: a, scale: s, segments: 2, material: paint.copy() as! SCNMaterial)) }
+        let band = SCNNode(geometry: lathe(scaled(RocketShape.profile(from: RocketShape.bandLow, to: RocketShape.bandHigh, steps: 2)).map { ($0.y, $0.r * 1.012) },
+                                           material: paint, capBottom: false, capTop: false))
+        band.name = "band"
+        tip.addChildNode(band)
+        for a in RocketShape.legBearings { tip.addChildNode(RocketShape.leg(at: a, scale: s, segments: 2, material: lit(RocketShape.legColor))) }
         let engineH = RocketShape.engineHeight * s
         let engine = SCNNode(geometry: faceted(SCNCone(topRadius: RocketShape.engineTop * s, bottomRadius: RocketShape.engineBottom * s, height: engineH)))
         engine.geometry!.firstMaterial = dark
@@ -399,7 +403,7 @@ enum Props {
         for c in tip.childNodes {
             let name = (c.value(forKey: "part") as? String) ?? ""
             if name.hasPrefix("panel"), let i = Int(name.dropFirst(5)) { c.isHidden = i >= panels }
-            else if name == "nose" || name == "hatch" || name == "name" || name == "rcs" { c.isHidden = !whole }
+            else if name == "nose" || name == "hatch" || name == "name" || name == "rcs" || name == "band" { c.isHidden = !whole }
         }
     }
 }
