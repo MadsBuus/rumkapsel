@@ -68,6 +68,7 @@ def bake(theme, seed):
     slots.sort(key=lambda cs: (steps(cs) // 3,
                                math.atan2(sum(y for _, y in cs)/len(cs), sum(x for x, _ in cs)/len(cs))))
 
+    base = set(lit)
     out = []
     for cells in slots:
         doors = [p for x, y in cells for p in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)) if p in hall]
@@ -88,9 +89,40 @@ def bake(theme, seed):
             run = []
         lit |= set(run)
         out.append({"cells": sorted(cells), "hall": sorted(run), "ring": steps(cells) // 3})
+    quarters = dict(quarters, galley=[galley(theme, lit, slots, quarters, base)])
     return {"theme": theme, "seed": seed, "quarters": {k: sorted(v) for k, v in quarters.items()},
             "fixed": {k: sorted(v) for k, v in fixed.items()},
             "base": sorted(lit - {p for o in out for p in o["hall"]}), "offices": out}
+
+# Which way each theme's camera looks across the plaza: Classic from +x+y, Kenney turned round.
+FACING = {"classic": -1, "kenney": 1}
+
+def galley(theme, hall, slots, quarters, lit):
+    """The galley is one tile off the lounge, opening into it: a tile no office, hallway or room will ever
+    take, so baking it in moves nothing else. Opening into the middle of a lounge wall keeps it clear of
+    the couches and the door. Hallway beside it would be a wall with no door, so the fewer the better; then
+out from behind the monolith as the theme's camera looks, then nearest the plaza."""
+    _, _, hull = ns['load'](theme)
+    lounge = set(quarters["lounge"])
+    taken = set(hall) | lounge | {p for v in quarters.values() for p in v} | {p for cs in slots for p in cs}
+    taken |= {tuple(p) for v in ns['load'](theme)[0].values() for p in v}
+    xs, ys = [x for x, _ in lounge], [y for _, y in lounge]
+    mid = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    door = min((c for c in lounge if any((c[0]+a, c[1]+b) in lit for a, b in ((1,0),(-1,0),(0,1),(0,-1)))),
+               key=lambda c: (c[1], c[0]))
+    best = None
+    for o in lounge:
+        for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+            c = (o[0]+a, o[1]+b)
+            if c in taken or not ns['inside'](c, hull): continue
+            side = (o[0] == mid[0]) != (o[1] == mid[1])
+            toward = FACING[theme]
+            behind = c[0] * toward >= 0 and c[1] * toward >= 0 and abs(c[0]) + abs(c[1]) <= 4
+            open_to = sum((c[0]+x, c[1]+y) in hall for x, y in ((1,0),(-1,0),(0,1),(0,-1)))
+            score = (open_to, behind, not side, o == door, abs(c[0]) + abs(c[1]), c)
+            if best is None or score < best[0]: best = (score, c)
+    assert best, f"{theme}: no tile beside the lounge for the galley"
+    return best[1]
 
 def write(plans):
     """BakedPlans.swift, its header kept, a plan per seed in the order picked."""

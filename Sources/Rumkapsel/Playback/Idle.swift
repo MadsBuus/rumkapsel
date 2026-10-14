@@ -21,16 +21,19 @@ enum IdleAfter: Equatable {
     case rest
     case bath(shower: Bool)
     case roam
+    case galley(Command.Fare)
 
-    static let bathBelow = 0.35, showerBelow = 0.12, roamBelow = 0.3
+    static let bathBelow = 0.35, showerBelow = 0.12, roamBelow = 0.3, galleyBelow = 0.45
 
-    static func after(_ rank: Rank?, roll: Double, night: Bool, bath: Bool) -> IdleAfter {
+    static func after(_ rank: Rank?, roll: Double, night: Bool, bath: Bool, galley: Command.Fare? = nil) -> IdleAfter {
         if night { return .rest }
         switch rank {
         case .yard?, .release?:
             return bath && roll < bathBelow ? .bath(shower: roll < showerBelow) : .rest
         case .desk?, .message?, .qa?:
-            return roll < roamBelow ? .roam : .rest
+            if roll < roamBelow { return .roam }
+            if let galley, roll < galleyBelow { return .galley(galley) }
+            return .rest
         default:
             return .rest
         }
@@ -42,11 +45,12 @@ enum IdlePick: Equatable {
     case gym
     case bath(shower: Bool)
     case read
+    case galley(Command.Fare)
 
-    static let roamBelow = 0.40, gymBelow = 0.65, bathBelow = 0.85
+    static let galleyFrom = 0.25, roamBelow = 0.40, gymBelow = 0.65, bathBelow = 0.85
 
-    static func pick(roll: Double, night: Bool, crew: Bool, gymFree: Bool, bath: Bool, shower: Bool) -> IdlePick {
-        if roll < roamBelow { return .roam }
+    static func pick(roll: Double, night: Bool, crew: Bool, gymFree: Bool, bath: Bool, shower: Bool, galley: Command.Fare? = nil) -> IdlePick {
+        if roll < roamBelow { return roll >= galleyFrom && !night ? galley.map { .galley($0) } ?? .roam : .roam }
         if roll < gymBelow { return !night && !crew && gymFree ? .gym : .roam }
         if roll < bathBelow { return bath ? .bath(shower: shower) : .roam }
         return .read

@@ -47,6 +47,7 @@ extension Station {
                          Footprint(at: showerPole(bath: bath) - o, radius: 0.034), Footprint(at: towelRail(bath: bath) - o, radius: 0.096)]
                 + (kingdom ? [Footprint(at: showerNozzle(bath: bath) - o, radius: 0.208)] : []))
         }
+        if let galley { place(rooms["kind:galley"], galley.counter.map { Footprint(at: $0, radius: Galley.counterWidth / 2 * 0.8) }) }
         place(rooms["kind:quarters"], beds.map { Footprint(at: $0.pos, radius: $0.level > 0 ? 0.296 : kingdom ? 0.2066 : 0.288) })
         for room in offices {
             guard let at = desk(room, theme: theme) else { continue }

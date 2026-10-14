@@ -3,7 +3,7 @@ import SceneKit
 import SpriteKit
 
 enum LoungeOrder: CaseIterable {
-    case gym, bed, read, shower, toilet
+    case gym, bed, read, shower, toilet, coffee, bite
 
     var symbol: String {
         switch self {
@@ -12,6 +12,8 @@ enum LoungeOrder: CaseIterable {
         case .read: return "book.fill"
         case .shower: return "shower.fill"
         case .toilet: return "toilet.fill"
+        case .coffee: return "cup.and.saucer.fill"
+        case .bite: return "fork.knife"
         }
     }
 
@@ -22,6 +24,8 @@ enum LoungeOrder: CaseIterable {
         case .read: return "read on the couch"
         case .shower: return "take a shower"
         case .toilet: return "go to the toilet"
+        case .coffee: return "get a coffee"
+        case .bite: return "have a bite"
         }
     }
 
@@ -32,6 +36,8 @@ enum LoungeOrder: CaseIterable {
         case .read: return NSColor(rgb: (0.94, 0.65, 0.10))
         case .shower: return NSColor(rgb: (0.62, 0.82, 0.95))
         case .toilet: return NSColor(rgb: (0.92, 0.92, 0.9))
+        case .coffee: return NSColor(rgb: (0.78, 0.55, 0.36))
+        case .bite: return NSColor(rgb: (0.93, 0.6, 0.25))
         }
     }
 
@@ -160,6 +166,9 @@ extension StationController {
         case .bed:
             send(m, to: .quarters)
             m.napping = m.place == .quarters
+        case .coffee, .bite:
+            guard station.galley != nil else { logEvent("\(m.home.name): no galley here"); return }
+            guard visitGalley(m, station: station, fare: o == .coffee ? .coffee : .bite) else { logEvent("\(m.home.name): someone is at the galley"); return }
         }
         m.idle = IdleClock()
     }

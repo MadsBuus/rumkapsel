@@ -43,6 +43,7 @@ struct Command {
         case goTo(place: Place)
         case bath(kind: Bath, back: Place, seconds: Double)
         case exercise(kind: Workout, back: Place, seconds: Double)
+        case galley(fare: Fare, back: Place, seconds: Double)
         case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
         case pack(office: String)
@@ -73,6 +74,16 @@ struct Command {
             case .bag: return "boxing the bag"
             case .mat: return "doing jumping jacks on the mat"
             }
+        }
+    }
+
+    enum Fare: CaseIterable {
+        case coffee, bite
+        var words: String { self == .coffee ? Words.current.coffee : Words.current.bite }
+        var doing: String { "waiting on \(words)" }
+        var seconds: ClosedRange<Double> {
+            let printed = Galley.printSeconds + Galley.slideSeconds + Galley.pickSeconds
+            return self == .coffee ? 18...26 : printed...printed
         }
     }
 
@@ -113,7 +124,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .exercise, .pack, .stow: return [.walk, .act]
+        case .bath, .exercise, .galley, .pack, .stow: return [.walk, .act]
         default: return [.walk, .settle]
         }
     }
@@ -128,6 +139,13 @@ struct Command {
     var isRest: Bool {
         switch kind {
         case .goTo, .sleep, .work: return true
+        default: return false
+        }
+    }
+
+    var holdsMug: Bool {
+        switch kind {
+        case .chore, .qa: return true
         default: return false
         }
     }
@@ -207,13 +225,17 @@ struct Command {
         Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to \(Words.current.theGym) for \(kind.words), back to \(back.words) after")
     }
 
+    static func galley(_ fare: Fare, back: Place, seconds: Double) -> Command {
+        Command(kind: .galley(fare: fare, back: back, seconds: seconds), words: "off to \(Words.current.theGalley) for \(fare.words), back to \(back.words) after")
+    }
+
     static func chore(spot: Cell, seconds: Double) -> Command {
         Command(kind: .chore(spot: spot, seconds: seconds), words: Words.current.lookRound)
     }
 
     var visitSeconds: Double? {
         switch kind {
-        case .bath(_, _, let s), .exercise(_, _, let s), .chore(_, let s): return s
+        case .bath(_, _, let s), .exercise(_, _, let s), .galley(_, _, let s), .chore(_, let s): return s
         default: return nil
         }
     }
@@ -268,6 +290,7 @@ extension Place {
             case "kind:lounge": return Words.current.theCouch
             case "kind:bath": return Words.current.theBath
             case "kind:gym": return Words.current.theGym
+            case "kind:galley": return Words.current.theGalley
             case "kind:hangar": return Words.current.theBay
             case "kind:deck": return Words.current.theDeck
             case "kind:pad": return Words.current.thePad

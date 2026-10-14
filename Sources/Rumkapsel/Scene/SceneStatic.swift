@@ -329,6 +329,13 @@ extension StationController {
                 for n in f.fixtures { n.name = "gym:" + roomKey(station, gym); staticRoot.addChildNode(n) }
                 if let bar = f.bar, let bag = f.bag { gymProps[station.name] = (bar, bag) }
             }
+            kitchens[station.name] = nil
+            if let galley = station.galley, let room = station.rooms["kind:galley"] {
+                let f = Looks.current.furnishGalley(galley, in: station)
+                for n in f.props { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
+                for n in f.fixtures { n.name = "gym:" + roomKey(station, room); staticRoot.addChildNode(n) }
+                kitchens[station.name] = f.kitchen
+            }
             if station.hasHangar {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
@@ -454,6 +461,7 @@ extension StationController {
         case "kind:quarters": return Words.current.dorm
         case "kind:lounge": return Words.current.lounge
         case "kind:bath": return Words.current.bath
+        case "kind:galley": return Words.current.galley
         default: return room.name
         }
     }
@@ -554,6 +562,7 @@ extension StationController {
             enum Side { case south, north, east, west }
             for (room, office) in drawnRooms(station) {
                 let text = StationController.displayName(room)
+                if Station.opensInto[room.key] != nil { continue }
                 if room.key.hasPrefix("kind:") {
                     let accent = room.key == "kind:quarters" ? NSColor(Colors.bed) : NSColor(room.color).lighter(0.2)
                     let label = floorSign(text, color: accent, size: 0.36)

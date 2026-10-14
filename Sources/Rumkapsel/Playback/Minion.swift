@@ -35,6 +35,10 @@ final class Minion: Body {
     private var staticNode: SCNNode?
     var staticSeen = true
     private var towelNode: SCNNode?
+    private var mugNode: SCNNode?
+    private var mugSteam: [SCNNode] = []
+    private var mealNode: SCNNode?
+    private var meal: (bowl: SCNNode, food: SCNNode, spoon: SCNNode, steam: [SCNNode], crumbs: [SCNNode])?
     private var jetpackNode: SCNNode?
     private static let noise: [NSImage] = (0..<4).map { _ in
         let n = 5
@@ -327,7 +331,7 @@ final class Minion: Body {
         setPose(currentPose(at: clock))
         wear(outfit, clock: clock, dt: dt)
         let resting = path.isEmpty && state == .settled
-        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing ? Routines.hop(clock: clock, phase: bobPhase) : 0
+        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing && fare == nil ? Routines.hop(clock: clock, phase: bobPhase) : 0
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
         node.position = v3(station.offset.x + pos.x + drawnLean.x, hover + hop, station.offset.y + pos.y + drawnLean.y)
         shadow.position.y = CGFloat(0.003 - hop - hover)
@@ -341,6 +345,8 @@ final class Minion: Body {
         setStatic(o.pixels, frame: Int(clock * 12))
         setTowel(o.towel)
         setJetpack(o.jetpack, clock: clock)
+        setMug(o.mug, clock: clock)
+        setMeal(o.meal, clock: clock)
         stepFades(dt)
     }
 
@@ -439,6 +445,68 @@ final class Minion: Body {
         body.addChildNode(t)
         arrive(t)
         towelNode = t
+    }
+
+    func setMug(_ on: Bool, clock: Double) {
+        guard on else { retire(mugNode); mugNode = nil; return }
+        let mug = mugNode ?? {
+            let m = Kitchen.mug()
+            mugSteam = Kitchen.steam(over: Kitchen.mugHeight / 2)
+            mugSteam.forEach(m.addChildNode)
+            m.name = node.name
+            hold.addChildNode(m)
+            arrive(m)
+            mugNode = m
+            return m
+        }()
+        let cycle = (clock * 0.11 + bobPhase).truncatingRemainder(dividingBy: 1)
+        let sip = cycle < 0.12 ? sin(cycle / 0.12 * .pi) : 0
+        mug.position = v3(0.16 - sip * 0.1, bodyHeight * (0.1 + sip * 0.26), bodyDepth / 2 + 0.06 - sip * 0.02)
+        mug.eulerAngles.x = CGFloat(-sip * 0.6)
+        Kitchen.rise(mugSteam, over: Kitchen.mugHeight / 2, at: clock + bobPhase)
+    }
+
+    func setMeal(_ left: Double?, clock: Double) {
+        guard let left else { retire(mealNode); mealNode = nil; meal = nil; return }
+        if meal == nil {
+            let holder = SCNNode()
+            let parts = Kitchen.bowl()
+            holder.addChildNode(parts.bowl)
+            let spoon = SCNNode(geometry: SCNBox(width: 0.014, height: 0.012, length: 0.08, chamferRadius: 0.003))
+            spoon.geometry!.firstMaterial = lit(NSColor(rgb: (0.75, 0.77, 0.82)))
+            holder.addChildNode(spoon)
+            let steam = Kitchen.steam(over: 0.04)
+            steam.forEach(parts.bowl.addChildNode)
+            let crumbs = (0..<3).map { i -> SCNNode in
+                let c = SCNNode(geometry: SCNBox(width: 0.012, height: 0.012, length: 0.012, chamferRadius: 0))
+                c.geometry!.firstMaterial = lit(i == 1 ? NSColor(rgb: (0.4, 0.75, 0.38)) : NSColor(rgb: (0.93, 0.6, 0.25)))
+                holder.addChildNode(c)
+                return c
+            }
+            holder.name = node.name
+            hold.addChildNode(holder)
+            arrive(holder)
+            mealNode = holder
+            meal = (parts.bowl, parts.food, spoon, steam, crumbs)
+        }
+        guard let meal, let holder = mealNode else { return }
+        holder.position = v3(0, bodyHeight * 0.08, bodyDepth / 2 + 0.07)
+        let food = CGFloat(max(0.02, Timing.clamped((left - 0.2) / 0.8)))
+        meal.food.scale = SCNVector3(food, food, food)
+        let bowl = CGFloat(max(0.02, Timing.clamped(left / 0.2)))
+        meal.bowl.scale = SCNVector3(bowl, bowl, bowl)
+        let cycle = (clock / 2.8 + bobPhase).truncatingRemainder(dividingBy: 1)
+        let up = cycle < 0.5 ? sin(cycle / 0.5 * .pi) : 0
+        meal.spoon.position = v3(0.02, 0.03 + up * bodyHeight * 0.24, 0.01 + up * 0.02)
+        meal.spoon.eulerAngles.x = CGFloat(0.3 - up * 0.9)
+        for (i, c) in meal.crumbs.enumerated() {
+            let k = Timing.clamped((cycle - 0.45 - Double(i) * 0.04) / 0.3)
+            c.isHidden = k <= 0 || k >= 1 || left < 0.05
+            c.position = v3(0.02 + Double(i - 1) * 0.015, 0.03 + bodyHeight * 0.2 * (1 - k) - k * 0.12, 0.03)
+            c.opacity = CGFloat(1 - k)
+        }
+        Kitchen.rise(meal.steam, over: 0.04, at: clock + bobPhase)
+        meal.steam.forEach { $0.isHidden = left < 0.35 }
     }
 
     func setJetpack(_ thrust: Double?, clock: Double) {

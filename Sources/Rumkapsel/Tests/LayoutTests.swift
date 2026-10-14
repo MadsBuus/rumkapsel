@@ -12,7 +12,7 @@ enum LayoutTests {
         test("two stations given the same rooms in the same order lay them out cell for cell the same") {
             let a = fresh(), b = fresh()
             for k in keys { place(k, on: a); place(k, on: b) }
-            for k in keys + ["kind:lounge", "kind:quarters", "kind:bath", "kind:gym"] {
+            for k in keys + ["kind:lounge", "kind:quarters", "kind:bath", "kind:gym", "kind:galley"] {
                 expect(a.rooms[k]?.cells == b.rooms[k]?.cells && a.rooms[k] != nil, "\(k): \(cells(a, k)) against \(cells(b, k))")
             }
             expect(a.dug == b.dug, "and the same hallway was dug: \(a.dugCount) and \(b.dugCount) cells")
@@ -33,7 +33,7 @@ enum LayoutTests {
             let a = fresh()
             for k in keys { place(k, on: a) }
             for (k, r) in a.rooms {
-                expect(r.cells.contains { c in c.neighbours.contains { a.isCorridor($0) } }, "\(k) has a door on the corridor")
+                expect(a.doorOutside(of: k) != nil, "\(k) has a doorway")
                 expect(!r.cells.contains { a.isReserved($0) }, "\(k) keeps off the corridor and the yard")
             }
         }
@@ -85,7 +85,7 @@ enum LayoutTests {
                 let rings = plan.slots.map(\.ring)
                 expect(zip(rings, rings.dropFirst()).allSatisfy { $0 <= $1 },
                        "plan \(plan.seed) opens ring by ring outward, \(rings.first ?? 0) to \(rings.last ?? 0)")
-                for name in ["lounge", "quarters", "bath", "gym"] {
+                for name in ["lounge", "quarters", "bath", "gym", "galley"] {
                     expect(plan.quarters[name] != nil, "plan \(plan.seed) places the \(name)")
                 }
                 let hall = Set(plan.base) .union(plan.slots.flatMap(\.hall))
@@ -122,7 +122,7 @@ enum LayoutTests {
             for k in ["task:api#901", "task:web#900"] { expect(a.rooms[k]?.cells == b.rooms[k]?.cells, "\(k): \(cells(a, k)) against \(cells(b, k))") }
             let hall = Set(b.corridorCells + b.coreCells).subtracting([b.monolithCell])
             expect(hall.allSatisfy { b.hallDistance(of: $0) != nil }, "b's hallway is still one piece")
-            for (k, r) in b.rooms { expect(r.cells.contains { c in c.neighbours.contains { b.isCorridor($0) } }, "\(k) still has a door on the hallway") }
+            for k in b.rooms.keys { expect(b.doorOutside(of: k) != nil, "\(k) still has a doorway") }
         }
 
         test("forty rooms: the station builds outward along the hallway, every room on it, none on the plan") {
@@ -130,7 +130,7 @@ enum LayoutTests {
             let before = a.dugCount
             for i in 0..<40 { place("task:repo\(i % 5)#\(100 + i)", on: a) }
             for (k, r) in a.rooms {
-                expect(r.cells.contains { c in c.neighbours.contains { a.isCorridor($0) } }, "\(k) has a door on the hallway")
+                expect(a.doorOutside(of: k) != nil, "\(k) has a doorway")
                 expect(!r.cells.contains { a.isReserved($0) }, "\(k) keeps off the hallway and the yard")
             }
             expect(a.dugCount > before, "hallway was dug for them: \(a.dugCount) cells")
@@ -193,7 +193,7 @@ enum LayoutTests {
             defer { OfficePlacement.pinned = .rings }
             let after = Station(name: "work")
             after.restore(saved, relayout: true)
-            for place in [Place.quarters, .lounge, .bath, .gym] { after.ensureFixedRoom(place) }
+            for place in [Place.quarters, .lounge, .bath, .gym, .galley] { after.ensureFixedRoom(place) }
             expect(Set(after.rooms.keys) == Set(before.rooms.keys), "the same rooms stand: \(after.rooms.count) against \(before.rooms.count)")
             expect(whole(after), "the hallway is one piece and every office has its door on it")
             expect(neighbourly(after) >= 0.8, "the offices stand by repository: \(Int(neighbourly(after) * 100))%")
@@ -446,6 +446,7 @@ enum LayoutTests {
             case "kind:quarters": ch = "D"
             case "kind:bath": ch = "B"
             case "kind:gym": ch = "G"
+            case "kind:galley": ch = "K"
             default:
                 if byRepo, let i = s.rooms[key]!.repo.flatMap(repos.firstIndex) { ch = letters[i % letters.count] }
                 else { ch = letters[next % letters.count]; next += 1 }
@@ -467,7 +468,7 @@ enum LayoutTests {
         guard let start = s.coreCells.first(where: { $0 != s.plan.monolith }) else { return false }
         var seen: Set<Cell> = [start], queue = [start], head = 0
         while head < queue.count { let c = queue[head]; head += 1; for n in c.neighbours where hall.contains(n) && !seen.contains(n) { seen.insert(n); queue.append(n) } }
-        return seen == hall && s.rooms.values.allSatisfy { r in r.cells.contains { c in c.neighbours.contains(where: s.isCorridor) } }
+        return seen == hall && s.rooms.values.allSatisfy { s.doorOutside(of: $0.key) != nil }
     }
 
     private static func walked(_ s: Station, to cells: Set<Cell>) -> [Cell: Int] {

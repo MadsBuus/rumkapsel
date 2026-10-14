@@ -68,6 +68,20 @@ enum IdleTests {
             expect(IdlePick.pick(roll: 0.5, night: false, crew: false, gymFree: true, bath: true, shower: false) == .gym, "by day, free")
         }
 
+        test("the galley takes a slice of the look round, by day and while nobody else is at it") {
+            func pick(_ roll: Double, night: Bool = false, galley: Command.Fare? = .coffee) -> IdlePick {
+                IdlePick.pick(roll: roll, night: night, crew: false, gymFree: true, bath: true, shower: true, galley: galley)
+            }
+            expect(pick(0.24) == .roam && pick(0.25) == .galley(.coffee) && pick(0.39) == .galley(.coffee), "0.25 to 0.40: the galley")
+            expect(pick(0.3, galley: .bite) == .galley(.bite), "a bite, when that is what the hour serves")
+            expect(pick(0.3, galley: nil) == .roam, "the galley taken or missing: a look round")
+            expect(pick(0.3, night: true) == .roam, "not by night")
+            expect(pick(0.40) == .gym, "the rest as before")
+            expect(IdleAfter.after(.desk, roll: 0.4, night: false, bath: true, galley: .coffee) == .galley(.coffee), "after desk work, now and then a coffee")
+            expect(IdleAfter.after(.desk, roll: 0.4, night: false, bath: true) == .rest, "no galley: rest")
+            expect(IdleAfter.after(.yard, roll: 0.4, night: false, bath: true, galley: .coffee) == .rest, "hauling is followed by the bath or rest, not a coffee")
+        }
+
         test("the bath only where there is one, a shower or the toilet as rolled") {
             expect(IdlePick.pick(roll: 0.7, night: true, crew: true, gymFree: false, bath: false, shower: true) == .roam, "no bath: a look round")
             expect(IdlePick.pick(roll: 0.7, night: true, crew: true, gymFree: false, bath: true, shower: false) == .bath(shower: false), "the toilet")

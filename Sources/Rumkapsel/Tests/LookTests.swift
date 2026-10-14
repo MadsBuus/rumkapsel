@@ -107,6 +107,7 @@ enum LookTests {
         place(st.rooms["kind:lounge"], st.rooms["kind:lounge"].map { look.furnishLounge($0, in: st).props } ?? [])
         place(st.rooms["kind:bath"], st.rooms["kind:bath"].map { look.furnishBath($0, in: st).props } ?? [])
         place(st.rooms["kind:gym"], st.rooms["kind:gym"].map { look.furnishGym($0, in: st).props } ?? [])
+        place(st.rooms["kind:galley"], st.galley.map { look.furnishGalley($0, in: st).props } ?? [])
         place(st.rooms["kind:quarters"], st.beds.map { b in
             let n = look.bed(level: b.level)
             n.position.x += b.pos.x; n.position.z += b.pos.y

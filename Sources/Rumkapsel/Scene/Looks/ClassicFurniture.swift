@@ -7,6 +7,64 @@ struct Furnishing {
     var bar: SCNNode?
     var bag: SCNNode?
     var towel: SCNNode?
+    var kitchen: Kitchen?
+}
+
+struct Kitchen {
+    var lamp: SCNNode
+    var cup: SCNNode
+    var stream: SCNNode
+    var window: SCNNode
+    var meal: SCNNode
+    var head: SCNNode
+    var steam: [SCNNode]
+    static let mealIn = SCNVector3(0, 0.05, -0.01), mealOut = SCNVector3(0, 0.012, 0.13)
+
+    static let mugHeight = 0.08
+
+    static func mug() -> SCNNode {
+        let m = SCNNode(geometry: SCNBox(width: 0.07, height: mugHeight, length: 0.07, chamferRadius: 0.007))
+        m.geometry!.firstMaterial = lit(NSColor(rgb: (0.94, 0.94, 0.92)))
+        let handle = SCNNode(geometry: SCNBox(width: 0.016, height: 0.045, length: 0.028, chamferRadius: 0))
+        handle.geometry!.firstMaterial = m.geometry!.firstMaterial
+        handle.position = v3(-0.042, 0, 0)
+        m.addChildNode(handle)
+        return m
+    }
+
+    static func bowl() -> (bowl: SCNNode, food: SCNNode) {
+        let bowl = SCNNode(geometry: SCNBox(width: 0.08, height: 0.03, length: 0.08, chamferRadius: 0.006))
+        bowl.geometry!.firstMaterial = lit(NSColor(rgb: (0.78, 0.62, 0.42)))
+        let food = SCNNode()
+        food.position = v3(0, 0.02, 0)
+        let noodles = SCNNode(geometry: SCNBox(width: 0.062, height: 0.018, length: 0.062, chamferRadius: 0.005))
+        noodles.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.6, 0.25)))
+        let greens = SCNNode(geometry: SCNBox(width: 0.024, height: 0.016, length: 0.024, chamferRadius: 0))
+        greens.geometry!.firstMaterial = lit(NSColor(rgb: (0.4, 0.75, 0.38)))
+        greens.position = v3(0.014, 0.012, -0.01)
+        food.addChildNode(noodles); food.addChildNode(greens)
+        bowl.addChildNode(food)
+        return (bowl, food)
+    }
+
+    static func steam(over top: Double) -> [SCNNode] {
+        (0..<3).map { _ in
+            let puff = SCNNode(geometry: SCNBox(width: 0.018, height: 0.018, length: 0.018, chamferRadius: 0.004))
+            puff.geometry!.firstMaterial = Props.glowing(NSColor(white: 0.95, alpha: 1), alpha: 0.5)
+            puff.position = v3(0, top, 0)
+            return puff
+        }
+    }
+
+    static func rise(_ steam: [SCNNode], over top: Double, at clock: Double) {
+        for (i, puff) in steam.enumerated() {
+            let k = (clock * 0.7 + Double(i) / Double(steam.count)).truncatingRemainder(dividingBy: 1)
+            puff.position = v3(sin(clock * 2.3 + Double(i) * 2) * 0.012, top + k * 0.14, cos(clock * 1.9 + Double(i)) * 0.01)
+            puff.opacity = CGFloat(sin(k * .pi) * 0.9)
+            let s = CGFloat(0.6 + k)
+            puff.scale = SCNVector3(s, s, s)
+        }
+    }
 }
 
 extension Classic {
@@ -198,6 +256,78 @@ extension Classic {
         mat.geometry!.firstMaterial = flat(NSColor(Colors.furnitureLight))
         mat.position = v3(spots[3].x, 0.006, spots[3].y)
         f.fixtures.append(mat)
+        return f
+    }
+
+    static func galley(_ galley: Galley, in station: Station) -> Furnishing {
+        var f = Furnishing()
+        let yaw = atan2(-galley.back.x, -galley.back.y)
+        func place(_ n: SCNNode, _ at: SIMD2<Double>, _ y: Double) {
+            n.position = v3(station.offset.x + at.x, y, station.offset.y + at.y)
+            n.eulerAngles.y = CGFloat(yaw)
+        }
+        func box(_ w: Double, _ h: Double, _ d: Double, _ m: SCNMaterial, _ at: SCNVector3, chamfer: Double = 0) -> SCNNode {
+            let n = SCNNode(geometry: SCNBox(width: w, height: h, length: d, chamferRadius: chamfer))
+            n.geometry!.firstMaterial = m
+            n.position = at
+            return n
+        }
+        let top = Galley.counterHeight
+        let steel = lit(NSColor(rgb: (0.7, 0.72, 0.78))), dark = lit(NSColor(rgb: (0.2, 0.21, 0.25)))
+        for at in galley.counter {
+            let unit = box(Galley.counterWidth, top, Galley.counterDepth, lit(NSColor(Colors.furnitureDim)), SCNVector3Zero)
+            unit.addChildNode(box(Galley.counterWidth, 0.024, Galley.counterDepth + 0.02, lit(NSColor(Colors.furnitureLight)), v3(0, top / 2 + 0.012, 0.01)))
+            place(unit, at, top / 2)
+            f.props.append(unit)
+        }
+
+        let machine = SCNNode()
+        machine.addChildNode(box(0.17, 0.2, 0.14, steel, v3(0, 0.1, -0.02), chamfer: 0.01))
+        machine.addChildNode(box(0.17, 0.025, 0.14, dark, v3(0, 0.212, -0.02)))
+        machine.addChildNode(box(0.07, 0.07, 0.07, lit(NSColor(rgb: (0.42, 0.27, 0.18))), v3(0.03, 0.26, -0.04)))
+        let head = box(0.11, 0.035, 0.08, dark, v3(0, 0.15, 0.08))
+        machine.addChildNode(head)
+        machine.addChildNode(box(0.12, 0.012, 0.07, dark, v3(0, 0.006, 0.085)))
+        let lamp = box(0.026, 0.018, 0.006, flat(NSColor(rgb: (0.3, 0.32, 0.36))), v3(0.055, 0.185, 0.053))
+        machine.addChildNode(lamp)
+        let cup = Kitchen.mug()
+        cup.position = v3(0, 0.012 + Kitchen.mugHeight / 2, 0.085)
+        cup.eulerAngles.y = .pi / 2
+        cup.isHidden = true
+        machine.addChildNode(cup)
+        let steam = Kitchen.steam(over: Kitchen.mugHeight / 2)
+        steam.forEach(cup.addChildNode)
+        let stream = box(0.012, 0.04, 0.012, flat(NSColor(rgb: (0.36, 0.22, 0.12))), v3(0, 0.112, 0.085))
+        stream.isHidden = true
+        machine.addChildNode(stream)
+        place(machine, galley.machine(.coffee), top + 0.024)
+        f.fixtures.append(machine)
+
+        let printer = SCNNode()
+        printer.addChildNode(box(0.22, 0.2, 0.17, lit(NSColor(rgb: (0.86, 0.87, 0.9))), v3(0, 0.1, -0.01), chamfer: 0.012))
+        let window = box(0.15, 0.1, 0.006, flat(NSColor(rgb: (0.16, 0.18, 0.22))), v3(0, 0.09, 0.076))
+        window.geometry!.firstMaterial!.transparency = 0.55
+        printer.addChildNode(window)
+        printer.addChildNode(box(0.04, 0.022, 0.006, flat(NSColor(rgb: (0.4, 0.95, 0.75))), v3(0.075, 0.172, 0.076)))
+        printer.addChildNode(box(0.16, 0.01, 0.06, dark, v3(0, 0.005, 0.1)))
+        let meal = Kitchen.bowl().bowl
+        meal.position = Kitchen.mealIn
+        meal.isHidden = true
+        printer.addChildNode(meal)
+        place(printer, galley.machine(.bite), top + 0.024)
+        f.fixtures.append(printer)
+
+        let rack = SCNNode()
+        for side in [-1.0, 1.0] {
+            let mug = Kitchen.mug()
+            mug.position = v3(side * 0.04, Kitchen.mugHeight / 2, 0)
+            mug.eulerAngles.y = CGFloat(side * 0.4)
+            rack.addChildNode(mug)
+        }
+        place(rack, galley.middle + galley.back * 0.43, top + 0.024)
+        f.fixtures.append(rack)
+
+        f.kitchen = Kitchen(lamp: lamp, cup: cup, stream: stream, window: window, meal: meal, head: head, steam: steam)
         return f
     }
 

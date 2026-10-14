@@ -237,6 +237,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var localSignature = ""
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
+    var kitchens: [String: Kitchen] = [:]
     private var lastBusy: [String: Double] = [:]
     var stationAnchors: [String: SCNNode] = [:]
     var knownSpine: [String: Int] = [:]
@@ -809,6 +810,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .exercise: return "gym"
         case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
         case .chore: return "roam"
+        case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"
         default: return m.place == .lounge && m.activity != .sleeping ? "lounge" : nil
         }
     }
@@ -879,6 +881,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if !b.choring {
                 if b.bathing || b.exercising { simulation.finish(b, to: .lounge) }
                 if !startRoam(b, station: station) { go(.lounge) }
+            }
+        case "coffee", "bite":
+            if b.fare == nil {
+                if b.bathing || b.exercising || b.choring { simulation.finish(b, to: .lounge) }
+                if !visitGalley(b, station: station, fare: m.doing == "coffee" ? .coffee : .bite) { go(.lounge) }
             }
         case "lounge":
             go(.lounge)
