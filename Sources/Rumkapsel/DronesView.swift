@@ -128,7 +128,7 @@ extension StationController {
                 v.strobe?.isHidden = resting || clock.truncatingRemainder(dividingBy: 1.2) > 0.08
                 v.eye?.geometry?.firstMaterial?.diffuse.contents = d.torch ? NSColor(rgb: (1.0, 0.75, 0.3)) : Props.droneEye
                 v.torch?.isHidden = !d.torch
-                if d.torch, case .weld(let key) = d.task, let r = simulation.rockets[key], let seam = seamPoint(r) {
+                if d.torch, case .weld(let key) = d.task, let seam = seamPoint(key, panel: d.seam) {
                     let lamp = v.lamp ?? {
                         let l = Props.weldLamp()
                         propRoot.addChildNode(l)

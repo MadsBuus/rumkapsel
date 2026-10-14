@@ -227,7 +227,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let rocketRoot = SCNNode()
     var rocketViews: [String: RocketView] = [:]
     var sparks: [Spark] = []
-    var undocking: [(node: SCNNode, since: Double)] = []
+    var undocking: [(node: SCNNode, since: Double, from: SCNVector3?)] = []
     var shuttleViews: [ObjectIdentifier: ShuttleView] = [:]
     var lastBoxCount: [String: Int] = [:]
     var markerSignatures: [String: String] = [:]
@@ -262,6 +262,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var padFields: [String: HangarField] = [:]
     var vortexViews: [String: VortexView] = [:]
     var padRings: [String: SCNNode] = [:]
+    var padsDrawn = ""
     var droneViews: [String: DroneView] = [:]
     var puffs: [Puff] = []
     static let powerWindow: TimeInterval = 2 * 3600
@@ -348,6 +349,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var demoClock = 0.0
     var demoMerged = false
     var demoStaged = false
+    var demoLaunched = false
 
     static let activeWindow: TimeInterval = 60 * 60
     static let busyWindow: TimeInterval = 90
@@ -975,18 +977,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             setCrewRoster(members)
         case .crewActivity(let a):
             playCrew(a)
-        case .stagingOpened(let stationName, let repo, let number):
-            simulation.stagingOpened(station: stationName, repo: repo, number: number)
-        case .stagingMerged(let stationName, let repo, let number):
-            logEvent("\(repo): staging release #\(number) merged")
-            simulation.stagingMerged(station: stationName, repo: repo, number: number)
-        case .stagingClosed(let stationName, let repo, let number):
-            logEvent("\(repo): staging release #\(number) closed, not merged")
-            simulation.stagingClosed(station: stationName, repo: repo, number: number)
-        case .releaseOpened, .releaseMerged:
-            break
-        case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command, let hotfix):
-            simulation.rocket(station: stationName, repo: repo, hotfix: hotfix, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):
             promptLanded(station: stationName, key: key, minionId: minionId, count: count)
         case .crewHidden:
@@ -1017,10 +1007,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted(let stationName, let repo, false, let expected, _, let elapsed):
-            simulation.stagingDeploy(station: stationName, repo: repo, outcome: nil, usual: expected, elapsed: elapsed)
-        case .deployEnded(let stationName, let repo, false, let outcome):
-            simulation.stagingDeploy(station: stationName, repo: repo, outcome: outcome)
+        case .deployStarted(_, _, false, _, _, _), .deployEnded(_, _, false, _):
+            break
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
@@ -1079,7 +1067,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             updateBerths()
             tickHullLamps()
             drawRockets()
-            tickPadLifts(dt: dt)
+            tickPadLifts()
             tickSparks(dt: dt)
             turnPlanets(dt: dt)
             drawDrones(dt: dt)

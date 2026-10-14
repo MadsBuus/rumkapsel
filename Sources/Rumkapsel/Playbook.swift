@@ -27,7 +27,7 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     }
     static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { if case .aboard = $0 { return true }; return false } }
     static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
-    static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.world.padKeys().contains { $0.hasSuffix("|web") } }
+    static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.simulation.shown.values.contains { $0.rockets.values.contains { $0.repo == "web" } } }
     static let bodyOnDeck = PlaybookWait.until("somebody in the hall") { c in
         c.minions.values.contains { m in c.fleet.stations[m.station]?.hall.cells.contains(m.cell) ?? false }
     }
@@ -49,11 +49,13 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
         } }
     }
     static func weldAlmost(_ repo: String) -> PlaybookWait {
-        .until("\(repo)'s weld nearly done") { c in c.simulation.rockets.values.contains {
-            $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } }
+        .until("\(repo)'s weld nearly done") { c in c.simulation.shown.values.contains { $0.rockets.values.contains {
+            $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } } }
     }
     static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
-    static let hotfixGone = PlaybookWait.until("the hotfix rocket climbed") { c in !c.simulation.rockets.keys.contains { RocketKey.parts($0).hotfix != nil } }
+    static let hotfixGone = PlaybookWait.until("the hotfix rocket climbed") { c in
+        !c.simulation.shown.values.contains { $0.rockets.values.contains { if case .hotfix = $0.kind { return true }; return false } }
+    }
 }
 
 struct PlaybookEntry {
@@ -148,6 +150,11 @@ enum Playbook {
                       camera: .area("yard", 2.6), tail: 4, yard: true, rooms: [], crowd: true),
         PlaybookEntry("release", "Production deploy succeeds", "the rocket flies to its colony and lands", [("16x", 0.5), ("Release: Production opens", 2), ("Release: Production merges", 2),
                                                                            ("1x", 0.5), ("Deploy: Production starts", .flightFarOut), ("Deploy: Goes live", 30)],
+                      camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
+
+        PlaybookEntry("release", "Production deploy from the pad", "the deploy starts at the merge: the vortex loads the rocket, it climbs off its pad and the flight takes it from there while the deck sinks",
+                      [("16x", 0.5), ("Release: Production opens", 2), ("1x", 0.5), ("Release: Production merges", 1), ("Deploy: Production starts", .flightFarOut),
+                       ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
 
         PlaybookEntry("release", "Hotfix PR opened", "an express rocket with a red tip stands beside web's release rocket",

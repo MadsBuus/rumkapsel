@@ -33,13 +33,14 @@ extension StationController {
         for m in minions.values {
             for p in m.pyramids + m.queuedCones { mark(m.station, p, offset: .zero) }
         }
-        for (key, r) in simulation.rockets {
-            guard let st = fleet.stations[r.station] else { continue }
-            let at = padPosition(station: st, slot: padSlot(station: st, key: key))
-            let p = SIMD2(Double(at.x) - st.offset.x, Double(at.z) - st.offset.y)
-            let hull = 0.3, f = Double(Station.fine)
-            for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
-                for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[r.station, default: []].insert(Cell(x: sx, y: sy)) }
+        for st in fleet.stations.values where st.hasPad {
+            for (_, r) in simulation.shownRockets(st) {
+                let at = padPosition(station: st, slot: r.slot)
+                let p = SIMD2(Double(at.x) - st.offset.x, Double(at.z) - st.offset.y)
+                let hull = 0.3, f = Double(Station.fine)
+                for sx in Int(((p.x - hull) * f).rounded())...Int(((p.x + hull) * f).rounded()) {
+                    for sy in Int(((p.y - hull) * f).rounded())...Int(((p.y + hull) * f).rounded()) { blocked[st.name, default: []].insert(Cell(x: sx, y: sy)) }
+                }
             }
         }
         if furnitureObstaclesAt != staticRoot.childNodes.count {
@@ -302,9 +303,11 @@ extension StationController {
         if padHexRoot.parent == nil { propRoot.addChildNode(padHexRoot) }
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
         padRings = [:]
+        var drawn: [String] = []
         for station in fleet.stations.values where station.hasPad {
-            let held = Dictionary(world.padOrder(station: station).compactMap { key in world.releases.padSlotOf[key].map { ($0, key) } },
-                                  uniquingKeysWith: { a, _ in a })
+            let rockets = simulation.shownRockets(station)
+            drawn += rockets.map { "\($0.key):\($0.rocket.slot)" }
+            let held = Dictionary(rockets.map { ($0.rocket.slot, $0.key) }, uniquingKeysWith: { a, _ in a })
             for (i, at) in world.padSlots(station: station).enumerated() {
                 let pad = SCNNode(geometry: faceted(SCNTube(innerRadius: Hall.padRadius - 0.06, outerRadius: Hall.padRadius, height: 0.008)))
                 pad.geometry!.firstMaterial = flat(held[i].map { NSColor(fleet.color(forRepo: RocketKey.parts($0).repo)) } ?? Props.berthIdle)
@@ -315,6 +318,7 @@ extension StationController {
                 if let key = held[i] { padRings[key] = pad }
             }
         }
+        padsDrawn = drawn.sorted().joined(separator: ",")
     }
 
     func hatchBlink(station name: String) {

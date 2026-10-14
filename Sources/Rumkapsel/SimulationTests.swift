@@ -157,49 +157,6 @@ enum SimulationTests {
             expect(step(sim, seconds: 30, until: { sim.flights.isEmpty }), "and the ship leaves with it")
         }
 
-        test("a release merged: the vortex pulls every cleared crate into the hold, one after another, and only then does the rocket climb") {
-            let (sim, station, _) = fixture()
-            put(station, sim, "web", [430, 431, 432], .cleared, quiet: true)
-            sim.play()
-            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.standBy, station: "work", repo: "web"))
-            let docked = step(sim, seconds: 10, until: { sim.rockets["work|web"]?.kick == .docked })
-            expect(docked, "the standing tip goes down onto its kick stage and the lift docks it")
-            _ = Rules.apply([.launched(repo: "web", hotfix: nil)], at: sim.now, to: &station.facts, yard: station.yard)
-            sim.play()
-            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.launch, station: "work", repo: "web"))
-            sim.stepRockets()
-            guard let v = sim.vortices["work|web"] else { return expect(false, "the merge opens a vortex: phase \(String(describing: sim.rockets["work|web"]?.phaseKind))") }
-            expect(v.waiting.count == 3 && v.flying.isEmpty, "three crates wait their turn: \(v.waiting.count)")
-            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .vortex = $0 { return true }; return false } == true, "off the rows from the start: the vortex draws them")
-            var climbedEarly = false, climbed = false
-            let done = step(sim, seconds: 20, until: { sim.vortices["work|web"] == nil }, beat: {
-                guard !climbed, sim.rockets["work|web"]?.phaseKind == .climb else { return }
-                climbed = true
-                climbedEarly = sim.vortices["work|web"].map { !$0.waiting.isEmpty || !$0.flying.isEmpty } ?? false
-            })
-            expect(done, "the vortex closes once all are in")
-            expect(!climbedEarly, "the rocket waits for every crate")
-            sim.stepRockets()
-            expect(climbed || sim.rockets["work|web"]?.phaseKind == .climb, "then it climbs")
-            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .aboard = $0 { return true }; return false } == true, "and every crate is shown aboard")
-        }
-
-        test("a cleared rocket waits with its crates on their rows, and standing it down takes nothing back") {
-            let (sim, station, _) = fixture()
-            put(station, sim, "web", [440, 441], .cleared, quiet: true)
-            sim.play()
-            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
-                       command: .rocket(.load(2), station: "work", repo: "web"))
-            _ = step(sim, seconds: 2)
-            expect(sim.rockets["work|web"]?.isSteaming == true, "the rocket waiting for the merge")
-            expect(sim.cargo.isEmpty && sim.vortices.isEmpty, "nothing moves before the merge")
-            sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
-                       command: .rocket(.standBy, station: "work", repo: "web"))
-            expect(sim.rockets["work|web"]?.stage == .standBy, "standing by again")
-            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .row(let s) = $0 { return s.zone == .cleared }; return false } == true,
-                   "the crates still on their rows")
-        }
-
         test("the board: a body with a crate on its arms is not taken off its carry") {
             let (sim, station, m) = fixture()
             put(station, sim, "web", [440], .stored, quiet: true)

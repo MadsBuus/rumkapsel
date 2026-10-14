@@ -784,7 +784,7 @@ final class Station {
 
     private var savedFacts: Facts {
         var f = facts
-        f.launches = [:]
+        f.rockets = f.rockets.filter { !$0.value.launched }
         f.crates = f.crates.filter { if case .aboard = $0.value.place { return false }; return true }
         return f
     }

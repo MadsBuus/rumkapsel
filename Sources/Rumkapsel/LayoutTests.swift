@@ -313,7 +313,7 @@ enum LayoutTests {
             let b = Station(name: "work")
             b.restore(saved)
             var want = a.facts
-            want.launches = [:]
+            want.rockets = want.rockets.filter { !$0.value.launched }
             want.crates[CrateID(repo: "web", number: 5)] = nil
             expect(b.facts == want, "the same facts but what flew: \(b.facts.crates.keys.sorted())")
             var old = saved

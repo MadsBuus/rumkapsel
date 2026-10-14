@@ -24,6 +24,14 @@ struct Shown: Equatable {
     var deliveries: [Int: Delivery] = [:]
     var cubes: [String: Int] = [:]
     var folds: [Int: Double] = [:]
+    var rockets: [RocketID: ShownRocket] = [:]
+    var flown: Set<RocketID> = []
+
+    var grounded: Shown {
+        var s = self
+        s.rockets = [:]
+        return s
+    }
 }
 
 enum MoveKind: Equatable { case haul, carry, park, hold }
@@ -44,7 +52,6 @@ struct Calm: Equatable {
     let facts: Facts
     let view: Shown
     let jobs: Set<Int>
-    let rockets: Set<String>
 }
 
 struct Slot: Hashable { let zone: Zone; let column: Int; let level: Int }
@@ -153,12 +160,13 @@ extension Simulation {
         if played.insert(st.name).inserted { snap(st); return }
         playCrates(st)
         playOffices(st)
+        playRockets(st)
     }
 
     private func calm(_ st: Station) -> Calm {
         let jobs = Set(cargo.filter { $0.value.command.crate?.station == st.name }.keys)
             .union(ownOrders.filter { if case .pack = $0.value.command.kind { return bodies[$0.value.body]?.station == st.name }; return false }.keys)
-        return Calm(facts: st.facts, view: shown[st.name] ?? Shown(), jobs: jobs, rockets: Set(rockets.map { "\($0.key)|\($0.value.launch ?? "")" }))
+        return Calm(facts: st.facts, view: (shown[st.name] ?? Shown()).grounded, jobs: jobs)
     }
 
     private func playCrates(_ st: Station) {
@@ -187,7 +195,6 @@ extension Simulation {
         reaimLifted(st, view, targets)
         let blocked = order(st, view, targets, &moves)
         hire(st, view, moves, blocked)
-        launchPending(st, view)
         if shown[st.name] != before { cue(.redraw) }
         calms[st.name] = calm(st)
         watch(st, targets)
@@ -203,13 +210,14 @@ extension Simulation {
     func snap(_ st: Station) {
         for (cid, job) in cargo where job.command.crate?.station == st.name { callOff(cid) }
         for (key, v) in vortices where v.station == st.name { vortices[key] = nil }
-        stalls = stalls.filter { !$0.key.hasPrefix(st.name + "|") }
+        stalls = stalls.filter { !$0.key.hasPrefix(st.name + "|") && !$0.key.hasPrefix("rocket|\(st.name)|") }
         var view = shown[st.name] ?? Shown()
         let fresh = targets(st).mapValues(\.at)
         for id in view.crates.keys where fresh[id] == nil { cue(.vanish(st.name, id)) }
         view.crates = fresh
         shown[st.name] = view
         snapOffices(st)
+        snapRockets(st)
         cue(.redraw)
     }
 
@@ -256,6 +264,7 @@ extension Simulation {
             case .log(let text): onEvent(.log(text))
             case .quiet(.crate(let id)): snap(st, id)
             case .quiet(.office(let key)): snapOffice(st, key)
+            case .quiet(.rocket(let id)): snapRocket(st, id)
             case .renamed(.crate(let from), to: .crate(let to)): snap(st, from); snap(st, to)
             case .renamed(.office(let from), to: .office(let to)): rekey(st, from: from, to: to)
             case .renamed: break
@@ -272,6 +281,7 @@ extension Simulation {
                 return "\(id) shown \(describe(view.crates[id])), fact \(describe(targets[id]?.at))"
             }
             if let lag = officeLag(st) { return lag }
+            for id in Set(st.facts.rockets.keys).union(view.rockets.keys).sorted() { if let lag = rocketLag(st, id) { return lag } }
         }
         if let job = cargo.values.min(by: { $0.command.id < $1.command.id }) { return "still carrying: \(job.command.words)" }
         return nil
@@ -287,17 +297,6 @@ extension Simulation {
         case .vortex(let r)?: return "in the vortex to \(r)"
         case .aboard(let r)?: return "aboard \(r)"
         case .falling(let to, _, _)?: return "falling to \(to.zone.rawValue) c\(to.column) L\(to.level)"
-        }
-    }
-
-    func loads(_ r: RocketJob, _ rocket: RocketID) -> Bool { r.launch == rocket }
-
-    func pending(_ r: RocketJob) -> Bool {
-        guard let st = fleet.stations[r.station] else { return false }
-        let view = shown[st.name] ?? Shown()
-        return st.facts.crates.values.contains { c in
-            guard case .aboard(let rocket) = c.place, loads(r, rocket) else { return false }
-            return view.crates[c.id] != .aboard(rocket)
         }
     }
 
@@ -648,7 +647,7 @@ extension Simulation {
 
     private func watch(_ st: Station, _ targets: [CrateID: Target]) {
         let view = shown[st.name] ?? Shown()
-        if stirred[st.name]?.view != view { stirred[st.name] = (view, clock) }
+        if stirred[st.name]?.view != view.grounded { stirred[st.name] = (view.grounded, clock) }
         let still = clock - (stirred[st.name]?.at ?? clock) >= Patience.waitLimit
         var behind: Set<String> = []
         var carriers: [CrateID: String] = [:]
@@ -667,20 +666,5 @@ extension Simulation {
             snap(st, id)
         }
         for key in stalls.keys where key.hasPrefix(st.name + "|") && !behind.contains(key) { stalls[key] = nil }
-    }
-
-    private func launchPending(_ st: Station, _ view: Shown) {
-        let claimed = Set(rockets.values.compactMap(\.launch))
-        for (id, _) in st.facts.launches.sorted(by: { ($0.value, $0.key) < ($1.value, $1.key) }) where !claimed.contains(id) {
-            guard st.facts.crates.values.contains(where: { $0.place == .aboard(id) && view.crates[$0.id] != .aboard(id) }) else { continue }
-            let repo = String(id.prefix { $0 != "|" })
-            let key = RocketKey.of(station: st.name, repo: repo)
-            if id.contains("|merge#") {
-                if rockets[key] == nil { launchOnMerge(station: st, repo: repo) }
-            } else if id.contains("|release#"), rockets[key].map({ !$0.isLaunching }) ?? true {
-                rocket(station: st.name, repo: repo, label: rockets[key]?.label ?? "rocket:\(world.waitingURL(repo: repo))|\(repo) · \(Words.current.liftedOff)",
-                       untested: false, tall: true, cargo: 0, command: .rocket(.launch, station: st.name, repo: repo))
-            }
-        }
     }
 }

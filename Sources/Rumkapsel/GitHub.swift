@@ -588,9 +588,9 @@ final class GitHubResolver {
         return releases[repoRoot]?.0
     }
 
-    func hotfixes(repoRoot: String) -> [ReleasePR] {
+    func hotfixes(repoRoot: String) -> [ReleasePR]? {
         lock.lock(); defer { lock.unlock() }
-        return hotfixes[repoRoot]?.0 ?? []
+        return hotfixes[repoRoot]?.0
     }
 
     func takeHotfixLaunches() -> [(repoRoot: String, pr: ReleasePR)] {

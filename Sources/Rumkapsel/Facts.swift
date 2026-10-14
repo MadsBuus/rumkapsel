@@ -115,7 +115,39 @@ struct StagingFact: Codable, Equatable {
     var number: Int
     var merged = false
     var deploy: Deploy = .unheard
+    var mergedAt: Date?
+    var heardAt: Date?
     enum Deploy: Codable, Equatable { case unheard, running(since: Date, usual: TimeInterval), live, failed }
+
+    var underway: Bool { merged && deploy != .live }
+
+    func settled(at now: Date) -> Bool {
+        guard merged else { return false }
+        switch deploy {
+        case .unheard, .failed: return now.timeIntervalSince(heardAt ?? mergedAt ?? .distantPast) > Deployments.findWithin
+        case .running(let since, let usual): return now.timeIntervalSince(since) > usual * 3 + Deployments.findWithin
+        case .live: return number == 0 && now.timeIntervalSince(heardAt ?? .distantPast) > 60
+        }
+    }
+}
+
+struct RocketFact: Codable, Equatable {
+    enum Kind: Codable, Equatable { case release, hotfix(Int), merge }
+
+    let id: RocketID
+    let repo: String
+    var kind: Kind
+    var slot: Int?
+    var label: String
+    var docked = false
+    var go = false
+    var launchedAt: Date?
+
+    init(id: RocketID, repo: String, kind: Kind, label: String, docked: Bool = false) {
+        self.id = id; self.repo = repo; self.kind = kind; self.label = label; self.docked = docked
+    }
+
+    var launched: Bool { launchedAt != nil }
 }
 
 struct RepoFacts: Codable, Equatable {
@@ -148,7 +180,7 @@ struct Facts: Codable, Equatable {
     var homes: [String: Int] = [:]
     var offices: [String: OfficeFact] = [:]
     var staging: [String: StagingFact] = [:]
-    var launches: [RocketID: Date] = [:]
+    var rockets: [RocketID: RocketFact] = [:]
 
     init() {}
 
@@ -161,7 +193,7 @@ struct Facts: Codable, Equatable {
         homes = try c.decodeIfPresent([String: Int].self, forKey: .homes) ?? [:]
         offices = try c.decodeIfPresent([String: OfficeFact].self, forKey: .offices) ?? [:]
         staging = try c.decodeIfPresent([String: StagingFact].self, forKey: .staging) ?? [:]
-        launches = try c.decodeIfPresent([RocketID: Date].self, forKey: .launches) ?? [:]
+        rockets = try c.decodeIfPresent([RocketID: RocketFact].self, forKey: .rockets) ?? [:]
         nextSeq = max(nextSeq, (crates.values.map(\.seq).max() ?? -1) + 1)
     }
 
@@ -170,4 +202,9 @@ struct Facts: Codable, Equatable {
     func repo(_ name: String) -> RepoFacts { repos[name] ?? RepoFacts() }
     func count(_ zone: Zone) -> Int { crates.values.filter { $0.zone == zone }.count }
     func rowCrates(of repo: String) -> Int { crates.values.filter { $0.id.repo == repo && $0.onRow }.count }
+    func cargo(_ repo: String) -> [CrateFact] {
+        let zones = self.repo(repo).loadZones
+        return crates.values.filter { $0.id.repo == repo && $0.zone.map(zones.contains) == true }.sorted { $0.id < $1.id }
+    }
+    func aboard(_ rocket: RocketID) -> [CrateFact] { crates.values.filter { $0.place == .aboard(rocket) }.sorted { $0.id < $1.id } }
 }

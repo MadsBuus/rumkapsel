@@ -24,24 +24,16 @@ struct Expect {
     static func log(_ text: String) -> Expect {
         event("log \"\(text)\"") { if case .log(let t) = $0 { return t.contains(text) }; return false }
     }
-    static func stagingOpened(_ repo: String) -> Expect {
-        event("stagingOpened \(repo)") { if case .stagingOpened(_, let r, _) = $0 { return r == repo }; return false }
-    }
-    static func stagingMerged(_ repo: String) -> Expect {
-        event("stagingMerged \(repo)") { if case .stagingMerged(_, let r, _) = $0 { return r == repo }; return false }
-    }
-    static func stagingClosed(_ repo: String) -> Expect {
-        event("stagingClosed \(repo)") { if case .stagingClosed(_, let r, _) = $0 { return r == repo }; return false }
+    static func staging(_ repo: String, _ what: String) -> Expect {
+        event("staging release \(what) \(repo)") { if case .log(let t) = $0 { return t.hasPrefix("\(repo): staging release #") && t.hasSuffix(" " + what) }; return false }
     }
     static func releaseOpened(_ repo: String, untested: Bool) -> Expect {
-        event("releaseOpened \(repo)\(untested ? " untested" : "")") {
-            if case .releaseOpened(_, let r, _, _, let u, _) = $0 { return r == repo && u == untested }; return false
+        event("release on the pad \(repo)\(untested ? " untested" : "")") {
+            if case .log(let t) = $0 { return t.hasPrefix("\(repo): release to ") && t.hasSuffix(untested ? " (untested)" : Words.current.onThePad) }; return false
         }
     }
-    static func releaseMerged(_ repo: String, production: Bool) -> Expect {
-        event("releaseMerged \(repo)\(production ? " production" : "")") {
-            if case .releaseMerged(_, let r, _, _, _, let p) = $0 { return r == repo && p == production }; return false
-        }
+    static func releaseMerged(_ repo: String) -> Expect {
+        event("release merged \(repo)") { if case .log(let t) = $0 { return t.hasPrefix("\(repo): release merged, ") }; return false }
     }
     static func boardMoved(_ repo: String, to stage: WorldEvent.Stage) -> Expect {
         event("boardMoved \(repo) -> \(stage)") { if case .boardMoved(let it, _, let to) = $0 { return it.repo == repo && to == stage }; return false }
@@ -83,11 +75,9 @@ struct Expect {
         command("deliverOffice", by: who) { if case .deliverOffice = $0 { return true }; return false }
     }
     static let flight = command("flight", by: "shuttle") { if case .flight = $0 { return true }; return false }
-    static func rocket(_ stage: Command.RocketStage, _ repo: String) -> Expect {
-        command("rocket \(stage) \(repo)", by: "rocket") {
-            if case .rocket(let s, _, let r) = $0 { return s.rank == stage.rank && r == repo }; return false
-        }
-    }
+    static func standing(_ repo: String) -> Expect { log("\(repo) \(Words.current.standingBy)") }
+    static func go(_ repo: String) -> Expect { log("\(repo) \(Words.current.steaming)") }
+    static func liftingOff(_ repo: String) -> Expect { log("\(repo) \(Words.current.liftingOff)") }
     static func stow(by who: String) -> Expect {
         command("stow", by: who) { if case .stow = $0 { return true }; return false }
     }
@@ -179,14 +169,14 @@ enum Scenarios {
             ("Release: Hotfix merges", 4.8),
         ], tail: 240, expects: [
             .log("hotfix #298"),
-            .log("as a hotfix"),
-            .rocket(.launch, "ios"),
+            .log("ios: hotfix #298 merged, 1 crate aboard"),
             .carry(298, to: .waiting),
+            .liftingOff("ios"),
         ], floor: { sim in
-            let rockets = sim.station.simulation.rockets
-            if rockets.keys.contains(where: { $0.contains("hotfix") }) { return "the hotfix rocket is still on the pad: \(rockets.keys.sorted())" }
-            guard let release = rockets["work|ios"] else { return "the release rocket went: \(rockets.keys.sorted())" }
-            if release.isLaunching { return "the release rocket launched with the hotfix" }
+            let rockets = sim.station.simulation.shown["work"]?.rockets ?? [:]
+            if rockets.values.contains(where: { if case .hotfix = $0.kind { return true }; return false }) { return "the hotfix rocket is still on the pad: \(rockets.keys.sorted())" }
+            guard let release = rockets.first(where: { $0.value.repo == "ios" && $0.value.kind == .release })?.key else { return "the release rocket went: \(rockets.keys.sorted())" }
+            if sim.station.world.fleet.stations["work"]?.facts.rockets[release]?.launched == true { return "the release rocket launched with the hotfix" }
             if case .aboard? = Scenario.fact(sim, "ios", 298)?.place { return nil }
             return Scenario.fact(sim, "ios", 298) == nil ? nil : "#298 is still on the floor"
         }),
@@ -225,8 +215,8 @@ enum Scenarios {
             ("Release: Staging opens", 80),
             ("Release: Staging merges", 4.8),
         ], tail: 160, expects: [
-            .stagingOpened("web"),
-            .stagingMerged("web"),
+            .staging("web", "open"),
+            .staging("web", "merged"),
             .carry(to: .testing),
         ], floor: { sim in
             Scenario.crates(sim, [.testing, .cleared], "web") > 0 ? nil : "nothing of web stands on the deck"
@@ -246,8 +236,8 @@ enum Scenarios {
             ("Release: Staging opens", 80),
             ("Release: Staging closes", 4.8),
         ], tail: 160, hold: 60, expects: [
-            .stagingOpened("web"),
-            .stagingClosed("web"),
+            .staging("web", "open"),
+            .staging("web", "closed, not merged"),
         ], floor: { sim in
             let deck = Scenario.crates(sim, [.testing, .cleared], "web")
             if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
@@ -261,8 +251,9 @@ enum Scenarios {
             ("Open PR", 32),
             ("Merge PR", 4.8),
         ], tail: 720, expects: [
-            .rocket(.launch, "ios"),
+            .log("ios: #298 merged, 1 crate aboard"),
             .carry(298, to: .waiting),
+            .liftingOff("ios"),
         ], floor: { sim in
             let zone = Scenario.fact(sim, "ios", 298)?.zone
             return zone == nil ? nil : "#298 is still placed in \(String(describing: zone)) after the launch"
@@ -277,11 +268,11 @@ enum Scenarios {
             ("Release: Mark tested", 128),
             ("Release: Production merges", 4.8),
         ], tail: 224, expects: [
-            .rocket(.standBy, "ios"),
             .arrived(298, in: .waiting),
             .carry(298, to: .waiting),
-            .releaseMerged("ios", production: true),
-            .rocket(.launch, "ios"),
+            .go("ios"),
+            .releaseMerged("ios"),
+            .liftingOff("ios"),
         ], floor: { sim in
             let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
@@ -296,11 +287,10 @@ enum Scenarios {
         ], tail: 224, expects: [
             .arrived(298, in: .waiting),
             .carry(298, to: .waiting),
-            .rocket(.launch, "ios"),
+            .liftingOff("ios"),
         ], floor: { sim in
-            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
-                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
-                - Scenario.count(sim, .rocket(.load(0), "ios"), after: "Release: Tag")
+            let standing = Scenario.count(sim, .standing("ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .go("ios"), after: "Repo: Ships on tags")
             if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times before any tag" }
             let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after the tag"
@@ -315,10 +305,10 @@ enum Scenarios {
         ], tail: 64, expects: [
             .carry(298, to: .waiting),
         ], forbids: [
-            .rocket(.launch, "ios"),
+            .liftingOff("ios"),
         ], floor: { sim in
-            let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
-                + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
+            let standing = Scenario.count(sim, .standing("ios"), after: "Repo: Ships on tags")
+                + Scenario.count(sim, .go("ios"), after: "Repo: Ships on tags")
             if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times" }
             return Scenario.fact(sim, "ios", 298)?.zone == .waiting ? "#298 still stands in storage after it shipped" : nil
         }),
@@ -333,7 +323,7 @@ enum Scenarios {
         ], tail: 224, expects: [
             .arrived(298, in: .waiting),
             .carry(298, to: .waiting),
-            .rocket(.launch, "ios"),
+            .liftingOff("ios"),
         ], floor: { sim in
             let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 1 ? nil : "\(stored) ios crates left in storage; #280 alone should be"
@@ -351,7 +341,7 @@ enum Scenarios {
             .carry(298, to: .waiting),
             .carry(298, to: .testing),
             .carry(298, to: .cleared),
-            .rocket(.launch, "ios"),
+            .liftingOff("ios"),
         ], floor: { sim in
             let deck = Scenario.crates(sim, [.testing, .cleared], "ios")
             return deck == 1 ? nil : "\(deck) ios crates left on the deck; #280 alone should be"
@@ -363,13 +353,11 @@ enum Scenarios {
             ("Release: Mark tested", 96),
             ("Release: Production merges", 4.8),
         ], tail: 192, expects: [
-            .rocket(.standBy, "web"),
             .releaseOpened("web", untested: true),
-            .rocket(.load(2), "web"),
+            .go("web"),
             .carry(to: .cleared),
-            .rocket(.steam, "web"),
-            .releaseMerged("web", production: true),
-            .rocket(.launch, "web"),
+            .releaseMerged("web"),
+            .liftingOff("web"),
         ], floor: { sim in
             let deck = Scenario.crates(sim, [.testing, .cleared], "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
@@ -421,8 +409,8 @@ enum Scenarios {
             ("Target: api#5140", 0),
             ("Teammate: Merge PR", 4.8),
         ], tail: 192, expects: [
-            .officeGone("work|task:api#5140", reason: "pull request closed"),
             .carry(5140, to: .waiting),
+            .officeGone("work|task:api#5140", reason: "pull request closed"),
         ], floor: { sim in
             guard let st = sim.station.world.fleet.stations["work"] else { return "no station" }
             if st.rooms["task:api#5140"] != nil || sim.station.simulation.shown["work"]?.offices["task:api#5140"] != nil { return "the office still stands" }
@@ -661,8 +649,11 @@ final class ScenarioRunner {
                     say("    move  \(job.command.words) · \(job.rank) · \(job.carrier ?? "nobody")\(job.blockedBy.isEmpty ? "" : " · waits on \(job.blockedBy.sorted())")")
                 }
             }
-            for r in sim.station.simulation.rockets.values {
-                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · vortex \(sim.station.simulation.vortices[r.key] != nil), pending \(sim.station.simulation.pending(r))")
+            if let st = sim.station.world.fleet.stations["work"] {
+                for f in st.facts.rockets.values.sorted(by: { $0.id < $1.id }) {
+                    let r = sim.station.simulation.shown[st.name]?.rockets[f.id]
+                    say("    rocket  \(f.id): slot \(f.slot.map(String.init) ?? "-")\(f.docked ? " docked" : "")\(f.go ? " go" : "")\(f.launched ? " launched" : "") · shown \(r.map { "slot \($0.slot) dock \($0.dock) welded \($0.welded)\($0.climbing == nil ? "" : " climbing")" } ?? "no") · vortex \(sim.station.simulation.vortices["work|" + f.id] != nil), pending \(sim.station.simulation.pending(st, f.id))")
+                }
             }
             for m in sim.station.minions.values.sorted(by: { $0.home.name < $1.home.name }) {
                 let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""

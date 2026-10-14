@@ -822,42 +822,44 @@ final class SimulatorModel: ObservableObject {
     }
 
     func press(_ name: String) {
-        note("press", name, .press(name))
-        if name.hasPrefix("Target: ") {
-            pick(String(name.dropFirst(8)))
-        } else if name.hasPrefix("Board: Move "), let to = name.range(of: " to ") {
-            let id = String(name[name.index(name.startIndex, offsetBy: 12)..<to.lowerBound])
-            let column = String(name[to.upperBound...])
-            guard let it = board.first(where: { "\($0.repo)#\($0.number)" == id }) else {
-                return note("skipped", "no board item \(id)", .skipped("no board item \(id)"))
-            }
-            move([it], to: column)
-        } else if name.hasPrefix("Set: "), let eq = name.range(of: " = ") {
-            setKnob(String(name[name.index(name.startIndex, offsetBy: 5)..<eq.lowerBound]), to: String(name[eq.upperBound...]))
-        } else if timeNames.contains(name) {
-            time(name)
-        } else if let b = groups.flatMap(\.buttons).first(where: { $0.name == name }) {
-            switch b.blocked {
-            case nil:
-                run(name)
-            case .already(let why):
-                note("skipped", why, .skipped(why))
-            case .missing(let what, let lay):
-                note("set up", what)
-                lay()
-                station.after(1) { [weak self] in
-                    guard let self else { return }
-                    if let again = groups.flatMap(\.buttons).first(where: { $0.name == name }), let why = again.blocked {
-                        return note("skipped", "set-up did not take: " + why.words, .skipped(why.words))
-                    }
-                    run(name)
-                    refreshSoon()
+        station.world.batch {
+            note("press", name, .press(name))
+            if name.hasPrefix("Target: ") {
+                pick(String(name.dropFirst(8)))
+            } else if name.hasPrefix("Board: Move "), let to = name.range(of: " to ") {
+                let id = String(name[name.index(name.startIndex, offsetBy: 12)..<to.lowerBound])
+                let column = String(name[to.upperBound...])
+                guard let it = board.first(where: { "\($0.repo)#\($0.number)" == id }) else {
+                    return note("skipped", "no board item \(id)", .skipped("no board item \(id)"))
                 }
+                move([it], to: column)
+            } else if name.hasPrefix("Set: "), let eq = name.range(of: " = ") {
+                setKnob(String(name[name.index(name.startIndex, offsetBy: 5)..<eq.lowerBound]), to: String(name[eq.upperBound...]))
+            } else if timeNames.contains(name) {
+                time(name)
+            } else if let b = groups.flatMap(\.buttons).first(where: { $0.name == name }) {
+                switch b.blocked {
+                case nil:
+                    run(name)
+                case .already(let why):
+                    note("skipped", why, .skipped(why))
+                case .missing(let what, let lay):
+                    note("set up", what)
+                    lay()
+                    station.after(1) { [weak self] in
+                        guard let self else { return }
+                        if let again = groups.flatMap(\.buttons).first(where: { $0.name == name }), let why = again.blocked {
+                            return note("skipped", "set-up did not take: " + why.words, .skipped(why.words))
+                        }
+                        run(name)
+                        refreshSoon()
+                    }
+                }
+            } else {
+                note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
             }
-        } else {
-            note("skipped", "no such button: \(name)", .skipped("no such button: \(name)"))
+            refreshSoon()
         }
-        refreshSoon()
     }
 
     private func refreshSoon() {
@@ -1115,9 +1117,11 @@ final class SimulatorModel: ObservableObject {
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
         case "Deploy: Staging starts":
+            station.world.learn(.staging(repo: repo, .deploy(.running(since: station.simulation.now, usual: 40))), repo: repo)
             station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 40, release: ""))
         case "Deploy: Staging goes live", "Deploy: Staging fails":
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : .failed
+            station.world.learn(.staging(repo: repo, .deploy(outcome == .live ? .live : .failed)), repo: repo)
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: false, outcome: outcome))
         case "Release: Production opens":
             let cfg = ConfigStore.shared.current
@@ -1256,14 +1260,6 @@ final class SimulatorModel: ObservableObject {
         case .worldLoaded: return "worldLoaded"
         case .log(let t): return "log: \(t)"
         case .chime(let s): return "chime \(s)"
-        case .releaseOpened(_, let repo, let n, let base, let untested, _):
-            return "releaseOpened \(repo)#\(n) -> \(base)\(untested ? " untested" : "")"
-        case .releaseMerged(_, let repo, let n, let base, _, let production):
-            return "releaseMerged \(repo)#\(n) -> \(base)\(production ? " production" : "")"
-        case .rocketCommand(_, let repo, _, _, _, _, let c, let hotfix): return "rocketCommand \(repo)\(hotfix.map { " hotfix #\($0)" } ?? ""): \(c.words)"
-        case .stagingOpened(_, let repo, let n): return "stagingOpened \(repo)#\(n)"
-        case .stagingMerged(_, let repo, let n): return "stagingMerged \(repo)#\(n)"
-        case .stagingClosed(_, let repo, let n): return "stagingClosed \(repo)#\(n)"
         case .deployStarted(_, let repo, let production, let expected, let release, _): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
         case .deployEnded(_, let repo, let production, let outcome): return "deployEnded \(repo) \(production ? "production" : "staging") \(outcome)"
         case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"

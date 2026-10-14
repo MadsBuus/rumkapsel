@@ -77,7 +77,7 @@ extension Simulation {
 
     func qaWanted(_ station: Station) -> Bool {
         guard !station.hall.deckCells.isEmpty, station.staged.values.reduce(0, +) > 0,
-              !rockets.values.contains(where: { $0.station == station.name && $0.isSteaming }) else { return false }
+              !station.facts.rockets.values.contains(where: { $0.go && !$0.launched }) else { return false }
         return world.repoRoots.contains { _, info in
             guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
             let alien = Set(station.facts.crates.values.filter { $0.alien && $0.id.repo == info.repo }.map(\.id.number))
@@ -94,7 +94,7 @@ extension Simulation {
         case .work: return .desk
         case .react: return .crew
         case .leave: return .leaving
-        case .goTo, .sleep, .bath, .exercise, .chore, .flight, .rocket: return .idle
+        case .goTo, .sleep, .bath, .exercise, .chore, .flight: return .idle
         }
     }
 

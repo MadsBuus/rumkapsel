@@ -214,6 +214,66 @@ enum PlaybackTests {
             }
         }
 
+        test("a release merged: the vortex pulls every aboard crate in, one after another, and only then does the rocket climb") {
+            let (sim, station, _) = fixture()
+            put(station, sim, "web", [430, 431, 432], .cleared, quiet: true)
+            _ = Rules.apply([.release(repo: "web", production: true, label: "")], at: sim.now, to: &station.facts, yard: station.yard)
+            sim.play()
+            guard let id = station.facts.rockets.keys.first else { return expect(false, "a rocket in the facts") }
+            expect(sim.shown["work"]?.rockets[id]?.dock == 1, "a first sight is history: docked at once")
+            _ = Rules.apply([.launched(repo: "web")], at: sim.now, to: &station.facts, yard: station.yard)
+            unchanged(sim, station) {
+                sim.play()
+                guard let v = sim.vortices["work|" + id] else { return expect(false, "the merge opens a vortex") }
+                expect(v.waiting.count == 3 && v.flying.isEmpty, "three crates wait their turn: \(v.waiting.count)")
+                expect([430, 431, 432].allSatisfy { shown(sim, $0) == .vortex(id) }, "off the rows from the start: the vortex draws them")
+                var aboard: [Int: Double] = [:]
+                var climbedAt: Double?
+                let gone = step(sim, seconds: 40, until: {
+                    for n in [430, 431, 432] where aboard[n] == nil && shown(sim, n) == .aboard(id) { aboard[n] = sim.clock }
+                    if climbedAt == nil, let c = sim.shown["work"]?.rockets[id]?.climbing { climbedAt = c }
+                    return sim.shown["work"]?.flown.contains(id) == true
+                })
+                let times = aboard.values.sorted()
+                expect(times.count == 3 && zip(times, times.dropFirst()).allSatisfy { $1 - $0 > 0.3 }, "pulled in one after another: \(times)")
+                expect(climbedAt.map { c in times.count == 3 && times.allSatisfy { $0 <= c } } == true, "the climb waits for every crate: \(String(describing: climbedAt))")
+                expect(gone && climbedAt.map { sim.clock - $0 >= ShownRocket.climbSeconds - 0.1 } == true, "gone a while after the climb")
+                expect(caughtUp(sim, station), "and the picture is the facts: \(sim.lag() ?? "")")
+            }
+        }
+
+        test("a go rocket waits with its crates on their rows; stood down, the tip comes up, and with nothing to wait for it goes, never in a blink") {
+            let (sim, station, _) = fixture()
+            put(station, sim, "web", [440, 441], .cleared, quiet: true)
+            sim.play()
+            _ = Rules.apply([.release(repo: "web", production: true, label: "")], at: sim.now, to: &station.facts, yard: station.yard)
+            guard let id = station.facts.rockets.keys.first else { return expect(false, "a rocket in the facts") }
+            unchanged(sim, station) {
+                _ = step(sim, seconds: RocketGeometry.dockSeconds + 2)
+                let r = sim.shown["work"]?.rockets[id]
+                expect(r?.dock == 1 && r?.venting == true, "it appeared, docked over the lift's time and vents: \(String(describing: r))")
+                expect(sim.cargo.isEmpty && sim.vortices.isEmpty, "nothing moves before the merge")
+            }
+            _ = Rules.apply([.release(repo: "web", production: nil, label: "")], at: sim.now, to: &station.facts, yard: station.yard)
+            unchanged(sim, station) {
+                _ = step(sim, seconds: 1)
+                expect(sim.shown["work"]?.rockets[id].map { $0.dock > 0 && $0.dock < 1 && !$0.venting } == true, "the tip comes up slowly")
+                _ = step(sim, seconds: RocketGeometry.dockSeconds)
+                expect(sim.shown["work"]?.rockets[id]?.dock == 0 && caughtUp(sim, station), "standing on its legs: \(sim.lag() ?? "")")
+                expect([440, 441].allSatisfy { if case .row(let s)? = shown(sim, $0) { return s.zone == .cleared }; return false }, "the crates still on their rows")
+            }
+            _ = Rules.apply([.policy(repo: "web", RepoFacts(hasStaging: true, hasCleared: true, ships: false)), .release(repo: "web", production: nil, label: "")],
+                            at: sim.now, to: &station.facts, yard: station.yard)
+            unchanged(sim, station) {
+                var faded = false
+                let gone = step(sim, seconds: 5, until: {
+                    if let r = sim.shown["work"]?.rockets[id], r.leaving != nil { faded = true }
+                    return sim.shown["work"]?.rockets[id] == nil
+                })
+                expect(gone && faded && caughtUp(sim, station), "it fades away, then is gone: \(sim.lag() ?? "")")
+            }
+        }
+
         for seed in PlaybackTests.busySeeds {
             test("a busy yard, seed \(seed): 400 rounds of news between short steps; the picture catches up by itself, never on air") {
                 busy(seed: UInt64(seed), rounds: 400)

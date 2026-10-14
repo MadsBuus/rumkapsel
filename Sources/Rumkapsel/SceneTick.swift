@@ -44,12 +44,8 @@ extension StationController {
         rebuildStatic()
         for m in minions.values { send(m, to: m.place) }
         logEvent("#450 opened a pull request")
-        if let st = fleet.stations["work"] {
-            for (i, repo) in ["api-node-nest", "tattoodo-web"].enumerated() {
-                simulation.rocket(station: st.name, repo: repo, label: "rocket:https://github.com|demo release",
-                                  untested: i == 1, tall: i == 1, cargo: 0,
-                                  command: .rocket(.standBy, station: st.name, repo: repo))
-            }
+        for (i, repo) in ["api-node-nest", "tattoodo-web"].enumerated() {
+            world.learn(.release(repo: repo, production: i == 1, label: "rocket:https://github.com|demo release", quiet: true))
         }
     }
 
@@ -73,9 +69,9 @@ extension StationController {
                 demoStaged = true
                 world.learn(.work(WorkNews(crate: CrateID(repo: "tattoodo-web", number: 450), stage: .qa)))
             }
-            if clock > 30, let r = simulation.rockets["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {
-                simulation.rocket(station: st.name, repo: "tattoodo-web", label: r.label, untested: false, tall: true, cargo: 0,
-                                  command: .rocket(.launch, station: st.name, repo: "tattoodo-web"))
+            if clock > 30, !demoLaunched {
+                demoLaunched = true
+                world.learn(.launched(repo: "tattoodo-web"))
                 logEvent("tattoodo-web launched to production: release 2.14")
             }
             if clock > 6, !minions.keys.contains("demo-new") {
@@ -295,7 +291,6 @@ extension StationController {
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let order, let station, let slot, let room, let color): crateOrdered(order, station: station, slot: slot, room: room, color: color)
         case .crateDropped(let order, let station, let slot): crateDropped(order, station: station, slot: slot)
-        case .rocketLoading, .liftOff, .steam, .rocketGone: play(rocket: cue)
         }
     }
 

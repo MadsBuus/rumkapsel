@@ -34,10 +34,6 @@ enum Cue {
     case sweep(up: Bool)
     case crateOrdered(order: Int, station: String, slot: Int, room: String, color: RGB)
     case crateDropped(order: Int, station: String, slot: Int)
-    case rocketLoading(key: String)
-    case liftOff(key: String)
-    case steam(key: String)
-    case rocketGone(key: String)
 }
 
 enum Hands {
@@ -81,14 +77,12 @@ final class Simulation<B: Body> {
     var bodies: [String: B] = [:]
     var hooks: SimHooks?
     var cargo: [Int: Cargo] = [:]
-    var staging: [String: StagingBatch] = [:]
     var vortices: [String: Vortex] = [:]
     var drones: [String: [PadDrone]] = [:]
     var ownOrders: [Int: OwnOrder] = [:]
     var idleRoll: () -> Double = { Double.random(in: 0..<1) }
     var spareHallway: [String: (cells: [Cell], since: Double)] = [:]
     var flights: [Flight] = []
-    var rockets: [String: RocketJob] = [:]
     var shown: [String: Shown] = [:]
     var played: Set<String> = []
     var stalls: [String: (mark: String, since: Double)] = [:]
@@ -106,10 +100,9 @@ final class Simulation<B: Body> {
 
     init(world: World) {
         self.world = world
-        world.rocketBusy = { [weak self] key in self?.rockets[key]?.isBusy ?? false }
-        world.stagingUnderway = { [weak self] key in self?.staging[key].map { $0.merged && $0.deploy != .live } ?? false }
         world.clock = { [weak self] in self?.now ?? Date() }
         world.onOffices = { [weak self] st, effects in self?.officesChanged(st, effects) }
+        world.onFacts = { [weak self] st, effects in self?.factsChanged(st, effects) }
         world.onLoaded = { [weak self] in self?.loaded() }
     }
 
@@ -135,8 +128,7 @@ final class Simulation<B: Body> {
         runTimers()
         if clock - lastBeat > Tempo.beat { lastBeat = clock; beat() }
         stepShuttles()
-        stepKicks(dt: dt)
-        stepTips(dt: dt)
+        stepRockets(dt: dt)
         stepVortices()
         stepDrones(dt: dt)
         stepBodies(dt: dt)
@@ -152,10 +144,9 @@ final class Simulation<B: Body> {
     }
 
     private func beat() {
-        for (station, effects) in world.beatFacts(now: now) { heard(effects, station: station) }
+        world.settle(tick: true)
         play()
         assignOrders()
-        stepRockets()
         reconcileBodies()
         onBeat(contractHallways())
         replanBlockedWalks()
@@ -522,7 +513,7 @@ final class Simulation<B: Body> {
 
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
-        let rocketReady = rockets.values.contains { $0.station == station.name && ($0.isVenting || $0.isLaunching) }
+        let rocketReady = (shown[station.name]?.rockets ?? [:]).contains { $0.value.venting || station.facts.rockets[$0.key]?.launched == true }
         let window = station.hall.windowWatch
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
             .subtracting(window)

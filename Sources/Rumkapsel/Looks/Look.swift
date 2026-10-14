@@ -1,6 +1,29 @@
 import AppKit
 import SceneKit
 
+struct LaunchPose {
+    var offset = SIMD3<Double>(0, 0, 0)
+    var opacity = 1.0
+    var flame = 0.0
+}
+
+enum Timing {
+    static func easeIn(_ x: Double) -> Double { bezier(x, 0.42, 1) }
+    static func easeInOut(_ x: Double) -> Double { bezier(x, 0.42, 0.58) }
+    static func clamped(_ x: Double) -> Double { min(1, max(0, x)) }
+
+    private static func bezier(_ x: Double, _ x1: Double, _ x2: Double) -> Double {
+        let x = clamped(x)
+        var lo = 0.0, hi = 1.0
+        for _ in 0..<32 {
+            let t = (lo + hi) / 2, u = 1 - t
+            if 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t < x { lo = t } else { hi = t }
+        }
+        let t = (lo + hi) / 2
+        return 3 * (1 - t) * t * t + t * t * t
+    }
+}
+
 protocol Look {
     // MARK: the world
 
@@ -26,7 +49,9 @@ protocol Look {
     func output(_ station: Station, deckInUse: Bool) -> SetPiece?
     func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double)
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode
-    func launch(_ rocket: SCNNode) -> SCNAction
+    func launch(at t: Double) -> LaunchPose
+    var launchSeconds: Double { get }
+    var rocketFollowsLoad: Bool { get }
 
     // MARK: the center
 
@@ -88,7 +113,9 @@ extension Look {
     func output(_ station: Station, deckInUse: Bool) -> SetPiece? { nil }
     func doorFrame(facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) { Classic.doorFrame(facing: facing) }
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode { Classic.rocket(color: color, tall: tall, cargo: cargo) }
-    func launch(_ rocket: SCNNode) -> SCNAction { Classic.launch() }
+    func launch(at t: Double) -> LaunchPose { Classic.launch(at: t) }
+    var launchSeconds: Double { Classic.launchSeconds }
+    var rocketFollowsLoad: Bool { false }
 
     func monolith() -> SCNNode { Classic.monolith() }
 

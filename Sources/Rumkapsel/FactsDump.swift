@@ -19,6 +19,14 @@ extension StationController {
                 let fact = o.map { "\($0.crate.map(\.description) ?? "no crate")\($0.merged ? ", merged" : "")\($0.closedAt.map { ", closed \(when($0))" } ?? "")" } ?? "no fact"
                 say("  office \(key): \(fact) · shown \(view.offices[key].map { "\($0.phase)" } ?? "nowhere")")
             }
+            for id in Set(station.facts.rockets.keys).union(view.rockets.keys).sorted() where repo == nil || id.hasPrefix(repo! + "|") {
+                let fact = station.facts.rockets[id].map { "\($0.kind), pad \($0.slot.map(String.init) ?? "-")\($0.docked ? ", docked" : "")\($0.go ? ", go" : "")\($0.launchedAt.map { ", launched \(when($0))" } ?? "")" } ?? "no fact"
+                let shown = view.rockets[id].map { "pad \($0.slot), dock \(String(format: "%.2f", $0.dock)), welded \(Int($0.welded))\($0.climbing == nil ? "" : ", climbing")\($0.leaving == nil ? "" : ", leaving")" }
+                say("  rocket \(id): \(fact) · shown \(shown ?? (view.flown.contains(id) ? "flown" : "nowhere"))")
+            }
+            for (name, s) in station.facts.staging.sorted(by: { $0.key < $1.key }) where repo == nil || name == repo {
+                say("  staging \(name): #\(s.number)\(s.merged ? " merged" : ""), deploy \(s.deploy)")
+            }
             for d in view.deliveries.values.sorted(by: { $0.id < $1.id }) {
                 say("  delivery \(d.id) for \(d.room): slot \(d.slot), \(d.landed ? "on the bay floor" : "in the shuttle"), fetched by \(d.who ?? "anyone")")
             }

@@ -8,12 +8,6 @@ enum WorldEvent {
     case peerArrived(String), peerLeft(String)
 
     case office(station: String, OfficeNews, reason: String = "")
-    case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
-    case releaseMerged(station: String, repo: String, number: Int, base: String, title: String, isProduction: Bool)
-    case stagingOpened(station: String, repo: String, number: Int)
-    case stagingMerged(station: String, repo: String, number: Int)
-    case stagingClosed(station: String, repo: String, number: Int)
-    case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command, hotfix: Int? = nil)
     case prompt(station: String, key: String, minionId: String, count: Int)
     case crewRoster(members: [String: CrewMember])
     case crewActivity(CrewActivity)

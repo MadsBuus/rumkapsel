@@ -66,15 +66,15 @@ final class Vortex {
 }
 
 extension Simulation {
-    func openVortex(_ r: RocketJob, station: Station) {
-        guard vortices[r.key] == nil, let field = station.hall.padField, var view = shown[station.name] else { return }
+    func openVortex(_ station: Station, _ id: RocketID) {
+        let key = rocketKey(station.name, id)
+        guard vortices[key] == nil, let field = station.hall.padField, var view = shown[station.name] else { return }
         var standing: [(crate: CrateRef, from: Spot, into: RocketID)] = []
-        for c in station.facts.crates.values.sorted(by: { $0.id < $1.id }) {
-            guard case .aboard(let rocket) = c.place, loads(r, rocket) else { continue }
+        for c in station.facts.aboard(id) {
             let ref = CrateRef(station: station.name, repo: c.id.repo, number: c.id.number)
             switch view.crates[c.id] {
-            case .row(let s)?: standing.append((ref, self.standing(station, c.id.repo, s), rocket))
-            case .parked(let p)?: standing.append((ref, p, rocket))
+            case .row(let s)?: standing.append((ref, self.standing(station, c.id.repo, s), id))
+            case .parked(let p)?: standing.append((ref, p, id))
             default: continue
             }
         }
@@ -93,14 +93,15 @@ extension Simulation {
         }
         shown[station.name] = view
         settle(station.name)
-        vortices[r.key] = Vortex(key: r.key, station: station.name, crates: crates, ring: ring, at: clock)
-        StationLog.write("release", "\(r.key) vortex opens at \(String(format: "%.1f", clock)) for \(crates.map { "#\($0.crate.number)" }.joined(separator: " "))")
+        vortices[key] = Vortex(key: key, station: station.name, crates: crates, ring: ring, at: clock)
+        StationLog.write("release", "\(key) vortex opens at \(String(format: "%.1f", clock)) for \(crates.map { "#\($0.crate.number)" }.joined(separator: " "))")
         cue(.redraw)
-        onLog("\(r.repo): released, the drones pull \(crates.count == 1 ? "its crate" : "its \(crates.count) crates") out through the field")
+        let repo = station.facts.rockets[id]?.repo ?? ""
+        onLog("\(repo): released, the drones pull \(crates.count == 1 ? "its crate" : "its \(crates.count) crates") out through the field")
     }
 
     func vortexHatch(_ v: Vortex) -> SIMD3<Double>? {
-        guard let station = fleet.stations[v.station], let r = rockets[v.key], let at = rocketSpot(station: station, key: r.key) else { return nil }
+        guard let (station, _, r) = shownRocket(v.key), let at = rocketSpot(station, r) else { return nil }
         let h = RocketGeometry.hatch(offset: r.tipOffset)
         return SIMD3(station.offset.x + at.x + h.x, h.y, station.offset.y + at.y + h.z)
     }
@@ -119,7 +120,7 @@ extension Simulation {
             }
             if v.closedAt == nil, v.waiting.isEmpty, v.flying.isEmpty {
                 v.closedAt = clock
-                StationLog.write("release", "\(key) vortex closes at \(String(format: "%.1f", clock)), rocket \(rockets[key].map { "\($0.phaseKind)" } ?? "gone")")
+                StationLog.write("release", "\(key) vortex closes at \(String(format: "%.1f", clock))")
             }
             if let closed = v.closedAt, clock - closed >= Vortex.fadeSeconds { vortices[key] = nil }
         }

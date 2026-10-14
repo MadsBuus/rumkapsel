@@ -49,38 +49,16 @@ final class World {
     func stationEvents() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
-        var launches: Set<String> = []
-        var clearedThisPass = false
-        for (record, t) in transitions {
-            switch t.to {
-            case .ready:
-                guard let (station, room) = office(for: record) else { waiting.append((record, t)); continue }
-                guard t.from != nil, isReady(record.repo) else { continue }
-                let key = roomKey(station, room)
-                let author = (crewRoomInfo[key] != nil ? record.author : nil) ?? github.myLogin() ?? ""
-                if let number = record.pulls.keys.min() {
-                    events.append(.pullRequestOpened(repo: record.repo, number: number, author: author))
-                }
-            case .cleared where t.from != nil:
-                guard repoRoots.values.contains(where: { $0.repo == record.repo }), isReady(record.repo) else { continue }
-                clearedThisPass = true
-            case .shipped where t.from != nil:
-                guard !releases.hotfixRecords.contains(record.id), let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
-                if github.pipeline(repoRoot: root).shipsOnTag { continue }
-                let key = info.station + "|" + info.repo
-                if !t.wasQuiet || releases.padSlotOf[key] != nil { launches.insert(key) }
-            default: break
+        for (record, t) in transitions where t.to == .ready {
+            guard let (station, room) = office(for: record) else { waiting.append((record, t)); continue }
+            guard t.from != nil, isReady(record.repo) else { continue }
+            let key = roomKey(station, room)
+            let author = (crewRoomInfo[key] != nil ? record.author : nil) ?? github.myLogin() ?? ""
+            if let number = record.pulls.keys.min() {
+                events.append(.pullRequestOpened(repo: record.repo, number: number, author: author))
             }
         }
         transitions = waiting
-        if !launches.isEmpty { assignPads() }
-        for key in launches.sorted() {
-            guard let station = fleet.stations[String(key.split(separator: "|")[0])] else { continue }
-            let repo = String(key.split(separator: "|", maxSplits: 1)[1])
-            if releases.mergeLaunches.contains(key) || releases.launchedThisPass.contains(key) { continue }
-            events.append(wish(.launch, station: station, repo: repo, waiting: cargoWaiting(station: station, repo: repo), cleared: true))
-        }
-        if clearedThisPass { events += applyReleases() }
         return events
     }
 
@@ -132,12 +110,11 @@ final class World {
     static let officeGraceScans = 10
     var waitsForGitHub = true
 
-    var rocketBusy: (String) -> Bool = { _ in false }
     var clock: () -> Date = Date.init
     var onOffices: (Station, [Effect]) -> Void = { _, _ in }
+    var onFacts: (Station, [Effect]) -> Void = { _, _ in }
     var onLoaded: () -> Void = {}
     var now: Date { clock() }
-    var stagingUnderway: (String) -> Bool = { _ in false }
 
     func isReady(_ repo: String?) -> Bool { repo.map { readyRepos.contains($0) } ?? true }
 
@@ -263,14 +240,16 @@ final class World {
     func isKicked(_ key: String) -> Bool { kicked[key].map { now.timeIntervalSince($0) < World.holdWindow } ?? false }
 
     func kick(roomKey key: String) -> [WorldEvent] {
-        let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-        guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return [] }
-        var k = kicked; k[key] = now; kicked = k
-        crewRoomInfo[key] = nil; crewBoxes[key] = nil; peerOffices[key] = nil; peerBoxes[key] = nil; pushedByPeer.remove(key)
-        var events = drop(station: station, room: room, announce: false, reason: "kicked")
-        events.append(.log("\(Words.current.kicked) \(room.name) \(Words.current.kickedOff)"))
-        events.append(.layoutChanged)
-        return events
+        batch {
+            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]] else { return [] }
+            var k = kicked; k[key] = now; kicked = k
+            crewRoomInfo[key] = nil; crewBoxes[key] = nil; peerOffices[key] = nil; peerBoxes[key] = nil; pushedByPeer.remove(key)
+            var events = drop(station: station, room: room, announce: false, reason: "kicked")
+            events.append(.log("\(Words.current.kicked) \(room.name) \(Words.current.kickedOff)"))
+            events.append(.layoutChanged)
+            return events
+        }
     }
 
     private func drop(station: Station, room: Room, announce: Bool, reason: String) -> [WorldEvent] {
@@ -314,186 +293,189 @@ final class World {
     private var sessionPrompts: [String: (marker: String, count: Int)] = [:]
 
     func applyScan(_ result: ScanResult, now: Date, minionHomes: [String: MinionHome]) -> [WorldEvent] {
-        var events: [WorldEvent] = []
-        var changed = false
-        let firstRun = !didLoadLayout
-        if firstRun {
-            didLoadLayout = true
-            works.workflow = { [weak self] repo in self?.workflow(repo: repo) ?? Workflow() }
-            works.onTransition = { [weak self] r, t in
-                let who = r.number.map { "#\($0)" } ?? r.work().label
-                StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
-                self?.transitions.append((r, t))
-                self?.learn(r, t)
+        batch {
+            var events: [WorldEvent] = []
+            var changed = false
+            let firstRun = !didLoadLayout
+            if firstRun {
+                didLoadLayout = true
+                works.workflow = { [weak self] repo in self?.workflow(repo: repo) ?? Workflow() }
+                works.onTransition = { [weak self] r, t in
+                    let who = r.number.map { "#\($0)" } ?? r.work().label
+                    StationLog.write("stage", "\(r.repo) \(who): \(t.from.map { "\($0) → " } ?? "")\(t.to) · \(t.by.rawValue)\(t.back ? " (back)" : "")")
+                    self?.transitions.append((r, t))
+                    self?.launchShipped(r, t)
+                    self?.learn(r, t)
+                }
+                fleet.load(alone: peerSnapshots.isEmpty)
+                restored()
+                if waitsForGitHub { github.loadKnowledge() }
+                changed = true
+                events.append(.worldLoaded)
             }
-            fleet.load(alone: peerSnapshots.isEmpty)
-            restored()
-            if waitsForGitHub { github.loadKnowledge() }
-            changed = true
-            events.append(.worldLoaded)
-        }
 
-        scans += 1
-        var sessionRooms: Set<String> = []
-        let cfg = ConfigStore.shared.current
-        for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
-            && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
-            let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
-            let station = fleet.station(stationName)
-            if let branch = s.branch, now.timeIntervalSince(s.lastModified) > 600 {
-                github.refreshCommits(worktree: s.cwd)
-                if let current = github.currentBranch(worktree: s.cwd), current != branch { continue }
-            }
-            let home = homeFor(s, station: stationName)
-            sessionRooms.insert("\(stationName)|\(home.key)")
-            let held = settling && station.rooms[home.key] == nil
-            if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
-               !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
-                let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:") && !firstRun && m.idle
-                station.renameRoom(from: m.key, to: home.key, name: home.name)
-                learn(.renamed(from: m.key, to: home.key), station: stationName)
-                events.append(.office(station: stationName, .renamed(from: m.key, to: home.key)))
-                if promoted { events.append(.log("\(home.name): branch created")) }
-                changed = true
-            }
-            if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
-            if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
-                changed = true
-                roomCreated["\(stationName)|\(home.key)"] = now
-                events.append(opened(station, home.key, repo: home.repo,
-                                     via: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle(for: s.id)))
-                report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
-            }
-            if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
-                repoRoots[root] = (s.repo, stationName)
-            }
-            let marker = s.eventMarkers[.prompt] ?? ""
-            if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
-                events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
-                                      count: max(1, s.promptCount - seen.count)))
-                report(office: home.key, repo: home.repo, .working, by: .session, at: s.lastModified)
-            }
-            sessionPrompts[s.id] = (marker, s.promptCount)
-            if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
-                room.worktree = s.cwd
-                if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
-                if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
-                if let w = room.worktree { github.refreshCommits(worktree: w) }
-            }
-        }
-        for station in fleet.stations.values {
-            var byWorkspace: [String: [Room]] = [:]
-            for room in station.rooms.values where !room.key.hasPrefix("kind:") {
-                if stage(office: room.key, repo: room.repo).map({ $0 >= .stored }) == true { continue }
-                if let w = room.worktree { byWorkspace[w, default: []].append(room) }
-            }
-            for (_, rooms) in byWorkspace where rooms.count > 1 {
-                let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
-                for room in rooms where room !== keep {
-                    events += drop(station: station, room: room, announce: false, reason: "one workspace, one office")
+            scans += 1
+            var sessionRooms: Set<String> = []
+            let cfg = ConfigStore.shared.current
+            for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
+                && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
+                let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
+                let station = fleet.station(stationName)
+                if let branch = s.branch, now.timeIntervalSince(s.lastModified) > 600 {
+                    github.refreshCommits(worktree: s.cwd)
+                    if let current = github.currentBranch(worktree: s.cwd), current != branch { continue }
+                }
+                let home = homeFor(s, station: stationName)
+                sessionRooms.insert("\(stationName)|\(home.key)")
+                let held = settling && station.rooms[home.key] == nil
+                if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
+                   !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
+                    let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:") && !firstRun && m.idle
+                    station.renameRoom(from: m.key, to: home.key, name: home.name)
+                    learn(.renamed(from: m.key, to: home.key), station: stationName)
+                    events.append(.office(station: stationName, .renamed(from: m.key, to: home.key)))
+                    if promoted { events.append(.log("\(home.name): branch created")) }
                     changed = true
                 }
-            }
-        }
-        let livedIn = Set(sessionRooms.compactMap { key -> String? in
-            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            return parts.count == 2 ? fleet.stations[parts[0]]?.rooms[parts[1]]?.worktree : nil
-        })
-        for station in fleet.stations.values {
-            for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
-                let key = roomKey(station, room)
-                let pull = pulls.pull(ownOffice: room)
-                let state = pull?.state
-                if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), at: now) }
-                let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
-                var gone = room.worktree.map { !Workspaces.isOpen($0) } ?? false
-                if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
-                    github.refreshCommits(worktree: w)
-                    if let current = github.currentBranch(worktree: w), current != branch { gone = true }
-                }
-                let closed = state == "CLOSED" && !merged
-                if closed, closedAt[key] == nil {
-                    closedAt[key] = now
-                    learnClosed(office: room.key, repo: room.repo)
-                    events.append(.log("\(room.name): pull request closed, not merged"))
-                }
-                if state != nil, !closed { closedAt[key] = nil }
-                status(station, room)
-                let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
-                    && (cfg.project == nil || github.projectItems() != nil)
-                let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
-                let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
-                let lan = peerOffices[key] != nil
-                let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, mine: mine, lan: lan) }
-                if gone || ended != nil || orphan {
-                    if ended != nil { retired[key] = now }
-                    events += drop(station: station, room: room, announce: !firstRun, reason: gone ? "workspace archived" : ended ?? "nobody's")
+                if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
+                if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                     changed = true
+                    roomCreated["\(stationName)|\(home.key)"] = now
+                    events.append(opened(station, home.key, repo: home.repo,
+                                         via: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle(for: s.id)))
+                    report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
+                }
+                if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
+                    repoRoots[root] = (s.repo, stationName)
+                }
+                let marker = s.eventMarkers[.prompt] ?? ""
+                if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
+                    events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
+                                          count: max(1, s.promptCount - seen.count)))
+                    report(office: home.key, repo: home.repo, .working, by: .session, at: s.lastModified)
+                }
+                sessionPrompts[s.id] = (marker, s.promptCount)
+                if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
+                    room.worktree = s.cwd
+                    if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
+                    if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
+                    if let w = room.worktree { github.refreshCommits(worktree: w) }
                 }
             }
-        }
-
-        if firstRun, !simulated {
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let workspaces = home.appendingPathComponent("conductor/workspaces")
-            if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
-                for repo in repos {
-                    let root = home.appendingPathComponent("dev/\(repo)").path
-                    if FileManager.default.fileExists(atPath: root + "/.git"), !repoRoots.values.contains(where: { $0.repo == repo }) {
-                        repoRoots[root] = (repo, "work")
-                        _ = fleet.color(forRepo: repo)
+            for station in fleet.stations.values {
+                var byWorkspace: [String: [Room]] = [:]
+                for room in station.rooms.values where !room.key.hasPrefix("kind:") {
+                    if stage(office: room.key, repo: room.repo).map({ $0 >= .stored }) == true { continue }
+                    if let w = room.worktree { byWorkspace[w, default: []].append(room) }
+                }
+                for (_, rooms) in byWorkspace where rooms.count > 1 {
+                    let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
+                    for room in rooms where room !== keep {
+                        events += drop(station: station, room: room, announce: false, reason: "one workspace, one office")
+                        changed = true
                     }
                 }
             }
-            for (repo, o) in cfg.repos where cfg.shown(repo: repo) {
-                guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git"),
-                      !repoRoots.values.contains(where: { $0.repo == repo }) else { continue }
-                repoRoots[root] = (repo, "work")
-                _ = fleet.color(forRepo: repo)
-            }
-        }
-        github.intervalMinutes = cfg.githubMinutes
-        if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
-        for (root, info) in repoRoots {
-            github.refreshReleases(repoRoot: root)
-            github.refreshDeploys(repoRoot: root)
-            github.watchPulls(repoRoot: root)
-            if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
-        }
-        for d in github.takeDeploys() {
-            guard let info = repoRoots[d.repoRoot] else { continue }
-            if d.production { releases.awaitingDeploy[d.repoRoot] = nil }
-            switch d.change {
-            case .started(let run, let elapsed):
-                events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
-                                             release: run.release, elapsed: elapsed))
-                if !d.production { learn(.staging(repo: info.repo, .deploy(.running(since: now.addingTimeInterval(-elapsed), usual: d.usual))), repo: info.repo) }
-            case .ended(_, let outcome):
-                events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
-                if !d.production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
-            }
-        }
-        events += lostDeploys()
-        events += applyBoardMoves()
-        for change in github.takeStateChanges() {
+            let livedIn = Set(sessionRooms.compactMap { key -> String? in
+                let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
+                return parts.count == 2 ? fleet.stations[parts[0]]?.rooms[parts[1]]?.worktree : nil
+            })
             for station in fleet.stations.values {
-                for room in station.rooms.values where room.branch == change.branch {
-                    if let repo = room.repo { works.note(repo: repo, branch: change.branch, issue: change.pr.closes.first, pull: change.pr.number, pullState: change.pr.state) }
+                for room in Array(station.rooms.values) where !room.key.hasPrefix("kind:") {
+                    let key = roomKey(station, room)
+                    let pull = pulls.pull(ownOffice: room)
+                    let state = pull?.state
+                    if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), at: now) }
+                    let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
+                    var gone = room.worktree.map { !Workspaces.isOpen($0) } ?? false
+                    if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
+                        github.refreshCommits(worktree: w)
+                        if let current = github.currentBranch(worktree: w), current != branch { gone = true }
+                    }
+                    let closed = state == "CLOSED" && !merged
+                    if closed, closedAt[key] == nil {
+                        closedAt[key] = now
+                        learnClosed(office: room.key, repo: room.repo)
+                        events.append(.log("\(room.name): pull request closed, not merged"))
+                    }
+                    if state != nil, !closed { closedAt[key] = nil }
+                    status(station, room)
+                    let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
+                        && (cfg.project == nil || github.projectItems() != nil)
+                    let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
+                    let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
+                    let lan = peerOffices[key] != nil
+                    let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, mine: mine, lan: lan) }
+                    if gone || ended != nil || orphan {
+                        if ended != nil { retired[key] = now }
+                        events += drop(station: station, room: room, announce: !firstRun, reason: gone ? "workspace archived" : ended ?? "nobody's")
+                        changed = true
+                    }
                 }
             }
-            for station in fleet.stations.values {
-                for room in station.rooms.values where room.branch == change.branch {
-                    guard let repo = room.repo else { continue }
-                    report(pullState: change.pr.state, record: works.find(repo: repo, pull: change.pr.number), at: now)
+
+            if firstRun, !simulated {
+                let home = FileManager.default.homeDirectoryForCurrentUser
+                let workspaces = home.appendingPathComponent("conductor/workspaces")
+                if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
+                    for repo in repos {
+                        let root = home.appendingPathComponent("dev/\(repo)").path
+                        if FileManager.default.fileExists(atPath: root + "/.git"), !repoRoots.values.contains(where: { $0.repo == repo }) {
+                            repoRoots[root] = (repo, "work")
+                            _ = fleet.color(forRepo: repo)
+                        }
+                    }
+                }
+                for (repo, o) in cfg.repos where cfg.shown(repo: repo) {
+                    guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git"),
+                          !repoRoots.values.contains(where: { $0.repo == repo }) else { continue }
+                    repoRoots[root] = (repo, "work")
+                    _ = fleet.color(forRepo: repo)
                 }
             }
-            let who = Work(repo: "", branch: change.branch).label
-            events.append(.log("\(who): \(change.pr.summary)"))
-            events.append(.chime(change.pr.number))
+            github.intervalMinutes = cfg.githubMinutes
+            if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number); github.refreshProjectDelta(owner: p.owner, number: p.number) }
+            for (root, info) in repoRoots {
+                github.refreshReleases(repoRoot: root)
+                github.refreshDeploys(repoRoot: root)
+                github.watchPulls(repoRoot: root)
+                if info.station == "work" { github.refreshFeed(repoRoot: root); github.refreshOpenPRs(repoRoot: root) }
+            }
+            for d in github.takeDeploys() {
+                guard let info = repoRoots[d.repoRoot] else { continue }
+                if d.production { releases.awaitingDeploy[d.repoRoot] = nil }
+                switch d.change {
+                case .started(let run, let elapsed):
+                    events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
+                                                 release: run.release, elapsed: elapsed))
+                    if !d.production { learn(.staging(repo: info.repo, .deploy(.running(since: now.addingTimeInterval(-elapsed), usual: d.usual))), repo: info.repo) }
+                case .ended(_, let outcome):
+                    events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
+                    if !d.production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
+                }
+            }
+            events += lostDeploys()
+            events += applyBoardMoves()
+            for change in github.takeStateChanges() {
+                for station in fleet.stations.values {
+                    for room in station.rooms.values where room.branch == change.branch {
+                        if let repo = room.repo { works.note(repo: repo, branch: change.branch, issue: change.pr.closes.first, pull: change.pr.number, pullState: change.pr.state) }
+                    }
+                }
+                for station in fleet.stations.values {
+                    for room in station.rooms.values where room.branch == change.branch {
+                        guard let repo = room.repo else { continue }
+                        report(pullState: change.pr.state, record: works.find(repo: repo, pull: change.pr.number), at: now)
+                    }
+                }
+                let who = Work(repo: "", branch: change.branch).label
+                events.append(.log("\(who): \(change.pr.summary)"))
+                events.append(.chime(change.pr.number))
+            }
+            events += stationEvents()
+            if changed { events.append(.layoutChanged) }
+            return events
         }
-        events += stationEvents()
-        if changed { events.append(.layoutChanged) }
-        return events
     }
 
     func homeFor(_ s: SessionInfo, station: String) -> Home {
@@ -509,13 +491,15 @@ final class World {
     // MARK: github
 
     func applyGitHub(now: Date, timed: ((String, () -> [WorldEvent]) -> [WorldEvent])? = nil) -> [WorldEvent] {
-        let run = timed ?? { _, b in b() }
-        placementsLeft = false
-        var events = run("gh.releases") { self.applyReleases() }
-        events += run("gh.board") { self.applyBoardMoves() }
-        events += run("gh.crew") { self.rebuildCrew(now: now) }
-        events += stationEvents()
-        return events
+        batch {
+            let run = timed ?? { _, b in b() }
+            placementsLeft = false
+            var events = run("gh.releases") { self.applyReleases() }
+            events += run("gh.board") { self.applyBoardMoves() }
+            events += run("gh.crew") { self.rebuildCrew(now: now) }
+            events += stationEvents()
+            return events
+        }
     }
 
     private func applyBoardMoves() -> [WorldEvent] {
@@ -740,85 +724,89 @@ final class World {
     var peerName = ""
 
     func applyPeer(_ snap: PeerSnapshot, now: Date) -> [WorldEvent] {
-        var events: [WorldEvent] = []
-        let isNewPeer = peerFirstSeen[snap.name] == nil
-        if isNewPeer { peerFirstSeen[snap.name] = now; events.append(.peerArrived(snap.name)) }
-        let bulk = isNewPeer || now.timeIntervalSince(peerFirstSeen[snap.name]!) < 15
-        let previousSnap = peerSnapshots[snap.name]?.snap
-        peerSnapshots[snap.name] = (snap, now)
-        let station = fleet.station("work")
-        let sk = station.name + "|"
-        var changed = false
-        var markers = false
-        let cfg = ConfigStore.shared.current
-        if let colors = snap.colors, snap.name < peerName,
-           fleet.adopt(colors.filter { cfg.repos[$0.key]?.color == nil && cfg.repos[$0.key]?.station != "hidden" }) {
-            changed = true
-            events.append(.log("repository colours now match \(snap.name)'s"))
-        }
-        let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
-        var live: Set<String> = []
-        var disputed: [(key: String, cells: [Cell])] = []
-        for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
-            works.note(repo: o.repo, branch: o.branch, pull: o.pull, pullState: o.pullState)
-            let key = sk + o.key
-            live.insert(key)
-            let before = peerOffices[key]?[snap.name]
-            peerOffices[key, default: [:]][snap.name] = o
-            if before?.dim != o.dim { changed = true }
-            if before?.pull != o.pull || before?.pullState != o.pullState || before?.checks != o.checks || before?.review != o.review { markers = true }
-            if o.pushed, pushedByPeer.insert(key).inserted { changed = true }
-            let boxesBefore = peerBoxes[key]?.count
-            if o.boxes > 0 || o.pull != nil { peerBoxes[key] = (max(1, o.boxes), o.pullState ?? "NONE", o.color) } else { peerBoxes[key] = nil }
-            if peerBoxes[key]?.count != boxesBefore { markers = true }
-            if let r = station.rooms[o.key] {
-                r.lastActive = max(r.lastActive, o.lastActive, now)
-                if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
-                if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName { disputed.append((o.key, o.cells)) }
-                continue
+        batch {
+            var events: [WorldEvent] = []
+            let isNewPeer = peerFirstSeen[snap.name] == nil
+            if isNewPeer { peerFirstSeen[snap.name] = now; events.append(.peerArrived(snap.name)) }
+            let bulk = isNewPeer || now.timeIntervalSince(peerFirstSeen[snap.name]!) < 15
+            let previousSnap = peerSnapshots[snap.name]?.snap
+            peerSnapshots[snap.name] = (snap, now)
+            let station = fleet.station("work")
+            let sk = station.name + "|"
+            var changed = false
+            var markers = false
+            let cfg = ConfigStore.shared.current
+            if let colors = snap.colors, snap.name < peerName,
+               fleet.adopt(colors.filter { cfg.repos[$0.key]?.color == nil && cfg.repos[$0.key]?.station != "hidden" }) {
+                changed = true
+                events.append(.log("repository colours now match \(snap.name)'s"))
             }
-            let color = fleet.color(forRepo: o.repo)
-            guard station.ensureRoom(key: o.key, name: o.name, repo: o.repo, color: color, lastActive: now, preferredCells: o.cells) else { continue }
-            changed = true
-            if !bulk, now.timeIntervalSince(o.startedAt) < 3 * 60 {
-                events.append(opened(station, o.key, repo: o.repo, via: .shuttle(for: nil)))
-                report(office: o.key, repo: o.repo, .inbound, by: .neighbour, at: o.startedAt)
-                events.append(.log("\(snap.name) started \(o.name)"))
-            } else {
-                events.append(opened(station, o.key, repo: o.repo, via: .fade))
+            let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
+            var live: Set<String> = []
+            var disputed: [(key: String, cells: [Cell])] = []
+            for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
+                works.note(repo: o.repo, branch: o.branch, pull: o.pull, pullState: o.pullState)
+                let key = sk + o.key
+                live.insert(key)
+                let before = peerOffices[key]?[snap.name]
+                peerOffices[key, default: [:]][snap.name] = o
+                if before?.dim != o.dim { changed = true }
+                if before?.pull != o.pull || before?.pullState != o.pullState || before?.checks != o.checks || before?.review != o.review { markers = true }
+                if o.pushed, pushedByPeer.insert(key).inserted { changed = true }
+                let boxesBefore = peerBoxes[key]?.count
+                if o.boxes > 0 || o.pull != nil { peerBoxes[key] = (max(1, o.boxes), o.pullState ?? "NONE", o.color) } else { peerBoxes[key] = nil }
+                if peerBoxes[key]?.count != boxesBefore { markers = true }
+                if let r = station.rooms[o.key] {
+                    r.lastActive = max(r.lastActive, o.lastActive, now)
+                    if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
+                    if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName { disputed.append((o.key, o.cells)) }
+                    continue
+                }
+                let color = fleet.color(forRepo: o.repo)
+                guard station.ensureRoom(key: o.key, name: o.name, repo: o.repo, color: color, lastActive: now, preferredCells: o.cells) else { continue }
+                changed = true
+                if !bulk, now.timeIntervalSince(o.startedAt) < 3 * 60 {
+                    events.append(opened(station, o.key, repo: o.repo, via: .shuttle(for: nil)))
+                    report(office: o.key, repo: o.repo, .inbound, by: .neighbour, at: o.startedAt)
+                    events.append(.log("\(snap.name) started \(o.name)"))
+                } else {
+                    events.append(opened(station, o.key, repo: o.repo, via: .fade))
+                }
             }
-        }
-        if station.replaceRooms(disputed) {
-            touch(station)
-            changed = true
-            events.append(.log("\(disputed.count) office\(disputed.count == 1 ? " stands" : "s stand") where \(snap.name) put \(disputed.count == 1 ? "it" : "them")"))
-        }
-        for key in mine where !live.contains(key) {
-            peerOffices[key]?[snap.name] = nil
-            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; if peerBoxes.removeValue(forKey: key) != nil { markers = true } }
-        }
-        func working(_ s: PeerSnapshot?) -> Set<String> { Set((s?.minions ?? []).filter { !$0.asleep }.map { sk + $0.office }) }
-        if working(previousSnap) != working(snap) { changed = true }
-        if changed { events.append(.layoutChanged) }
-        else if markers { events.append(.markersChanged) }
+            if station.replaceRooms(disputed) {
+                touch(station)
+                changed = true
+                events.append(.log("\(disputed.count) office\(disputed.count == 1 ? " stands" : "s stand") where \(snap.name) put \(disputed.count == 1 ? "it" : "them")"))
+            }
+            for key in mine where !live.contains(key) {
+                peerOffices[key]?[snap.name] = nil
+                if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; if peerBoxes.removeValue(forKey: key) != nil { markers = true } }
+            }
+            func working(_ s: PeerSnapshot?) -> Set<String> { Set((s?.minions ?? []).filter { !$0.asleep }.map { sk + $0.office }) }
+            if working(previousSnap) != working(snap) { changed = true }
+            if changed { events.append(.layoutChanged) }
+            else if markers { events.append(.markersChanged) }
 
-        if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number {
-            github.adoptProject(b.items, at: b.at)
-            events += applyBoardMoves()
+            if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number {
+                github.adoptProject(b.items, at: b.at)
+                events += applyBoardMoves()
+            }
+            for k in snap.github ?? [] where cfg.shared(repo: k.repo) {
+                for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.adopt(k, repoRoot: root) }
+            }
+            return events
         }
-        for k in snap.github ?? [] where cfg.shared(repo: k.repo) {
-            for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.adopt(k, repoRoot: root) }
-        }
-        return events
     }
 
     func dropPeer(_ name: String) -> [WorldEvent] {
-        peerSnapshots[name] = nil; peerFirstSeen[name] = nil
-        for (key, claims) in peerOffices where claims[name] != nil {
-            peerOffices[key]?[name] = nil
-            if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil; held[key] = now }
+        batch {
+            peerSnapshots[name] = nil; peerFirstSeen[name] = nil
+            for (key, claims) in peerOffices where claims[name] != nil {
+                peerOffices[key]?[name] = nil
+                if peerOffices[key]?.isEmpty == true { peerOffices[key] = nil; peerBoxes[key] = nil; held[key] = now }
+            }
+            return [.peerLeft(name), .markersChanged]
         }
-        return [.peerLeft(name), .markersChanged]
     }
 
     private(set) var closedAt: [String: Date] = [:]

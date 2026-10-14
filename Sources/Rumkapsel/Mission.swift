@@ -136,17 +136,11 @@ extension StationController {
             queuedMissions[i].started = min(queuedMissions[i].started, m.started); queuedMissions[i].expected = expected
             return
         }
-        if let current = mission {
-            if current.repo != repo, !queuedMissions.contains(where: { $0.repo == repo }) { queuedMissions.append(m) }
-            logEvent("\(repo): liftoff, deploying to production")
-            return
-        }
-        if rocketLoading(m.rocket) {
-            queuedMissions.append(m)
+        if mission != nil || rocketLoading(m) {
+            if !queuedMissions.contains(where: { $0.repo == repo }) { queuedMissions.append(m) }
             return
         }
         launch(m)
-        logEvent("\(repo): liftoff, deploying to production")
     }
 
     private func launch(_ m: Mission) {
@@ -155,20 +149,20 @@ extension StationController {
         let repo = m.repo, release = m.release
         missionShown = ""
         placePlanets()
-        missionRockets(m).forEach {
-            $0.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-            let leaving = $0.clone()
+        logEvent("\(repo): liftoff, deploying to production")
+        if let (key, r, _) = padRocket(m), let at = r.climbing, let v = rocketViews[key], !v.node.isHidden,
+           let st = fleet.stations[RocketKey.parts(key).station] {
+            v.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
+            let leaving = v.node.clone()
             leaving.name = nil
-            leaving.opacity = 1
             leaving.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.launching }
             Props.shape(leaving, lifter: true, panels: RocketGeometry.panels)
-            leaving.childNode(withName: "flame", recursively: false)?.opacity = 0
             rocketRoot.addChildNode(leaving)
-            undocking.append((leaving, clock))
-            leaving.runAction(.sequence([Looks.current.launch(leaving), .removeFromParentNode()]))
+            undocking.append((leaving, at, padPosition(station: st, slot: r.slot)))
+            pose(leaving, at: padPosition(station: st, slot: r.slot), t: clock - at)
             drone.sweep(up: true)
-            $0.isHidden = true
-            hiddenRockets.append($0)
+            v.node.isHidden = true
+            hiddenRockets.append(v.node)
         }
         settleColony(repo)
         Colonies.hoist(planets[repo]?.childNode(withName: "colony", recursively: false), repo: repo, release: release,
@@ -274,20 +268,24 @@ extension StationController {
         }
     }
 
-    func rocketLoading(_ key: String) -> Bool {
-        simulation.rockets[key].map { $0.isLaunching && ($0.phaseKind == .load || $0.kick != .docked) } ?? false
+    func missionFlies(_ m: Mission, _ key: String) -> Bool {
+        let a = RocketKey.parts(m.rocket), b = RocketKey.parts(key)
+        return a.station == b.station && a.repo == b.repo && a.hotfix == b.hotfix
     }
 
-    func missionRockets(_ m: Mission) -> [SCNNode] {
-        if let v = rocketViews[m.rocket] { return v.node.isHidden ? [] : [v.node] }
-        let others = Set(rocketViews.values.map { ObjectIdentifier($0.node) })
-        return rocketRoot.childNodes.filter {
-            $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true && !$0.isHidden && !others.contains(ObjectIdentifier($0))
-        }
+    func padRocket(_ m: Mission) -> (key: String, rocket: ShownRocket, launched: Bool)? {
+        guard let st = fleet.stations[RocketKey.parts(m.rocket).station] else { return nil }
+        let all = simulation.shownRockets(st).filter { missionFlies(m, $0.key) }
+            .map { ($0.key, $0.rocket, st.facts.rockets[String($0.key.dropFirst(st.name.count + 1))]?.launched == true) }
+        return all.first { $0.2 && $0.1.climbing == nil } ?? all.first { $0.1.climbing == nil } ?? all.first
+    }
+
+    func rocketLoading(_ m: Mission) -> Bool {
+        padRocket(m).map { $0.launched && $0.rocket.climbing == nil } ?? false
     }
 
     func stepMission() {
-        if mission == nil, let i = queuedMissions.firstIndex(where: { !rocketLoading($0.rocket) }) {
+        if mission == nil, let i = queuedMissions.firstIndex(where: { !rocketLoading($0) }) {
             launch(queuedMissions.remove(at: i))
             return
         }
@@ -586,13 +584,13 @@ extension StationController {
     }
 
     private func missionPad(_ m: Mission) -> SIMD3<Double> {
-        if let rocket = rocketViews[m.rocket]?.node ?? rocketRoot.childNodes.first(where: { $0.name?.hasPrefix("rocket:") == true && $0.name?.contains("|\(m.repo) ") == true }) {
+        if let rocket = padRocket(m).flatMap({ rocketViews[$0.key] })?.node {
             let p = rocket.worldPosition
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }
         let st = fleet.stations[m.station] ?? fleet.ordered.first
         guard let st else { return .zero }
-        let taken = Set(world.padOrder(station: st).compactMap { world.releases.padSlotOf[$0] })
+        let taken = Set(st.facts.rockets.values.compactMap(\.slot))
         let slots = world.padSlots(station: st)
         let free = (0..<slots.count).first { !taken.contains($0) } ?? 0
         let p = padPosition(station: st, slot: free)

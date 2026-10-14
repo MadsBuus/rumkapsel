@@ -133,7 +133,7 @@ extension StationController {
         return v
     }
 
-    func tickPadLifts(dt: Double) {
+    func tickPadLifts() {
         guard Theme.forPlan.kickRises else {
             if !padLifts.isEmpty { padLiftRoot.childNodes.forEach { $0.removeFromParentNode() }; padLifts = [:] }
             return
@@ -152,16 +152,9 @@ extension StationController {
                 }
                 let v = padLifts[id] ?? buildLift(station, at: slot)
                 padLifts[id] = v
-                let key = world.releases.padSlotOf.first { $0.value == i && $0.key.hasPrefix(station.name + "|") }?.key
-                if let key, let r = simulation.rockets[key], let view = rocketViews[key], Props.part(view.node, "lifter") != nil,
-                   view.node.parent != nil, view.node.position.y < 0.3 {
-                    v.iris = RocketGeometry.iris(dock: r.dock)
-                    v.deckY = RocketGeometry.deck(dock: r.dock)
-                } else if v.deckY > -depth {
-                    v.deckY = max(-depth, v.deckY - dt * depth / 3)
-                } else {
-                    v.iris = max(0, v.iris - dt / 1.3)
-                }
+                let lift = simulation.shownRockets(station).first { $0.rocket.slot == i }?.rocket.lift(at: clock) ?? (iris: 0, deck: -depth)
+                v.iris = lift.iris
+                v.deckY = lift.deck
                 v.deck.position = v3(0, v.deckY - 0.001, 0)
                 let idle = v.deckY <= -depth + 1e-6 && v.iris <= 0
                 v.deck.isHidden = idle

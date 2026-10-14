@@ -364,12 +364,15 @@ struct KingdomLook: Look {
         return ship
     }
 
-    func launch(_ rocket: SCNNode) -> SCNAction {
-        rocket.childNode(withName: "flame", recursively: true)?.runAction(.fadeIn(duration: 1.2))
-        let cast = SCNAction.moveBy(x: -1.2, y: 0, z: 0, duration: 3.5)
-        cast.timingMode = .easeIn
-        let away = SCNAction.moveBy(x: -26, y: 0, z: 0, duration: 16)
-        return .sequence([cast, .group([away, .sequence([.wait(duration: 9), .fadeOut(duration: 5)])])])
+    var launchSeconds: Double { 19.5 }
+    var rocketFollowsLoad: Bool { true }
+
+    func launch(at t: Double) -> LaunchPose {
+        var p = LaunchPose()
+        p.flame = Timing.clamped(t / 1.2)
+        p.offset = SIMD3(-1.2, 0, 0) * Timing.easeIn(t / 3.5) + SIMD3(-26, 0, 0) * Timing.clamped((t - 3.5) / 16)
+        p.opacity = 1 - Timing.clamped((t - 12.5) / 5)
+        return p
     }
 
     // MARK: the center

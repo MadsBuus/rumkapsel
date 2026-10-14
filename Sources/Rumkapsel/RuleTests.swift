@@ -31,7 +31,7 @@ enum RuleTests {
             expect([1, 2, 3, 4].allSatisfy { f.crates[id("web", $0)]?.place == .testing }, "all four on the testing rows")
             expect([1, 2, 3, 4].map { column(f, "web", $0) ?? -1 } == [6, 7, 14, 15], "in web's band: \([1, 2, 3, 4].map { column(f, "web", $0) })")
             expect(logs(fx).count == 1, "one line: \(logs(fx))")
-            expect(f.staging["web"] == StagingFact(number: 900, merged: true), "the staging release is merged")
+            expect(f.staging["web"].map { $0.number == 900 && $0.merged && $0.mergedAt == t0 } == true, "the staging release is merged")
         }
 
         test("the board takes a crate back from testing to storage") {
@@ -69,7 +69,7 @@ enum RuleTests {
             apply(&f, [work("ios", 3, .shipped)])
             expect(f.crates[id("ios", 3)] == nil, "shipped with no tag: gone")
             apply(&f, [.tick], at: t0 + 660)
-            expect(f.crates.isEmpty && f.launches.isEmpty, "the launched rocket's crates go with its tombstone: \(f.crates.keys.sorted())")
+            expect(f.crates.isEmpty && f.rockets.isEmpty, "the launched rocket's crates go with its tombstone: \(f.crates.keys.sorted())")
 
             var w = Facts()
             apply(&w, [.policy(repo: "web", staged), work("web", 1, .stored, quiet: true), work("web", 2, .qa, quiet: true), work("web", 3, .cleared, quiet: true)])
@@ -239,7 +239,7 @@ enum RuleTests {
             guard case .aboard(let first)? = f.crates[id("web", 1)]?.place, case .aboard(let second)? = f.crates[id("web", 2)]?.place else {
                 return expect(false, "both aboard")
             }
-            expect(first != second && f.launches.count == 2, "two rockets: \(first), \(second)")
+            expect(first != second && f.rockets.count == 2, "two rockets: \(first), \(second)")
         }
 
         test("a first answer is never news: decon arrivals and a first policy place crates quietly") {
@@ -319,6 +319,130 @@ enum RuleTests {
             apply(&f, [.office(.opened("task:web#5", repo: "web", via: .appear)),
                        .office(.status("task:web#5", crate: id("web", 5), merged: false, closedAt: t0))])
             expect(f.offices["task:web#5"]?.closedAt == t0 && f.offices["task:web#5"]?.crate == id("web", 5), "the status is the source's word")
+        }
+
+        test("a production release opens untested: the rocket docks, not go; tested, it is go; closed, the tip stands up again") {
+            var f = stored("web", [1, 2])
+            apply(&f, [work("web", 1, .qa), work("web", 2, .qa)])
+            let fx = apply(&f, [.release(repo: "web", production: true, label: "rocket:x|web · release")])
+            guard let r = f.rockets.values.first(where: { $0.repo == "web" }) else { return expect(false, "a rocket for web") }
+            expect(r.kind == .release && r.docked && !r.go && r.slot == 0 && !r.launched, "docked on pad 0, held: \(r)")
+            expect(logs(fx) == ["web \(Words.current.standingBy)"], "said once: \(logs(fx))")
+            let tested = apply(&f, [work("web", 1, .cleared), work("web", 2, .cleared)])
+            expect(f.rockets[r.id]?.go == true, "everything it ships is tested: go")
+            expect(logs(tested).contains("web \(Words.current.steaming), waiting for the release to merge"), "said: \(logs(tested))")
+            apply(&f, [.release(repo: "web", production: nil, label: "rocket:x|web · 2 crates waiting for a release")])
+            expect(f.rockets[r.id].map { !$0.docked && !$0.go && $0.slot == 0 } == true, "closed unmerged: the same rocket stands on its pad, not go without its kick stage")
+            var q = stored("web", [1])
+            apply(&q, [work("web", 1, .qa)])
+            let quiet = apply(&q, [.release(repo: "web", production: true, label: "", quiet: true)])
+            expect(quiet == q.rockets.keys.map { .quiet(.rocket($0)) }, "a first answer is history: \(quiet)")
+        }
+
+        test("a release merged: what it ships goes aboard, the rocket is a tombstone, and a shipped word after changes nothing") {
+            var f = stored("web", [1, 2, 3])
+            apply(&f, [work("web", 2, .qa), work("web", 3, .cleared), .release(repo: "web", production: true, label: "")])
+            guard let rocket = f.rockets.keys.first else { return expect(false, "a rocket") }
+            let fx = apply(&f, [.launched(repo: "web")], at: t0 + 60)
+            expect(f.rockets[rocket]?.launchedAt == t0 + 60, "the standing rocket launched: \(String(describing: f.rockets[rocket]))")
+            expect([2, 3].allSatisfy { f.crates[id("web", $0)]?.place == .aboard(rocket) }, "the testing and cleared rows aboard it")
+            expect(f.crates[id("web", 1)]?.place == .waiting, "storage stays behind")
+            expect(logs(fx) == ["web: release merged, 2 \(Words.current.crates) \(Words.current.aboard)"], "said what happened: \(logs(fx))")
+            let before = f
+            apply(&f, [work("web", 2, .shipped), work("web", 3, .shipped), .release(repo: "web", production: nil, label: "")], at: t0 + 70)
+            expect(f.crates.mapValues(\.place) == before.crates.mapValues(\.place) && f.rockets == before.rockets, "shipped after the launch changes nothing, and nothing stands up for storage")
+            apply(&f, [.tick], at: t0 + 660)
+            expect(f.rockets.isEmpty && f.crates.keys.sorted() == [id("web", 1)], "the tombstone goes with its crates: \(f.crates.keys.sorted())")
+        }
+
+        test("a repository that ships on merge: each merge is a launched rocket of its own with its crate aboard, and nothing stands") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "ios", RepoFacts(shipsOnMerge: true, shipsAtOnce: true)), work("ios", 1, .ready, office: true), work("ios", 2, .ready, office: true)])
+            let fx = apply(&f, [work("ios", 1, .stored, office: true)])
+            apply(&f, [work("ios", 2, .stored, office: true), .release(repo: "ios", production: nil, label: "")], at: t0 + 5)
+            guard case .aboard(let a)? = f.crates[id("ios", 1)]?.place, case .aboard(let b)? = f.crates[id("ios", 2)]?.place else {
+                return expect(false, "both aboard: \(f.crates.values.map(\.place))")
+            }
+            expect(a != b && [a, b].allSatisfy { f.rockets[$0].map { $0.kind == .merge && $0.launched && $0.slot != nil } == true }, "two merge rockets on pads: \(f.rockets)")
+            expect(f.rockets.count == 2, "no release rocket stands for a repository that ships at once")
+            expect(logs(fx) == ["ios: #1 merged, 1 \(Words.current.crate) \(Words.current.aboard)"], "said: \(logs(fx))")
+        }
+
+        test("a hotfix: its own rocket and pad beside the release, which keeps its cargo when the hotfix goes up") {
+            var f = stored("web", [1, 2])
+            apply(&f, [work("web", 1, .qa), work("web", 2, .qa), .release(repo: "web", production: true, label: ""), work("web", 9, .ready, office: true)])
+            let fx = apply(&f, [.hotfixes(repo: "web", open: [9: "rocket:x|web · hotfix #9"])])
+            guard let release = f.rockets.values.first(where: { $0.kind == .release }), let hot = f.rockets["web|hotfix#9"] else { return expect(false, "two rockets: \(f.rockets)") }
+            expect(hot.docked && !hot.go && hot.slot != nil && hot.slot != release.slot, "the express rocket docked on a pad of its own: \(hot)")
+            expect(logs(fx) == ["web \(Words.current.standingBy)"], "said: \(logs(fx))")
+            apply(&f, [.launched(repo: "web", hotfix: 9, crates: [9]), work("web", 9, .stored, office: true), work("web", 9, .shipped, office: true),
+                       .hotfixes(repo: "web", open: [:])], at: t0 + 30)
+            expect(f.crates[id("web", 9)]?.place == .aboard(hot.id) && f.rockets[hot.id]?.launched == true, "#9 aboard the launched express rocket")
+            expect([1, 2].allSatisfy { f.crates[id("web", $0)]?.zone == .testing } && f.rockets[release.id] == release, "the release rocket and its cargo untouched")
+            apply(&f, [.hotfixes(repo: "web", open: [10: ""])])
+            apply(&f, [.hotfixes(repo: "web", open: [:])])
+            expect(f.rockets["web|hotfix#10"] == nil && f.rockets[hot.id] != nil, "a hotfix closed unmerged takes its rocket away; a launched one stays its time")
+        }
+
+        test("pads: an urgent rocket takes the pad of an idle one, and every other rocket keeps its own") {
+            var f = Facts()
+            let repos = (0..<g.pads).map { "r\($0)" }
+            for r in repos { apply(&f, [.policy(repo: r, RepoFacts()), work(r, 1, .stored, quiet: true), .release(repo: r, production: nil, label: r)]) }
+            let before = Dictionary(uniqueKeysWithValues: f.rockets.values.map { ($0.id, $0.slot) })
+            expect(g.pads >= 2 && Set(before.values.compactMap { $0 }).count == g.pads, "every pad taken: \(before)")
+            apply(&f, [.policy(repo: "hot", RepoFacts()), .hotfixes(repo: "hot", open: [7: ""])])
+            let hot = f.rockets["hot|hotfix#7"]?.slot
+            let evicted = f.rockets.values.filter { $0.slot == nil }.map(\.repo)
+            expect(hot != nil && evicted == [repos.last!], "the hotfix took the last idle rocket's pad: \(evicted)")
+            expect(f.rockets.values.filter { $0.repo != repos.last! && $0.repo != "hot" }.allSatisfy { before[$0.id] == $0.slot }, "nobody else moved")
+            apply(&f, [.release(repo: repos[0], production: true, label: ""), work(repos[1], 2, .stored)])
+            expect(f.rockets.values.allSatisfy { $0.repo == repos.last! || $0.repo == "hot" || before[$0.id] == $0.slot } && f.rockets["hot|hotfix#7"]?.slot == hot,
+                   "docking and new cargo move no rocket")
+            apply(&f, [.hotfixes(repo: "hot", open: [:])])
+            expect(f.rockets.values.first { $0.repo == repos.last! }?.slot == hot, "the hotfix closed: the idle rocket gets a pad again")
+        }
+
+        test("shipped words in one pass are one launch; nothing aboard, nothing goes up") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "ios", RepoFacts()), work("ios", 1, .stored, quiet: true), work("ios", 2, .stored, quiet: true), work("ios", 3, .stored, quiet: true),
+                       .release(repo: "ios", production: nil, label: "")])
+            let events = FactFeed.together([.launched(repo: "ios", crates: [1]), work("ios", 1, .shipped), .launched(repo: "ios", crates: [2]), work("ios", 2, .shipped)])
+            let fx = apply(&f, events, at: t0 + 10)
+            let launched = f.rockets.values.filter(\.launched)
+            expect(launched.count == 1 && f.aboard(launched[0].id).map(\.id.number) == [1, 2], "one rocket with #1 and #2: \(f.rockets)")
+            expect(logs(fx).filter { $0.contains("shipped") } == ["ios: #1, #2 shipped, 2 \(Words.current.crates) \(Words.current.aboard)"], "said once: \(logs(fx))")
+            apply(&f, [.launched(repo: "ios", crates: [2])], at: t0 + 10)
+            expect(f.rockets.values.filter(\.launched).count == 1, "a late word in the same moment joins the same rocket")
+            let standing = f.rockets.values.filter { !$0.launched }
+            apply(&f, [.launched(repo: "ios", crates: [1, 9])], at: t0 + 20)
+            expect(f.rockets.values.filter { !$0.launched } == standing, "crates already aboard or unknown: the standing rocket stays put")
+        }
+
+        test("pads: a fresh launch keeps its pad over a standing rocket, then gives it up once its flight is done") {
+            var f = Facts()
+            let repos = (0..<g.pads).map { "r\($0)" }
+            for r in repos { apply(&f, [.policy(repo: r, RepoFacts()), work(r, 1, .stored, quiet: true), .release(repo: r, production: nil, label: r)]) }
+            apply(&f, [.launched(repo: repos[0])], at: t0 + 1)
+            guard let flying = f.rockets.values.first(where: \.launched) else { return expect(false, "launched") }
+            apply(&f, [.policy(repo: "new", RepoFacts()), work("new", 1, .stored, quiet: true), .release(repo: "new", production: nil, label: "")], at: t0 + 2)
+            let waiting = f.rockets.values.first { $0.repo == "new" }
+            expect(f.rockets[flying.id]?.slot != nil && waiting?.slot == nil, "the launch keeps its pad, the newcomer waits")
+            apply(&f, [.tick], at: t0 + 1 + Rules.flightWindow)
+            expect(f.rockets[flying.id]?.slot == nil && f.rockets[waiting?.id ?? ""]?.slot == flying.slot, "after the flight the pad goes to the one waiting")
+        }
+
+        test("a staging batch settles: never heard of, it is dropped after a while; a deploy with no batch is not kept") {
+            var f = Facts()
+            apply(&f, [.staging(repo: "web", .opened(7)), .staging(repo: "web", .merged(7))])
+            apply(&f, [.tick], at: t0 + Deployments.findWithin - 1)
+            expect(f.staging["web"]?.merged == true, "a merged batch waits for its deploy")
+            apply(&f, [.tick], at: t0 + Deployments.findWithin + 1)
+            expect(f.staging["web"] == nil, "no deploy heard: dropped")
+            apply(&f, [.staging(repo: "api", .deploy(.running(since: t0, usual: 60)))], at: t0)
+            expect(f.staging["api"]?.underway == true, "a deploy with no batch welds")
+            apply(&f, [.staging(repo: "api", .deploy(.live))], at: t0 + 60)
+            apply(&f, [.tick], at: t0 + 200)
+            expect(f.staging["api"] == nil, "and is gone once live")
         }
 
         if failures > 0 { print("rules: \(failures) failed"); exit(1) }

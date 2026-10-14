@@ -14,6 +14,7 @@ final class PadDrone {
     var route: [SIMD3<Double>] = []
     var torch = false
     var weldSide: Int?
+    var seam = 0
 
     enum Task: Equatable {
         case rest
@@ -86,11 +87,11 @@ extension Simulation {
         func nearest(to p: SIMD3<Double>) -> PadDrone? {
             fleet.filter(\.isFree).min { simd_distance($0.pos, p) < simd_distance($1.pos, p) }
         }
-        for r in rockets.values where r.station == station.name && r.welding {
-            guard !fleet.contains(where: { $0.task == .weld(r.key) }),
-                  let at = rocketSpot(station: station, key: r.key),
+        for (key, r) in shownRockets(station) where r.welding {
+            guard !fleet.contains(where: { $0.task == .weld(key) }),
+                  let at = rocketSpot(station, r),
                   let d = nearest(to: SIMD3(station.offset.x + at.x, 1, station.offset.y + at.y)) else { continue }
-            d.task = .weld(r.key)
+            d.task = .weld(key)
             d.weldSide = nil
             d.route = []
         }
@@ -114,8 +115,8 @@ extension Simulation {
             let t = len > 1e-9 ? min(1, max(0, simd_dot(c - p, ab) / len)) : 0
             return simd_distance(p + ab * t, c)
         }
-        return rockets.values.contains { r in
-            guard r.station == station.name, let at = rocketSpot(station: station, key: r.key) else { return false }
+        return shownRockets(station).contains { _, r in
+            guard let at = rocketSpot(station, r) else { return false }
             return distance(to: at) < 0.42
         }
     }
@@ -165,7 +166,7 @@ extension Simulation {
         case .home:
             if d.route.isEmpty { d.task = .rest }
         case .weld(let key):
-            guard let r = rockets[key], r.welding, let at = rocketSpot(station: station, key: r.key) else { goHome(d, station: station); return }
+            guard let (_, _, r) = shownRocket(key), r.welding, let at = rocketSpot(station, r) else { goHome(d, station: station); return }
             weld(d, r, at: at, station: station)
         case .vortex(let key, let slot):
             guard let v = vortices[key], v.closedAt == nil, let hatch = vortexHatch(v) else { goHome(d, station: station); return }
@@ -176,8 +177,8 @@ extension Simulation {
         }
     }
 
-    private func weld(_ d: PadDrone, _ r: RocketJob, at spot: SIMD2<Double>, station: Station) {
-        guard r.kick == .docked || r.kick == .none else {
+    private func weld(_ d: PadDrone, _ r: ShownRocket, at spot: SIMD2<Double>, station: Station) {
+        guard r.dock >= 1 || r.dock <= 0 else {
             d.torch = false
             if d.route.isEmpty, d.pos.y < DroneFlight.low { d.route = [SIMD3(d.pos.x, DroneFlight.low, d.pos.z)] }
             d.weldSide = nil
@@ -210,6 +211,6 @@ extension Simulation {
         guard d.route.isEmpty else { return }
         d.yaw = atan2(-face.x, -face.y)
         d.torch = true
-        r.seam = ring * 6 + k
+        d.seam = ring * 6 + k
     }
 }

@@ -6,6 +6,7 @@ struct WorkNews: Equatable {
     var stage: Stage
     var closed = false
     var quiet = false
+    var link = ""
 }
 
 enum OfficeNews: Equatable {
@@ -25,13 +26,15 @@ enum Event: Equatable {
     case deconClosed(CrateID)
     case renumbered(from: CrateID, to: CrateID)
     case staging(repo: String, StagingNews)
-    case launched(repo: String, hotfix: Int?)
+    case release(repo: String, production: Bool?, label: String, quiet: Bool = false)
+    case hotfixes(repo: String, open: [Int: String], quiet: Bool = false)
+    case launched(repo: String, hotfix: Int? = nil, crates: [Int]? = nil, label: String = "")
     case sweep(repo: String, keep: [Int])
     case restack
     case tick
 }
 
-enum Subject: Hashable { case crate(CrateID), office(String) }
+enum Subject: Hashable { case crate(CrateID), office(String), rocket(RocketID) }
 
 enum Effect: Equatable {
     case log(String)
@@ -46,6 +49,7 @@ enum Rules {
     static func apply(_ events: [Event], at now: Date, to f: inout Facts, yard g: YardGeometry) -> [Effect] {
         var fx: [Effect] = []
         var arrived: [String: [Zone: [Int]]] = [:]
+        let go = Set(f.rockets.values.filter(\.go).map(\.id))
         for event in events {
             switch event {
             case .policy(let repo, let r):
@@ -83,14 +87,13 @@ enum Rules {
                     put(from, nil, &f, g)
                 }
             case .staging(let repo, let news):
-                staging(repo, news, &f)
-            case .launched(let repo, let hotfix):
-                let r = f.repo(repo)
-                let rocket = hotfix.map { "\(repo)|hotfix#\($0)" } ?? "\(repo)|release#\(f.take())"
-                let going = hotfix.map { [CrateID(repo: repo, number: $0)] }
-                    ?? f.crates.values.filter { $0.id.repo == repo && $0.zone.map(r.loadZones.contains) == true }.sorted { $0.seq > $1.seq }.map(\.id)
-                f.launches[rocket] = now
-                for id in going where f.crates[id] != nil { put(id, .aboard(rocket), &f, g) }
+                staging(repo, news, now, &f)
+            case .release(let repo, let production, let label, let quiet):
+                release(repo, production: production, label: label, quiet: quiet, &f, &fx)
+            case .hotfixes(let repo, let open, let quiet):
+                hotfixes(repo, open: open, quiet: quiet, &f, &fx)
+            case .launched(let repo, let hotfix, let crates, let label):
+                launch(repo, hotfix: hotfix, crates: crates, label: label, now, &f, g, &fx)
             case .sweep(let repo, let keep):
                 let kept = Set(keep)
                 for c in f.crates.values.filter({ $0.id.repo == repo && $0.onRow && !kept.contains($0.id.number) }).sorted(by: { $0.seq > $1.seq }) {
@@ -110,6 +113,9 @@ enum Rules {
             }
         }
         normalize(&f, at: now, yard: g)
+        for r in f.rockets.values.sorted(by: { $0.id < $1.id }) where r.go && !go.contains(r.id) && !fx.contains(.quiet(.rocket(r.id))) {
+            fx.append(.log("\(r.repo) \(Words.current.steaming), waiting for the release to merge"))
+        }
         return fx
     }
 
@@ -135,9 +141,10 @@ enum Rules {
     static func normalize(_ f: inout Facts, at now: Date, yard g: YardGeometry) {
         let expired = f.crates.values.filter { $0.closedAt.map { now.timeIntervalSince($0) >= closedFor } ?? false }.map(\.id)
         for id in expired.sorted() { put(id, nil, &f, g) }
-        for (rocket, at) in f.launches.sorted(by: { $0.key < $1.key }) where now.timeIntervalSince(at) >= launchedFor {
-            f.launches[rocket] = nil
-            f.crates = f.crates.filter { $0.value.place != .aboard(rocket) }
+        for r in f.rockets.values.sorted(by: { $0.id < $1.id }) {
+            guard let at = r.launchedAt, now.timeIntervalSince(at) >= launchedFor else { continue }
+            f.rockets[r.id] = nil
+            f.crates = f.crates.filter { $0.value.place != .aboard(r.id) }
         }
         let onRows = Set(f.crates.values.filter(\.onRow).map(\.id.repo))
         for repo in f.homes.keys.sorted() where !onRows.contains(repo) { f.homes[repo] = nil }
@@ -160,6 +167,9 @@ enum Rules {
             f.crates[c.id]?.column = to
             break
         }
+        for (repo, s) in f.staging.sorted(by: { $0.key < $1.key }) where s.settled(at: now) { f.staging[repo] = nil }
+        ready(&f)
+        assignPads(&f, pads: g.pads, at: now)
     }
 
     private static func work(_ news: WorkNews, _ now: Date, _ f: inout Facts, _ g: YardGeometry, _ fx: inout [Effect],
@@ -168,9 +178,7 @@ enum Rules {
         let old = f.crates[id]?.place
         var to = place(news.stage, r, office: news.office, old: old)
         if r.shipsOnMerge, to == .waiting, old != .waiting {
-            let rocket = "\(id.repo)|merge#\(f.nextSeq)"
-            f.launches[rocket] = now
-            to = .aboard(rocket)
+            to = .aboard(mergeRocket(id, link: news.link, quiet: news.quiet, now, &f, &fx))
         }
         let moved = put(id, to, &f, g)
         guard f.crates[id] != nil else { return }
@@ -205,7 +213,7 @@ enum Rules {
         }
     }
 
-    private static func staging(_ repo: String, _ news: StagingNews, _ f: inout Facts) {
+    private static func staging(_ repo: String, _ news: StagingNews, _ now: Date, _ f: inout Facts) {
         switch news {
         case .opened(let n):
             f.staging[repo] = StagingFact(number: n)
@@ -213,16 +221,18 @@ enum Rules {
             var s = f.staging[repo] ?? StagingFact(number: n)
             s.number = n
             s.merged = true
+            s.mergedAt = now
             f.staging[repo] = s
         case .closed(let n):
             if f.staging[repo]?.number == n { f.staging[repo] = nil }
         case .deploy(let d):
-            f.staging[repo]?.deploy = d
+            f.staging[repo, default: StagingFact(number: 0, merged: true, mergedAt: now)].deploy = d
+            f.staging[repo]?.heardAt = now
         }
     }
 
     @discardableResult
-    private static func put(_ id: CrateID, _ to: CrateFact.Place?, _ f: inout Facts, _ g: YardGeometry) -> Bool {
+    static func put(_ id: CrateID, _ to: CrateFact.Place?, _ f: inout Facts, _ g: YardGeometry) -> Bool {
         let old = f.crates[id]
         guard old?.place != to else { return false }
         if let old, let zone = old.zone, let column = old.column { leave(old, zone, column, &f, g) }

@@ -127,6 +127,12 @@ extension Simulation {
         shown[d.station]?.deliveries[id] = changed
     }
 
+    func factsChanged(_ st: Station, _ effects: [Effect]) {
+        if played.insert(st.name).inserted { snap(st); return }
+        heard(effects, station: st.name)
+        play(st)
+    }
+
     func officesChanged(_ st: Station, _ effects: [Effect]) {
         if played.insert(st.name).inserted { snap(st); return }
         heard(effects, station: st.name)

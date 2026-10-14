@@ -49,6 +49,12 @@ enum LookTests {
             test("\(theme.title) letters its floor: \(claim.letters)") {
                 expect(Looks.current.writesOnFloor == claim.letters, "writesOnFloor is \(Looks.current.writesOnFloor)")
             }
+            test("\(theme.title) launches within the climb: gone from the pad view when the shown rocket goes") {
+                let end = Looks.current.launch(at: ShownRocket.climbSeconds)
+                expect(ShownRocket.climbSeconds >= Looks.current.launchSeconds && end.opacity <= 0.001,
+                       "climb \(ShownRocket.climbSeconds) s, launch \(Looks.current.launchSeconds) s, opacity at the end \(end.opacity)")
+                expect(!theme.kickRises || RocketGeometry.clearing < ShownRocket.climbSeconds, "the rocket clears the pad lift before it goes: \(RocketGeometry.clearing) s")
+            }
             test("\(theme.title) rims its offices: \(claim.rims)") {
                 expect(Looks.current.rimsOffices == claim.rims, "rimsOffices is \(Looks.current.rimsOffices)")
             }

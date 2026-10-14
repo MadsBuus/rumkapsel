@@ -6,11 +6,7 @@ final class ReleaseBook {
     var seen: Set<String> = []
     var stagingPRs: [String: (number: Int, state: String)] = [:]
     var stagingSeen: Set<String> = []
-    var mergeLaunches: Set<String> = []
     var awaitingDeploy: [String: Date] = [:]
-    var padSlotOf: [String: Int] = [:]
-    var launchedThisPass: Set<String> = []
-    var hotfixLoads: [String: (crate: Int?, at: Date)] = [:]
     var hotfixRecords: Set<Int> = []
 }
 
@@ -37,22 +33,6 @@ extension World {
             return !r.quiet || r.words[.git] != nil || r.words[.board] != nil
         }
     }
-    func clearedToLoad(repo: String, station: String) -> Bool {
-        let w = waiting(repo: repo, station: station)
-        return !w.isEmpty && (!workflow(repo: repo).has(.cleared) || w.allSatisfy { $0.stage.map { $0 >= .cleared } ?? false })
-    }
-
-    func padRockets() -> Set<String> {
-        var pads = Set(repoRoots.compactMap { root, info in padRelease(root: root) != nil ? info.station + "|" + info.repo : nil }).union(releases.mergeLaunches)
-        for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true && !workflow(repo: info.repo).shipped.isEmpty
-            && !github.pipeline(repoRoot: root).shipsAtOnce && !waiting(repo: info.repo, station: info.station).isEmpty { pads.insert(info.station + "|" + info.repo) }
-        for (root, info) in repoRoots where fleet.stations[info.station]?.hasPad == true {
-            for pr in github.hotfixes(repoRoot: root) where pr.state == "OPEN" {
-                pads.insert(RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number))
-            }
-        }
-        return pads.union(releases.hotfixLoads.keys)
-    }
 
     private func hotfixRecord(repo: String, pr: ReleasePR) -> WorkBook.Record {
         let r = works.find(repo: repo, pull: pr.number) ?? works.note(repo: repo, branch: pr.head, pull: pr.number, pullState: pr.state)
@@ -60,9 +40,14 @@ extension World {
         return r
     }
 
-    func hotfixWish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR) -> WorldEvent {
-        .rocketCommand(station: station.name, repo: repo, label: "rocket:\(pr.url)|\(repo) · hotfix #\(pr.number) \(pr.title)",
-                       untested: false, tall: true, cargo: 1, command: .rocket(stage, station: station.name, repo: repo), hotfix: pr.number)
+    private func label(repo: String, hotfix pr: ReleasePR) -> String { "rocket:\(pr.url)|\(repo) · hotfix #\(pr.number) \(pr.title)" }
+
+    private func label(repo: String, release pr: ReleasePR) -> String {
+        pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)" : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)"
+    }
+
+    private func label(repo: String, waiting n: Int) -> String {
+        "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release"
     }
 
     private func applyHotfixes() -> [WorldEvent] {
@@ -70,35 +55,31 @@ extension World {
         for launch in github.takeHotfixLaunches() {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
             let pr = launch.pr
-            let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
             let record = hotfixRecord(repo: info.repo, pr: pr)
-            releases.hotfixLoads[key] = (record.number, now)
-            learn(.launched(repo: info.repo, hotfix: record.number ?? pr.number), repo: info.repo)
+            learn(.launched(repo: info.repo, hotfix: pr.number, crates: [record.number ?? pr.number], label: label(repo: info.repo, hotfix: pr)), repo: info.repo)
             works.report(record, .shipped, by: .git, at: pr.mergedAt ?? now)
-            assignPads()
             events.append(.chime(pr.number))
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
-            events.append(.log("\(info.repo) \(Words.current.launchedTo) production as a hotfix: \(pr.title)"))
-            events.append(hotfixWish(.launch, station: station, repo: info.repo, pr: pr))
         }
-        for (root, info) in repoRoots {
-            guard let station = fleet.stations[info.station], station.hasPad else { continue }
-            for pr in github.hotfixes(repoRoot: root) where pr.state == "OPEN" {
-                let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
+        for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
+            guard let station = fleet.stations[info.station], station.hasPad, let all = github.hotfixes(repoRoot: root) else { continue }
+            let quiet = releases.seen.insert("hotfix|" + root).inserted || settling
+            var open: [Int: String] = [:]
+            for pr in all where pr.state == "OPEN" {
                 _ = hotfixRecord(repo: info.repo, pr: pr)
-                guard releases.padSlotOf[key] != nil, releases.hotfixLoads[key] == nil else { continue }
-                if releases.announced.insert(key).inserted {
+                open[pr.number] = label(repo: info.repo, hotfix: pr)
+                if releases.announced.insert(RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)).inserted, !quiet {
                     events.append(.log("\(info.repo): hotfix #\(pr.number) \(Words.current.onThePad)"))
                 }
-                events.append(hotfixWish(.standBy, station: station, repo: info.repo, pr: pr))
             }
+            learn(.hotfixes(repo: info.repo, open: open, quiet: quiet), repo: info.repo)
         }
         return events
     }
 
     func rocketKey(station: String, repo: String, release: String) -> String {
         guard release.hasPrefix("#"), let n = Int(release.dropFirst()), let root = root(station: station, repo: repo),
-              github.hotfixes(repoRoot: root).contains(where: { $0.number == n }) else { return station + "|" + repo }
+              github.hotfixes(repoRoot: root)?.contains(where: { $0.number == n }) == true else { return station + "|" + repo }
         return RocketKey.of(station: station, repo: repo, hotfix: n)
     }
 
@@ -121,13 +102,6 @@ extension World {
         return out
     }
 
-    func wish(_ stage: Command.RocketStage, station: Station, repo: String, waiting n: Int, cleared: Bool) -> WorldEvent {
-        let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
-        let label = "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release\(status)"
-        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared, tall: stage.rank >= 3, cargo: n,
-                              command: .rocket(stage, station: station.name, repo: repo))
-    }
-
     func waitingURL(repo: String) -> String {
         guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return "" }
         let p = github.pipeline(repoRoot: root)
@@ -135,81 +109,47 @@ extension World {
         return shipped.isEmpty ? "https://github.com/\(owner)" : "https://github.com/\(owner)/compare/\(shipped)...\(p.trunk)"
     }
 
-    func wish(_ stage: Command.RocketStage, station: Station, repo: String, pr: ReleasePR, cleared: Bool? = nil) -> WorldEvent {
-        let cleared = cleared ?? !pr.untested
-        let status = " · " + (cleared ? Words.current.cleared : Words.current.holding)
-        let label = pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)\(status)"
-            : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)\(status)"
-        return .rocketCommand(station: station.name, repo: repo, label: label, untested: !cleared,
-                              tall: pr.isProduction, cargo: cargoWaiting(station: station, repo: repo),
-                              command: .rocket(stage, station: station.name, repo: repo))
-    }
-
-    func cargoWaiting(station: Station, repo: String) -> Int {
-        (stagingIsDeck(station: station.name, repo: repo) ? station.staged : station.stored)[repo] ?? 0
+    func launchShipped(_ r: WorkBook.Record, _ t: Transition) {
+        guard t.to == .shipped, t.from != nil, !t.wasQuiet, !releases.hotfixRecords.contains(r.id), let n = r.number,
+              let root = repoRoots.first(where: { $0.value.repo == r.repo })?.key, !github.pipeline(repoRoot: root).shipsAtOnce else { return }
+        learn(.launched(repo: r.repo, crates: [n], label: "rocket:\(waitingURL(repo: r.repo))|\(r.repo) · shipped"), repo: r.repo)
     }
 
     func applyReleases() -> [WorldEvent] {
-        var events: [WorldEvent] = []
-        var launched: Set<String> = []
-        releases.launchedThisPass = []
-        assignPads()
-        events += applyHotfixes()
+        var events = applyHotfixes()
         for launch in github.takeLaunches() {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
             let pr = launch.pr
-            events.append(.releaseMerged(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
-                                         title: pr.title, isProduction: pr.isProduction))
             events.append(.chime(pr.number))
             guard pr.isProduction else { continue }
-            launched.insert(info.station + "|" + info.repo)
-            learn(.launched(repo: info.repo, hotfix: nil), repo: info.repo)
+            learn(.launched(repo: info.repo, label: label(repo: info.repo, release: pr)), repo: info.repo)
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
             for r in waiting(repo: info.repo, station: station.name) {
                 works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
                 if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
             }
             releases.announced = releases.announced.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
-            events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
-                                       : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
-            events.append(wish(.launch, station: station, repo: info.repo, pr: pr))
-            releases.launchedThisPass.insert(info.station + "|" + info.repo)
         }
-        for (root, info) in repoRoots {
-            guard let station = fleet.stations[info.station], github.openReleases(repoRoot: root) != nil else { continue }
-            let quiet = !releases.seen.contains(root)
-            releases.seen.insert(root)
+        for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
+            guard let station = fleet.stations[info.station], station.hasPad, github.openReleases(repoRoot: root) != nil else { continue }
+            let quiet = releases.seen.insert(root).inserted || settling
             let key = info.station + "|" + info.repo
-            guard !launched.contains(key) else { continue }
-            guard releases.padSlotOf[key] != nil || padRelease(root: root) == nil else { continue }
             guard let pr = padRelease(root: root) else {
-                let w = waiting(repo: info.repo, station: station.name)
-                guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !releases.mergeLaunches.contains(key),
-                      !github.pipeline(repoRoot: root).shipsAtOnce, releases.padSlotOf[key] != nil else { continue }
-                let cleared = clearedToLoad(repo: info.repo, station: station.name)
-                events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
-                                   station: station, repo: info.repo, waiting: w.count, cleared: cleared))
+                learn(.release(repo: info.repo, production: nil, label: label(repo: info.repo, waiting: waiting(repo: info.repo, station: station.name).count), quiet: quiet), repo: info.repo)
                 continue
             }
             let mark = "\(key)|\(pr.number)|\(pr.untested)"
-            if quiet { releases.announced.insert(mark) }
-            if !releases.announced.contains(mark) {
-                releases.announced.insert(mark)
-                events.append(.releaseOpened(station: info.station, repo: info.repo, number: pr.number, base: pr.base,
-                                             untested: pr.untested, isProduction: pr.isProduction))
+            if releases.announced.insert(mark).inserted, !quiet {
                 events.append(.log("\(info.repo): release to \(pr.base) \(Words.current.onThePad)" + (pr.untested ? " (untested)" : "")))
             }
             let flow = workflow(repo: info.repo)
             let boardClears = flow.cleared?.first == .board && flow.has(.qa)
-            let labelClears = !pr.untested && flow.cleared?.contains(.pulls) == true
-            if labelClears {
+            if !pr.untested, flow.cleared?.contains(.pulls) == true {
                 for r in waiting(repo: info.repo, station: station.name) where !boardClears || r.words[.board] == nil {
                     works.report(r, .cleared, by: .pulls, at: now)
                 }
             }
-            let cleared = pr.isProduction && ((labelClears && !boardClears) || clearedToLoad(repo: info.repo, station: station.name))
-            events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
-                               station: station, repo: info.repo, pr: pr, cleared: cleared))
+            learn(.release(repo: info.repo, production: pr.isProduction, label: label(repo: info.repo, release: pr), quiet: quiet), repo: info.repo)
         }
         return events + applyStaging()
     }
@@ -229,7 +169,7 @@ extension World {
             if let open, releases.stagingPRs[key]?.number != open.number {
                 releases.stagingPRs[key] = (open.number, "OPEN")
                 learn(.staging(repo: info.repo, .opened(open.number)), repo: info.repo)
-                events.append(.stagingOpened(station: info.station, repo: info.repo, number: open.number))
+                events.append(.log("\(info.repo): staging release #\(open.number) open"))
                 continue
             }
             guard let known = releases.stagingPRs[key], known.state == "OPEN",
@@ -237,19 +177,20 @@ extension World {
             releases.stagingPRs[key] = (pr.number, pr.state)
             let merged = pr.state == "MERGED"
             learn(.staging(repo: info.repo, merged ? .merged(pr.number) : .closed(pr.number)), repo: info.repo)
-            events.append(merged ? .stagingMerged(station: info.station, repo: info.repo, number: pr.number)
-                                 : .stagingClosed(station: info.station, repo: info.repo, number: pr.number))
+            events.append(.log("\(info.repo): staging release #\(pr.number) \(merged ? "merged" : "closed, not merged")"))
         }
         return events
     }
 
     func reconcileYards() -> [WorldEvent] {
-        for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station.hasPad {
-            for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name {
-                if let c = github.cargo(repoRoot: root) { reconcile(repo: info.repo, root: root, cargo: c) }
+        batch {
+            for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station.hasPad {
+                for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name {
+                    if let c = github.cargo(repoRoot: root) { reconcile(repo: info.repo, root: root, cargo: c) }
+                }
             }
+            return stationEvents()
         }
-        return stationEvents()
     }
 
     func reconcile(repo: String, root: String, cargo c: GitHubResolver.Cargo) {
@@ -277,30 +218,4 @@ extension World {
     }
 
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
-
-    func assignPads() {
-        let wanted = padRockets().union(releases.padSlotOf.keys.filter(rocketBusy))
-        for key in releases.padSlotOf.keys where !wanted.contains(key) { releases.padSlotOf[key] = nil }
-        for station in fleet.stations.values {
-            let prefix = station.name + "|"
-            let count = padSlots(station: station).count
-            func urgent(_ key: String) -> Bool {
-                if RocketKey.parts(key).hotfix != nil || releases.mergeLaunches.contains(key) || rocketBusy(key) { return true }
-                let repo = String(key.dropFirst(prefix.count))
-                if stagingUnderway(key) { return true }
-                return repoRoots.contains { $0.value.repo == repo && $0.value.station == station.name && padRelease(root: $0.key) != nil }
-            }
-            let keys = wanted.filter { $0.hasPrefix(prefix) }.sorted { a, b in urgent(a) != urgent(b) ? urgent(a) : a < b }
-            for key in keys where releases.padSlotOf[key] == nil {
-                let taken = Set(releases.padSlotOf.filter { $0.key.hasPrefix(prefix) }.values)
-                if let free = (0..<count).first(where: { !taken.contains($0) }) { releases.padSlotOf[key] = free; continue }
-                guard urgent(key), let victim = releases.padSlotOf.keys.filter({ $0.hasPrefix(prefix) && !urgent($0) }).sorted().last else { continue }
-                releases.padSlotOf[key] = releases.padSlotOf.removeValue(forKey: victim)
-            }
-        }
-    }
-    func padOrder(station: Station) -> [String] {
-        releases.padSlotOf.filter { $0.key.hasPrefix(station.name + "|") }.sorted { $0.value < $1.value }.map(\.key)
-    }
-    func padKeys() -> Set<String> { Set(releases.padSlotOf.keys) }
 }

@@ -1,16 +1,53 @@
 import Foundation
 
 final class FactFeed {
+    static func together(_ events: [Event]) -> [Event] {
+        var out: [Event] = []
+        var first: [String: Int] = [:]
+        for e in events {
+            guard case .launched(let repo, nil, let crates?, let label) = e else { out.append(e); continue }
+            guard let i = first[repo], case .launched(_, _, let had?, _) = out[i] else { first[repo] = out.count; out.append(e); continue }
+            out[i] = .launched(repo: repo, crates: had + crates.filter { !had.contains($0) }, label: label)
+        }
+        return out
+    }
+
     var pending: [(repo: String?, event: Event)] = []
     var numbered: [Int: CrateID] = [:]
     var swept: Set<String> = []
     var unsaved = false
     var savedAt = Date.distantPast
+    var depth = 0
+    var settling = false
     static let unrouted = 500, saveEvery: TimeInterval = 5
 }
 
 extension World {
-    func learn(_ event: Event, repo: String? = nil) { feed.pending.append((repo, event)) }
+    func learn(_ event: Event, repo: String? = nil) {
+        feed.pending.append((repo, event))
+        if feed.depth == 0 { settle() }
+    }
+
+    func batch<T>(_ body: () -> T) -> T {
+        feed.depth += 1
+        let out = body()
+        feed.depth -= 1
+        if feed.depth == 0 { settle() }
+        return out
+    }
+
+    func settle(tick: Bool = false) {
+        guard !feed.settling else { return }
+        feed.settling = true
+        defer { feed.settling = false }
+        var ticking = tick
+        for _ in 0..<4 {
+            let out = applyFacts(now: now, tick: ticking)
+            ticking = false
+            for (name, effects) in out { if let st = fleet.stations[name] { onFacts(st, effects) } }
+            if feed.pending.allSatisfy({ $0.repo.map { r in !repoRoots.values.contains { $0.repo == r } } ?? false }) { break }
+        }
+    }
     func learn(_ news: OfficeNews, station name: String) {
         guard let station = fleet.stations[name] else { return }
         let effects = Rules.apply([.office(news)], at: now, to: &station.facts, yard: station.yard)
@@ -24,7 +61,11 @@ extension World {
         guard let n = record.number else { return }
         let crate = CrateID(repo: record.repo, number: n)
         feed.numbered[record.id] = crate
-        learn(.work(WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil)), repo: record.repo)
+        var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil)
+        if t.to == .stored, let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key, github.pipeline(repoRoot: root).shipsOnMerge {
+            news.link = waitingURL(repo: record.repo)
+        }
+        learn(.work(news), repo: record.repo)
     }
 
     func learnClosed(office key: String, repo: String?) {
@@ -50,7 +91,7 @@ extension World {
         return out
     }
 
-    func beatFacts(now: Date) -> [(station: String, effects: [Effect])] {
+    private func applyFacts(now: Date, tick: Bool) -> [(station: String, effects: [Effect])] {
         let news = renumbered() + feed.pending
         let routed = Set(repoRoots.values.map(\.repo))
         feed.pending = Array(news.filter { $0.repo.map { !routed.contains($0) } ?? false }.suffix(FactFeed.unrouted))
@@ -63,16 +104,19 @@ extension World {
                 let r = policy(root: root, repo: info.repo, station: station.name)
                 if station.facts.repos[info.repo] != r { events.append(.policy(repo: info.repo, r)) }
             }
-            events += news.filter { $0.repo.map(repos.contains) ?? true }.map(\.event)
+            events += FactFeed.together(news.filter { $0.repo.map(repos.contains) ?? true }.map(\.event))
+            guard tick || !events.isEmpty else { continue }
             let before = station.facts
-            var effects = Rules.apply(events + [.tick], at: now, to: &station.facts, yard: station.yard)
-            let drift = officeDrift(station)
-            if !drift.isEmpty { effects += Rules.apply(drift, at: now, to: &station.facts, yard: station.yard) }
-            out.append((station.name, effects))
+            var effects = Rules.apply(events + (tick ? [.tick] : []), at: now, to: &station.facts, yard: station.yard)
+            if tick {
+                let drift = officeDrift(station)
+                if !drift.isEmpty { effects += Rules.apply(drift, at: now, to: &station.facts, yard: station.yard) }
+            }
+            if station.facts != before || !effects.isEmpty { out.append((station.name, effects)) }
             if station.facts != before { feed.unsaved = true }
             shipAboardMerges(station, now: now)
         }
-        if feed.unsaved, now.timeIntervalSince(feed.savedAt) >= FactFeed.saveEvery {
+        if tick, feed.unsaved, now.timeIntervalSince(feed.savedAt) >= FactFeed.saveEvery {
             feed.unsaved = false
             feed.savedAt = now
             fleet.save()

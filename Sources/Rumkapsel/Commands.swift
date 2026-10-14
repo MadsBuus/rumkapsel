@@ -51,7 +51,6 @@ struct Command {
         case sleep
         case work(office: String)
         case flight(kind: Flight, station: String, slot: Int)
-        case rocket(stage: RocketStage, station: String, repo: String)
         case react(activity: Activity, place: Place, for: TimeInterval)
     }
 
@@ -83,19 +82,6 @@ struct Command {
         case takeWorker(String)
     }
 
-    enum RocketStage: Equatable {
-        case standBy, load(Int), steam, launch
-
-        var rank: Int {
-            switch self {
-            case .standBy: return 0
-            case .load: return 1
-            case .steam: return 2
-            case .launch: return 3
-            }
-        }
-    }
-
     enum Phase {
         case walk
         case approach
@@ -109,13 +95,11 @@ struct Command {
         case unload
         case rise
         case leave
-        case load
-        case climb
 
         var interruptible: Bool {
             switch self {
-            case .walk, .approach, .settle, .load: return true
-            case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .climb, .act: return false
+            case .walk, .approach, .settle: return true
+            case .lift, .setDown, .stepOut, .haul, .descend, .unload, .rise, .leave, .act: return false
             }
         }
         var takesNewDestination: Bool { self == .haul }
@@ -130,12 +114,6 @@ struct Command {
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
         case .bath, .exercise, .pack, .stow: return [.walk, .act]
-        case .rocket(let stage, _, _):
-            switch stage {
-            case .standBy, .steam: return [.settle]
-            case .load: return [.load]
-            case .launch: return [.load, .climb]
-            }
         default: return [.walk, .settle]
         }
     }
@@ -257,17 +235,6 @@ struct Command {
     static func flight(_ flight: Flight, station: String, slot: Int, what: String) -> Command {
         Command(kind: .flight(kind: flight, station: station, slot: slot),
                 words: "\(Words.current.inbound) \(what)")
-    }
-
-    static func rocket(_ stage: RocketStage, station: String, repo: String) -> Command {
-        let words: String
-        switch stage {
-        case .standBy: words = "\(repo) \(Words.current.standingBy)"
-        case .load(let n): words = "loading \(n == 1 ? "one \(Words.current.crate)" : "\(n) \(Words.current.crates)") of \(repo) \(Words.current.loadInto)"
-        case .steam: words = "\(repo) \(Words.current.steaming), waiting for the release to merge"
-        case .launch: words = "\(repo) \(Words.current.liftingOff)"
-        }
-        return Command(kind: .rocket(stage: stage, station: station, repo: repo), words: words)
     }
 
     static func react(_ activity: Activity, place: Place, for seconds: TimeInterval, words: String) -> Command {

@@ -12,16 +12,18 @@ final class ShuttleView {
 
 final class RocketView {
     var node: SCNNode
-    var untestedShown: Bool
+    var heldShown: Bool
+    var tallShown: Bool
+    var cargoShown: Int
     var panelsShown: Int
-    var bornAt: Double
     var flying: [Int: Double] = [:]
     var paintedNode: SCNNode?
     var weldedShown = 0
     var hot: [Int: Double] = [:]
     var stripping: [Int: Double] = [:]
-    init(node: SCNNode, untested: Bool, panels: Int, at clock: Double) {
-        self.node = node; untestedShown = untested; panelsShown = panels; bornAt = clock
+    var lifted = false
+    init(node: SCNNode, held: Bool, tall: Bool, cargo: Int, panels: Int) {
+        self.node = node; heldShown = held; tallShown = tall; cargoShown = cargo; panelsShown = panels
     }
 }
 
@@ -129,67 +131,108 @@ extension StationController {
         let pc = slots[slot % slots.count]
         return v3(station.offset.x + pc.x, 0, station.offset.y + pc.y)
     }
-    func padSlot(station: Station, key: String) -> Int { world.releases.padSlotOf[key] ?? 0 }
 
-    private func rocketNode(station: Station, _ r: RocketJob, slot: Int) -> SCNNode {
+    private func load(_ st: Station, _ key: String, _ r: ShownRocket) -> Int {
+        let id = String(key.dropFirst(st.name.count + 1))
+        return st.facts.rockets[id]?.launched == true ? st.facts.aboard(id).count : st.facts.cargo(r.repo).count
+    }
+
+    private func rocketNode(station: Station, _ key: String, _ r: ShownRocket) -> SCNNode {
         let color = NSColor(fleet.color(forRepo: r.repo))
-        let n = Looks.current.rocket(color: color, tall: r.tall, cargo: r.cargo)
+        let docked = r.dock >= 1
+        let n = Looks.current.rocket(color: color, tall: docked, cargo: load(station, key, r))
         Props.nameRocket(n, repo: r.repo, color: color)
-        if r.hotfix != nil { Props.paintNose(n, RocketShape.hotfixRed) }
-        Props.shape(n, lifter: r.kick == .docked, panels: r.panels)
-        if r.untested, let own = Looks.current.hold(tall: r.kick == .docked) { own.name = "hold"; n.addChildNode(own) }
-        n.position = padPosition(station: station, slot: slot)
-        n.name = r.label
-        n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
+        if case .hotfix = r.kind { Props.paintNose(n, RocketShape.hotfixRed) }
+        Props.shape(n, lifter: docked, panels: r.panels)
+        if r.held, let own = Looks.current.hold(tall: docked) { own.name = "hold"; n.addChildNode(own) }
+        n.position = padPosition(station: station, slot: r.slot)
+        name(n, r.label)
         rocketRoot.addChildNode(n)
         n.opacity = 0
         return n
     }
 
-    func drawRockets() {
-        for (key, r) in simulation.rockets {
-            guard let st = fleet.stations[r.station] else { continue }
-            let slot = padSlot(station: st, key: key)
-            guard let v = rocketViews[key] else {
-                rocketViews[key] = RocketView(node: rocketNode(station: st, r, slot: slot), untested: r.untested, panels: r.panels, at: clock)
-                continue
-            }
-            if v.node.opacity < 1, !v.node.hasActions { v.node.opacity = CGFloat(min(1, (clock - v.bornAt) / 1.2)) }
-            weld(r, v)
-            paintHull(r, v)
-            signal(r, v)
-            placeKick(r, v)
-            vent(r, v)
-            guard r.stage.rank < 3, !v.node.hasActions else { continue }
-            if r.untested != v.untestedShown {
-                let position = v.node.position
-                v.node.removeFromParentNode()
-                v.node = rocketNode(station: st, r, slot: slot)
-                v.node.opacity = 1
-                v.flying = [:]
-                v.node.position = position
-                v.untestedShown = r.untested
-                v.panelsShown = r.panels
-            } else if v.node.name != r.label {
-                v.node.name = r.label
-                v.node.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = r.label } }
-            }
-            if world.releases.padSlotOf[key] != nil { v.node.position = padPosition(station: st, slot: slot) }
-        }
+    private func name(_ n: SCNNode, _ label: String) {
+        n.name = label
+        n.enumerateChildNodes { c, _ in if c.name != "flame" && c.name != "hold" { c.name = label } }
     }
 
-    private func weld(_ r: RocketJob, _ v: RocketView) {
+    func drawRockets() {
+        var live: Set<String> = []
+        for st in fleet.stations.values {
+            for (key, r) in simulation.shownRockets(st) {
+                live.insert(key)
+                let cargo = load(st, key, r)
+                guard let v = rocketViews[key] else {
+                    rocketViews[key] = RocketView(node: rocketNode(station: st, key, r), held: r.held, tall: r.dock >= 1, cargo: cargo, panels: r.panels)
+                    continue
+                }
+                let reshaped = Looks.current.rocketFollowsLoad && (v.tallShown != (r.dock >= 1) || v.cargoShown != cargo)
+                if r.held != v.heldShown || reshaped, r.climbing == nil {
+                    let position = v.node.position, opacity = v.node.opacity
+                    v.node.removeFromParentNode()
+                    v.node = rocketNode(station: st, key, r)
+                    v.node.position = position
+                    v.node.opacity = opacity
+                    v.flying = [:]
+                    v.heldShown = r.held
+                    v.tallShown = r.dock >= 1
+                    v.cargoShown = cargo
+                    v.panelsShown = r.panels
+                } else if v.node.name != r.label, r.climbing == nil {
+                    name(v.node, r.label)
+                }
+                weld(st, key, r, v)
+                paintHull(r, v)
+                signal(key, r, v)
+                placeKick(r, v)
+                vent(r, v)
+                place(st, key, r, v)
+            }
+        }
+        for (key, v) in rocketViews where !live.contains(key) {
+            v.node.removeFromParentNode()
+            rocketViews[key] = nil
+        }
+        let pads = live.map { "\($0):\(simulation.shownRocket($0)?.rocket.slot ?? -1)" }.sorted().joined(separator: ",")
+        if pads != padsDrawn { rebuildPadHexes() }
+    }
+
+    private func place(_ st: Station, _ key: String, _ r: ShownRocket, _ v: RocketView) {
+        let pad = padPosition(station: st, slot: r.slot)
+        guard let at = r.climbing else {
+            v.node.position = pad
+            let leaving = r.leaving.map { 1 - (clock - $0) / ShownRocket.fadeSeconds } ?? 1
+            v.node.opacity = CGFloat(max(0, min(1, (clock - r.since) / 1.2, leaving)))
+            return
+        }
+        if !v.lifted, !v.node.isHidden {
+            drone.sweep(up: true)
+            undocking.append((v.node, at, nil))
+        }
+        v.lifted = true
+        pose(v.node, at: pad, t: clock - at)
+    }
+
+    func pose(_ node: SCNNode, at from: SCNVector3, t: Double) {
+        let p = Looks.current.launch(at: t)
+        node.position = SCNVector3(from.x + CGFloat(p.offset.x), from.y + CGFloat(p.offset.y), from.z + CGFloat(p.offset.z))
+        node.opacity = CGFloat(p.opacity)
+        node.childNode(withName: "flame", recursively: true)?.opacity = CGFloat(p.flame)
+    }
+
+    private func weld(_ st: Station, _ key: String, _ r: ShownRocket, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip") else { return }
         func piece(_ name: String) -> SCNNode? { tip.childNodes.first { ($0.value(forKey: "part") as? String) == name } }
         if r.panels > v.panelsShown {
             for i in v.panelsShown..<r.panels { v.flying[i] = clock + Double(i - v.panelsShown) * 0.15 }
         } else if r.panels < v.panelsShown {
-            Props.shape(v.node, lifter: r.kick == .docked, panels: r.panels)
+            Props.shape(v.node, lifter: r.dock >= 1, panels: r.panels)
             v.flying = [:]
         }
         v.panelsShown = r.panels
         let flight = Hull.flight
-        let welder = simulation.drones[r.station]?.first { $0.task == .weld(r.key) }
+        let welder = simulation.drones[st.name]?.first { $0.task == .weld(key) }
         let source = welder.map { tip.convertPosition(v3($0.pos.x, $0.pos.y, $0.pos.z), from: nil) }
         for (i, at) in v.flying {
             guard let panel = piece("panel\(i)"), let rest = panel.value(forKey: "rest") as? SCNVector3 ?? {
@@ -216,7 +259,7 @@ extension StationController {
         }
     }
 
-    private func paintHull(_ r: RocketJob, _ v: RocketView) {
+    private func paintHull(_ r: ShownRocket, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip") else { return }
         let done = Int(r.welded)
         func paint(_ i: Int, _ color: NSColor, glow: NSColor = .black) {
@@ -254,14 +297,14 @@ extension StationController {
         }
     }
 
-    private func signal(_ r: RocketJob, _ v: RocketView) {
-        guard let ring = padRings[r.key] else { return }
+    private func signal(_ key: String, _ r: ShownRocket, _ v: RocketView) {
+        guard let ring = padRings[key] else { return }
         let color = NSColor(fleet.color(forRepo: r.repo))
         if r.welding {
             let flash = pow(max(0, cos((clock / 0.9).truncatingRemainder(dividingBy: 1) * 2 * .pi)), 4)
             ring.geometry?.firstMaterial?.diffuse.contents = Props.amberLampOff.blended(withFraction: CGFloat(0.3 + 0.7 * flash), of: Props.amberLamp)
             ring.opacity = 0.95
-        } else if r.untested {
+        } else if r.held {
             let k = 0.5 + 0.5 * sin(clock * 2.2)
             ring.geometry?.firstMaterial?.diffuse.contents = Props.failRed.blended(withFraction: CGFloat(0.3 * (1 - k)), of: .black)
             ring.opacity = CGFloat(0.55 + 0.4 * k)
@@ -271,8 +314,8 @@ extension StationController {
         }
     }
 
-    private func vent(_ r: RocketJob, _ v: RocketView) {
-        guard r.isVenting, Double.random(in: 0...1) < 0.3 else { return }
+    private func vent(_ r: ShownRocket, _ v: RocketView) {
+        guard r.venting, Double.random(in: 0...1) < 0.3 else { return }
         let p = v.node.presentation.worldPosition
         let side = Bool.random() ? 1.0 : -1.0
         let out = SIMD3(0, 0, side)
@@ -310,54 +353,29 @@ extension StationController {
         }
     }
 
-    func seamPoint(_ r: RocketJob) -> SCNVector3? {
-        guard let tip = rocketViews[r.key].flatMap({ Props.part($0.node, "tip") }),
-              let seam = tip.childNodes.first(where: { ($0.value(forKey: "part") as? String) == "panel\(r.seam)" }) else { return nil }
+    func seamPoint(_ key: String, panel: Int) -> SCNVector3? {
+        guard let tip = rocketViews[key].flatMap({ Props.part($0.node, "tip") }),
+              let seam = tip.childNodes.first(where: { ($0.value(forKey: "part") as? String) == "panel\(panel)" }) else { return nil }
         return seam.convertPosition(SCNVector3Zero, to: propRoot)
     }
 
-    private func placeKick(_ r: RocketJob, _ v: RocketView) {
+    private func placeKick(_ r: ShownRocket, _ v: RocketView) {
         guard let tip = Props.part(v.node, "tip"), let stage = Props.part(v.node, "lifter") else { return }
         stage.isHidden = r.dock <= 0
         stage.position = v3(0, RocketGeometry.deck(dock: r.dock), 0)
         tip.position.y = CGFloat(r.tipOffset)
         RocketShape.fold(tip, RocketGeometry.fold(dock: r.dock))
-        RocketShape.showLegs(tip, r.kick != .docked)
-    }
-
-    func play(rocket cue: Cue) {
-        switch cue {
-        case .rocketLoading(let key):
-            rocketViews[key]?.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-        case .liftOff(let key):
-            if let node = rocketViews[key]?.node, !queuedMissions.contains(where: { $0.rocket == key && $0.ended == nil }) {
-                node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
-                liftOff(node, repo: RocketKey.parts(key).repo)
-            }
-        case .steam:
-            break
-        case .rocketGone(let key):
-            rocketViews.removeValue(forKey: key)?.node.removeFromParentNode()
-        default: break
-        }
-    }
-
-    func liftOff(_ node: SCNNode, repo: String) {
-        let flying = (mission.map { $0.repo == repo && $0.ended == nil } ?? false) || queuedMissions.contains { $0.repo == repo && $0.ended == nil }
-        if flying {
-            node.runAction(.sequence([.fadeOut(duration: 0.6), .removeFromParentNode()]))
-            return
-        }
-        drone.sweep(up: true)
-        node.opacity = 1
-        node.childNode(withName: "flame", recursively: false)?.opacity = 0
-        undocking.append((node, clock))
-        node.runAction(.sequence([Looks.current.launch(node), .removeFromParentNode()]))
+        RocketShape.showLegs(tip, r.dock < 1)
     }
 
     func tickUndocking() {
-        undocking.removeAll { clock - $0.since > 6 || $0.node.parent == nil }
-        for u in undocking where Double.random(in: 0...1) < 0.35 {
+        for u in undocking {
+            guard let from = u.from else { continue }
+            let t = clock - u.since
+            if t >= Looks.current.launchSeconds { u.node.removeFromParentNode() } else { pose(u.node, at: from, t: t) }
+        }
+        undocking.removeAll { $0.node.parent == nil || ($0.from == nil && clock - $0.since > 6) }
+        for u in undocking where clock - u.since <= 6 && Double.random(in: 0...1) < 0.35 {
             let side = Double.random(in: 0..<(2 * .pi))
             let out = SIMD3(sin(side), Double.random(in: -0.6 ... -0.1), cos(side))
             let p = u.node.presentation.worldPosition
@@ -366,8 +384,5 @@ extension StationController {
         }
     }
 
-    func refreshRockets() {
-        simulation.refreshRockets()
-        rebuildPadHexes()
-    }
+    func refreshRockets() { rebuildPadHexes() }
 }

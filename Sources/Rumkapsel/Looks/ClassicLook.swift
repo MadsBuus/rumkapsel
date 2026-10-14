@@ -234,13 +234,16 @@ enum Classic {
         return ship
     }
 
-    static func launch() -> SCNAction {
-        let clear = SCNAction.moveBy(x: -0.5, y: 2.2, z: -0.4, duration: 5)
-        clear.timingMode = .easeInEaseOut
-        let light = SCNAction.run { $0.childNode(withName: "flame", recursively: false)?.opacity = 1 }
-        let burn = SCNAction.moveBy(x: -5, y: 36, z: -4, duration: 10)
-        burn.timingMode = .easeIn
-        return .sequence([.wait(duration: 0.8), clear, light, .group([burn, .sequence([.wait(duration: 7), .fadeOut(duration: 3)])])])
+    static let launchSeconds = 15.8
+
+    static func launch(at t: Double) -> LaunchPose {
+        var p = LaunchPose()
+        p.offset = SIMD3(-0.5, 2.2, -0.4) * Timing.easeInOut((t - 0.8) / 5)
+        guard t >= 5.8 else { return p }
+        p.flame = 1
+        p.offset += SIMD3(-5, 36, -4) * Timing.easeIn((t - 5.8) / 10)
+        p.opacity = 1 - Timing.clamped((t - 12.8) / 3)
+        return p
     }
 
     static func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {

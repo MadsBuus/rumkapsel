@@ -257,6 +257,8 @@ struct KenneyLook: Look {
     func shuttle(color: NSColor) -> SCNNode { Kit.craft(color: color) ?? Classic.shuttle(color: color) }
     var berthHexHeight: Double { Kit.plateTop + 0.004 }
 
+    var rocketFollowsLoad: Bool { true }
+
     func rocket(color: NSColor, tall: Bool, cargo: Int) -> SCNNode {
         Kit.rocketProp(color: color, tall: tall, cargo: cargo) ?? Classic.rocket(color: color, tall: tall, cargo: cargo)
     }
