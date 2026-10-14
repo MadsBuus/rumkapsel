@@ -1,33 +1,54 @@
 import Foundation
 
+enum Ships: String, Codable, CaseIterable { case release, tag, merge, never }
+
 struct ReleaseFile: Codable, Equatable {
     var trunk: String?
     var staging: String?
     var production: String?
     var releaseBranches: [String]?
     var boardColumns: Bool?
-    var ship: String?
+    var ship: Ships?
 }
 
-extension Pipeline {
-    func overridden(by b: AppConfig.Branches?) -> Pipeline {
-        guard let b else { return self }
+struct Pipeline: Equatable {
+    static let trunkNames = ["develop", "main", "master"]
+    static let stagingName = "staging"
+    static let productionName = "production"
+    static let unread = Pipeline(trunk: "", staging: stagingName, production: productionName)
+
+    var trunk: String
+    var staging: String
+    var production: String
+    var releaseBranches: [String] = PipelineDetection.defaultReleaseBranches
+    var boardColumns: Bool? = nil
+    var source: String = "unread"
+    var why: String = ""
+    var ship: Ships = .release
+    var remote = true
+    var shipsOnMerge: Bool { ship == .merge }
+    var shipsOnTag: Bool { ship == .tag }
+    var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
+    var ships: Bool { ship != .never }
+    var hasStaging: Bool { !staging.isEmpty }
+    func isReleaseHead(_ head: String) -> Bool {
+        head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
+    }
+
+    func overridden(by o: AppConfig.RepoOverride?) -> Pipeline {
+        guard let o, o.setsPipeline else { return self }
         var p = self
-        p.trunk = b.trunk; p.staging = b.staging; p.production = b.production
+        if let t = o.trunk, !t.isEmpty { p.trunk = t }
+        if let s = o.staging { p.staging = s }
+        if let s = o.ships { p.ship = s }
+        if let b = o.production, !b.isEmpty { p.production = b }
+        if p.ship != .release { p.production = "" } else if p.production.isEmpty { p.production = Pipeline.productionName }
         p.source = "override"; p.why = "set in Settings"
-        if !b.production.isEmpty, p.ship == "merge" || p.ship == "tag" { p.ship = "release" }
         return p
     }
 
-    var flow: String {
-        shipsOnMerge ? "\(trunk), ships on merge"
-            : shipsOnTag ? "\(trunk), ships on tags"
-            : production.isEmpty ? "\(trunk), no releases"
-            : [trunk, staging, production].filter { !$0.isEmpty }.joined(separator: " → ")
-    }
-
-    static func override(forRoot root: String) -> AppConfig.Branches? {
-        ConfigStore.shared.current.repos[URL(fileURLWithPath: root).lastPathComponent]?.branches
+    static func override(forRoot root: String) -> AppConfig.RepoOverride? {
+        ConfigStore.shared.current.repos[URL(fileURLWithPath: root).lastPathComponent]
     }
 }
 
@@ -40,16 +61,25 @@ enum PipelineDetection {
         pattern.hasSuffix("*") ? branch.hasPrefix(String(pattern.dropLast())) : branch == pattern
     }
 
-    static func detect(branches: Set<String>, merges: [Merge], file: ReleaseFile?,
-                       names: (trunk: String, staging: String, production: String), deploysOnPush: Bool = false,
-                       tagged: Bool = false) -> Pipeline {
+    static func tagged(_ tags: [(name: String, at: Date)], now: Date) -> Bool {
+        tags.contains { $0.name.firstMatch(of: #/^v?\d+(\.\d+)*$/#) != nil && now.timeIntervalSince($0.at) < 365 * 24 * 3600 }
+    }
+
+    static func settle(cached: Pipeline?, read: Pipeline, failed: Bool) -> Pipeline? {
+        guard failed else { return read }
+        return cached.flatMap { $0.remote == read.remote ? $0 : nil }
+    }
+
+    static func detect(branches: Set<String>, merges: [Merge], file: ReleaseFile?, defaultBranch: String? = nil, history: Bool = true,
+                       deploysOnPush: Bool = false, tagged: Bool = false, remote: Bool = true) -> Pipeline {
         let exists: (String) -> Bool = { b in !b.isEmpty && (branches.isEmpty || branches.contains(b)) }
         let releaseLike: (String) -> Bool = { h in defaultReleaseBranches.contains { matches(h, $0) } }
-        let longLived = Set([names.trunk, names.staging, names.production, "develop", "main", "master", "staging", "production"].filter { !$0.isEmpty })
+        let named = [defaultBranch].compactMap { $0 }.filter { !$0.isEmpty && $0 != Pipeline.stagingName && $0 != Pipeline.productionName }
+        let longLived = Set(named + Pipeline.trunkNames + [Pipeline.stagingName, Pipeline.productionName])
 
-        var trunk = [names.trunk, "develop", "main", "master"].first(where: exists) ?? names.trunk
-        var staging = exists(names.staging) && names.staging != trunk ? names.staging : ""
-        var production = [names.production, "master", "main"].first { exists($0) && $0 != trunk && $0 != staging } ?? ""
+        var trunk = (history ? named + Pipeline.trunkNames : Pipeline.trunkNames + named).first(where: exists) ?? named.first ?? Pipeline.trunkNames[0]
+        var staging = exists(Pipeline.stagingName) && Pipeline.stagingName != trunk ? Pipeline.stagingName : ""
+        var production = [Pipeline.productionName, "master", "main"].first { exists($0) && $0 != trunk && $0 != staging } ?? ""
         var releaseBranches = defaultReleaseBranches
         var source = "branches", why = "branch names only: no release history read"
 
@@ -97,12 +127,18 @@ enum PipelineDetection {
         if source == "branches" {
             why = merges.isEmpty ? "branch names only: no history read" : "branch names: no release among the last \(merges.count) merges"
         }
-        var ship = "release"
-        if production.isEmpty, deploysOnPush {
-            ship = "merge"; source = "workflow"; why = "deploys on every push to \(trunk)"
-        }
-        if production.isEmpty, ship == "release", tagged {
-            ship = "tag"; source = "tags"; why = "no release branch: what is tagged on \(trunk) has shipped"
+        var ship = Ships.release
+        if source == "branches", production != Pipeline.productionName, deploysOnPush || tagged { production = "" }
+        if production.isEmpty {
+            if !remote {
+                ship = .never; source = "local"; why = "no GitHub remote: local work only"
+            } else if deploysOnPush {
+                ship = .merge; source = "workflow"; why = "deploys on every push to \(trunk)"
+            } else if tagged {
+                ship = .tag; source = "tags"; why = "no release branch: what is tagged on \(trunk) has shipped"
+            } else {
+                ship = .never; why = "no release branch, no recent tags and no deploy on push to \(trunk)"
+            }
         }
 
         if let f = file {
@@ -110,10 +146,12 @@ enum PipelineDetection {
             if let s = f.staging { staging = s }
             if let p = f.production { production = p }
             if let r = f.releaseBranches { releaseBranches = r }
-            if let s = f.ship { ship = s }
+            if let s = f.ship { ship = s } else if !production.isEmpty { ship = .release }
             source = "file"; why = ".github/rumkapsel.json"
         }
+        if ship == .release, production.isEmpty { ship = .never }
+        if ship != .release { production = "" }
         return Pipeline(trunk: trunk, staging: staging, production: production, releaseBranches: releaseBranches,
-                        boardColumns: file?.boardColumns, source: source, why: why, ship: ship)
+                        boardColumns: file?.boardColumns, source: source, why: why, ship: ship, remote: remote)
     }
 }

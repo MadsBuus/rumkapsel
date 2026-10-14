@@ -13,10 +13,10 @@ run() { RUMKAPSEL_SUPPORT=$(mktemp -d) $BIN "$@" >$OUT/$1 2>&1; echo $? >$OUT/$1
 run --scenarios ${1:-} &
 run --playback-tests &
 run --intake-tests &
-for suite in rule sim idle walk work deploy github pipeline layout spacelog look log; do run --$suite-tests; done
+for suite in rule sim idle walk work deploy github pipeline setup layout spacelog look log; do run --$suite-tests; done
 wait
 FAILED=0
-for suite in rule intake playback sim idle walk work deploy github pipeline layout spacelog look log; do
+for suite in rule intake playback sim idle walk work deploy github pipeline setup layout spacelog look log; do
   grep -E "not so|FAIL" $OUT/--$suite-tests
   tail -1 $OUT/--$suite-tests
   [ "$(cat $OUT/--$suite-tests.code 2>/dev/null)" = 0 ] || { FAILED=1; echo "$suite: exit $(cat $OUT/--$suite-tests.code 2>/dev/null || echo none)" }

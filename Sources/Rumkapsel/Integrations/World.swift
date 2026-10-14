@@ -21,6 +21,30 @@ final class World {
     // MARK: model state
 
     private(set) var repoRoots: [String: (repo: String, station: String)] = [:]
+    private(set) var newRepos: [String] = []
+    private var seen: Set<String>?
+    var hasScanned: Bool { scans > 0 }
+    private static var seenURL: URL { AppSupport.root.appendingPathComponent("Rumkapsel/seen-repos.json") }
+
+    private func remember(_ repos: Set<String>) {
+        guard !simulated, !demo else { return }
+        let all = (seen ?? []).union(repos)
+        guard all != seen else { return }
+        seen = all
+        if let data = try? JSONEncoder().encode(all.sorted()) { try? data.write(to: World.seenURL, options: .atomic) }
+    }
+
+    func announce(new repos: [String]) { for r in repos where !newRepos.contains(r) { newRepos.append(r) } }
+
+    private func register(root: String, repo: String, station: String) {
+        let real = GitWatch.real(root)
+        guard !repoRoots.values.contains(where: { $0.repo == repo }), !repoRoots.keys.contains(where: { GitWatch.real($0) == real }) else { return }
+        repoRoots[root] = (repo, station)
+        if station == "work" { _ = fleet.color(forRepo: repo) }
+        guard let seen else { return }
+        if !simulated, !seen.contains(repo), ConfigStore.shared.current.repos[repo] == nil, !newRepos.contains(repo) { newRepos.append(repo) }
+        remember([repo])
+    }
 
     struct CrewRoomInfo { var state: String; var last: Date }
     private(set) var crewRoomInfo: [String: CrewRoomInfo] = [:]
@@ -98,7 +122,7 @@ final class World {
     func workflow(repo: String) -> Workflow {
         if let w = ConfigStore.shared.current.repos[repo]?.workflow { return w }
         let root = repoRoots.first { $0.value.repo == repo }?.key
-        let pipeline = root.map { github.pipeline(repoRoot: $0) } ?? .configured
+        let pipeline = root.map { github.pipeline(repoRoot: $0) } ?? .unread
         return Workflow.detected(pipeline: pipeline, board: ConfigStore.shared.current.project != nil)
     }
     func stage(office key: String, repo: String?) -> Stage? { repo.flatMap { works.find(officeKey: key, repo: $0) }?.stage }
@@ -314,6 +338,7 @@ final class World {
                     self?.learn(r, t)
                 }
                 fleet.load(alone: peerSnapshots.isEmpty)
+                if seen == nil, let data = try? Data(contentsOf: World.seenURL), let names = try? JSONDecoder().decode([String].self, from: data) { seen = Set(names) }
                 restored()
                 if waitsForGitHub { github.loadKnowledge() }
                 changed = true
@@ -351,9 +376,7 @@ final class World {
                                          via: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle(for: s.id)))
                     report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
                 }
-                if let root = s.repoRoot, !repoRoots.values.contains(where: { $0.repo == s.repo }) {
-                    repoRoots[root] = (s.repo, stationName)
-                }
+                if let root = s.repoRoot { register(root: root, repo: s.repo, station: stationName) }
                 let marker = s.eventMarkers[.prompt] ?? ""
                 if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
                     events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
@@ -421,24 +444,16 @@ final class World {
             }
 
             if firstRun, !simulated {
-                let home = FileManager.default.homeDirectoryForCurrentUser
-                let workspaces = home.appendingPathComponent("conductor/workspaces")
-                if let repos = try? FileManager.default.contentsOfDirectory(atPath: workspaces.path) {
-                    for repo in repos {
-                        let root = home.appendingPathComponent("dev/\(repo)").path
-                        if FileManager.default.fileExists(atPath: root + "/.git"), !repoRoots.values.contains(where: { $0.repo == repo }) {
-                            repoRoots[root] = (repo, "work")
-                            _ = fleet.color(forRepo: repo)
-                        }
-                    }
+                for (repo, root) in Discovery.conductor(home: FileManager.default.homeDirectoryForCurrentUser) {
+                    guard cfg.shown(repo: repo) else { continue }
+                    register(root: root, repo: repo, station: "work")
                 }
-                for (repo, o) in cfg.repos where cfg.shown(repo: repo) {
-                    guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git"),
-                          !repoRoots.values.contains(where: { $0.repo == repo }) else { continue }
-                    repoRoots[root] = (repo, "work")
-                    _ = fleet.color(forRepo: repo)
+                for (repo, o) in cfg.repos.sorted(by: { $0.key < $1.key }) where cfg.shown(repo: repo) {
+                    guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git") else { continue }
+                    register(root: root, repo: repo, station: "work")
                 }
             }
+            if firstRun, seen == nil { remember(Set(repoRoots.values.map(\.repo)).union(cfg.repos.keys).union(fleet.repoColors.keys)) }
             github.intervalMinutes = cfg.githubMinutes
             if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
             github.watch(repoRoots.mapValues { $0.station == "work" }, board: cfg.project.map { ($0.owner, $0.number) })
@@ -742,14 +757,14 @@ final class World {
             var markers = false
             let cfg = ConfigStore.shared.current
             if let colors = snap.colors, snap.name < peerName,
-               fleet.adopt(colors.filter { cfg.repos[$0.key]?.color == nil && cfg.repos[$0.key]?.station != "hidden" }) {
+               fleet.adopt(colors.filter { cfg.repos[$0.key]?.color == nil && cfg.shown(repo: $0.key) }) {
                 changed = true
                 events.append(.log("repository colours now match \(snap.name)'s"))
             }
             let mine = Set(peerOffices.filter { $0.value[snap.name] != nil }.map(\.key))
             var live: Set<String> = []
             var disputed: [(key: String, cells: [Cell])] = []
-            for o in snap.offices where cfg.repos[o.repo]?.station != "hidden" && !isKicked(sk + o.key) {
+            for o in snap.offices where cfg.shown(repo: o.repo) && !isKicked(sk + o.key) {
                 works.note(repo: o.repo, branch: o.branch, pull: o.pull, pullState: o.pullState)
                 let key = sk + o.key
                 live.insert(key)

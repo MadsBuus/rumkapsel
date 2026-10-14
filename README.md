@@ -14,7 +14,32 @@ stations on the same network share a floor.
 ./test.sh             # the gate, before every commit
 ```
 
-Requires macOS 14, Xcode 26 / Swift 6.3 and the `gh` CLI, signed in, for GitHub.
+Requires macOS 14 and Xcode 26 / Swift 6.3 to build.
+
+## Setting up
+
+What the station needs:
+
+- **git**, and **Claude Code sessions**: every folder a session runs in that is a git checkout becomes a
+  repository on the station, wherever it lives. Worktrees join their repository. Settings › Repositories ›
+  Watch a repository… adds one by hand.
+- **GitHub pull requests**, read through the [GitHub CLI](https://cli.github.com) (`brew install gh`, then
+  `gh auth login`). Without a GitHub remote a repository is local work only: offices and cubes, no crates.
+
+That is enough for the whole station: offices, crates in storage when they merge, and a rocket when the work
+ships. What is optional:
+
+- **A testing phase**: a `staging` branch releases go through.
+- **How it ships**: a production branch (release pull requests), release tags (`v1.2`), or a workflow that
+  deploys on every push. None of them: it doesn't ship, and merged crates wait in storage.
+- **A GitHub project board** and issues (Settings › GitHub), to lay the yard out from its columns.
+- **Neighbours**: sharing on the local network, per repository (Settings › General and Repositories).
+
+Each new repository is set up from what it has: the trunk is GitHub's default branch, the testing phase is on
+when a `staging` branch exists, and how it ships is read from its branches, tags and workflows. It is shown on
+the station and not shared. A quiet card in the top corner says what was found; "Looks right" keeps it,
+"Change…" opens its page in Settings, and ignoring it keeps it too. When the yard is empty the station says
+why, and Settings › General has the same setup check.
 
 `./release.sh <version>` builds, signs, notarises and publishes a release with a Sparkle appcast; its header
 says the one-time setup.

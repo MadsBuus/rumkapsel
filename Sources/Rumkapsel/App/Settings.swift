@@ -8,6 +8,8 @@ struct RepoDetail {
     var remote: String?
     var detected: Pipeline?
     var workflow: Workflow?
+    var worktrees = 0
+    var branches: Set<String>?
 }
 
 final class SettingsModel: ObservableObject {
@@ -16,11 +18,20 @@ final class SettingsModel: ObservableObject {
     @Published var details: [String: RepoDetail] = [:]
     @Published var people: [String: SeenPerson] = [:]
     @Published var launchAtLogin = false
+    @Published var problems: [String] = []
+    @Published var tab = 0
+    @Published var selected: String?
     let board = BoardCatalog()
     private var forwarding: AnyCancellable?
     init() { forwarding = board.objectWillChange.sink { [weak self] in self?.objectWillChange.send() } }
 
-    func commit() { pending?.cancel(); ConfigStore.shared.update { $0 = config } }
+    func commit() {
+        pending?.cancel()
+        let latest = ConfigStore.shared.current
+        for (name, r) in latest.repos where r.answered == true { config.repos[name, default: .init()].answered = true }
+        if config.viewerLogin == nil { config.viewerLogin = latest.viewerLogin }
+        ConfigStore.shared.update(byUser: true) { $0 = config }
+    }
 
     private var pending: DispatchWorkItem?
     func commitSoon() {
@@ -34,14 +45,17 @@ final class SettingsModel: ObservableObject {
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
     var onLaunchAtLogin: (Bool) -> Void
-    @State private var selected: String?
+    private var selected: String? {
+        get { model.selected }
+        nonmutating set { model.selected = newValue }
+    }
 
     var body: some View {
-        TabView {
-            general.tabItem { Label("General", systemImage: "gear") }
-            repositories.tabItem { Label("Repositories", systemImage: "shippingbox") }
-            github.tabItem { Label("GitHub", systemImage: "arrow.triangle.pull") }
-            teammates.tabItem { Label("Teammates", systemImage: "person.2") }
+        TabView(selection: $model.tab) {
+            general.tabItem { Label("General", systemImage: "gear") }.tag(0)
+            repositories.tabItem { Label("Repositories", systemImage: "shippingbox") }.tag(1)
+            github.tabItem { Label("GitHub", systemImage: "arrow.triangle.pull") }.tag(2)
+            teammates.tabItem { Label("Teammates", systemImage: "person.2") }.tag(3)
         }
         .frame(width: 680, height: 560)
     }
@@ -50,6 +64,18 @@ struct SettingsView: View {
 
     private var general: some View {
         Form {
+            Section {
+                if model.problems.isEmpty {
+                    Text("All set: \(model.knownRepos.count) \(model.knownRepos.count == 1 ? "repository" : "repositories") on the station.")
+                } else {
+                    ForEach(model.problems, id: \.self) { Text($0) }
+                }
+            } header: {
+                Text("Setup check")
+            } footer: {
+                Text("Needed: git, and GitHub pull requests read through the GitHub CLI, signed in. Optional: a GitHub project board, issues, a staging branch, releases or tags.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section {
                 Picker("Look", selection: Binding(get: { model.config.theme }, set: { model.config.themeName = $0.rawValue })) {
                     ForEach(Theme.allCases) { Text($0.title).tag($0) }
@@ -90,28 +116,33 @@ struct SettingsView: View {
     private var repositories: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                List(model.knownRepos, id: \.self, selection: $selected) { repo in
+                List(model.knownRepos, id: \.self, selection: $model.selected) { repo in
                     HStack(spacing: 8) {
                         Circle().fill(swatch(repo)).frame(width: 10, height: 10)
                         Text(repo).foregroundStyle(model.config.shown(repo: repo) ? .primary : .secondary)
                     }
                 }
                 Divider()
-                HStack(spacing: 0) {
-                    Button { addRepository() } label: { Image(systemName: "plus").frame(width: 24, height: 20) }
-                        .help("Add a git checkout from this Mac")
-                    Button { removeRepository() } label: { Image(systemName: "minus").frame(width: 24, height: 20) }
-                        .help("Remove a checkout you added")
-                        .disabled(selected.map { model.config.repos[$0]?.path == nil } ?? true)
+                HStack(spacing: 8) {
+                    Button("Watch a repository…") { addRepository() }
+                        .help("Put a git checkout on this Mac on the station")
                     Spacer()
+                    Button { removeRepository() } label: { Image(systemName: "minus").frame(width: 20, height: 18) }
+                        .help("Stop watching a repository you added")
+                        .disabled(selected.map { model.config.repos[$0]?.path == nil } ?? true)
                 }
                 .buttonStyle(.borderless)
-                .padding(4)
+                .padding(6)
             }
             .frame(width: 210)
             Divider()
             if let repo = selected, model.knownRepos.contains(repo) {
                 repositoryPage(repo)
+            } else if model.knownRepos.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.problems, id: \.self) { Text($0) }
+                }
+                .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 Text("Select a repository").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -119,12 +150,34 @@ struct SettingsView: View {
         .onAppear { if selected == nil { selected = model.knownRepos.first } }
     }
 
+    private func edit(_ repo: String, soon: Bool = false, _ change: (inout AppConfig.RepoOverride) -> Void) {
+        var o = model.config.repos[repo] ?? AppConfig.RepoOverride()
+        change(&o)
+        o.answered = true
+        model.config.repos[repo] = o
+        soon ? model.commitSoon() : model.commit()
+    }
+
+    private func branchField(_ title: String, _ repo: String, _ path: WritableKeyPath<AppConfig.RepoOverride, String?>, detected: String,
+                             on github: Set<String>?, effective: String) -> some View {
+        BranchField(title: title, saved: model.config.repos[repo]?[keyPath: path] ?? "", detected: detected, missing: github.map { !$0.contains(effective) } ?? false) { name in
+            edit(repo) { $0[keyPath: path] = name.isEmpty ? nil : name }
+        }
+        .id(repo + title)
+    }
+
+    private static let shipChoices: [(Ships, String)] = [
+        (.release, "from a release branch"), (.tag, "on tags"), (.merge, "on every merge"), (.never, "it doesn't ship"),
+    ]
+
     private func repositoryPage(_ repo: String) -> some View {
         let detail = model.details[repo]
         let path = model.config.repos[repo]?.path ?? detail?.path
         let shown = model.config.shown(repo: repo)
         let picked = model.config.repos[repo]?.color
-        let branches = model.config.repos[repo]?.branches
+        let own = model.config.repos[repo]
+        let detected = detail?.detected
+        let way = (detected ?? .unread).overridden(by: own)
         return Form {
             Section {
                 LabeledContent("Folder") {
@@ -138,22 +191,23 @@ struct SettingsView: View {
                         Text("no checkout on this Mac").foregroundStyle(.secondary)
                     }
                 }
-                LabeledContent("GitHub", value: detail?.remote ?? "not read yet")
+                if let n = detail?.worktrees, n > 0 {
+                    LabeledContent("Worktrees", value: "\(n) more \(n == 1 ? "checkout" : "checkouts"), part of this repository")
+                }
+                LabeledContent("GitHub", value: detail?.remote ?? (detected?.remote == false ? "no GitHub remote: local work only" : "not read yet"))
             } header: {
                 Text(repo)
             }
             Section {
-                Toggle("Show on the station", isOn: Binding(
-                    get: { shown },
-                    set: { model.config.repos[repo, default: .init()].station = $0 ? "auto" : "hidden"; model.commit() }))
+                Toggle("Show on the station", isOn: Binding(get: { shown }, set: { on in edit(repo) { $0.shown = on } }))
                 Toggle("Share with neighbours", isOn: Binding(
-                    get: { shown && (model.config.repos[repo]?.share ?? false) },
-                    set: { model.config.repos[repo, default: .init()].share = $0; model.commit() }))
+                    get: { shown && (own?.share ?? false) },
+                    set: { on in edit(repo) { $0.share = on } }))
                     .disabled(!shown)
                 LabeledContent("Colour") {
                     HStack(spacing: 8) {
                         if picked != nil {
-                            Button("Clear") { model.config.repos[repo, default: .init()].color = nil; model.commit() }
+                            Button("Clear") { edit(repo) { $0.color = nil } }
                                 .buttonStyle(.link)
                                 .help("Back to the colour its name gives it")
                         }
@@ -161,69 +215,65 @@ struct SettingsView: View {
                             get: { swatch(repo) },
                             set: { c in
                                 guard let n = NSColor(c).usingColorSpace(.genericRGB) else { return }
-                                model.config.repos[repo, default: .init()].color = RGB(r: n.redComponent, g: n.greenComponent, b: n.blueComponent)
-                                model.commitSoon()
+                                edit(repo, soon: true) { $0.color = RGB(r: n.redComponent, g: n.greenComponent, b: n.blueComponent) }
                             }), supportsOpacity: false)
                         .labelsHidden()
                     }
                 }
             } footer: {
-                Text("The colour comes from the name, so it is the same on every station. A colour you pick is yours alone.")
+                Text((model.config.shareOnLAN ? "" : "Sharing is off for this Mac in General. ")
+                     + "The colour comes from the name, so it is the same on every station. A colour you pick is yours alone.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
-                if branches != nil {
-                    TextField("Trunk", text: branchField(repo, \.trunk), prompt: Text("develop"))
-                    TextField("Staging", text: branchField(repo, \.staging), prompt: Text("none"))
-                    TextField("Production", text: branchField(repo, \.production), prompt: Text("no releases"))
-                    Button("Use what the repository says") { model.config.repos[repo]?.branches = nil; model.commit() }
+                Picker("How does it ship?", selection: Binding(get: { way.ship }, set: { v in edit(repo) { $0.ships = v } })) {
+                    ForEach(Self.shipChoices, id: \.0) { Text(Setup.sentence($0.1)).tag($0.0) }
+                }
+                if way.ship == .release {
+                    branchField("Release branch", repo, \.production, detected: detected?.production.isEmpty == false ? detected!.production : Pipeline.productionName,
+                                on: detail?.branches, effective: way.production)
+                }
+                Toggle("Testing phase", isOn: Binding(
+                    get: { way.hasStaging },
+                    set: { on in edit(repo) { $0.staging = on ? (detected?.hasStaging == true ? detected!.staging : Pipeline.stagingName) : "" } }))
+                if way.hasStaging {
+                    branchField("Testing branch", repo, \.staging, detected: detected?.hasStaging == true ? detected!.staging : Pipeline.stagingName,
+                                on: detail?.branches, effective: way.staging)
+                }
+                branchField("Trunk", repo, \.trunk, detected: detected.map { $0.trunk.isEmpty ? "main" : $0.trunk } ?? "main",
+                            on: detail?.branches, effective: way.trunk)
+                if own?.setsPipeline == true {
+                    Button("Use what the repository says") { edit(repo) { $0.trunk = nil; $0.ships = nil; $0.production = nil; $0.staging = nil } }
                         .buttonStyle(.link)
-                } else {
-                    LabeledContent("Pipeline", value: detail?.detected?.flow ?? "not read yet")
-                    if let why = detail?.detected?.why, !why.isEmpty {
-                        Text(why).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Button("Set by hand") {
-                        let p = detail?.detected ?? .configured
-                        model.config.repos[repo, default: .init()].branches = .init(trunk: p.trunk, staging: p.staging, production: p.production)
-                        model.commit()
-                    }
-                    .buttonStyle(.link)
                 }
             } header: {
-                Text("Releases")
+                Text("Way to production · " + (own?.setsPipeline == true ? "set by hand" : detected == nil ? "not read yet" : "detected"))
             } footer: {
-                Text("Merged pull requests go to storage, a release into staging moves them to the test deck, and a release into production loads the rocket. Read from the repository's release history, else its branch names. To set it for everyone, put .github/rumkapsel.json on the default branch.")
+                Text((detected.map { "Detected: \($0.why). " } ?? "")
+                     + "Merged pull requests wait in storage, a testing phase takes them to the test deck, and the release, the tag or the merge sends them up in a rocket. To set it for everyone, put .github/rumkapsel.json on the default branch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let workflow = detail?.workflow {
-                let byHand = model.config.repos[repo]?.workflow != nil
+                let byHand = own?.workflow != nil
                 Section {
                     if byHand {
                         stagePicker("Stored when", repo, workflow, \.stored)
                         optionalStagePicker("QA", repo, workflow, \.qa, off: "none: stored goes straight to the rocket")
                         optionalStagePicker("Cleared when", repo, workflow, \.cleared, off: "always: the rocket never waits")
                         stagePicker("Shipped when", repo, workflow, \.shipped)
-                        Picker("Outside work", selection: Binding(
-                            get: { workflow.outside },
-                            set: { v in var w = workflow; w.outside = v; model.config.repos[repo, default: .init()].workflow = w; model.commit() })) {
-                            Text("bots").tag(Workflow.Outside.bots)
-                            Text("bots and anyone not on the team").tag(Workflow.Outside.strangers)
-                            Text("nobody").tag(Workflow.Outside.nobody)
-                        }
-                        Button("Use what is detected") { model.config.repos[repo]?.workflow = nil; model.commit() }
+                        Button("Use what is detected") { edit(repo) { $0.workflow = nil } }
                             .buttonStyle(.link)
                     } else {
                         ForEach(workflow.summary, id: \.question) { row in
                             LabeledContent(row.question, value: row.answer)
                         }
-                        Button("Set by hand") { model.config.repos[repo, default: .init()].workflow = workflow; model.commit() }
+                        Button("Set by hand") { edit(repo) { $0.workflow = workflow } }
                             .buttonStyle(.link)
                     }
                 } header: {
-                    Text("Workflow" + (byHand ? " · set by hand" : " · detected"))
+                    Text("Who says each stage" + (byHand ? " · set by hand" : " · detected"))
                 } footer: {
-                    Text("Who may say each stage, first in line first. Any of them moves work on; only the first may take it back. Detected from the releases above and the board.")
+                    Text("Who may say each stage, first in line first. Any of them moves work on; only the first may take it back. Detected from the way to production above and the board.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -234,7 +284,7 @@ struct SettingsView: View {
     private func stagePicker(_ title: String, _ repo: String, _ workflow: Workflow, _ path: WritableKeyPath<Workflow, [Source]>) -> some View {
         Picker(title, selection: Binding(
             get: { workflow[keyPath: path].first ?? .pulls },
-            set: { s in var w = workflow; w[keyPath: path] = Workflow.first(s, in: w[keyPath: path]); model.config.repos[repo, default: .init()].workflow = w; model.commit() })) {
+            set: { s in var w = workflow; w[keyPath: path] = Workflow.first(s, in: w[keyPath: path]); edit(repo) { $0.workflow = w } })) {
             ForEach([Source.board, .pulls, .git, .deploy], id: \.self) { Text("\($0.title) first").tag($0) }
         }
     }
@@ -245,16 +295,11 @@ struct SettingsView: View {
             set: { s in
                 var w = workflow
                 w[keyPath: path] = s.map { Workflow.first($0, in: w[keyPath: path] ?? Workflow()[keyPath: path] ?? [$0]) }
-                model.config.repos[repo, default: .init()].workflow = w; model.commit()
+                edit(repo) { $0.workflow = w }
             })) {
             Text(off).tag(Source?.none)
             ForEach([Source.board, .pulls, .git, .deploy], id: \.self) { Text("\($0.title) first").tag(Source?.some($0)) }
         }
-    }
-
-    private func branchField(_ repo: String, _ path: WritableKeyPath<AppConfig.Branches, String>) -> Binding<String> {
-        Binding(get: { model.config.repos[repo]?.branches?[keyPath: path] ?? "" },
-                set: { model.config.repos[repo]?.branches?[keyPath: path] = $0.trimmingCharacters(in: .whitespaces); model.commitSoon() })
     }
 
     private func swatch(_ repo: String) -> Color {
@@ -265,10 +310,10 @@ struct SettingsView: View {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
-        panel.prompt = "Add"
-        panel.message = "Choose a git checkout"
+        panel.prompt = "Watch"
+        panel.message = "Choose a git checkout, or any folder inside one"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let root = Self.checkoutRoot(url.path) else {
+        guard let root = Discovery.root(of: url.path) else {
             let alert = NSAlert()
             alert.messageText = "Not a git checkout"
             alert.informativeText = "\((url.path as NSString).abbreviatingWithTildeInPath) is not inside a git repository."
@@ -276,39 +321,22 @@ struct SettingsView: View {
             return
         }
         let repo = URL(fileURLWithPath: root).lastPathComponent
-        model.config.repos[repo, default: .init()].path = root
-        model.config.repos[repo, default: .init()].station = "auto"
         if !model.knownRepos.contains(repo) { model.knownRepos = (model.knownRepos + [repo]).sorted() }
         model.details[repo, default: RepoDetail()].path = root
         selected = repo
-        model.commit()
+        edit(repo) { $0.path = root; $0.shown = true }
     }
 
     private func removeRepository() {
         guard let repo = selected, model.config.repos[repo]?.path != nil else { return }
         model.config.repos[repo]?.path = nil
-        if model.config.repos[repo] == AppConfig.RepoOverride() { model.config.repos[repo] = nil }
-        if model.details[repo]?.path == model.config.repos[repo]?.path || model.config.repos[repo] == nil {
+        if model.config.repos[repo].map({ var o = $0; o.answered = nil; return o == AppConfig.RepoOverride() }) == true { model.config.repos[repo] = nil }
+        if model.config.repos[repo] == nil {
             model.details[repo] = nil
             model.knownRepos.removeAll { $0 == repo }
             selected = model.knownRepos.first
         }
         model.commit()
-    }
-
-    private static func checkoutRoot(_ path: String) -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        p.arguments = ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return nil }
-        p.waitUntilExit()
-        guard p.terminationStatus == 0,
-              let dir = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              dir.hasSuffix("/.git") else { return nil }
-        return String(dir.dropLast(5))
     }
 
     // MARK: GitHub
@@ -438,6 +466,34 @@ struct SettingsView: View {
             }
         }
         .padding(20)
+    }
+}
+
+struct BranchField: View {
+    let title: String
+    let saved: String
+    let detected: String
+    let missing: Bool
+    let commit: (String) -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TextField(title, text: $draft, prompt: Text(detected))
+                .focused($focused)
+                .onSubmit(save)
+                .onChange(of: focused) { _, now in if !now { save() } }
+            if missing {
+                Text("\(draft.isEmpty ? detected : draft) isn't on GitHub").font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .onAppear { draft = saved }
+    }
+
+    private func save() {
+        let name = draft.trimmingCharacters(in: .whitespaces)
+        if name != saved { commit(name) }
     }
 }
 

@@ -13,11 +13,11 @@ final class ReleaseBook {
 extension World {
     func root(station: String, repo: String) -> String? { repoRoots.first { $0.value.station == station && $0.value.repo == repo }?.key }
     func stagingIsDeck(station: String, repo: String) -> Bool {
-        root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? !ConfigStore.shared.current.stagingBranch.isEmpty
+        root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? true
     }
     func deckInUse(station: String) -> Bool {
         let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
-        return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
+        return roots.isEmpty || roots.contains { github.pipeline(repoRoot: $0).hasStaging }
     }
 
     private func padRelease(root: String) -> ReleasePR? {

@@ -309,6 +309,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var storyPanel: CrateStoryPanel?
     var storyOf: (station: String, id: CrateID)?
     var storyClock = 0.0
+    var setupCard: SetupCard?
+    var cardFacts: SetupCardFacts?
+    var answeredCards: Set<String> = []
+    var onChangeRepo: ((String) -> Void)?
+    let setupLabel = SKLabelNode()
+    let setupPlate = SKSpriteNode()
+    var setupProblems: [String] = []
     var hovered: String?
     var following: String?
     private var lastTick = 0.0
@@ -395,7 +402,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.cardTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node, floor in
             let n = node?.name ?? ""
@@ -510,6 +517,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
         installStory()
+        installCard()
         if !simulated { Bulkhead.prepare() }
         if demo {
             seedDemo()
@@ -1184,9 +1192,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func applyConfigChange(from old: AppConfig, to new: AppConfig) {
         applySharing()
-        var renamed = old
+        var renamed = old.withoutAnswers
         renamed.shareName = new.shareName
-        guard renamed != new else { return }
+        guard renamed != new.withoutAnswers else { return }
         enqueue { [self] in
             let cfg = ConfigStore.shared.current
             if Looks.theme != cfg.theme {
@@ -1211,9 +1219,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var repoDetails: [String: RepoDetail] {
         var out: [String: RepoDetail] = [:]
         for (root, info) in world.repoRoots.sorted(by: { $0.key < $1.key }) where out[info.repo] == nil {
-            let p = github.detectedPipeline(repoRoot: root)
-            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root), detected: p.source == "settings" ? nil : p,
-                                        workflow: world.workflow(repo: info.repo))
+            out[info.repo] = RepoDetail(path: root, remote: github.nameWithOwner(repoRoot: root),
+                                        detected: github.pipelineRead(repoRoot: root) ? github.detectedPipeline(repoRoot: root) : nil,
+                                        workflow: world.workflow(repo: info.repo), branches: github.githubBranches(repoRoot: root))
         }
         return out
     }

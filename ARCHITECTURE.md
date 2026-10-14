@@ -68,13 +68,15 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `GitHubHTTP.swift` | conditional REST reads (ETag) with the `gh` token, behind the rate gate |
 | `GitWatch.swift` | FSEvents on a repository's `.git`: a commit, a worktree's checkout, remote refs or tags moving; which worktree belongs where |
 | `GitHubDiag.swift`, `GitHubMeter.swift` | `--github-diag` and its counters |
-| `Pipelines.swift` | a repository's way to production, detected or from `.github/rumkapsel.json` |
+| `Pipelines.swift` | `Pipeline` and `Ships`: a repository's way to production, detected, from `.github/rumkapsel.json`, or answered in Settings |
+| `Discovery.swift` | where repositories are found: a checkout's repository (worktrees join theirs), Conductor's workspaces, `git worktree list`, a GitHub remote |
+| `Setup.swift` | a repository's setup in words: the new-repository card and the setup check, from `World` |
 | `Deployments.swift` | which Actions runs are deploys, their usual length, starts and ends |
 | `Scanner.swift` | the transcripts: sessions, activity, prompts |
 | `Watcher.swift` | FSEvents on a folder |
 | `Workspaces.swift` | whether a checkout is still open |
 | `Peers.swift` | `PeerSnapshot` and `PeerHub`: Bonjour, the links, the heartbeat |
-| `Config.swift` | `AppConfig` (`config.json`), `ConfigStore`, the support folder |
+| `Config.swift` | `AppConfig` and the per-repository answers (`RepoOverride`); `ConfigFile`: `config.json` read per repository, written atomically with the keys older builds need and the keys this one does not know, `config.json.bak` before the first rewrite, an unreadable file kept aside and left alone; `ConfigStore`; the support folder |
 | `Events.swift` | `WorldEvent`: what World hands the scene that is not a fact: log lines, prompts, crew, deploys |
 
 **Playback/**: the `Simulation`, which owns the clock, the bodies and `shown`.
@@ -124,7 +126,8 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Looks/` | the `Look` protocol and the looks: see [THEMES.md](THEMES.md) |
 
 **App/**: `main.swift` (flags, menus, windows), `StationView.swift` (input and camera), `Settings.swift`,
-`SpaceLogPanel.swift`, `NeighboursPanel.swift`, `CrateStoryPanel.swift`, `StationLog.swift` (`station.log`), and the tools:
+`SpaceLogPanel.swift`, `NeighboursPanel.swift`, `CrateStoryPanel.swift`, `SetupCard.swift` (the new-repository card and the empty
+yard's setup check), `StationLog.swift` (`station.log`), and the tools:
 `Simulator.swift`, `Playbook.swift`, `Gallery.swift`, `LookDev.swift`, `FactsDump.swift`, `BodyDump.swift`,
 `FloorDump.swift`, `Replay.swift` (`--replay`: a log file replayed and checked, or one crate's story).
 
@@ -171,7 +174,7 @@ scene reads `shown`, bodies and facts and writes nothing back.
   `fleet-v25.unreadable-<time>.json`, and what it held starts afresh.
 - After loading, rooms and office facts are reconciled (`officeDrift`) and the picture is snapped to the
   facts: nothing half-done resumes.
-- Elsewhere in the support folder: `config.json`, `board.json` (the board, its owners and which
+- Elsewhere in the support folder: `config.json`, `seen-repos.json` (every repository this Mac has had), `board.json` (the board, its owners and which
   repositories use it), `station.log` (rolled at 4 MB).
 
 ## Intake

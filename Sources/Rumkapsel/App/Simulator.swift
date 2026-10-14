@@ -85,6 +85,8 @@ final class SimulatorModel: ObservableObject {
     private var github: GitHubResolver { station.world.github }
 
     let repos = ["web", "api", "ios"]
+    static let trunk = "develop"
+    static let flow = Pipeline(trunk: trunk, staging: Pipeline.stagingName, production: Pipeline.productionName, source: "history")
     let teammate = "leo"
     let peerName = "kim"
 
@@ -154,6 +156,7 @@ final class SimulatorModel: ObservableObject {
         for r in repos {
             github.inject(owner: "simcorp/" + r, for: root(r))
             github.inject(cargo: GitHubResolver.Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: []), for: root(r))
+            github.inject(pipeline: SimulatorModel.flow, for: root(r))
         }
         board = [
             item("web", 455, "booking flow", statuses.development, "me"),
@@ -495,8 +498,7 @@ final class SimulatorModel: ObservableObject {
         noStaging.remove(repo)
         shipsOnMerge.remove(repo)
         shipsOnTag.remove(repo)
-        github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: cfg.stagingBranch, production: cfg.productionBranch),
-                      for: root(repo))
+        github.inject(pipeline: SimulatorModel.flow, for: root(repo))
         pushGitHub()
     }
 
@@ -1082,21 +1084,18 @@ final class SimulatorModel: ObservableObject {
 
         case "Repo: Ships on merge":
             shipsOnMerge.insert(repo)
-            let cfg = ConfigStore.shared.current
-            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "workflow", why: "deploys on every push", ship: "merge"), for: root(repo))
+            github.inject(pipeline: Pipeline(trunk: SimulatorModel.trunk, staging: "", production: "", source: "workflow", why: "deploys on every push", ship: .merge), for: root(repo))
             pushGitHub()
         case "Repo: Ships on tags":
             shipsOnTag.insert(repo)
-            let cfg = ConfigStore.shared.current
-            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "", source: "tags",
-                                             why: "no release branch: what is tagged on \(cfg.trunkBranch) has shipped", ship: "tag"), for: root(repo))
+            github.inject(pipeline: Pipeline(trunk: SimulatorModel.trunk, staging: "", production: "", source: "tags",
+                                             why: "no release branch: what is tagged on \(SimulatorModel.trunk) has shipped", ship: .tag), for: root(repo))
             move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
             pushGitHub()
         case "Release: Tag":
-            let cfg = ConfigStore.shared.current
             nextRelease += 1
             let name = "v0.\(nextRelease - 9000)"
-            let tag = ReleasePR(number: 0, title: name, base: cfg.trunkBranch, head: name, state: "MERGED",
+            let tag = ReleasePR(number: 0, title: name, base: SimulatorModel.trunk, head: name, state: "MERGED",
                                 url: "https://example.invalid/\(repo)/releases/tag/\(name)", labels: [], mergedAt: station.now,
                                 production: true, staging: false, tag: true)
             releases[repo, default: []].append(tag)
@@ -1104,15 +1103,13 @@ final class SimulatorModel: ObservableObject {
             pushGitHub()
         case "Repo: No staging":
             noStaging.insert(repo)
-            let cfg = ConfigStore.shared.current
-            github.inject(pipeline: Pipeline(trunk: cfg.trunkBranch, staging: "", production: "master"), for: root(repo))
+            github.inject(pipeline: Pipeline(trunk: SimulatorModel.trunk, staging: "", production: "master"), for: root(repo))
             move(board.filter { $0.repo == repo && ($0.status == statuses.deck || $0.status == statuses.cleared) }, to: statuses.storage)
             pushGitHub()
         case "Release: Staging opens":
-            let cfg = ConfigStore.shared.current
             nextRelease += 1
-            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to staging", base: cfg.stagingBranch,
-                                                         head: cfg.trunkBranch, state: "OPEN",
+            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to staging", base: Pipeline.stagingName,
+                                                         head: SimulatorModel.trunk, state: "OPEN",
                                                          url: "https://example.invalid/\(repo)/\(nextRelease)", labels: [], mergedAt: nil))
             pushGitHub()
         case "Release: Staging merges", "Release: Staging merges (board lags)":
@@ -1142,11 +1139,10 @@ final class SimulatorModel: ObservableObject {
             station.world.learn(.staging(repo: repo, .deploy(outcome == .live ? .live : .failed)), repo: repo)
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: false, outcome: outcome))
         case "Release: Production opens":
-            let cfg = ConfigStore.shared.current
             nextRelease += 1
             let bare = noStaging.contains(repo)
-            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to production", base: bare ? "master" : cfg.productionBranch,
-                                                         head: bare ? "release/v\(nextRelease)" : cfg.stagingBranch, state: "OPEN",
+            releases[repo, default: []].append(ReleasePR(number: nextRelease, title: "release to production", base: bare ? "master" : Pipeline.productionName,
+                                                         head: bare ? "release/v\(nextRelease)" : Pipeline.stagingName, state: "OPEN",
                                                          url: "https://example.invalid/\(repo)/\(nextRelease)", labels: ["untested"], mergedAt: nil,
                                                          production: true, staging: false))
             pushGitHub()
@@ -1178,7 +1174,7 @@ final class SimulatorModel: ObservableObject {
             let n = o.home.issue ?? o.number
             let url = "https://example.invalid/\(o.repo)/\(n)"
             setPull(PullRequest(number: n, title: "hotfix: \(o.title)", state: "OPEN", reviewDecision: "APPROVED", isDraft: false, url: url), on: o.uid)
-            var pr = ReleasePR(number: n, title: "hotfix: \(o.title)", base: ConfigStore.shared.current.productionBranch, head: o.branch,
+            var pr = ReleasePR(number: n, title: "hotfix: \(o.title)", base: Pipeline.productionName, head: o.branch,
                                state: "OPEN", url: url, labels: [], mergedAt: nil, production: true, staging: false)
             pr.hotfix = true
             hotfixPRs[o.repo, default: []].append(pr)

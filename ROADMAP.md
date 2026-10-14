@@ -44,7 +44,8 @@ and are not started unasked.
 - **Deployments as stages**: QA when a staging deploy lands, Shipped when the production deploy succeeds,
   environment approvals as Cleared, and deploys outside GitHub Actions. Deployments are in every workflow
   answer but report nothing.
-- **The outside-work answer** in Settings: only bots go to decon, whatever it says.
+- **Who counts as outside**: only bots go to decon; a stranger's pull request could too. Settings had an
+  answer for it that nothing read, so it went.
 - **Ticket systems** (Jira, Linear) in the board's place; incoming bugs (Sentry and the like) as something
   arriving at the station; the state of the infrastructure.
 
