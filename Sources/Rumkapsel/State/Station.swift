@@ -254,6 +254,7 @@ final class Station {
     var hall: Hall { blocks.hall }
 
     var facts = Facts()
+    var migrated = false
     var stored: [String: Int] { counts([.waiting]) }
     var storedBoxes: Int { stored.values.reduce(0, +) }
     var staged: [String: Int] { counts([.testing, .cleared]) }
@@ -780,19 +781,13 @@ final class Station {
         Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree,
                       branch: $0.branch, repoRoot: $0.repoRoot, openedAt: $0.openedAt)
-        }, stored: storedBoxes, ledger: nil, facts: savedFacts, placement: OfficePlacement.current.rawValue)
-    }
-
-    private var savedFacts: Facts {
-        var f = facts
-        f.rockets = f.rockets.filter { !$0.value.launched }
-        f.crates = f.crates.filter { if case .aboard = $0.value.place { return false }; return true }
-        return f
+        }, stored: storedBoxes, ledger: nil, facts: facts.persisted, placement: OfficePlacement.current.rawValue)
     }
 
     func restore(_ s: Saved, relayout: Bool = false) {
         dug = relayout ? [] : (s.hallway ?? []).filter { !plan.plaza.contains($0) }
         facts = s.facts ?? Facts.migrate(s.ledger ?? LegacyLedger(crates: [:]), yard: yard)
+        migrated = s.facts?.scheme != Facts.scheme
         if facts.scheme != Facts.scheme { facts.scheme = Facts.scheme; Layout.relayout(&facts, yard: yard) }
         let kept = s.rooms.filter { key, _ in key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") }
         if relayout {
@@ -840,11 +835,13 @@ final class Fleet {
 
     static let order = ["work"]
 
+    static let saveName = "fleet-v25.json"
+
     private static var saveURL: URL {
         let dir = AppSupport.root
             .appendingPathComponent("Rumkapsel", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("fleet-v25.json")
+        return dir.appendingPathComponent(saveName)
     }
 
     static func stationName(for cwd: String, owner: String?, repo: String) -> String {

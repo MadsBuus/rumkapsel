@@ -34,6 +34,7 @@ a failure:
 | `layout` | the floor: same rooms give the same cells, slots, the yard, the bay, signs, facts across a save |
 | `spacelog` | the Station Log panel's story from the feed, releases and board |
 | `look` | per theme: what it draws itself, its furniture and cones on the station's footprints, its launch within the climb |
+| `log` | the event log: every event written and read back, broken lines, recorded intake runs replayed to their facts in another process, a crate's history, restarts, two writers, pruning |
 
 ## Smoke scenarios
 
@@ -81,9 +82,14 @@ picture that never caught up with the facts, a watchdog snap, or its own floor c
 | Develop › Restack the Yard | lays every crate out afresh by the rules |
 | Develop › Rehearse Launch, Rehearse Failed Launch | flies a pretend deploy |
 | `kill -USR1 <pid>` | writes the state to `station.log` |
+| `--replay <file.jsonl>` | replays an event log file from its first baseline and checks it against each later baseline, then the next day's file or the saved facts; prints OK or the first difference |
+| `--replay <file.jsonl> --crate repo#n` | that crate's story: a line per change of its fact, with the event that caused it |
 | `--github-diag [seconds] [--repo <path>]` | runs the GitHub poller alone against the real settings for 120 s (or the seconds given) and prints every ask and every answer that changed |
 | `--dump-floor <theme>`, `--dump-colors` | the fixed floor as JSON for `floor/`; the repository colours |
 | `--bake-plating`, `--bake-walls`, `--bake-detail`, `--bake-suits` | bake the textures into `Resources/` |
+
+`events/<station>-<yyyy-MM-dd>.jsonl` in the support folder has a line per applied batch and starts with a
+baseline of the facts; scripted runs keep none. Files older than thirty days are deleted.
 
 `station.log` in the support folder has a line per command, stage transition (`stage`), GitHub ask
 (`github`), rule drift (`facts`), watchdog snap (`playback`), release step (`release`) and blocked walk

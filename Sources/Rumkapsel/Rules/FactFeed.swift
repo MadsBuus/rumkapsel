@@ -50,12 +50,19 @@ extension World {
     }
     func learn(_ news: OfficeNews, station name: String) {
         guard let station = fleet.stations[name] else { return }
-        let effects = Rules.apply([.office(news)], at: now, to: &station.facts, yard: station.yard)
+        let effects = apply([.office(news)], at: now, to: station)
         feed.unsaved = true
         onOffices(station, effects)
     }
 
     func touch(_ station: Station) { onOffices(station, []) }
+
+    func apply(_ events: [Event], at now: Date, to station: Station) -> [Effect] {
+        let before = station.facts, yard = station.yard
+        let effects = Rules.apply(events, at: now, to: &station.facts, yard: yard)
+        log.record(events, at: now, station: station, yard: yard, before: before, effects: effects.count)
+        return effects
+    }
 
     func learn(_ record: WorkBook.Record, _ t: Transition) {
         guard let n = record.number else { return }
@@ -107,10 +114,10 @@ extension World {
             events += FactFeed.together(news.filter { $0.repo.map(repos.contains) ?? true }.map(\.event))
             guard tick || !events.isEmpty else { continue }
             let before = station.facts
-            var effects = Rules.apply(events + (tick ? [.tick] : []), at: now, to: &station.facts, yard: station.yard)
+            var effects = apply(events + (tick ? [.tick] : []), at: now, to: station)
             if tick {
                 let drift = officeDrift(station)
-                if !drift.isEmpty { effects += Rules.apply(drift, at: now, to: &station.facts, yard: station.yard) }
+                if !drift.isEmpty { effects += apply(drift, at: now, to: station) }
             }
             if station.facts != before || !effects.isEmpty { out.append((station.name, effects)) }
             if station.facts != before { feed.unsaved = true }
