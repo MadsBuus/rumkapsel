@@ -1,313 +1,315 @@
 # The station
 
-What things are, what they may do, and what may move them. This is the checklist every command is
-read against. If a behaviour is not allowed here, it is a bug, however pretty.
+What things are, what they may do, and what may move them. Every behaviour is read against this. If
+something is not allowed here, it is a bug, however pretty. Where the facts come from is
+[WIRING.md](WIRING.md); how the code is cut is [ARCHITECTURE.md](ARCHITECTURE.md); what is still to
+build is [ROADMAP.md](ROADMAP.md).
+
+## Things
+
+These are the words, in code, docs, settings and the log. A theme may draw them differently and call
+them what it likes on screen (`Vocabulary` in `State/Theme.swift`), but underneath they are these.
+
+| Thing | What it is |
+|---|---|
+| **minion** | a session at work, a teammate, or a neighbour's session |
+| **work** | one piece of work, with one id and every name it goes by: its branch, its checkout folder, `repo#PR`, `repo#issue` |
+| **office** | the room where one piece of work takes place: one office per work |
+| **shuttle** | brings a new office, or a new minion, to the bay |
+| **bay** | the hangar where shuttles land |
+| **cone** | the message a minion is working on |
+| **cube** | a commit; a ghost cube is uncommitted work |
+| **crate** | a pull request, or the issue it closes |
+| **yard** | the room merged work crosses on its way out: storage, the staging area and the cleared rows |
+| **storage** | the waiting rows: merged crates wait here for a release; `waiting` in code |
+| **staging area** | the testing rows, where crates are tested; `testing` in code, `deck` in places |
+| **cleared rows** | tested crates, ready to ship |
+| **decon** | where pull requests from outside wait to be screened |
+| **launchpad** | outside the pad wall: five pad slots and the drones' rack |
+| **rocket** | a release to production; a hotfix gets its own |
+| **drone** | one of three on the pad: welds a rocket's tip, and rings the vortex |
+| **vortex** | at a launch, pulls the rocket's crates off their rows into the rocket |
+
+## Facts first, the picture catches up
+
+- What the station knows changes the moment it hears it. A merged pull request's crate is in storage
+  then, not when a minion gets there. The counts in the hover and the log lines in the corner read what
+  is known, so they say it at once.
+- Everything that moves on screen is the picture catching up to what is known: a carry, a shuttle, an
+  office unfolding, a rocket docking. It never shows a step that is not on the way, and never ends
+  anywhere else.
+- The picture never changes what is known. A minion setting a crate down tells nobody anything.
+- A first answer from any source is history, not news. It is shown as it stands, at once, and nothing
+  is said. Only changes after it are news.
+- The picture is skipped, shown as it is known at once, when the app starts, when a frame comes more
+  than five station seconds after the last (a sleep), for anything a first answer placed, and from
+  Develop › Skip to the Facts.
+- A crate, office or rocket whose catching up has not moved for ninety station seconds is shown where
+  it belongs, and `station.log` says so. A rocket waits as long as its deploy usually takes, when that
+  is longer.
+- Holding space plays the picture four times as fast. What is known keeps the wall clock.
 
 ## The place
 
 A station is a hallway one tile wide with rooms snapped against it, like the game's: a plaza three by
-three round the **monolith**, four arms out of it, the two long ones wandering in runs and jogs with
-short alleys off them, every other alley looping back into its arm so there is a way round as well as a
-way out, and rooms on both sides of every stretch. The hallway is drawn whole from the
-station's name and built outward as rooms need it, so it never re-plans and two machines that share a
-station draw the same one. Hallway that no office needs any more is taken up again, from its far end
-inward, once nobody is on it, so a quiet station shrinks back to its plaza, arms and quarters. The monolith is the ancient artefact the game's minions researched for new
-skills. Here it stands for the outside world: sessions that search the web or talk to other systems send
-their subagents to it, and it answers with cones of light, never lightning. The **bay** at the south
-arm's end is a hangar under the hull, open to space at its mouth behind the **field**: a sheet of light
-that holds the air in and lets ships through. Shuttles fly in through the field and land in the bay and
-nowhere else, on a honeycomb of berths, and the berth a ship is flying into burns in its repository's
-colour until the crate on it has been carried in. The arm runs straight into the bay through a wide
-door, so hallway and hangar read as one straight way out. Everyone who arrives steps off a shuttle
-there, and everyone who leaves boards one. Nobody goes to the bay for any other reason. Spacewalks, visits
-to other stations and other ships docking are its future. The **yard** is where merged work goes on its way to production, in one
-line from the hallway to the pad: see **The yard** below.
+three round the **monolith**, arms out of it that wander in runs and jogs with short alleys off them,
+and rooms on both sides. The floor is drawn offline per theme (`floor/`) and lit slot by slot as offices
+arrive, so it never re-plans and two machines that share a station draw the same one. Hallway that no
+office needs is taken up again from its far end once nobody is on it, so a quiet station shrinks back.
 
-**Offices** are where work happens. One office per branch. A hexagon crate delivered by shuttle
-becomes an office: it lands squarely on the bay's hexagon, aligned with it; a minion carries it to
-the doorway of the empty plot and sets it down just inside, by the hallway. The floor is not there
-yet. The crate folds open and the office unfolds from it, tile by tile away from the doorway until
-the plot is filled, then the name fades in. Until that moment there is nothing on the plot. Closing
-is the reverse: whoever is inside steps out to the doorway, the name fades, the floor rolls up tile
-by tile toward the door into a hex, and the hex drops away through the floor. Offices belong to whoever has the branch checked out; teammates' offices are darker
-and carry their name on the floor, mine carry mine. An office's hover says how old the work in it is
-and, when it has gone quiet, for how long: the age counts from the pull request or issue where GitHub
-says when that began, otherwise from when the office first stood here. The **dorm**, **lounge** and **bath** stand
-together off the corridor, as living quarters would; a galley and an exercise corner belong there too,
-since real stations mandate both.
+The monolith is the ancient artefact the game's minions researched. Here it stands for the outside
+world: sessions that search the web or talk to other systems send their subagents to it, and it
+answers with cones of light, never lightning.
+
+The **bay** at the end of the south arm is a hangar under the hull, open to space at its mouth behind
+the **field**: a sheet of light that holds the air in and lets ships through. Shuttles fly in through
+the field and land in the bay and nowhere else, on a honeycomb of berths; the berth a ship is flying
+into burns in its repository's colour until its crate has been carried in. Everyone who arrives steps
+off a shuttle there and everyone who leaves boards one. Nobody goes to the bay for any other reason.
+
+The **dorm**, **lounge**, **bath** and **gym** stand together off the hallway, as living quarters would.
 
 ## Air and weight
 
-The hull is the line between air and none. Inside it there is air and a low gravity, and work is done
-by hands: minions, who stand for the sessions and the people, for whatever still needs judgement.
-Outside there is neither, and work is done by **drones**: small faceted machines that fly on puffs of
-thrust, never propellers, and stand for what machines do on their own, the builds, the deploys, the
-bots. Nobody works outside and no drone comes in: a minion goes out only on a spacewalk, suited and on
-its jetpack, through the field. What crosses the hull crosses through a field, and the pad wall's field is
-the hand-off: up to it a person is still needed, past it nobody is.
+The hull is the line between air and none. Inside there is air and a low gravity, and work is done by
+hands: minions, who stand for the sessions and the people, for whatever still needs judgement. Outside
+there is neither, and work is done by **drones**: small faceted machines that fly on puffs of thrust,
+never propellers, and stand for what machines do on their own. Nobody works outside and no drone comes
+in. The pad wall's field is the hand-off: up to it a person is still needed, past it nobody is.
 
-- Inside, things fall, slowly: the station's gravity is low, so a crate with nothing under it settles
-  rather than drops.
-- Outside, nothing falls and nothing is let go of. A drone holds what it carries, the pad's clamps hold
-  the rocket, and anything set loose would drift away.
-- The bay is inside: a shuttle lands there and stands on its berth, and minions walk to it. Space is
-  only past the field.
-- Idle drones wait in a rack on the pad by the walkway's end of the field, and that is all they do when the
+- Inside, things fall slowly: a crate with nothing under it settles rather than drops.
+- Outside, nothing falls and nothing is let go of. The pad holds the rocket.
+- The bay is inside: a shuttle lands there and minions walk to it. Space is only past the field.
+- Idle drones wait in their rack at the walkway's end of the pad, and that is all they do when the
   pad is quiet.
 
 ## The yard
 
-The yard is one room beside the station, five tiles wide and eight deep, with no wall inside it. Work moves
-through it one way: in from the hallway at the back, out through the field to the pad at the front.
+The yard is one room beside the station, five tiles wide and eight deep, with no wall inside it. Work
+moves through it one way: in from the hallway at the back, out through the field to the pad at the front.
 
-- **The walkway** runs down the hall's side from the hallway to the field. The **aisles** cross the hall
-  between its zones. Nothing stands on either.
+- **The walkway** runs down one side from the hallway to the field. **Aisles** cross between the zones.
+  Nothing stands on either.
 - **Three zones**, two rows of four tiles each, an aisle between them, the floor telling them apart:
-  - **Cleared**, by the field: tested work, ready to ship.
-  - **Testing**, in the middle: work on staging, untested.
-  - **Waiting**, at the back: merged work not on staging yet, or, for a repository with no staging,
-    waiting for its release.
-  Each zone's word is painted on the walkway beside it.
-- **A repository has a column**, the same in every zone: its tested pile by the field, its untested right
-  below, its waiting crates below those. The first takes the column by the walkway, the next a column away,
-  and the gaps fill only when the hall is busy. A pile grows from its first crate: beside it, in front of
-  it, then on top, three high. One that outgrows its column spills into the nearest free one.
-- **A crate's light** says where it is in the line: off while waiting; amber on the testing rows; green
-  once tested.
-- **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached by
-  stepping onto the near tile when it is clear, and with a toss from the aisle when a crate stands there:
-  the gravity is low, so the crate drifts over.
-- **A staging release** that merges sends its repository's waiting crates across to the testing rows. A
-  tester's tick sends a crate across to the cleared rows.
-- **The pad wall** is a field, the same sheet the ships fly through at the bay: it holds the air in, you see
-  the rockets through it, and a release goes out through it.
-- **Decon** is a room behind the waiting zone, entered from the walkway's back end: see **Decon**.
-- **The pad** is outside, graphite, under open space: the rockets, and the drones' rack.
+  **cleared** by the field, **testing** in the middle, **waiting** (storage) at the back. A repository
+  with no staging keeps its merged work in storage until it ships. Each zone's word is painted on the
+  walkway beside it.
+- **A repository has a home lane**, the same in every zone, kept for as long as it has crates in the
+  yard and given up when it has none. The first repository takes the lane by the walkway, the next a
+  lane further out, and the lanes between fill only when the yard is busy. With every lane held, a new
+  repository shares the least loaded one.
+- **A pile grows from its first crate**: beside it, in front of it, then on top, never above three.
+  One that outgrows its lane borrows the nearest room, never above three either.
+- **A stray goes home.** A crate standing outside its home lane is moved home as soon as the lane has
+  room, one at a time, at the lowest priority: real work always comes first.
+- **On the rows, the crates above go first.** Before a lower crate is taken, the crates on it are
+  moved aside, each to its own place; a crate with nowhere to go is set down nearby and brought back.
+- **A crate's light** says where it is: off in storage, amber on the testing rows, green on the
+  cleared rows.
+- **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached
+  across the near one, with a toss when a crate stands there: the gravity is low, so it drifts over.
+- **A staging release** that merges sends its repository's stored crates across to the testing rows.
+  A tester's tick sends a crate to the cleared rows.
+- **The pad wall** is a field, the same sheet the ships fly through: glass until a vortex forms, then
+  striped while it runs.
+- **Decon** is a room behind storage, entered from the walkway's back end: see **Decon**.
+- **The pad** is outside, under open space: five pad slots and the drones' rack.
 
 ## Shapes mean things
 
 - hexagon: a packed office, on its way to being built
-- cube: a piece of work (a commit); ghost cubes are uncommitted work
+- cube: a commit; ghost cubes are uncommitted work
 - square strapped crate: a pull request. The plate on its side is a light: blinking while checks run,
-  red when they fail, green when all is well; the whole crate turns red when the PR is closed unmerged.
-  In the yard the light says where the crate is in the line (see **The yard**); a tested one wears a
-  sticker on the lid. A crate of your own
-  work is strapped in white, so yours pick out of a row of everyone's.
-- pyramid: the message a session is working on, one per session, on the cell nearest the door. Messages
-  queued behind it stand in a row inward, translucent. A new message shrinks the old cone away; a session
-  that waits for you has none.
-- drone: a machine at work outside the hull; it is none of the shapes above, and never carries a
-  repository's colour
-- rocket: a release on its way down to production, the planet below, where the users live. It comes in
-  two pieces. The tip is the staging release, welded on the pad by drones while staging deploys. The
-  **kick stage** is the production release, and it is the burn that takes the tip down. Under each pad
-  slot is a lift: a hex door in the pad floor, an iris, over a shaft whose deck holds the kick stage. When
-  a production release opens, the iris opens under the standing tip, the tip goes down into the shaft onto
-  the kick stage and locks, and the deck raises the whole stack until it is flush with the pad and is
-  floor again. After launch the empty deck sinks and the iris closes; when the release closes unmerged
-  the same runs backwards and the tip comes up to stand on its legs again. An idle pad shows only its
-  closed doors. The ring on the pad under it is its beacon: pulsing red while
-  what it would ship is untested, flashing amber while its tip is welded, its repository's colour otherwise.
-  It vents only when it is fuelled and go: its kick stage under it and everything it ships tested, waiting
-  only for the merge. A tip waiting alone stands on its own three legs, the ones it lands on at its colony;
-  they fold in just before it settles onto the kick stage and are out of sight while it is docked, and in
-  flight they close into a tapered ring round the tip's engine. The station's rocket and the flight's are one
-  shape (`RocketShape`), a 1950s rocket: one streamlined body, a long point, three swept fins to the ground
-  with pods on their tips; only the finish differs, flat and six-sided on the station, plated and twelve-sided
-  in flight. Its repository's colour is on the fins, the pods and the legs, and its name runs down the side.
-  A hotfix goes up in an express rocket of its own, the same rocket with a red tip. Thin jets of boil-off from the top of the stage, gone in a breath; a bare tip never vents
-- nothing is round; everything has flat sides
+  red when they fail, green when all is well; the whole crate turns red when the pull request is
+  closed unmerged. In the yard the light says the zone instead; a tested crate wears a sticker on the
+  lid. A crate of your own work is strapped in white, so yours pick out of a row of everyone's.
+- pyramid: the message a session is working on, one per session, on the cell nearest the door.
+  Messages queued behind it stand in a row inward, translucent. A new message shrinks the old cone away;
+  a session that waits for you has none.
+- drone: a machine at work outside the hull; never in a repository's colour.
+- rocket: a release on its way down to production, the planet below where the users live (see
+  **Rockets**).
+- nothing is round; everything has flat sides.
 
-## Things are heavy
+## Crates
 
-- A crate moves only in a minion's hands, tossed by one across a row, or pulled out by the release's
-  vortex. Never by itself. Never through a wall, a crate, a minion or a piece of furniture.
-- A crate that has been set down does not move again until someone picks it up. The layout is
-  drawn around what stands there; it never shoves.
-- A crate keeps its slot until it leaves. Stacks are taken from the top and built from the floor. When
-  a lower crate is taken, the ones above settle down one, slowly, not in a blink: the yard is low
-  gravity, and a crate with nothing under it takes its time coming down.
-- Lifting and setting down take time and a posture: crouch on the floor, a slide at waist height,
-  over the head for the third level, a hop above that. The crate stays in the hands until it is on
-  its slot.
-- A carrier with carries queued behind it hurries: quicker on its feet, the same lift and the same
-  set-down, and it says so.
-- A shuttle lands only in the bay and leaves before anyone walks under it. No two come in alike: each
-  draws its own way in, out in space — a high swing round, a low sweep past the hull, a dive, a long
-  shallow final — but every one threads the bay's mouth and comes through the field, which ripples where
-  it passes, and goes out the same way. Its nose follows the line it is flying the whole way.
-- A rocket is loaded at the merge, all of it at once: the three drones form a ring outside the field, a
-  vortex opens from the ring to the rocket's hatch, and it pulls the release's crates off their rows one
-  after another, through the field, which ripples, and spirals them shrinking into the hold, since the
-  rocket is far too small for them. Nobody carries a release out. The rocket climbs when the vortex closes.
-- A rocket leaves only with its cargo aboard, and it does not lift off: the station has no weight to
-  fight. The pad's clamps let go, its thrusters puff it clear, and only well away from the station does
-  the kick stage light for the way down.
-- When the floor changes under a walk, the walk is re-planned; nobody finishes a leg through something
-  that arrived in the way.
+- A crate moves only in a minion's hands, tossed by one across a row, or pulled by the vortex. Never by
+  itself, never through a wall, a crate, a minion or a piece of furniture.
+- A crate that has been set down stays until someone picks it up. Nothing shoves it.
+- Stacks are taken from the top and built from the floor. When a lower crate goes, the ones above settle
+  down one, slowly: the yard is low gravity.
+- Lifting and setting down take time and a posture, from a crouch at the floor to a hop above the
+  third level. The crate stays in the hands until it is on its place.
+- A carrier with carries queued behind it hurries: quicker on its feet, the same lift and set-down,
+  and it says so.
+- Moving a crate to the cleared rows outranks moving one into or out of storage; tidying a stray
+  comes last.
+- A crate closed unmerged turns red in its office and goes ten minutes later.
 
-## Minions
+## Offices
 
-- A minion does one thing at a time, and it is always something with a name: "carrying #5210 to
-  the deck". Hover it and it tells you.
-- An order is taken over only at a step where it can be: while walking, yes; mid-lift, no. A new
-  order does not reset an old one; it re-plans from where the minion stands.
-- A change of orders is visible: the minion stops, stands a beat with its head up, as if wondering,
-  then goes. The same beat everywhere. A message from you cuts the beat short and it hurries.
-- Minions walk around things, never through, and stand an arm's length from what they work on,
-  facing it. Two never share a couch, a bed, a shower or a crate.
-- Minions keep to the middle of the hallway, never brushing the walls, and never cut a corner
-  through a room. With something in their hands they need even more room.
-- Two never slide through each other: a body is solid at the middle of its tile, standing or lying.
-  A walker who finds someone in its way, standing or coming, drifts a third of a tile to its own
-  right, passes, and drifts back onto its line; the other does the same, so two meeting
-  head-on pass without either stopping or planning again, in a doorway as anywhere. Nobody ever
-  stops for anybody: where the floor leaves no side to step to, two may overlap for a moment. The
-  pass is for somebody in the way, so somebody standing well off the line is walked past squarely,
-  and a pass that never resolves — somebody standing where the walker is going, somebody keeping
-  station alongside — is given up on after a stride or two rather than held the whole walk. Someone
-  on a couch or in bed is on the furniture, off the walkway, and in nobody's way. Nobody settles in
-  a doorway. Every timing on the station runs on the station clock, so holding space speeds all of
-  it up alike.
-- A chore never stands in a doorway, the yard's or a room's: a body standing there shuts it.
+- One office per piece of work. It belongs to whoever has the branch checked out; teammates' offices are
+  darker and carry their name on the floor.
+- An office arrives in one of three ways. By **shuttle**, for a new session or a teammate's new work: the
+  shuttle lands a hexagon on its berth, a minion carries it to the doorway of the empty plot and sets it
+  down just inside, the hexagon folds open and the floor unfolds from it tile by tile away from the door,
+  then the name fades in. Until then there is nothing on the plot. A neighbour's office **fades** in where
+  the neighbour put it, unless it is under three minutes old, when it too comes by shuttle. Offices that
+  were already there when the app starts are simply **there**.
+- A delivery is picked up, always. The shuttle, the crate on the bay floor and the carrier share one
+  order, whatever the office is called by the time it lands. A crate nobody is fetching goes to the next
+  free hands, its own session's minion first. If the office is gone by then, the crate folds away where
+  it lies.
+- An office ends on the facts alone: a teammate's or a stray office once its work is merged, any office
+  ten minutes after its pull request closed unmerged. One in your own open checkout, or held by a
+  neighbour, stays.
+- An office that has ended still shows until its crate has been hauled out and whoever is inside has
+  stepped out. Then the name goes, the floor rolls up tile by tile toward the door into a hexagon, and
+  the hexagon sinks through the floor.
+- Packing and stowing are the picture catching up: when a pull request opens, the office's own minion
+  packs its crate; each new commit is a cube its minion stows, one at a time.
+- An office's hover says how old the work in it is and, when it has gone quiet, for how long.
 
-## Tasks and work
+## Rockets
 
-- A closed issue is finished work, whatever column the board left it in: it never makes an office.
-- An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue
-  the pull request closes, the pull request's own number when it closes none. One crate per task,
-  however many pull requests it took; the crate's hover names the task, what it is called and whose
-  work it is, and its click opens the task.
-- Every repository has its own way to production, and nobody sets it up. It is read from what the
-  repository did: the branch most work merges into is the trunk, the branch releases end in is
-  production, and a branch released onward into production is staging. Where there is no history, the
-  branch names decide: develop, else main or master; staging where it exists; production, else master
-  or main. A file .github/rumkapsel.json on the repository's default branch overrides both, for everyone.
-  Releases come from the trunk, from staging, or from a release or hotfix branch. A repository with no
-  releases and a workflow deploying on every push to its trunk ships on merge: the merged crate goes to
-  storage and straight up in a small rocket of its own. One with no release branch and no such workflow,
-  but which tags what it ships, ships on tags: what the trunk has that the newest tag has not is waiting
-  in storage, and a tag nobody has seen before launches it. The newest tag is the newest by date, never
-  by name, and a tag that is not a version is not a release. With staging a
-  repository's rocket loads from the lab, without from storage. The board fills its yard only if it
-  moves work through the storage and QA columns, or its file says so; otherwise its yard comes from git.
-- Releases are made of pull requests. What git says a release carries is translated to tasks on the
-  floor where the link is known, and stays a pull request where it is not.
+- One shape, `RocketShape`, for the station and the flight: a 1950s rocket, one streamlined body, a long
+  point, three swept fins to the ground with pods on their tips. Flat and six-sided on the station, plated
+  and twelve-sided in flight. Its repository's colour is on the fins, the pods and the legs, and its name
+  runs down the side.
+- It comes in two pieces. The **tip** is the staging release: while staging deploys, a drone welds it
+  panel by panel at the pace that deploy usually takes. The **kick stage** is the production release.
+- A rocket stands on a pad slot wherever a repository has work waiting to ship. A fresh launch, a
+  docked rocket, a hotfix and a rocket being welded come first; a rocket only standing by gives its slot
+  to them.
+- **The pad lift.** Under each slot is an iris over a shaft whose deck holds the kick stage. When the
+  production release opens, the iris opens under the standing tip, the tip goes down onto the kick
+  stage, its legs fold, and the deck raises the stack flush with the pad. When the release closes
+  unmerged the same runs backwards. Classic draws the lift; the other looks dock at once.
+- **The ring** under a rocket flashes amber while its tip is welded, pulses red while what it would
+  ship is untested, and shows its repository's colour otherwise.
+- **It vents** thin jets of boil-off only when docked and go: everything it ships tested, waiting only
+  for the merge. A bare tip never vents.
+- **The launch.** At the merge, the release's crates are aboard at once in what is known, and the log
+  says so. On screen, the three drones form a ring outside the field, a vortex opens from the ring to
+  the hatch, and it pulls the crates off their rows one after another, through the field, spiralling
+  and shrinking into the hold. The rocket climbs only once every crate it carries is in. It does not
+  lift off: the pad lets go, its thrusters puff it clear, and only well away does the kick stage light.
+  After it, the empty deck sinks and the iris closes.
+- **A hotfix** (a pull request into production from anything but the trunk, staging or a release
+  branch) stands by as an express rocket with a red tip, on a slot of its own. Merged, its crate is
+  carried from its office into storage and pulled into the express rocket, which goes up alone. The
+  release rocket keeps its cargo.
+- **A repository that ships on every merge** sends each merged crate up in a rocket of its own.
+- A production deploy is flown: an onboard camera rides the rocket to its repository's planet and
+  lands it at the colony, timed on how long its deploys usually take.
 
 ## Decon
 
-- A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the
-  floor. It is an object of unknown origin, and it waits in **decon**, a sealed room beyond the storage
-  zone with a hatch in its far wall. Objects come in through the hatch, never by shuttle and never
-  through the bay: a drone sets them in from outside, the hatch light flashes, and that is all the fuss an update gets. They stack
-  by repository like storage does, a dozen at most, small and dark with the unscreened green on the
-  plate, one pile per repository; the rest are counted in the tooltip. A floor that fills is the point: unscreened updates are meant to be seen.
-- An object whose pull request merges is cleared: a carrier pulls it straight out, wherever it is in its
-  stack, and whatever was on top drops; nobody is careful with unscreened things. It is carried up the
-  walkway into the waiting zone, and from there it is a crate like any other. It waits for the release, rides
-  the vortex and the rocket, and counts in the rocket's cargo, since a release that ships six bumps and a
-  feature ships seven things. It stays grey wherever it goes, so storage still reads as "two real,
-  five bumps". Nothing from decon is ever a tester's business: in the lab it counts as tested from the start.
+- A bot's pull request (dependabot and friends) is not work: it gets no office and nobody on the floor.
+  It is an object of unknown origin and waits in **decon**, a sealed room behind storage with a hatch in
+  its far wall. Objects drop in through the hatch, never by shuttle, and the hatch light blinks. They
+  stack by repository, twelve drawn at most, small and dark; the rest are counted in the hover. A floor
+  that fills is the point: unscreened updates are meant to be seen.
+- An object whose pull request merges is cleared: a carrier pulls it straight out, wherever it is in
+  its stack, and whatever was on top settles. It is carried into storage and from there it is a crate
+  like any other, counted in the rocket's cargo, since a release that ships six bumps and a feature
+  ships seven things. It stays dark wherever it goes. It counts as tested from the start.
 - An object whose pull request closes unmerged is ejected and forgotten. Nothing is carried.
+
+## Minions
+
+- A minion does one thing at a time, and it is always something with a name: "carrying #5210 to the
+  deck". Hover it and it stops and tells you; the bubble above it carries its callsign.
+- An order is taken over only at a step where it can be: while walking, yes; mid-lift, no. A new order
+  re-plans from where the minion stands.
+- A change of orders is visible: the minion stops and stands a beat with its head up, then goes. A
+  message from you cuts the beat short.
+- Minions walk around things, never through, and stand an arm's length from what they work on, facing
+  it. Two never share a couch, a bed, a shower, a bowl or a crate.
+- A standing body is solid: walks are planned round it. Someone close ahead on the way is passed with
+  a lean to the walker's own right; the walker slows as it closes and never leaves its line, so two
+  meeting head-on may overlap for a moment. Nobody stops for anybody, and a pass that does not resolve is
+  given up after a stride or two.
+- When the floor changes under a walk, the walk is re-planned.
+- Nobody settles in a doorway, and a chore never stands in one.
+- Speed is what the task needs: carrying is slow, hurrying carriers less so; pacing is another pace, a
+  stroll a third; getting up from bed takes a moment.
+- Every timing runs on the station clock.
 
 ## Bodies
 
-- One owner per body. The command in hand owns a minion's place, path and pose. Nothing else
-  writes them: a session's refresh, a floor change or the panel may only ask, and an ask waits
-  its turn behind whatever is in hand.
-- Every command is either moving or waiting on a fact it names: the crate to come down, the ship
-  to lift off, the release to merge. Standing still in the same phase for ten seconds, waiting on
-  nothing named, is a stall.
-- A stall is given up, and said so in the log. Giving up loses nothing, because the work is not
-  kept in the body: a carry goes back into the queue from where the crate now lies, an office's
-  crate stays on the floor for the next free hands, a visit ends. Truth then re-issues what it
-  still wants, to someone else first. What conditions took away is not retried; the body is free.
-- A wait on a named fact has its time, not forever: ninety station seconds without the fact and it
-  is given up like any stall.
-- A delivery is picked up. Period. A new office's crate is an order with a number that the shuttle,
-  the crate on the floor and the carrier all share, whatever the office is called by the time it
-  lands. A crate on the bay floor with nobody fetching it goes to the next free hands, its own
-  session's worker first; it goes into whatever room its order names now; if that room is gone it
-  folds away where it lies. It is never left standing. A bay slot is free only when nothing lies on
-  it and no ship is bound for it.
-- Right of way. Of two who meet, one holds and the other goes round, always the same one: a load
-  before a job, a job before rest, and names settle a tie. The one who holds steps round after a
-  while in case the other is not moving at all.
-
-## Sharing
-
-- Only offices worked in within the last twelve hours are shared, and only in repositories ticked for it.
-- A shared office carries its life: who is in it and whether they are working, waiting or asleep, their
-  message cones, and its pull request with the checks. A peer's minion is a real minion in a teammate's grey.
-- An office on GitHub is solid. One only on the peer's machine is outlined while idle, and solid with its
-  outline kept as a mark while someone works in it. An office its peer calls idle is dimmed.
-- An office a connected peer stops claiming goes on the next pass; a peer who disconnects has theirs held
-  for a day, so their return does not move it.
+- One owner per body. The order in hand owns a minion's place, path and pose. Nothing else writes them:
+  a session's refresh, a floor change or a panel may only ask, and the ask waits its turn.
+- Every order is either moving or waiting on a fact it names: the crate to come down, the ship to lift
+  off. Standing still in the same step for ten seconds, waiting on nothing named, is a stall; a wait on
+  a named fact gets ninety.
+- A stall is given up, and said so in the log. Nothing is lost, because the work is not kept in the
+  body: a carry goes back on the board from where the crate now lies and goes to someone else first, an
+  office's crate stays for the next free hands, a visit ends.
 
 ## Rooms
 
-- A room opens to the corridor through one doorway: the room tile that touches the hallway. Nothing
-  sits in it, no bed, couch, shower, fixture or sign, and nobody settles there; a room with its
-  door tile taken is shut to everyone else.
-- Fixtures stand along the walls away from the door, one minion to each: a bed, a couch, the bowl,
-  the shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it.
-- The middle of a room stays clear to walk through; a room holds as many as it has free tiles.
-- The dorm, lounge and bath touch each other off the corridor, the gym beside them.
-- An activity owns its picture, and nothing it turns on outlives it. What a body is wearing, holding or
-  covered by is worked out again from what is true of it now, every frame — never switched on when the
-  activity starts and left for its ending to switch off, because an activity has more ways to end than
-  the one that was thought of. A prop that belongs to a room is drawn for a body in that room, not for
-  one still carrying that room's order: an order travels, a room does not.
-- A visit lasts its whole time: a shower is two to three minutes of water from the nozzle over the shoulders,
-  with the pixels where they belong, then a few seconds at the rail with the towel over the shoulders before going. Nobody wanders off mid-shower. A pee is a sit: turn round, down
-  onto the bowl, back to the tank, a shuffle on the seat now and then, up again as the time runs out,
-  and the bowl flushes behind.
-- Speed is what the task needs, not who you are: carrying is slow, it is heavy; pacing is another
-  pace, a stroll a third; getting up from bed is slow, then quicker.
-- Minions never occupy the same spot and wait for each other to pass in a narrow place.
-- Social life exists: two talking, a game, a party, sports. All of it is idle time, never work.
-- When a rocket stands venting, the idle drift to the window to watch.
-- Nobody goes onto the pad. The field is as far as anyone walks.
-- Rules of the day: work at the office; hop for a minute when done; pace while waiting; read on the
-  couch when quiet by day, sleep in the dorm by night; a shower after long work, a pee after short,
-  chores when bored, a turn in the gym when the lounge gets dull; board a shuttle in the bay
-  when there is nothing left to do.
-- The gym is one room off the living cluster with four fixtures, a treadmill, a bench with a barbell,
-  a bag and a mat, one minion to each, a turn lasting its whole time. Loungers who stand near each
-  other talk; the rest stretch, look round, shuffle and yawn now and then.
-- Idle is not an order: it is what a minion does while the board has nothing for it, and any order takes it
-  from there, out of the shower or off the bench if need be, the towel back on its rail. The moment an
-  order ends with nothing next, the time of day, the work it did and chance decide: rest by night; after
-  hard work now and then the bath first; after the desk, a message or QA now and then a look round; else rest.
+- A room opens to the hallway through one doorway: the room tile that touches the hallway. Nothing sits
+  in it and nobody settles there.
+- Fixtures stand along the walls away from the door, one minion to each: a bed, a couch, the bowl, the
+  shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it.
+- The middle of a room stays clear to walk through.
+- What a body wears, holds or is covered by is worked out again every frame from what is true of it now.
+  A prop that belongs to a room is drawn for a body in that room, not for one still on its way there.
+- A visit lasts its whole time. A shower is two to three minutes of water over the shoulders, then a few
+  seconds at the rail with the towel. A pee is a sit: turn round, down onto the bowl, a shuffle on the
+  seat now and then, up as the time runs out, and the bowl flushes behind.
+- The gym has four fixtures, a treadmill, a bench with a barbell, a bag and a mat, one minion to each, a
+  turn lasting its whole time.
+- Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting, the idle
+  drift to the window to watch.
+
+## A minion's day
+
+- Work at the office. Hop for a minute when done. Pace the office while waiting. Quiet: read on a couch
+  by day, sleep in the dorm by night (night is 22 to 07).
+- A shower after twenty minutes or more of work, a pee after every second shorter stretch. Never while
+  busy, carrying or in bed; if work calls mid-visit, the minion leaves at once.
+- While untested crates stand on the testing rows and no rocket is go, one free minion walks them as
+  the tester.
+- Idle is not an order: it is what a minion does while the board has nothing for it, and any order takes
+  it from there, out of the shower or off the bench if need be. When an order ends with nothing next,
+  the time of day, the work it did and chance decide: rest by night; after hard work now and then the
+  bath; now and then a look round; else rest.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
   the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
-  Leaving the lounge does not reset it; it starts again once the lounger is back. A visit's time starts
-  when the minion arrives, never when it sets off. Roamers keep apart, except to watch a venting rocket.
-- You may pick a lounger's next thing from its bubble: the gym, bed, a book on the couch, the shower or
-  the bowl, given the way the idle clock gives it. One with a job in hand, or at work, is not for picking.
+  Leaving the lounge does not reset it. A visit's time starts when the minion arrives. Roamers keep
+  apart, except to watch a venting rocket.
+- You may pick a lounger's next thing from its bubble: the gym, bed, a book, the shower or the bowl.
+- A session that is over: lounge by day, dorm by night; when there is nothing left, a shuttle out from
+  the bay.
 
-## The world and the station
+## Tasks and work
 
-- Sources are truth about the world. The station is truth about the floor. They may disagree for
-  as long as it takes a minion to carry something.
-- A first answer from any source is never news. Only changes after it are. History is for GitHub
-  and other boring tools; the station shows now.
-- Nothing appears or disappears without a cue: a shuttle, a carry, a fade, a red crate that sits ten
-  minutes before it goes. Offices are held for those who left before they clear.
-- Counts follow the source through the minions' hands. What cannot be carried is redrawn, once,
-  and only if nobody is holding it.
+- An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue the
+  pull request closes, else the pull request's own number. One crate per task, however many pull
+  requests it took; its hover names the task and whose work it is, and its click opens it.
+- A closed issue is finished work, whatever column the board left it in: it never makes an office.
+- Every repository has its own way to production, read from what it did (see
+  [WIRING.md](WIRING.md#the-way-to-production)). With staging a rocket loads from the testing and
+  cleared rows; without, from storage.
 
-## Names
+## Sharing
 
-Minions may get names, or ridiculous job titles in the manner of The Office or Severance. Later.
-
-## Ideas parked
-
-Weightlessness when the station loses gravity. Enemy ships were the game's; this is not a game.
+- With sharing on, stations on the same network share offices in the repositories ticked for it, those
+  checked out and worked in within twelve hours. Each app shares only what it has checked out itself.
+- A shared office carries its life: who is in it and what they are doing, their cones, its pull request
+  with its checks. A neighbour's minion wears an orange suit with the repository's patch and does what
+  its own minion does: the gym, the bath, a look round, the lounge. Teammates seen only on GitHub wear
+  grey.
+- An office only on a neighbour's machine is outlined while idle; an office its neighbour calls idle is
+  dimmed.
+- An office a neighbour stops claiming goes; one held by a neighbour who disconnects stays for a day, so
+  their return does not move it.
 
 ## Humour, kept dry
 
-The station takes its work seriously and itself not at all. It has a voice: the log is the station's
-computer speaking, plainly and a little dry. Minions pee with the door open and a
-pixel patch. Testers frown into crates and tick notepads. The log speaks plainly: "web: six crates across to the lab". Jokes live in the words and the routines,
+The station takes its work seriously and itself not at all. The log is the station's computer speaking,
+plainly and a little dry: "web: six crates across to the lab". Minions pee with the door open and a
+pixel patch. Testers frown into crates and tick notepads. Jokes live in the words and the routines,
 never in the shapes.

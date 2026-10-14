@@ -1,7 +1,7 @@
 # Drawing the floor
 
-The station's floor is drawn here, offline, and baked into `Sources/Rumkapsel/BakedPlans.swift`. Nothing in
-the app plans a floor at run time any more: it reads a baked plan and lights slots as offices arrive.
+The station's floor is drawn here, offline, and baked into `Sources/Rumkapsel/State/BakedPlans.swift`. The app
+plans no floor at run time: it reads a baked plan and lights slots as offices arrive.
 
     .build/debug/Rumkapsel --dump-floor classic > floor/classic.json
     .build/debug/Rumkapsel --dump-floor kenney  > floor/kenney.json
@@ -21,6 +21,6 @@ outside in space, so the whole southern quadrant is not floor to build on.
 it, so lighting them in order leaves the floor connected at every step — checked there, and again in Swift
 when a plan loads (`Floorplan.check`).
 
-Four seeds are baked per theme, picked out of fifty-odd on offices placed, hallway per office, loops, the
-walk from the plaza, and striping — hallway cells sitting in a straight run of eight or more, which is what
+Four seeds are baked per theme (`picked.json`; Kenney Kingdom uses Classic's), picked out of fifty-odd on
+offices placed, hallway per office, loops, the walk from the plaza, and striping — hallway cells sitting in a straight run of eight or more, which is what
 makes a plan read as a grid rather than a station.

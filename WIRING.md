@@ -1,181 +1,245 @@
-# Wiring, as it is
+# Wiring
 
-Where each source speaks, and what the station does with what it says, stage by stage. The last section
-says who decides. The target is [STAGES.md](STAGES.md). File references are under `Sources/Rumkapsel/`.
+Where each source speaks, what it says, and what the station does with it: sources → events → rules →
+playback. This file owns the sources, their cadences and the stage rules. What things are and may do is
+[STATION.md](STATION.md); the code seams are [ARCHITECTURE.md](ARCHITECTURE.md). File references are
+under `Sources/Rumkapsel/`.
 
-## Sources
+## The flow
+
+1. **Sources** read and cache. None of them knows about the picture (`Integrations/`).
+2. **Reports.** A source says "this work reached this stage, by me, at this time" to the work's record
+   (`WorkBook.report`), or tells `World` something that is not a stage (an office opened, a release
+   open, a bot's pull request). A record turns what it hears into a transition by the rules under
+   **Priorities**.
+3. **Events.** Transitions become `.work` events; the rest become `.office`, `.release`, `.hotfixes`,
+   `.launched`, `.staging`, `.decon`, `.sweep` and `.policy` events (`Rules/Rules.swift`).
+4. **Rules.** `World.learn` hands each event to `Rules.apply` at once: new facts and effects (a log line,
+   "this is history", a rename, the decon hatch). The facts are what the HUD, the hover and the log read.
+5. **Playback** compares what is shown with the facts and plays the difference (`Playback/`).
+
+A source's first answer is quiet: whatever it holds already existed, so it is placed without a word and
+shown at once. Only changes after it are news.
+
+## Sources and cadences
 
 | Source | Reads | Cadence | Code |
 |---|---|---|---|
-| Sessions | `~/.claude/projects` transcripts | on file change, and every 5 s | `Scanner.swift` |
-| Conductor | `~/conductor/workspaces/<repo>` with a checkout at `~/dev/<repo>` | first scan only | `World.swift` |
-| Git | commits ahead of trunk, dirty files, merge history, tags | 1 min (commits), with releases | `GitHub.swift` |
-| GitHub pull requests | own branch's PR, team's open PRs, release PRs, activity feed | feed 1 min as a doorbell, PR asked at once when rung, all every 5 min | `GitHub.swift`, `Integrations/PullRequests.swift` |
-| Deploy workflows | `.github/workflows` on the branch a deploy runs from, by keyword | hourly | `GitHub.swift`, `Integrations/Deployments.swift` |
-| Board | one GitHub project, one single-select field | changes every 20 s, whole board every 5 min | `GitHub.swift` |
-| Neighbours | offices, pulls, boxes, board and GitHub knowledge | as soon as something changes (looked at twice a second), at least every 3 s; GitHub knowledge every 30 s | `Peers.swift`, `World.swift`, `NeighboursPanel.swift` |
-| `.github/rumkapsel.json` | trunk, staging, production, release branches, board columns, ship | hourly, with the pipeline | `Pipelines.swift`, `GitHub.swift` |
+| Sessions | `~/.claude/projects` transcripts | FSEvents on that folder, and every 5 s | `Integrations/Scanner.swift`, `Integrations/Watcher.swift` |
+| Conductor | `~/conductor/workspaces/<repo>` with a checkout at `~/dev/<repo>`, and repositories given a path in Settings | first scan | `Integrations/World.swift` |
+| Git, per checkout | commits ahead of the trunk, dirty files, the branch checked out | 60 s | `Integrations/GitHub.swift` |
+| Git, per repository | merges and tags for the counts; the pipeline; deploy workflows | with the releases; pipeline and workflows re-read hourly | `Integrations/GitHub.swift`, `Integrations/Pipelines.swift` |
+| Pull requests | your branch's pull request, by branch or number; the team's open list; release and hotfix pull requests | the base interval (Settings › GitHub, 5 min by default) | `Integrations/GitHub.swift`, `Integrations/PullRequests.swift` |
+| Pull request watcher | the 20 most recently updated pull requests, conditional (ETag) | 10 s, with a token | `GitHubResolver.watchPulls` |
+| Activity feed | each repository's events, conditional (ETag) | 60 s | `GitHubResolver.refreshFeed` |
+| Deploys | Actions runs on push to the staging and production branches | 15 s with a token, else the base interval; 10 s while one runs | `Integrations/GitHub.swift`, `Integrations/Deployments.swift` |
+| Board | one GitHub project, one single-select field | what moved every 20 s; the whole board at the base interval | `GitHubResolver.refreshProject`, `refreshProjectDelta` |
+| Neighbours | offices, minions, colours, GitHub knowledge | looked at twice a second and sent on a change, at least every 3 s; GitHub knowledge every 30 s | `Integrations/Peers.swift`, `Scene/Scene.swift` (`makeSnapshot`) |
 
-## Stage by stage
+Every scan asks every GitHub source; each answers from its cache until its own interval is up. A failed
+call keeps the previous answer.
 
-### Inbound: an office appears
+**Doorbells.** Something cheap that says *something moved* makes the thorough read come sooner
+(`GitHubResolver.expect`: a key asked every few seconds for a while instead of at its interval). A doorbell
+never moves work by itself.
 
-| Trigger | Condition | Effect | Code |
-|---|---|---|---|
-| Session in a checkout | not held while the station settles (10 scans) | `.officeOpened(.session)`, by shuttle or appearing | `World.swift` |
-| PR opens on the session's branch | | office re-keyed to `task:repo#PR` | `World.swift` |
-| Teammate's open PR | not a bot, not a trunk branch, not kicked | `.officeOpened(.github)` | `World.swift` |
-| Board issue in development | a sign of work: linked PR, `gh-N/` branch in the feed, a peer claim or a local worktree | `.officeOpened(.board)`, `.issueStarted` | `World.swift` |
-| Neighbour's office | adopted where the neighbour put it | shuttle if under 3 min old, else fades in | `World.swift` |
+| Rings | Asks again |
+|---|---|
+| a pull request opened, merged or closed in the feed | the open list, that pull request by number and branch: every 15 s for 2 min; on a merge also the releases (30 s for 5 min), the board (10 s for 2 min) and the deploys (20 s for 5 min) |
+| a push in the feed | that branch's pull request, every 30 s for 3 min |
+| a release in the feed | the releases, every 15 s for 2 min |
+| the watcher sees a pull request move | the open list and that pull request, every 5 s for 1 min; into staging or production, or merged: the releases too, and the deploys every 10 s for 5 min |
+| a board item moved | its linked pull requests, every 15 s for 2 min |
+| `gh pr create`, `gh pr merge` or `git push` in a transcript | the open list, the branch's pull request and the board; after a merge the releases; after a push the feed |
+| your pull request has checks pending or an approval | that pull request, every 30 s for 3 min |
+| a release merges, a deploy runs | the deploys, every 10 s |
 
-The office key is `task:repo#N` for a `gh-N/...` branch, `task:repo#PR` once the branch has a pull request
-(the open one, else the newest, so a merge does not rename the office), `task:repo/branch` otherwise, and
-nothing for `main`, `master`, `develop` or `HEAD` (`Work.swift`). One checkout has one office: a merged office
-left behind in a checkout whose session now lives in another office folds once its crate is hauled (`World.swift`).
+## Stages
 
-### Working: minions, cones, cubes
+What a piece of work goes through. The station reacts to stages; where a stage comes from is the
+business of the sources and nothing else. Work moves forward, and back only as **Priorities** says.
 
-| Trigger | Condition | Effect | Code |
-|---|---|---|---|
-| New prompt in a transcript | | `.prompt`, a cone | `World.swift`, `Scene.swift` |
-| Commits ahead of trunk | trunk is the first of `origin/<trunk>`, `develop`, `main`, `master` that exists | cubes; dirty files are ghost cubes | `GitHub.swift` |
-| Teammate pushes | feed | boxes = 1 + pushes | `World.swift` |
-| Neighbour's boxes | | as the neighbour counts them | `World.swift` |
-
-There is no Working state: it is an office with no pull request.
-
-### Ready: a crate in the office
-
-| Trigger | Condition | Effect | Code |
-|---|---|---|---|
-| Own branch's PR is OPEN | | `.pullRequestOpened`, the pack job | `World.swift`, `Scene.swift` |
-| Teammate's PR in the open list | | office drawn packaged | `SceneMarkers.swift` |
-| Checks | the PR's check rollup | the plate light | `GitHub.swift`, `SceneMarkers.swift` |
-| Review | `reviewDecision`, draft | the crate's colour | `SceneMarkers.swift` |
-
-Ready is not kept anywhere: it is worked out from the GitHub caches on every redraw.
-
-### Stored: the crate goes to storage
-
-Two paths.
-
-**The haul**, when an office's pull request is known to have merged:
-
-| Trigger | Condition | Effect | Code |
-|---|---|---|---|
-| Own PR state MERGED | | `.officeMerged`, the haul to storage, the office folds | `World.swift`, `Jobs.swift` |
-| Teammate PR leaves the open list | feed says merge or close, else the PR asked by number, else by branch; **with no checkout of the repository, assumed merged** | the haul, or the office drops if closed | `Integrations/PullRequests.swift`, `World.swift` |
-| Bot PR merges | feed, else the PR by number | `.deconCleared`, carried from decon | `World.swift`, `Jobs.swift` |
-
-**The counts**, `Cargo` from the source, reported to the record and reconciled into the ledger
-(`Releases.swift`):
-
-| Source | Storage is | Code |
+| Stage | On the station | Optional |
 |---|---|---|
-| Board | issues in the storage column | `GitHub.swift` |
-| Git, staging and production exist | PR numbers in `staging..trunk` commit subjects | `GitHub.swift` |
-| Git, ships on tags | PR numbers in `<newest tag>..trunk` | `GitHub.swift` |
-| Git, no staging | PR numbers in `production..trunk` | `GitHub.swift` |
-| Git, none of those | merged PRs since the last release, the last 80 and 30 days at most | `GitHub.swift` |
+| **Inbound** | a shuttle brings the office | |
+| **Working** | a minion at work, cones, cubes piling up | |
+| **Ready** | a crate packed in the office | |
+| **Stored** | the crate in storage | |
+| **QA** | the crate on the testing rows | yes: no staging, no QA |
+| **Cleared** | the crate on the cleared rows, a sticker on its lid | yes: nothing to clear it, no Cleared |
+| **Shipped** | the crate aboard a rocket that has launched; gone | |
 
-A crate the count has and the station does not is placed where the count says, with no haul.
+A repository without QA goes from Stored to Shipped. One without Cleared never waits for it: the rocket
+does not hold for a sticker nobody can give. Where a crate stands is `Rules.place(stage, …)`.
 
-**Board or git**, per repository (`GitHub.swift`): the repository's own file decides if it says; else
-the repository goes to the board the first time one of its issues is in the storage, QA or cleared
-column, and **stays there for good**, saved in `board.json`. A repository has git counts at all only with
-a release merged into staging or production, or when it ships on tags.
+## Priorities
 
-### QA: on the staging area
+Several sources can say the same thing. `Record.hear` (`State/Stages.swift`) takes them by two rules:
 
-| Trigger | Condition | Effect | Code |
+- **Forward: the furthest wins.** Any source the repository's workflow lists may move work on. Whichever
+  says it first moves it; the others catch up and change nothing.
+- **Back: only the first in line.** Work goes back a stage only when the first source in line for its
+  current stage, having said that stage, now says an earlier one: a card moved from QA back to
+  development. A source that simply has not caught up says nothing.
+
+First in line (`Workflow.inLine`): for Inbound a session, then pull requests, the board, a neighbour;
+for Working a session, then a neighbour; for Ready pull requests. From Stored on, the repository's
+workflow says.
+
+## The workflow is the repository's
+
+Each repository answers one question per stage (`State/Workflow.swift`). The answers are detected from
+its pipeline and whether a board is followed (`Workflow.detected`), shown and editable per repository in
+Settings › Repositories:
+
+| Question | Answer: sources, first in line first | Off |
+|---|---|---|
+| When is work **stored**? | board · pull requests · git | |
+| Does it go through **QA**? | board · deployments · pull requests | **no**: stored goes straight to the rocket |
+| When is it **cleared**? | board · deployments · pull requests | **always**: the rocket never waits |
+| When has it **shipped**? | board · deployments · pull requests · git | |
+| Whose pull requests are **outside** work? | bots · bots and anyone not on the team · nobody | |
+
+"Pull requests" covers releases: a staging release, a production release without the `untested` label,
+a merge. Deployments are listed but report nothing, and only bots go to decon whatever the outside
+answer says ([ROADMAP.md](ROADMAP.md)).
+
+Detected: no staging means no QA; a repository that ships on merge or on tags has no Cleared; without a
+board, the board is left out of every answer.
+
+## The way to production
+
+Read from what the repository did (`Integrations/Pipelines.swift`): the branch most work merges into is
+the trunk, the branch releases end in is production, and a branch released onward into production is
+staging. With no history the names decide: `develop`, else `main` or `master`; `staging` where it
+exists; `production`, else `master` or `main`. A `.github/rumkapsel.json` on the default branch says it
+for everyone and wins. Releases come from the trunk, from staging, or from a release or hotfix branch.
+
+- **Ships on merge**: no releases, and a workflow that deploys on every push to the trunk. Each merged
+  crate goes straight up in a rocket of its own.
+- **Ships on tags**: no release branch and no such workflow, but it tags what it ships. What the trunk
+  has that the newest tag (by date, and a version) has not waits in storage; no rocket stands by, and a
+  new tag launches one.
+
+## Triggers, stage by stage
+
+### Inbound: an office
+
+| Trigger | Condition | Event | Code |
 |---|---|---|---|
-| Work reaches QA (board QA column, or git `production..staging`) | repository has staging; the crate stands in storage | one carry per crate to the staged rows | `World.swift`, `Yard.swift`, `Jobs.swift` |
-| Staging release PR opens | | a staging batch is noted; a log line | `Releases.swift`, `Staging.swift` |
-| Staging release PR merges | board or no board | every crate in storage carried to the staged rows | `Scene.swift`, `Jobs.swift` |
-| Staging release PR closes | | the batch is forgotten; nothing moves | `Staging.swift` |
-| Staging deploy runs | the batch merged | the rocket's tip is welded while it runs | `Staging.swift`, `Rockets.swift` |
-| Board item moves to QA | | a log line | `Scene.swift` |
+| A session in a checkout | held while the station settles at start, up to 10 scans | `.office(.opened)`: simply there in the first scans, else by shuttle; Inbound by session | `World.applyScan` |
+| A pull request opens on the session's branch | | `.office(.renamed)` to `task:repo#PR` | `World.applyScan` |
+| A teammate's open pull request | not a bot, not a long-lived branch, not kicked; one new office per pass | `.office(.opened)` by shuttle once the repository has answered; Ready by pull requests | `World.swift` |
+| A board issue in development | assigned to a teammate, open, with a sign of work: a linked pull request, a `gh-N/` branch in the feed, a neighbour's office, a local worktree | `.office(.opened)`; Inbound by board | `World.swift` |
+| A neighbour's office | adopted where the neighbour put it | `.office(.opened)`: by shuttle if under 3 min old, else fades in; Inbound by neighbour | `World.applyPeer` |
 
-### Cleared: tested
+The office key is `task:repo#N` for a `gh-N/...` branch, `task:repo#PR` once the branch has a pull
+request (the open one, else the newest, so a merge does not rename it), `task:repo/branch` otherwise, and
+nothing for `main`, `master`, `develop` or `HEAD` (`State/Work.swift`). One checkout has one office.
 
-| Trigger | Condition | Effect | Code |
+An office ends (`.office(.gone)`) when its checkout is gone or on another branch, when nobody claims it
+for a day, when it is kicked, or by `Rules.officeEnds`: not yours and not a neighbour's, and merged, or
+closed unmerged ten minutes ago.
+
+### Working
+
+| Trigger | Effect | Code |
+|---|---|---|
+| A new prompt in a transcript | a cone; Working by session | `World.applyScan` |
+| Commits ahead of the trunk | cubes, at most 16; dirty files are ghost cubes | `World.cubes` |
+| A teammate pushes | boxes: one plus the pushes | `World.swift` |
+| A neighbour's boxes | as the neighbour counts them | `World.applyPeer` |
+
+### Ready
+
+| Trigger | Event | Code |
+|---|---|---|
+| Your branch's pull request is open | Ready by pull requests → the crate in its office | `World.applyScan` |
+| A teammate's pull request is in the open list | the same | `World.swift` |
+| Checks | the plate light, read when drawn | `Scene/SceneMarkers.swift` |
+
+### Stored
+
+| Trigger | Event | Code |
+|---|---|---|
+| Your pull request merged | Stored by pull requests → the crate in storage | `World.applyScan` |
+| A teammate's pull request leaves the open list | Stored or closed: the feed says, else the pull request asked by number, else by branch; with no checkout of the repository it is taken as merged | `Integrations/PullRequests.swift` |
+| A pull request closed unmerged | the work keeps its stage, closed → red, gone after 10 min | `World.learnClosed` |
+| The counts | per repository, `Cargo`: Stored, QA and Cleared by board or git, see below | `World.reconcile` |
+
+The counts, by source:
+
+| Source | Storage is | QA is |
+|---|---|---|
+| Board | issues in the storage column | the QA column; the cleared column is Cleared |
+| Git, staging and production exist | pull request numbers in `staging..trunk` commit subjects | `production..staging` |
+| Git, ships on tags | `<newest tag>..trunk` | |
+| Git, no staging | `production..trunk` | |
+| Git, none of those | pull requests merged into the trunk since the last release, the last 80 and 30 days at most | merged before the last staging release |
+
+Board or git, per repository: the repository's file decides if it says; else a repository goes to the
+board the first time one of its issues stands in the storage, QA or cleared column, and stays there,
+saved in `board.json`. A crate the counts have that the station has not is placed where the counts say.
+The first exact count after launch takes away row crates it does not list (`.sweep`), quietly.
+
+### QA
+
+| Trigger | Event | Code |
+|---|---|---|
+| The board's QA column, or git `production..staging` | QA → the crate to the testing rows | `World.reconcile` |
+| A staging release pull request opens, merges or closes | `.staging(.opened/.merged/.closed)`; after a merge the git counts find its crates in `production..staging` | `World.applyStaging` |
+| A staging deploy starts or ends | `.staging(.deploy)`: the tip is welded while it runs | `World.swift` |
+
+### Cleared
+
+| Trigger | Condition | Event | Code |
 |---|---|---|---|
-| Work reaches Cleared (board cleared column) | | the crate's `cleared` flag | `Releases.swift`, `Ledger.swift` |
-| Work reaches Cleared | | carried to the cleared rows; the releases are read again at once, so the rocket loads on the last card | `World.swift`, `Jobs.swift`, `Yard.swift` |
-| Open production release has no `untested` label | no board, or no QA | the whole release counts as cleared: the rocket loads | `GitHub.swift`, `Releases.swift` |
-| Open production release has no `untested` label | a board testing on the deck | work with no card counts as cleared; carded work waits for its card | `Releases.swift` |
-| Bot crate | always | cleared from the start | `Ledger.swift` |
-
-Without a board there is no Cleared per crate.
+| The board's cleared column | | Cleared by board | `World.reconcile` |
+| An open production release without an `untested` label | pull requests can clear; with a board testing on the deck, only work with no card | Cleared by pull requests | `World.applyReleases` |
+| A bot's crate | always | cleared from the start | `Rules` (`.decon`) |
 
 ### Shipped: the rocket
 
-| Trigger | Condition | Effect | Code |
+| Trigger | Condition | Event | Code |
 |---|---|---|---|
-| Open production release PR | or any open release with no staging | a rocket stands by and docks on its lift (9 s, Classic); loads once docked, if cleared | `Releases.swift` |
-| Work waiting, no release open | the repository ships, and not at once | a rocket stands by; loads if cleared | `Releases.swift` |
-| The rocket stands by | not cleared to load | whatever it took aboard goes back to its rows | `Releases.swift`, `Ledger.swift` |
-| Production release PR merges | | `.releaseMerged`, the launch: the vortex pulls the crates aboard, the rocket climbs | `GitHub.swift`, `Releases.swift`, `Vortex.swift`, `Rockets.swift` |
-| A new tag | ships on tags; not the first answer | the launch | `GitHub.swift` |
-| A crate lands in storage | ships on merge (a deploy keyword in a workflow on push to trunk) | a launch per merge; these repositories skip the counts | `Rockets.swift`, `Releases.swift` |
-| Board shipped column | | shipped on the record: the rocket launches; a log line | `Releases.swift`, `World.swift`, `Scene.swift` |
-| Hotfix PR opens | a PR into production from anything but the trunk, staging or a release branch | an express rocket with a red tip stands on a pad slot of its own | `GitHub.swift`, `Releases.swift` |
-| Hotfix PR merges | | its crate is hauled to storage, the vortex pulls it into the express rocket and that goes up; the release rocket keeps its cargo, and the hotfix's work ships as it climbs | `Releases.swift`, `Rockets.swift`, `Vortex.swift` |
-| Production deploy starts | | the flight flies the rocket going up, waiting while a hotfix rocket still loads | `Mission.swift` |
+| An open production release (or any open release, with no staging) | | `.release(production:)`: a rocket docked, go once its cargo is cleared | `World.applyReleases`, `Rules/RocketRules.swift` |
+| Work waiting, no release open | the repository ships, and not on merge or tags | `.release(production: nil)`: a rocket standing by | the same |
+| A production release merges | | `.launched`: the cargo aboard; Shipped for what waited | the same |
+| A new tag | ships on tags; not the first answer | `.launched` | `GitHub.swift`, `World.applyReleases` |
+| A crate lands in storage | ships on merge | a rocket of its own with the crate aboard | `Rules.mergeRocket` |
+| Work shipped by another source | the board's shipped column, git not listing it | `.launched` with those crates | `World.launchShipped` |
+| A hotfix pull request is open | into production from anything but the trunk, staging or a release branch | `.hotfixes`: an express rocket on its own slot | `World.applyHotfixes` |
+| A hotfix merges | | `.launched(hotfix:)` with its crate; the release rocket keeps its cargo | the same |
+| A production deploy starts | | the flight | `Scene/Mission.swift` |
 
-Shipped work is deleted from the ledger (`Ledger.swift`, `Releases.swift`). Offices fold at Stored,
-never at Shipped.
+Offices fold at Stored, never at Shipped.
 
 ### Outside work
 
-A bot's pull request waits in decon (`World.swift`). One rule recognises bots (`GitHub.swift`): the open
-list's `is_bot`, or a login with `dependabot`, `[bot]`, a `-bot` ending or `webhook`. Nothing else counts as
-outside: a fork's pull request is anyone's.
+A bot's pull request waits in decon (`World.screen`): `.decon` with the bots' open numbers. Merged, it is
+Stored by pull requests and carried out; closed, `.deconClosed` ejects it. One rule recognises bots
+(`GitHubResolver.isBot`): the open list's `is_bot`, or a login with `dependabot`, `[bot]`, a `-bot` ending
+or `webhook`.
 
 ## Baked-in settings
 
 | Setting | Value | Code |
 |---|---|---|
-| Trunk names | `develop`, `main`, `master` | `Pipelines.swift`, `GitHub.swift` |
-| Long-lived branches | those plus `staging`, `production` | `Pipelines.swift` |
-| Branches that are not work | `main`, `master`, `develop`, `HEAD` | `Work.swift` |
-| Release branch patterns | `release*`, `hotfix*` | `Pipelines.swift` |
-| Issue branch pattern | `gh-<N>/...` | `Work.swift` |
-| Default branch names | `develop`, `staging`, `production` | `Config.swift` |
-| Board field | `Status` | `Config.swift` |
-| Board columns | In Development, Ready for staging, QA, Ready to ship, Shipped | `Config.swift` |
-| Untested release | any label containing "untested" | `GitHub.swift` |
+| Trunk names | `develop`, `main`, `master` | `Integrations/Pipelines.swift` |
+| Long-lived branches | those plus `staging`, `production` | `State/Work.swift`, `Integrations/Pipelines.swift` |
+| Branches that are not work | `main`, `master`, `develop`, `HEAD` | `State/Work.swift` |
+| Release branch patterns | `release*`, `hotfix*` | `Integrations/Pipelines.swift` |
+| Issue branch pattern | `gh-<N>/...` | `State/Work.swift` |
+| Default branch names | `develop`, `staging`, `production` | `Integrations/Config.swift` |
+| Board field | `Status` | `Integrations/Config.swift` |
+| Board columns | In Development, Ready for staging, QA, Ready to ship, Shipped | `Integrations/Config.swift` |
+| Untested release | any label containing "untested" | `Integrations/GitHub.swift` |
 | Deploy words | environment:, serverless deploy, sls deploy, flyctl, vercel, railway, heroku, kubectl, helm upgrade, docker push, gcloud, cdk deploy, netlify deploy, wrangler deploy, firebase deploy, fly deploy | `Integrations/Deployments.swift` |
-| Bot names | `dependabot`, `[bot]`, `-bot`, `webhook` | `GitHub.swift` |
-| PR numbers in commits | `(#N)` at the end of a subject, `Merge pull request #N` | `GitHub.swift` |
-| Stale open PR | 14 days without an update | `GitHub.swift` |
-| Git history floor | 30 days, 80 merged PRs, 5 release PRs per base | `GitHub.swift` |
-| Teammate activity | feed events under 30 min | `World.swift` |
-| Neighbour's offices held | 24 h | `World.swift` |
-| Closed office window | 10 min | `World.swift` |
-| Conductor checkout | `~/dev/<repo>` | `World.swift` |
-
-## Who decides
-
-Every source above reads what it reads; what it does with it is report to the record
-(`WorkBook.report`), and the station acts on the record's transitions, drained once per pass into
-station events (`World.stationEvents`). The rules are in `Stage`/`Record.hear`, under the repository's
-`Workflow`.
-
-| Stage | Decided by |
-|---|---|
-| Inbound, Working | the office going up, a prompt, reported |
-| Ready | the record's transition, drained; the pack job follows |
-| Stored | the record: an office hauls when it says stored, whoever said it |
-| QA | the record's transition, drained into one carry per crate to the staged rows; a staging release merging carries the whole of storage |
-| Cleared | the record: the ledger's flag reads it, the carry across the staging area follows its transition |
-| Shipped | the record: a rocket waits wherever work waits, loads when it is cleared, launches on the transition |
-
-Names go through `Work` and the register `WorkBook`, one record per piece of work with every alias.
-The ledger hears the record rather than the counts (its rows keep the station's side, where a crate
-stands); GitHub's pull→issue table serves the hover only; the crew-room table is down to an office's
-state; one bot rule; the workflow is a repository's, detected and editable; and the
-reading of a pull request's state, your own office's by branch, a teammate's from the feed, then by
-number, then by branch, is `PullRequests` (`Integrations/`), which reads and reports and decides nothing.
-A piece of work whose first word is already stored, a merged office found at launch, is placed and not
-carried: history, not news.
+| Bot names | `dependabot`, `[bot]`, `-bot`, `webhook` | `Integrations/GitHub.swift` |
+| Pull request numbers in commits | `(#N)` at the end of a subject, `Merge pull request #N` | `Integrations/GitHub.swift` |
+| Stale open pull request | 14 days without an update | `Integrations/GitHub.swift` |
+| Git history floor | 30 days, 80 merged pull requests, 5 release pull requests per base | `Integrations/GitHub.swift` |
+| Teammate activity | feed events under 30 min | `Integrations/World.swift` |
+| Neighbour's offices held | 24 h | `Integrations/World.swift` |
+| Offices shared | worked in within 12 h | `Scene/Scene.swift` |
+| Closed crate kept | 10 min | `Rules/Rules.swift` |
