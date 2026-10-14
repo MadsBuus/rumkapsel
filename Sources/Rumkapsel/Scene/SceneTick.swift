@@ -172,8 +172,36 @@ extension StationController {
             m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)
             if how == .posed { pose(m, station: station, dt: dt) }
         }
+        for station in fleet.stations.values { tendKitchen(station) }
         for cue in simulation.drainCues() { play(cue) }
         if layoutDirty { flushScene() }
+    }
+
+    func tendKitchen(_ station: Station) {
+        guard let k = kitchens[station.name] else { return }
+        let cook = minions.values.first { $0.station == station.name && $0.atCounter && $0.fare != nil }
+        let p = cook.map { $0.actFor > 0 ? Timing.clamped((clock - $0.actStartedAt) / $0.actFor) : 0 } ?? 0
+        let brewing = cook?.fare == .coffee, printing = cook?.fare == .bite
+        let pouring = brewing && p > 0.12 && p < 0.78
+        k.cup.isHidden = !brewing
+        k.stream.isHidden = !pouring
+        if pouring { k.stream.scale = SCNVector3(0.7 + 0.3 * sin(clock * 31), 1, 1) }
+        k.head.position.x = CGFloat(pouring ? sin(clock * 53) * 0.002 : 0)
+        k.lamp.geometry?.firstMaterial?.diffuse.contents = brewing
+            ? (p < 0.12 ? Props.waitingAmber : Props.passedGreen) : NSColor(rgb: (0.3, 0.32, 0.36))
+        if brewing { Kitchen.rise(k.steam, over: Kitchen.mugHeight / 2, at: clock) }
+        let since = cook.map { clock - $0.actStartedAt } ?? 0
+        let inside = printing && since < Galley.printSeconds
+        k.window.geometry?.firstMaterial?.diffuse.contents = inside
+            ? NSColor(rgb: (0.95, 0.55, 0.2)).blended(withFraction: 0.5 + 0.5 * sin(clock * 6), of: NSColor(rgb: (0.6, 0.25, 0.1)))!
+            : NSColor(rgb: (0.16, 0.18, 0.22))
+        k.meal.isHidden = !printing
+        guard printing else { return }
+        let out = CGFloat(Timing.easeInOut(Timing.clamped((since - Galley.printSeconds) / Galley.slideSeconds)))
+        k.meal.position = SCNVector3(Kitchen.mealIn.x, Kitchen.mealIn.y + (Kitchen.mealOut.y - Kitchen.mealIn.y) * out,
+                                     Kitchen.mealIn.z + (Kitchen.mealOut.z - Kitchen.mealIn.z) * out)
+        let grown = CGFloat(max(0.05, Timing.clamped(since / Galley.printSeconds)))
+        k.meal.scale = SCNVector3(1, grown, 1)
     }
 
     func mirrorLoad(_ m: Minion) {
@@ -316,7 +344,7 @@ extension StationController {
                 default: break
                 }
             }
-            let onFixture = (m.bathing || m.exercising || m.seated) && m.path.isEmpty && m.fetchSpot == nil
+            let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
                 : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
@@ -411,6 +439,9 @@ extension StationController {
                 case .mat:
                     lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
                 }
+            }
+            if m.fare != nil, m.atCounter {
+                tilt = 0.1 + sin(t * 1.1) * 0.02; roll = sin(t * 0.7) * 0.03
             }
             if working && !atCone {
                 let r = Routines.working(m.activity, t: t, dt: dt, clock: clock)

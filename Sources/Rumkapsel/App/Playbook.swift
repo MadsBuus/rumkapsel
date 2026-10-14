@@ -71,7 +71,7 @@ struct PlaybookEntry {
     let crowd: Bool
     let settle: Double
 
-    static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym"]
+    static let idleRooms: Set<String> = ["kind:quarters", "kind:lounge", "kind:bath", "kind:gym", "kind:galley"]
 
     init(_ group: String, _ name: String, _ seeing: String, _ moves: [(String, PlaybookWait)], camera: PlaybookCamera,
          tail: Double = 8, yard: Bool = false, bay: Bool = false,
@@ -197,6 +197,10 @@ enum Playbook {
                       rooms: ["kind:bath"], crowd: false, settle: 7),
         PlaybookEntry("life", "Workout", "minion uses the gym", [("Workout", 2)], camera: .follow(who, 4), tail: 28,
                       rooms: ["kind:gym"], crowd: false, settle: 7),
+        PlaybookEntry("life", "Coffee", "minion makes a coffee in the galley and takes it back to the couch", [("Coffee", 2)],
+                      camera: .area("galley", 7), tail: 40, rooms: ["kind:lounge", "kind:galley"], crowd: false, settle: 7),
+        PlaybookEntry("life", "A bite", "the galley prints a bowl of noodles; minion eats it on the couch, bowl and all", [("A bite", 2)],
+                      camera: .area("galley", 5), tail: 130, rooms: ["kind:lounge", "kind:galley"], crowd: false, settle: 7),
         PlaybookEntry("life", "Everyone to the lounge", "minions sit on the couches", [("Everyone to lounge", 2)],
                       camera: .follow(who, 4), tail: 20, rooms: ["kind:lounge"]),
         PlaybookEntry("life", "Chore", "minion does a chore", [("Chore", 2)], camera: .whole(2.2), tail: 22,

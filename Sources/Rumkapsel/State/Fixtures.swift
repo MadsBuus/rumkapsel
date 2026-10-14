@@ -1,6 +1,28 @@
 import Foundation
 
+struct Galley {
+    let cell: Cell
+    let back: SIMD2<Double>
+
+    var middle: SIMD2<Double> { SIMD2(Double(cell.x), Double(cell.y)) }
+    var across: SIMD2<Double> { SIMD2(back.y, -back.x) }
+    var facing: Double { atan2(back.x, back.y) }
+    var opening: SIMD2<Double> { middle - back * 0.5 }
+
+    static let counterWidth = 0.32, counterDepth = 0.26, counterHeight = 0.26, nudge = 0.2
+    static let printSeconds = 10.0, slideSeconds = 0.5, pickSeconds = 0.8
+
+    func stand(_ fare: Command.Fare) -> SIMD2<Double> { middle + across * (fare == .coffee ? -Galley.nudge : Galley.nudge) }
+    func machine(_ fare: Command.Fare) -> SIMD2<Double> { stand(fare) + back * Hands.arm }
+    var counter: [SIMD2<Double>] { [-Galley.counterWidth, 0, Galley.counterWidth].map { middle + back * (0.5 - Galley.counterDepth / 2) + across * $0 } }
+}
+
 extension Station {
+    var galley: Galley? {
+        guard let room = rooms["kind:galley"], let cell = room.cells.first, let out = doorOutside(of: room.key) else { return nil }
+        return Galley(cell: cell, back: SIMD2(Double(cell.x - out.x), Double(cell.y - out.y)))
+    }
+
     func bathFixtures(bath: Room) -> (toilet: Cell, shower: Cell, toiletCorner: SIMD2<Double>, showerCorner: SIMD2<Double>) {
         let door = doorCell(of: bath.key)
         let maxY = bath.cells.map(\.y).max()!

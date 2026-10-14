@@ -75,10 +75,11 @@ enum Theme: String, CaseIterable, Identifiable {
 struct Vocabulary {
     var bay = "bay", pad = "launch", storage = "storage", deck = "staging", decon = "decon"
     var zoneWaiting = "waiting", zoneTesting = "testing", zoneCleared = "cleared"
-    var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", monolith = "monolith"
+    var dorm = "dorm", lounge = "lounge", bath = "bath", gym = "gym", galley = "galley", monolith = "monolith"
     var theBay = "the bay", thePad = "the pad", theRocket = "the rocket"
     var inStorage = "storage", theDeck = "the deck", testedRow = "the cleared rows", testDeck = "test deck", inDecon = "decon"
     var theMonolith = "the monolith", theDorm = "the dorm", theCouch = "the couch", theBath = "the bath", theGym = "the gym"
+    var theGalley = "the galley", coffee = "a coffee", bite = "a bite"
     var lookRound = "having a look round the station", leaving = "off the station on the next shuttle"
     var inbound = "shuttle inbound with", stow = "stowing a cube for the commit", pack = "packing a crate for the pull request"
     var asleep = "asleep in the dorm"

@@ -99,6 +99,7 @@ enum Place: Hashable {
     static let lounge = Place.room("kind:lounge")
     static let bath = Place.room("kind:bath")
     static let gym = Place.room("kind:gym")
+    static let galley = Place.room("kind:galley")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -279,7 +280,9 @@ final class Station {
         let minX = Double(xs.min()!), maxX = Double(xs.max()!), minY = Double(ys.min()!), maxY = Double(ys.max()!)
         let door = doorCell(of: "kind:lounge")
         let spots = [SIMD2(minX - 0.22, minY), SIMD2(minX - 0.22, maxY), SIMD2(maxX + 0.22, minY), SIMD2(maxX + 0.22, maxY), SIMD2(minX, maxY + 0.22), SIMD2(maxX, maxY + 0.22)]
+        let galley = self.galley?.opening
         let c = spots.filter { s in door.map { hypot(s.x - Double($0.x), s.y - Double($0.y)) > 0.6 } ?? true }
+            .filter { s in galley.map { hypot(s.x - $0.x, s.y - $0.y) > 0.6 } ?? true }
         couchCache = c
         return c
     }
@@ -373,7 +376,7 @@ final class Station {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { adopt($0) ? $0 : nil } ?? takeSlot(repo: repo)
+        let cells = preferredCells.flatMap { adopt($0, dig: Station.opensInto[key] == nil) ? $0 : nil } ?? takeSlot(repo: repo)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive, openedAt: openedAt)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
@@ -388,8 +391,14 @@ final class Station {
             "kind:quarters": ("quarters", "sleeping", Colors.idleDim,     Station.rect(2, 4)),
             "kind:bath":     ("bath",     "bath",     Colors.idleLight,   Station.rect(2, 2)),
             "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
+            "kind:galley":   ("galley",   "galley",   Colors.idleLight,   Station.rect(1, 1)),
         ]
         guard let it = named[key] else { return false }
+        if let into = Station.opensInto[key] {
+            guard let cells = floor.quarters[it.plan], let host = rooms[into],
+                  cells.allSatisfy({ occupied[$0] == nil && !isReserved($0) && !isCorridor($0) }),
+                  cells.contains(where: { $0.neighbours.contains(where: host.cells.contains) }) else { return false }
+        }
         return ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture, openedAt: .distantPast,
                           shape: it.shape, preferredCells: floor.quarters[it.plan])
     }
@@ -409,12 +418,24 @@ final class Station {
         if rooms["kind:gym"] != nil, !["kind:lounge", "kind:quarters", "kind:bath"].contains(where: { touching("kind:gym", $0) }) {
             removeRoom(key: "kind:gym"); ensureFixedRoom(.gym)
         }
+        if rooms["kind:galley"] != nil, !touching("kind:galley", "kind:lounge") {
+            removeRoom(key: "kind:galley"); ensureFixedRoom(.galley)
+        }
+    }
+
+    static let opensInto = ["kind:galley": "kind:lounge"]
+
+    var thresholds: Set<Cell> { Set(Station.opensInto.keys.compactMap { doorOutside(of: $0) }) }
+
+    private func entrance(of key: String) -> (Cell) -> Bool {
+        guard let into = Station.opensInto[key] else { return isCorridor }
+        return { [self] in room(at: $0)?.key == into }
     }
 
     func doorCell(of key: String) -> Cell? {
         if let d = doorCache[key] { return d }
         guard let r = rooms[key] ?? lingering[key] else { return nil }
-        let candidates = r.cells.filter { $0.neighbours.contains(where: isCorridor) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        let candidates = r.cells.filter { $0.neighbours.contains(where: entrance(of: key)) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         let d = candidates.first ?? r.cells.first
         if let d { doorCache[key] = d }
         return d
@@ -422,7 +443,7 @@ final class Station {
 
     func doorOutside(of key: String) -> Cell? {
         guard let d = doorCell(of: key) else { return nil }
-        return d.neighbours.first(where: isCorridor)
+        return d.neighbours.first(where: entrance(of: key))
     }
 
     private func yardArea(_ c: Cell) -> String? {
@@ -458,8 +479,8 @@ final class Station {
         }
         let ra = room(at: a)?.key, rb = room(at: b)?.key
         if ra == rb { return true }
-        if let ra, rb == nil { return doorCell(of: ra) == a && doorOutside(of: ra) == b }
-        if let rb, ra == nil { return doorCell(of: rb) == b && doorOutside(of: rb) == a }
+        if let ra, doorCell(of: ra) == a, doorOutside(of: ra) == b { return true }
+        if let rb, doorCell(of: rb) == b, doorOutside(of: rb) == a { return true }
         return false
     }
 
@@ -480,7 +501,7 @@ final class Station {
         forgetFloorPlan()
     }
 
-    private func adopt(_ cells: [Cell]) -> Bool {
+    private func adopt(_ cells: [Cell], dig: Bool = true) -> Bool {
         guard !cells.isEmpty else { return false }
         if let i = cells.first.flatMap({ floor.slotOf[$0] }), floor.slots[i].cells == cells.sorted(by: { ($0.x, $0.y) < ($1.x, $1.y) }),
            !usedSlots.contains(i), cells.allSatisfy({ occupied[$0] == nil }) {
@@ -499,7 +520,7 @@ final class Station {
             guard rooms.values.allSatisfy({ r in r.cells.contains { c in c.neighbours.contains(where: hall.contains) } }) else { return false }
             dug = remaining
         }
-        if cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) { return true }
+        if !dig || cells.contains(where: { $0.neighbours.contains(where: isCorridor) }) { return true }
         let room = Set(cells)
         let hall = blocks.hallway
         func diggable(_ c: Cell) -> Bool { !walkable.contains(c) && occupied[c] == nil && !room.contains(c) && (!isReserved(c) || floor.allHall.contains(c)) }
@@ -923,14 +944,15 @@ final class Fleet {
     }
 
     func station(_ name: String) -> Station {
-        station(name, fixed: [.quarters, .lounge, .bath, .gym])
+        station(name, fixed: [.quarters, .lounge, .bath, .gym, .galley])
     }
 
     @discardableResult
     func station(_ name: String, fixed: [Place]) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
-        for place in fixed { s.ensureFixedRoom(place) }
+        let inner = fixed.filter { if case .room(let k) = $0 { return Station.opensInto[k] != nil }; return false }
+        for place in fixed.filter({ !inner.contains($0) }) + inner { s.ensureFixedRoom(place) }
         stations[name] = s
         return s
     }
@@ -989,6 +1011,7 @@ final class Fleet {
             station.ensureFixedRoom(.bath)
             station.ensureFixedRoom(.gym)
             station.clusterQuarters()
+            station.ensureFixedRoom(.galley)
             station.removeRoom(key: "kind:airlock")
             stations[name] = station
         }

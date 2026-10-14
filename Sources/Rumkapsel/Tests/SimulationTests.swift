@@ -116,6 +116,29 @@ enum SimulationTests {
             expect(sim.visitLog.first.map { $0.kind == "gym" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
         }
 
+        test("a coffee: in through the lounge, made at arm's length facing the counter, then back to the couch with a mug") {
+            let (sim, station, m) = fixture()
+            sim.hooks = SimHooks()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let galley = station.galley else { return expect(false, "a galley on the station") }
+            expect(station.doorOutside(of: "kind:galley").map { station.room(at: $0)?.key } == "kind:lounge", "the galley opens into the lounge")
+            expect(sim.visitGalley(m, station: station, fare: .coffee), "the galley was free")
+            let other = body("b", sim: sim, station: station)
+            expect(!sim.visitGalley(other, station: station, fare: .bite), "one at the counter at a time")
+            expect(step(sim, seconds: 30, until: { m.atCounter }), "reached the counter")
+            let reach = galley.machine(.coffee) - m.pos
+            expect(abs((reach.x * reach.x + reach.y * reach.y).squareRoot() - Hands.arm) < 0.03, "an arm's length from the machine: \(reach)")
+            expect(abs(atan2(sin(m.facing - galley.facing), cos(m.facing - galley.facing))) < 0.05, "facing the counter")
+            let planned = m.actFor
+            expect(Command.Fare.coffee.seconds.contains(planned), "a coffee takes \(planned) s")
+            m.bathDue = sim.clock + 1
+            expect(step(sim, seconds: planned + 5, until: { m.fare == nil || !m.atCounter }), "done")
+            expect(!m.bathing && !m.atCounter && m.fetchSpot == nil, "a bath come due waits for the coffee")
+            expect(m.place == .lounge && m.mugUntil > sim.clock, "back to the lounge, mug in hand")
+            expect(sim.visitLog.first.map { $0.kind == "galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+        }
+
         test("nothing but rest moves a body with a visit in hand: a send during the bath changes nothing") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

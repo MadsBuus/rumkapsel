@@ -67,7 +67,10 @@ the field and land in the bay and nowhere else, on a honeycomb of berths; the be
 into burns in its repository's colour until its crate has been carried in. Everyone who arrives steps
 off a shuttle there and everyone who leaves boards one. Nobody goes to the bay for any other reason.
 
-The **dorm**, **lounge**, **bath** and **gym** stand together off the hallway, as living quarters would.
+The **dorm**, **lounge**, **bath** and **gym** stand together off the hallway, as living quarters would. The
+**galley** is one tile off the lounge and opens into it, not onto the hallway: a counter along its back wall
+with a coffee machine, a food printer and two spare mugs. It takes a tile no office or hallway ever would,
+away from the hallway where the plan allows, and where the monolith does not hide it.
 
 ## Air and weight
 
@@ -252,9 +255,11 @@ moves through it one way: in from the hallway at the back, out through the field
 ## Rooms
 
 - A room opens to the hallway through one doorway: the room tile that touches the hallway. Nothing sits
-  in it and nobody settles there.
+  in it and nobody settles there. The galley alone opens into the lounge instead, and nobody settles on the
+  lounge tile in front of it.
 - Fixtures stand along the walls away from the door, one minion to each: a bed, a couch, the bowl, the
-  shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it.
+  shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it. The galley
+  is too small for a name; its machines say what it is.
 - The middle of a room stays clear to walk through.
 - What a body wears, holds or is covered by is worked out again every frame from what is true of it now.
   A prop that belongs to a room is drawn for a body in that room, not for one still on its way there.
@@ -263,6 +268,12 @@ moves through it one way: in from the hallway at the back, out through the field
   seat now and then, up as the time runs out, and the bowl flushes behind.
 - The gym has four fixtures, a treadmill, a bench with a barbell, a bag and a mat, one minion to each, a
   turn lasting its whole time.
+- The galley takes one minion at a time, standing at the counter an arm's length from its machine. A coffee
+  is twenty-odd seconds: a mug under the spout, the pour, the steam. Then the mug goes along in the hand, back
+  to the couch or the desk, steaming, sipped now and then, for a few minutes; a carry, the bath or the gym
+  drinks it up first. A bite is printed in ten seconds: the printer's window glows while a bowl of noodles
+  grows inside, then slides out. The minion takes it to a couch and eats it there, a spoonful at a time,
+  crumbs and all. The bowl is printed too, and eaten last.
 - Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting, the idle
   drift to the window to watch.
 
@@ -279,10 +290,13 @@ moves through it one way: in from the hallway at the back, out through the field
   the time of day, the work it did and chance decide: rest by night; after hard work now and then the
   bath; now and then a look round; else rest.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
-  the station most often, a turn in the gym by day, the bath, or staying on the couch with a book.
+  the station most often, the galley by day when it is free, a turn in the gym by day, the bath, or staying
+  on the couch with a book. The galley serves a bite from 11 to 14 and 18 to 20, a coffee otherwise; after
+  desk work a minion now and then goes for one before it rests.
   Leaving the lounge does not reset it. A visit's time starts when the minion arrives. Roamers keep
   apart, except to watch a venting rocket.
-- You may pick a lounger's next thing from its bubble: the gym, bed, a book, the shower or the bowl.
+- You may pick a lounger's next thing from its bubble: the gym, bed, a book, the shower, the bowl, a coffee
+  or a bite.
 - A session that is over: lounge by day, dorm by night; when there is nothing left, a shuttle out from
   the bay.
 

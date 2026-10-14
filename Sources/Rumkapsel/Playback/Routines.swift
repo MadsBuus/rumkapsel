@@ -88,6 +88,8 @@ enum Routines {
         var pixels = false
         var towel = false
         var jetpack: Double?
+        var mug = false
+        var meal: Double?
     }
 
     static func outfit(_ m: Minion, at clock: Double) -> Outfit {
@@ -95,6 +97,9 @@ enum Routines {
         kit.pixels = m.bathing && m.phaseKind == .act && m.path.isEmpty
         kit.towel = m.drying
         kit.tool = hands(m, at: clock)
+        let free = !m.onJob && !m.lying && !m.bathing && !m.exercising && m.place != .quarters
+        kit.mug = free && clock < m.mugUntil
+        if free, clock < m.mealUntil, m.mealFor > 0 { kit.meal = (m.mealUntil - clock) / m.mealFor; kit.tool = nil }
         return kit
     }
 

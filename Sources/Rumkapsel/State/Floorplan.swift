@@ -85,7 +85,8 @@ struct Floorplan {
         precondition(!lit.isEmpty, "plan \(seed): nothing is lit before the offices")
         precondition(connected(lit, through: lit.union(rooms)), "plan \(seed): the base hallway is in pieces")
         for (name, cs) in quarters {
-            precondition(cs.contains { c in c.neighbours.contains { lit.contains($0) } },
+            let way = Station.opensInto["kind:" + name].map { Set(quarters[String($0.dropFirst(5))] ?? []) } ?? lit
+            precondition(cs.contains { c in c.neighbours.contains { way.contains($0) } },
                          "plan \(seed): the \(name) has no way in before any office opens")
         }
         for (i, slot) in slots.enumerated() {

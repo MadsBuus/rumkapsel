@@ -17,7 +17,8 @@ fills with tetromino offices. Hallway is grown only where an office actually lan
 back empty is taken up again. Nothing is laid past the hull: the bay floats
 outside in space, so the whole southern quadrant is not floor to build on.
 
-`bake.py` turns a plan into an activation order. Each office carries the run of hallway that first reaches
+`bake.py` turns a plan into an activation order, and picks the galley: one tile beside the lounge that no
+office or hallway takes, so it moves nothing else. Each office carries the run of hallway that first reaches
 it, so lighting them in order leaves the floor connected at every step — checked there, and again in Swift
 when a plan loads (`Floorplan.check`).
 

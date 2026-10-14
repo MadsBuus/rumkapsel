@@ -676,6 +676,7 @@ extension StationController {
             case "kind:quarters": return ("The quarters", nil)
             case "kind:bath": return ("The bath", nil)
             case "kind:gym": return ("The gym", nil)
+            case "kind:galley": return ("The galley", "coffee, and a bite now and then")
             default:
                 let here = minions.values.filter { $0.station == st.name && $0.place == .room(room.key) && $0.state != .leaving }
                 let doing = here.first(where: \.busy).map { $0.words }
