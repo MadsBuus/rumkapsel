@@ -428,7 +428,7 @@ extension StationController {
             infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click to open"
         } else if h.hasPrefix("decon:") {
             let name = String(h.dropFirst(6))
-            let waiting = fleet.stations[name]?.ledger.allCrates.filter { $0.alien && $0.placed == .decon }.count ?? 0
+            let waiting = fleet.stations[name]?.facts.count(.decon) ?? 0
             infoLabel.text = Words.current.deconHover + " · " + (waiting == 0 ? "nothing unscreened" : waiting == 1 ? "one object unscreened" : "\(waiting) objects unscreened")
         } else if (h.hasPrefix("storage:") || h.hasPrefix("deck:")), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let repo = String(h.split(separator: "|")[1])

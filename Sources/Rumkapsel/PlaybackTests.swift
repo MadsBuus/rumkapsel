@@ -1,0 +1,285 @@
+import Foundation
+
+enum PlaybackTests {
+    private static var failures = 0
+    private static let staged = RepoFacts(hasStaging: true, hasCleared: true)
+
+    static func run() -> Never {
+        test("one carry: an office's crate goes to storage in one body's hands, then stands on its row") {
+            let (sim, station, m) = fixture()
+            station.ensureRoom(key: "task:web#5", name: "#5", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            put(station, sim, "web", [5], .ready, office: "task:web#5")
+            sim.play()
+            expect(shown(sim, 5) == .office("task:web#5"), "packed in its office: \(sim.describe(shown(sim, 5)))")
+            settle(sim, m)
+            put(station, sim, "web", [5], .stored, office: "task:web#5")
+            unchanged(sim, station) {
+                var held = false
+                let done = step(sim, seconds: 90, until: {
+                    if shown(sim, 5) == .hands(m.id) { held = true }
+                    return held && sim.cargo.isEmpty
+                })
+                expect(held, "in the body's hands on the way")
+                expect(done && caughtUp(sim, station), "on its row in storage: \(sim.lag() ?? "")")
+                expect(m.current?.crate == nil && !m.hasLoad, "and the body is free again: \(m.words)")
+            }
+        }
+
+        test("top first: a buried crate's blocker is carried off before it, and every stack is built from the floor") {
+            let (sim, station, a) = fixture()
+            let b = body("b", sim: sim, station: station)
+            put(station, sim, "web", Array(1...6), .qa, quiet: true)
+            sim.play()
+            settle(sim, a, b)
+            put(station, sim, "web", [2], .cleared)
+            unchanged(sim, station) {
+                var liftedAt: [Int: Double] = [:]
+                var floating: [String] = []
+                let done = step(sim, seconds: 120, until: {
+                    for n in [2, 6] where liftedAt[n] == nil { if case .hands? = shown(sim, n) { liftedAt[n] = sim.clock } }
+                    floating += unsupported(sim)
+                    return liftedAt.count == 2 && sim.cargo.isEmpty
+                })
+                expect(done && caughtUp(sim, station), "both moved: \(sim.lag() ?? "")")
+                expect((liftedAt[6] ?? .infinity) < (liftedAt[2] ?? -1), "#6 off the top before #2 is lifted: \(liftedAt)")
+                expect(floating.isEmpty, "no crate ever stood on nothing: \(Set(floating).sorted())")
+            }
+        }
+
+        test("a fact that changes before the lift calls the move off; after the lift the crate lands where the fact now says") {
+            let (sim, station, m) = fixture()
+            put(station, sim, "web", [440, 441], .stored, quiet: true)
+            sim.play()
+            settle(sim, m)
+            let was = shown(sim, 440)
+            put(station, sim, "web", [440], .qa)
+            unchanged(sim, station) {
+                sim.play()
+                sim.assignOrders()
+                expect(m.current?.crate?.number == 440 && !m.hasLoad, "the carry is taken, not lifted yet: \(m.words)")
+            }
+            put(station, sim, "web", [440], .stored)
+            unchanged(sim, station) {
+                sim.play()
+                expect(sim.cargo.isEmpty, "called off: \(sim.cargo.count)")
+                expect(m.current?.crate == nil, "the carrier is let go: \(m.words)")
+                expect(shown(sim, 440) == was && caughtUp(sim, station), "still in storage where it stood: \(sim.describe(shown(sim, 440)))")
+            }
+            put(station, sim, "web", [441], .qa)
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 60, until: { shown(sim, 441) == .hands(m.id) }), "#441 up on the arms")
+            }
+            put(station, sim, "web", [441], .cleared)
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 90, until: { sim.cargo.isEmpty }), "set down")
+                guard case .row(let s)? = shown(sim, 441) else { return expect(false, "on a row: \(sim.describe(shown(sim, 441)))") }
+                expect(s.zone == .cleared && caughtUp(sim, station), "on the cleared rows, where the fact is now: \(sim.lag() ?? "")")
+            }
+        }
+
+        test("a skip mid-carry: everything shown where the facts say, no carry left, the carrier free") {
+            let (sim, station, m) = fixture()
+            put(station, sim, "web", [440, 441, 442], .stored, quiet: true)
+            sim.play()
+            settle(sim, m)
+            put(station, sim, "web", [440, 441, 442], .qa)
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 60, until: { m.hasLoad }), "a crate on the arms")
+                sim.skip()
+                expect(caughtUp(sim, station), "shown is the facts: \(sim.lag() ?? "")")
+                expect(sim.cargo.isEmpty && m.current?.crate == nil && !m.hasLoad, "no carry, empty hands: \(m.words)")
+            }
+        }
+
+        test("step(dt: 600) is a skip: the clock moves by 600 and the picture is the facts") {
+            let (sim, station, m) = fixture()
+            put(station, sim, "web", [440, 441, 442], .stored, quiet: true)
+            sim.play()
+            settle(sim, m)
+            put(station, sim, "web", [440, 441, 442], .qa)
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 60, until: { m.hasLoad }), "a crate on the arms")
+                let start = sim.clock
+                sim.step(dt: 600)
+                expect(abs(sim.clock - start - 600) < 1e-6, "the clock moved by 600: \(sim.clock - start)")
+                expect(caughtUp(sim, station), "shown is the facts: \(sim.lag() ?? "")")
+                expect(sim.cargo.isEmpty && m.current?.crate == nil && !m.hasLoad, "no carry, empty hands: \(m.words)")
+            }
+        }
+
+        test("a give-up parks the crate where it fell, and someone else finishes the carry from there") {
+            let (sim, station, a) = fixture()
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
+            settle(sim, a)
+            put(station, sim, "web", [440], .qa)
+            unchanged(sim, station) {
+                expect(step(sim, seconds: 60, until: { a.hasLoad && a.phaseKind == .haul }), "up on a's arms")
+                a.wedged = true
+                expect(step(sim, seconds: 15, until: { !a.hasLoad }), "a gives up")
+                guard case .parked(let p)? = shown(sim, 440) else { return expect(false, "parked where it fell: \(sim.describe(shown(sim, 440)))") }
+                expect(sim.cargo.values.first.map { if case .carry(_, let from, _) = $0.command.kind { return from == p }; return false } == true,
+                       "the carry starts again from there")
+                let b = body("b", sim: sim, station: station)
+                var carrier: String?
+                let done = step(sim, seconds: 90, until: {
+                    if case .hands(let who)? = shown(sim, 440) { carrier = who }
+                    return sim.cargo.isEmpty
+                })
+                expect(carrier == b.id, "b picks it up: \(carrier ?? "nobody")")
+                expect(done && caughtUp(sim, station), "and sets it down on the deck: \(sim.lag() ?? "")")
+            }
+        }
+
+        test("preemption: a release carry takes the body off a yard carry it has not lifted, which goes back on the board") {
+            let (sim, station, m) = fixture()
+            put(station, sim, "web", [440], .stored, quiet: true)
+            put(station, sim, "web", [441], .qa, quiet: true)
+            sim.play()
+            settle(sim, m)
+            put(station, sim, "web", [440], .qa)
+            unchanged(sim, station) {
+                sim.play()
+                sim.assignOrders()
+                expect(m.current?.crate?.number == 440 && !m.hasLoad, "the yard carry is taken: \(m.words)")
+            }
+            put(station, sim, "web", [441], .cleared)
+            unchanged(sim, station) {
+                sim.play()
+                let release = sim.cargo.values.first { $0.crate.number == 441 }
+                let yard = sim.cargo.values.first { $0.crate.number == 440 }
+                expect(release?.rank == .release && yard?.rank == .yard, "a carry into the cleared rows is release work")
+                sim.assignOrders()
+                expect(m.current?.crate?.number == 441, "taken off the yard carry for the release: \(m.words)")
+                expect(sim.cargo.values.first { $0.crate.number == 440 }?.carrier == nil, "the yard carry is back on the board, nobody on it")
+                expect(m.wonderUntil > sim.clock, "a beat, head up, before it goes")
+            }
+        }
+
+        for seed in PlaybackTests.busySeeds {
+            test("a busy yard, seed \(seed): 400 rounds of news between short steps; the picture catches up by itself, never on air") {
+                busy(seed: UInt64(seed), rounds: 400)
+            }
+        }
+
+        say(failures == 0 ? "playback: all passed" : "playback: \(failures) failed")
+        exit(failures == 0 ? 0 : 1)
+    }
+
+    static var busySeeds = [3]
+
+    private static func busy(seed start: UInt64, rounds: Int) {
+        let (sim, station, a) = fixture()
+        let b = body("b", sim: sim, station: station), c = body("c", sim: sim, station: station)
+        settle(sim, a, b, c)
+        var seed = start
+        func roll(_ n: Int) -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) % UInt64(n)) }
+        var floating: [String] = []
+        var next = 1
+        for _ in 0..<rounds {
+            let repos = ["web", "api", "ios"], repo = repos[roll(3)]
+            let mine = station.facts.crates.values.filter { $0.id.repo == repo }.sorted { $0.id < $1.id }
+            let pick = mine.isEmpty ? nil : mine[roll(mine.count)]
+            switch roll(7) {
+            case 0, 1: put(station, sim, repo, [next], .stored); next += 1
+            case 2: if let p = pick { put(station, sim, repo, [p.id.number], .qa) }
+            case 3: if let p = pick { put(station, sim, repo, [p.id.number], .cleared) }
+            case 4: if let p = pick { put(station, sim, repo, [p.id.number], .stored) }
+            case 5: if let p = pick { put(station, sim, repo, [p.id.number], .shipped) }
+            default: _ = Rules.apply([.restack], at: sim.now, to: &station.facts, yard: station.yard)
+            }
+            unchanged(sim, station, bytewise: false) { _ = step(sim, seconds: 0.5 + Double(roll(4)) * 0.5, every: 15, until: { floating += unsupported(sim); return false }) }
+        }
+        unchanged(sim, station) {
+            let done = step(sim, seconds: 1800, every: 15, until: { floating += unsupported(sim); return caughtUp(sim, station) })
+            expect(done, "caught up: \(sim.lag() ?? "")")
+            if !done {
+                for job in sim.cargo.values { say("        move \(job.command.words) kind \(job.kind) rank \(job.rank) carrier \(job.carrier ?? "-") blocked \(job.blockedBy.sorted())") }
+                for (id, at) in (sim.shown["work"]?.crates ?? [:]).sorted(by: { $0.key < $1.key }) { say("        \(id): \(sim.describe(at)) · fact \(sim.describe(sim.targets(station)[id]?.at))") }
+            }
+        }
+        expect(sim.snapped == 0, "the watchdog never had to snap: \(sim.snapped)")
+        expect(floating.isEmpty, "no crate ever stood on nothing: \(Set(floating).sorted())")
+    }
+
+    private static func put(_ station: Station, _ sim: Simulation<Body>, _ repo: String, _ numbers: [Int], _ stage: Stage,
+                            office: String? = nil, quiet: Bool = false) {
+        let news = numbers.map { Event.work(WorkNews(crate: CrateID(repo: repo, number: $0), office: office, stage: stage, quiet: quiet)) }
+        _ = Rules.apply([.policy(repo: repo, staged)] + news, at: sim.now, to: &station.facts, yard: station.yard)
+    }
+
+    private static func shown(_ sim: Simulation<Body>, _ number: Int) -> Shown.At? {
+        sim.shown["work"]?.crates[CrateID(repo: "web", number: number)]
+    }
+
+    private static func caughtUp(_ sim: Simulation<Body>, _ station: Station) -> Bool {
+        sim.cargo.isEmpty && sim.shown[station.name] == Shown(crates: sim.targets(station).mapValues(\.at))
+    }
+
+    private static func unsupported(_ sim: Simulation<Body>) -> [String] {
+        let rows = (sim.shown["work"]?.crates ?? [:]).compactMap { id, at -> (CrateID, YardSpot)? in if case .row(let s) = at { return (id, s) }; return nil }
+        let standing = Set(rows.map(\.1.slot))
+        let bad = rows.filter { $0.1.level > 0 && !standing.contains(Slot(zone: $0.1.zone, column: $0.1.column, level: $0.1.level - 1)) }
+        return bad.map { "\($0.0)" }
+    }
+
+    private static func unchanged(_ sim: Simulation<Body>, _ station: Station, bytewise: Bool = true, _ body: () -> Void) {
+        for _ in 0..<64 {
+            let was = station.facts
+            _ = Rules.apply([.tick], at: sim.now, to: &station.facts, yard: station.yard)
+            if station.facts == was { break }
+        }
+        let facts = station.facts, before = bytewise ? bytes(facts) : Data()
+        body()
+        expect(station.facts == facts && (!bytewise || bytes(station.facts) == before), "playback never writes a fact")
+    }
+
+    private static func bytes(_ f: Facts) -> Data {
+        let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
+        return (try? e.encode(f)) ?? Data()
+    }
+
+    private static func settle(_ sim: Simulation<Body>, _ bodies: Body...) {
+        for m in bodies { sim.send(m, to: .lounge) }
+        _ = step(sim, seconds: 30, until: { bodies.allSatisfy { $0.path.isEmpty } })
+    }
+
+    private static func fixture() -> (Simulation<Body>, Station, Body) {
+        let world = World(demo: true)
+        let station = world.fleet.station("work")
+        let sim = Simulation<Body>(world: world)
+        sim.idleRoll = { 0.99 }
+        return (sim, station, body("a", sim: sim, station: station))
+    }
+
+    private static func body(_ id: String, sim: Simulation<Body>, station: Station) -> Body {
+        let m = Body(id: id, station: "work", home: Home(key: "kind:lounge", name: id, repo: "r", issue: nil), cwd: "",
+                     toolCount: 0, isSubagent: false, start: station.coreCenter)
+        m.state = .settled
+        m.activity = .waiting
+        sim.bodies[m.id] = m
+        return m
+    }
+
+    private static func step(_ sim: Simulation<Body>, seconds: Double, every: Int = 1, until done: () -> Bool = { false }) -> Bool {
+        var left = seconds, k = 0
+        while left > 0 {
+            sim.step(dt: Tempo.substep)
+            left -= Tempo.substep
+            k += 1
+            if k % every == 0, done() { return true }
+        }
+        return false
+    }
+
+    private static func test(_ name: String, _ body: () -> Void) {
+        let before = failures
+        body()
+        say((failures == before ? "PASS  " : "FAIL  ") + name)
+    }
+    private static func expect(_ ok: Bool, _ what: String) {
+        if !ok { failures += 1; say("      not so: \(what)") }
+    }
+    private static func say(_ text: String) { FileHandle.standardError.write((text + "\n").data(using: .utf8)!) }
+}

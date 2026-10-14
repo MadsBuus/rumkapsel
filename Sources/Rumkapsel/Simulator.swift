@@ -226,7 +226,7 @@ final class SimulatorModel: ObservableObject {
         github.injectSilently = true
         defer {
             github.injectSilently = false
-            if yardFirst { station.reconcileYards() }
+            if yardFirst { station.handle(station.world.reconcileYards()) }
             station.simulateGitHub()
         }
         for r in repos {
@@ -1241,12 +1241,7 @@ final class SimulatorModel: ObservableObject {
         case .officeOpened(let st, let key, let src, let arrival): return "officeOpened \(st)|\(key) \(src) \(arrival)"
         case .officeRenamed(_, let from, let to, _, _, let promoted): return "officeRenamed \(from) -> \(to)\(promoted ? " promoted" : "")"
         case .officeArchived(_, let key, _, _, _, _, let why): return "officeArchived \(key) (\(why))"
-        case .officeMerged(_, let key, let repo, let n): return "officeMerged \(key) \(repo)#\(n)"
-        case .carryToDeck(_, let repo, let cs): return "carryToDeck \(repo) x\(cs.count)"
-        case .crateCleared(_, let repo, let n): return "crateCleared \(repo)#\(n)"
         case .crewRoster(let m): return "crewRoster \(m.keys.sorted().joined(separator: ","))"
-        case .deconArrived(let st, let repo, let ns): return "deconArrived \(st) \(repo) \(ns.map { "#\($0)" }.joined(separator: ","))"
-        case .deconCleared(_, let repo, let n): return "deconCleared \(repo)#\(n)"
         case .crewActivity(let a): return "crewActivity \(a.login) \(a.kind) \(a.label)"
         case .crewHidden: return "crewHidden"
         case .layoutChanged: return "layoutChanged"

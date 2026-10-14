@@ -159,22 +159,20 @@ enum SimulationTests {
 
         test("a release merged: the vortex pulls every cleared crate into the hold, one after another, and only then does the rocket climb") {
             let (sim, station, _) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [], deck: [430, 431, 432], cleared: [430, 431, 432]), repo: "web")
+            put(station, sim, "web", [430, 431, 432], .cleared, quiet: true)
+            sim.play()
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.standBy, station: "work", repo: "web"))
             let docked = step(sim, seconds: 10, until: { sim.rockets["work|web"]?.kick == .docked })
             expect(docked, "the standing tip goes down onto its kick stage and the lift docks it")
+            _ = Rules.apply([.launched(repo: "web", hotfix: nil)], at: sim.now, to: &station.facts, yard: station.yard)
+            sim.play()
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: true, cargo: 3, command: .rocket(.launch, station: "work", repo: "web"))
             sim.stepRockets()
             guard let v = sim.vortices["work|web"] else { return expect(false, "the merge opens a vortex: phase \(String(describing: sim.rockets["work|web"]?.phaseKind))") }
             expect(v.waiting.count == 3 && v.flying.isEmpty, "three crates wait their turn: \(v.waiting.count)")
-            expect(station.layout(of: .deck).filter { !$0.carried }.isEmpty, "off the rows from the start: the vortex draws them")
-            var climbedEarly = false, climbed = false, heard = false
+            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .vortex = $0 { return true }; return false } == true, "off the rows from the start: the vortex draws them")
+            var climbedEarly = false, climbed = false
             let done = step(sim, seconds: 20, until: { sim.vortices["work|web"] == nil }, beat: {
-                if !heard, (sim.vortices["work|web"]?.flying.count ?? 0) > 0 {
-                    heard = true
-                    station.ledger.adopt(Ledger.Word(storage: [], deck: []), repo: "web")
-                    for c in station.ledger.disagreements(repo: "web") { station.ledger.snap(repo: "web", number: c.number) }
-                }
                 guard !climbed, sim.rockets["work|web"]?.phaseKind == .climb else { return }
                 climbed = true
                 climbedEarly = sim.vortices["work|web"].map { !$0.waiting.isEmpty || !$0.flying.isEmpty } ?? false
@@ -183,60 +181,13 @@ enum SimulationTests {
             expect(!climbedEarly, "the rocket waits for every crate")
             sim.stepRockets()
             expect(climbed || sim.rockets["work|web"]?.phaseKind == .climb, "then it climbs")
-        }
-
-        test("a carry: the crate is lifted onto the arms, walked to the deck and set down, the ledger keeping step") {
-            let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
-            let crate = CrateRef(station: "work", repo: "web", number: 440)
-            sim.send(m, to: .lounge)
-            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            let commands = station.carryToDeck(repo: "web", numbers: [440])
-            expect(commands.count == 1, "one carry for one crate: \(commands.count)")
-            var landedCalled = false
-            for c in commands { expect(sim.carry(c, onDone: { landedCalled = true }), "the deck had a place for it") }
-            expect(sim.world.isCarried(crate), "spoken for from the order")
-            sim.assignOrders()
-            expect(m.current?.crate == crate && !m.path.isEmpty, "handed to the one free body, who sets off: \(m.words)")
-            var lifted = false, arms: String?
-            _ = step(sim, seconds: 60, until: {
-                if m.load == .crate(crate) { lifted = true; arms = sim.world.crate(crate)?.carrier }
-                return m.current?.crate == nil
-            })
-            expect(lifted && arms == m.id, "on the arms, and the ledger says whose: \(String(describing: arms))")
-            expect(!m.hasLoad && m.landing != nil && !m.landing!.dropped, "set down on its slot")
-            expect(sim.world.crate(crate)?.area == .deck && sim.world.crate(crate)?.placed == .deck && sim.world.crate(crate)?.heading == nil,
-                   "the ledger has it landed on the deck: \(String(describing: sim.world.crate(crate)?.at))")
-            expect(sim.cargo.isEmpty, "the carry is over")
-            let landed = sim.drainCues().contains { if case .landed = $0 { return true }; return false }
-            expect(landed && !landedCalled, "the landing is a cue for the scene, which runs what it meant to do")
-            expect(m.current?.isRest == true, "and the body is back to rest: \(m.words)")
-        }
-
-        test("the board: a release carry takes a body off a yard carry it has not lifted yet, which goes back on the board") {
-            let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: [], cleared: [441]), repo: "web")
-            sim.send(m, to: .lounge)
-            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            let both = station.carryToDeck(repo: "web", numbers: [440, 441])
-            guard let yard = both.first(where: { $0.crate?.number == 440 }), let other = both.first(where: { $0.crate?.number == 441 }),
-                  case .carry(let crate, let spot, _) = other.kind else { return expect(false, "two carries: \(both.count)") }
-            sim.carry(yard, onDone: {})
-            sim.assignOrders()
-            expect(m.current?.id == yard.id && sim.rank(of: yard) == .yard, "the yard carry is taken: \(m.words)")
-            sim.world.unorder(crate)
-            let release = Command.carry(crate, from: spot, to: .deck)
-            sim.carry(release, rank: .release, onDone: {})
-            expect(sim.rank(of: release) == .release, "a carry into the cleared rows is release work")
-            sim.assignOrders()
-            expect(m.current?.id == release.id, "taken off the yard carry for the release: \(m.words)")
-            expect(sim.cargo[yard.id]?.carrier == nil, "the yard carry is back on the board, nobody on it")
-            expect(m.wonderUntil > sim.clock, "a beat, head up, before it goes")
+            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .aboard = $0 { return true }; return false } == true, "and every crate is shown aboard")
         }
 
         test("a cleared rocket waits with its crates on their rows, and standing it down takes nothing back") {
             let (sim, station, _) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [], deck: [440, 441], cleared: [440, 441]), repo: "web")
+            put(station, sim, "web", [440, 441], .cleared, quiet: true)
+            sim.play()
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.load(2), station: "work", repo: "web"))
             _ = step(sim, seconds: 2)
@@ -245,37 +196,39 @@ enum SimulationTests {
             sim.rocket(station: "work", repo: "web", label: "", untested: false, tall: false, cargo: 2,
                        command: .rocket(.standBy, station: "work", repo: "web"))
             expect(sim.rockets["work|web"]?.stage == .standBy, "standing by again")
-            expect(station.ledger.crates(of: "web").allSatisfy { $0.placed == .deck }, "the crates still on their rows")
+            expect(sim.shown["work"]?.crates.values.allSatisfy { if case .row(let s) = $0 { return s.zone == .cleared }; return false } == true,
+                   "the crates still on their rows")
         }
 
         test("the board: a body with a crate on its arms is not taken off its carry") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440, 441], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            put(station, sim, "web", [441], .qa, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            let both = station.carryToDeck(repo: "web", numbers: [440, 441])
-            guard let yard = both.first(where: { $0.after.isEmpty }), let other = both.first(where: { $0.id != yard.id }),
-                  let first = yard.crate, case .carry(let crate, let spot, _) = other.kind else { return expect(false, "two carries: \(both.count)") }
-            sim.carry(yard, onDone: {})
-            sim.assignOrders()
+            let first = CrateRef(station: "work", repo: "web", number: 440)
+            put(station, sim, "web", [440], .qa)
             expect(step(sim, seconds: 60, until: { m.load == .crate(first) }), "up on the arms")
-            sim.world.unorder(crate)
-            let release = Command.carry(crate, from: spot, to: .pad)
-            sim.carry(release, onDone: {})
+            put(station, sim, "web", [441], .cleared)
+            sim.play()
             sim.assignOrders()
-            expect(m.current?.id == yard.id && m.load == .crate(first), "it keeps the crate it holds: \(m.words)")
-            expect(sim.cargo[release.id]?.carrier == nil, "the release waits for the next free hands")
+            let release = sim.cargo.values.first { $0.crate.number == 441 }
+            expect(m.current?.crate == first && m.load == .crate(first), "it keeps the crate it holds: \(m.words)")
+            expect(release?.rank == .release && release?.carrier == nil, "the release waits for the next free hands")
         }
 
         test("the board: a message takes its body off a carry it has not lifted yet, which goes back on the board") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let carry = station.carryToDeck(repo: "web", numbers: [440]).first else { return expect(false, "a carry") }
-            sim.carry(carry, onDone: {})
+            put(station, sim, "web", [440], .qa)
+            sim.play()
             sim.assignOrders()
-            expect(m.current?.id == carry.id && !m.hasLoad, "on its way to the crate: \(m.words)")
+            guard let carry = m.current, carry.crate != nil else { return expect(false, "a carry in hand: \(m.words)") }
+            expect(!m.hasLoad, "on its way to the crate: \(m.words)")
             let desk = station.cells(of: .room(m.home.key)).first ?? m.cell
             let message = Command(kind: .work(office: m.home.key), words: "working your message")
             sim.post(message, for: m, rank: .message, at: desk, place: .room(m.home.key))
@@ -289,13 +242,14 @@ enum SimulationTests {
 
         test("the board: packing waits for its worker's hands to be free, then it is the next thing done") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let carry = station.carryToDeck(repo: "web", numbers: [440]).first, let crate = carry.crate else { return expect(false, "a carry") }
-            sim.carry(carry, onDone: {})
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "up on the arms")
+            guard let carry = m.current else { return expect(false, "a carry in hand") }
             let desk = station.cells(of: .room(m.home.key)).first ?? m.cell
             let pack = Command.pack(office: m.home.key)
             sim.post(pack, for: m, rank: .yard, at: desk, place: .room(m.home.key))
@@ -306,12 +260,12 @@ enum SimulationTests {
 
         test("the board: a body keeps one of each kind of its own orders waiting, the newest") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let carry = station.carryToDeck(repo: "web", numbers: [440]).first, let crate = carry.crate else { return expect(false, "a carry") }
-            sim.carry(carry, onDone: {})
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "a crate on its arms, which no order takes it from")
             let desk = station.cells(of: .room(m.home.key)).first ?? m.cell
             let first = Command.stow(office: m.home.key), second = Command.stow(office: m.home.key)
@@ -324,7 +278,8 @@ enum SimulationTests {
 
         test("idle is no order: a carry takes a body out of the shower, and the bath is left as it was") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = true
@@ -332,37 +287,38 @@ enum SimulationTests {
             expect(step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil }), "in it")
             expect(!sim.start(m, .rest(place: .lounge, home: m.home.key, office: m.home.name, yours: true, asleep: false)) && m.bathing,
                    "a plain start does not cut into the visit, and nothing is left waiting on the body")
-            guard let carry = station.carryToDeck(repo: "web", numbers: [440]).first else { return expect(false, "a carry") }
-            sim.carry(carry, onDone: {})
+            put(station, sim, "web", [440], .qa)
+            sim.play()
             sim.assignOrders()
-            expect(m.current?.id == carry.id, "out of the shower for the carry: \(m.words)")
+            expect(m.current?.crate?.number == 440, "out of the shower for the carry: \(m.words)")
             expect(m.fixture == nil && !m.drying && m.place != .bath, "off the fixture, no towel, and the bath no longer its place")
         }
 
         test("dismissed with a crate on its arms, a body sets it down first, then leaves") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let carry = station.carryToDeck(repo: "web", numbers: [440]).first, let crate = carry.crate else { return expect(false, "a carry") }
-            sim.carry(carry, onDone: {})
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
+            let crate = CrateRef(station: "work", repo: "web", number: 440)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "up on the arms")
+            guard let carry = m.current else { return expect(false, "a carry in hand") }
             sim.dismiss(m)
             expect(m.current?.id == carry.id && m.state == .leaving, "it keeps the carry in hand: \(m.words)")
             expect(step(sim, seconds: 60, until: { m.current.map { if case .leave = $0.kind { return true }; return false } ?? false }), "then it leaves: \(m.words)")
-            expect(!m.hasLoad && sim.world.crate(crate)?.area == .deck, "with the crate set down on the deck")
+            expect(!m.hasLoad && shown(sim, 440)?.zone == .testing, "with the crate set down on the deck: \(sim.describe(shown(sim, 440)))")
             expect(m.place == .hangar && !m.path.isEmpty, "on its way out")
         }
 
         test("a wedged carrier gives up after ten seconds: the crate lies behind it and the carry is queued again") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             let crate = CrateRef(station: "work", repo: "web", number: 440)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
             m.wedged = true
             var gaveUp = false
@@ -371,7 +327,7 @@ enum SimulationTests {
             _ = step(sim, seconds: 12, until: { gaveUp })
             expect(gaveUp, "said so in the log")
             expect(!m.hasLoad && m.landing?.dropped == true, "the crate is down behind it")
-            expect(sim.world.crate(crate)?.carrier == nil && sim.world.isCarried(crate) == false, "off the arms in the ledger: \(String(describing: sim.world.crate(crate)?.at))")
+            if case .parked? = shown(sim, 440) {} else { expect(false, "shown parked where it fell: \(sim.describe(shown(sim, 440)))") }
             let job = sim.cargo.values.first
             expect(job?.carrier == nil && job?.gaveUp.contains(m.id) == true, "queued again, this carrier passed over while there is anyone else")
             if case .carry(_, let from, _)? = job?.command.kind, let landing = m.landing {
@@ -415,12 +371,12 @@ enum SimulationTests {
 
         test("a carrier left off the floor with a crate on its arms steps back onto it and delivers") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             let crate = CrateRef(station: "work", repo: "web", number: 440)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
             let north = station.walkable.map(\.y).min()! - 4
             m.pos = SIMD2(Double(station.walkable.filter { $0.y == north + 4 }.map(\.x).min()!), Double(north))
@@ -431,18 +387,18 @@ enum SimulationTests {
             sim.onEvent = { if case .log(let t) = $0, t.contains(" gives up ") { gaveUp = true }; was($0) }
             _ = step(sim, seconds: 90, until: { m.current?.crate == nil })
             expect(!gaveUp, "never gave up")
-            expect(sim.world.crate(crate)?.area == .deck, "down on the deck: \(String(describing: sim.world.crate(crate)?.at))")
+            expect(shown(sim, 440)?.zone == .testing, "down on the deck: \(sim.describe(shown(sim, 440)))")
             expect(station.walkable.contains(m.cell), "and back on the floor at \(m.cell.x),\(m.cell.y)")
         }
 
         test("a carrier giving up off the floor drops the crate on the nearest floor, not in space") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             let crate = CrateRef(station: "work", repo: "web", number: 440)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
-            sim.assignOrders()
+            put(station, sim, "web", [440], .qa)
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) && m.phaseKind == .haul }), "up on the arms and hauling")
             let north = station.walkable.map(\.y).min()! - 4
             m.pos = SIMD2(Double(station.walkable.filter { $0.y == north + 4 }.map(\.x).min()!), Double(north))
@@ -464,14 +420,13 @@ enum SimulationTests {
 
         test("a crate a walk cannot get any closer to is reached with the last shuffle, not waited on for good") {
             let (sim, station, m) = fixture()
-            for (k, repo) in ["a", "b", "c", "d"].enumerated() {
-                station.ledger.adopt(Ledger.Word(storage: [300 + k], deck: []), repo: repo)
-                _ = station.layout(of: .storage)
-            }
-            station.ledger.adopt(Ledger.Word(storage: [444], deck: []), repo: "web")
+            for (k, repo) in ["a", "b", "c", "d"].enumerated() { put(station, sim, repo, [300 + k], .stored, quiet: true) }
+            put(station, sim, "web", [444], .stored, quiet: true)
+            sim.play()
+            put(station, sim, "web", [444], .qa)
+            sim.play()
             let crate = CrateRef(station: "work", repo: "web", number: 444)
-            let commands = station.carryToDeck(repo: "web", numbers: [444])
-            guard case .carry(_, let from, _)? = commands.first?.kind else { return expect(false, "a carry") }
+            guard case .carry(_, let from, _)? = sim.cargo.values.first(where: { $0.crate.number == 444 })?.command.kind else { return expect(false, "a carry") }
             let at = SIMD2(from.pos.x - station.offset.x, from.pos.z - station.offset.y)
             let crateCell = Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded()))
             let own = [Cell(x: crateCell.x + 1, y: crateCell.y + 1), Cell(x: crateCell.x - 1, y: crateCell.y + 1),
@@ -481,7 +436,6 @@ enum SimulationTests {
             for c in station.walkable where c != own && abs(c.x - crateCell.x) <= 3 && abs(c.y - crateCell.y) <= 3 {
                 station.obstacles.insert(Cell(x: c.x * Station.fine, y: c.y * Station.fine))
             }
-            for c in commands { sim.carry(c, onDone: {}) }
             sim.assignOrders()
             var gaveUp = false
             let was = sim.onEvent
@@ -492,7 +446,8 @@ enum SimulationTests {
 
         test("a crate left just off the floor, its office gone from under it, is still fetched") {
             let (sim, station, m) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
+            put(station, sim, "web", [440], .stored, quiet: true)
+            sim.play()
             let crate = CrateRef(station: "work", repo: "web", number: 440)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
@@ -501,7 +456,8 @@ enum SimulationTests {
             let spot = Spot(area: .office, station: "work", owner: "gone", label: "gone", cell: Cell(x: x, y: north - 1),
                             pos: SIMD3(station.offset.x + Double(x), 0.12, station.offset.y + Double(north - 1)))
             expect(!station.walkable.contains(spot.cell), "the crate lies off the floor")
-            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c.from(spot), onDone: {}) }
+            sim.shown["work"]?.crates[CrateID(repo: "web", number: 440)] = .parked(spot)
+            sim.play()
             sim.assignOrders()
             var gaveUp = false
             let was = sim.onEvent
@@ -509,7 +465,6 @@ enum SimulationTests {
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
-
         test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
@@ -537,17 +492,6 @@ enum SimulationTests {
             expect(couches.count > 1 && beds.count > 1, "several seated and several in bed: \(couches.count) couches, \(beds.count) beds")
             expect(Set(couches).count == couches.count, "one to a couch: \(couches.sorted())")
             expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
-        }
-
-        test("a crate the board takes back to storage before it is lifted: its carry to the deck is called off") {
-            let (sim, station, _) = fixture()
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
-            for c in station.carryToDeck(repo: "web", numbers: [440]) { sim.carry(c, onDone: {}) }
-            expect(sim.cargo.count == 1, "one carry to the deck")
-            station.ledger.adopt(Ledger.Word(storage: [440], deck: []), repo: "web")
-            sim.callOffCarriesTakenBack()
-            expect(sim.cargo.isEmpty, "called off: \(sim.cargo.count)")
-            expect(station.ledger["web", 440]?.placed == .storage && station.ledger["web", 440]?.heading == nil, "still in storage, nowhere to go")
         }
 
         test("a sleeper given something to do stands up where it lies before it walks anywhere") {
@@ -588,6 +532,17 @@ enum SimulationTests {
 
         say(failures == 0 ? "simulation: all passed" : "simulation: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    private static let staged = RepoFacts(hasStaging: true, hasCleared: true)
+
+    private static func put(_ station: Station, _ sim: Simulation<Body>, _ repo: String, _ numbers: [Int], _ stage: Stage, quiet: Bool = false) {
+        let news = numbers.map { Event.work(WorkNews(crate: CrateID(repo: repo, number: $0), stage: stage, quiet: quiet)) }
+        _ = Rules.apply([.policy(repo: repo, staged)] + news, at: sim.now, to: &station.facts, yard: station.yard)
+    }
+
+    private static func shown(_ sim: Simulation<Body>, _ number: Int, repo: String = "web") -> Shown.At? {
+        sim.shown["work"]?.crates[CrateID(repo: repo, number: number)]
     }
 
     private static func fixture() -> (Simulation<Body>, Station, Body) {

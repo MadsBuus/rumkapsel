@@ -1,13 +1,17 @@
 import Foundation
 
 struct Cargo {
-    var command: Command; let onDone: () -> Void; var carrier: String?; var roomKey: String = ""
+    var command: Command; var carrier: String?; var roomKey: String = ""
     var aim: Spot
     var hurry = false
     var gaveUp: Set<String> = []
     var postedAt = 0.0
     var prefer: String?
     var rank = Rank.yard
+    let crate: CrateID
+    var kind: MoveKind
+    var blockedBy: Set<CrateID> = []
+    var spot: YardSpot?
 }
 
 enum Cue {
@@ -16,7 +20,6 @@ enum Cue {
     case towel(String, station: String, taken: Bool)
     case hop(String)
     case clearCones(String)
-    case landed(Cargo)
     case reveal(String)
     case foldCrate(String)
     case stow(String)
@@ -24,7 +27,9 @@ enum Cue {
     case ownDropped(String, Command)
     case packed(String)
     case redraw
-    case carryOrdered(id: Int, crate: CrateRef)
+    case hatch(String)
+    case appear(String, CrateID)
+    case vanish(String, CrateID)
     case sweep(up: Bool)
     case crateOrdered(key: String, station: String, slot: Int, repo: String)
     case crateDropped(key: String, station: String, slot: Int)
@@ -83,6 +88,13 @@ final class Simulation<B: Body> {
     var spareHallway: [String: (cells: [Cell], since: Double)] = [:]
     var flights: [Flight] = []
     var rockets: [String: RocketJob] = [:]
+    var shown: [String: Shown] = [:]
+    var played: Set<String> = []
+    var stalls: [String: (mark: String, since: Double)] = [:]
+    var stirred: [String: (view: Shown, at: Double)] = [:]
+    var calms: [String: Calm] = [:]
+    var snapped = 0
+    var packageCell: (Station, String) -> Cell? = { _, _ in nil }
     let epoch = Date()
     var now: Date { live ? Date() : epoch.addingTimeInterval(clock) }
     var visitLog: [(kind: String, lasted: Double, planned: Double)] = []
@@ -106,6 +118,7 @@ final class Simulation<B: Body> {
         if dt > Tempo.catchUp {
             clock += dt - substep
             for m in bodies.values { m.stallMark = "" }
+            skip()
             tick(substep)
             return
         }
@@ -135,11 +148,12 @@ final class Simulation<B: Body> {
     }
 
     private func beat() {
+        for (station, effects) in world.beatFacts(now: now) { heard(effects, station: station) }
+        play()
         assignOrders()
         stepRockets()
         reconcileBodies()
         onBeat(contractHallways())
-        world.beatFacts(now: now)
         replanBlockedWalks()
     }
 
@@ -225,12 +239,6 @@ final class Simulation<B: Body> {
         case .roam:
             if !startRoam(m, station: station) { send(m, to: restPlace(m)) }
         }
-    }
-
-    func reaim(_ id: Int) {
-        guard let job = cargo[id], case .carry(let crate, _, let yard) = job.command.kind,
-              let fresh = world.slotNow(for: crate, toward: yard), fresh.pos != job.aim.pos else { return }
-        cargo[id]?.aim = fresh
     }
 
     // MARK: rest and walks
@@ -635,8 +643,8 @@ final class Simulation<B: Body> {
             m.state = .settled
         case .settled:
             if m.isQA, clock >= m.nextWanderAt {
-                let stacks = Dictionary(grouping: station.layout(of: .deck).filter { !$0.cleared }, by: \.column)
-                    .values.compactMap { $0.first }.sorted { $0.column < $1.column }
+                let stacks = Dictionary(grouping: Layout.spots(station.facts, station.yard).values.filter { $0.zone == .testing }, by: \.column)
+                    .values.compactMap { $0.min { $0.level < $1.level } }.sorted { $0.column < $1.column }
                 if !stacks.isEmpty {
                     let stack = stacks[m.qaStop % stacks.count]
                     m.qaStop += 1

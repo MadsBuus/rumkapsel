@@ -10,9 +10,6 @@ enum WorldEvent {
     case officeOpened(station: String, key: String, source: Source, arrival: Arrival)
     case officeRenamed(station: String, from: String, to: String, name: String, session: String, promoted: Bool)
     case officeArchived(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String)
-    case officeMerged(station: String, key: String, repo: String, number: Int)
-    case carryToDeck(station: String, repo: String, commands: [Command])
-    case crateCleared(station: String, repo: String, number: Int)
     case releaseOpened(station: String, repo: String, number: Int, base: String, untested: Bool, isProduction: Bool)
     case releaseMerged(station: String, repo: String, number: Int, base: String, title: String, isProduction: Bool)
     case stagingOpened(station: String, repo: String, number: Int)
@@ -21,8 +18,6 @@ enum WorldEvent {
     case rocketCommand(station: String, repo: String, label: String, untested: Bool, tall: Bool, cargo: Int, command: Command, hotfix: Int? = nil)
     case prompt(station: String, key: String, minionId: String, count: Int)
     case crewRoster(members: [String: CrewMember])
-    case deconArrived(station: String, repo: String, numbers: [Int])
-    case deconCleared(station: String, repo: String, number: Int)
     case crewActivity(CrewActivity)
     case crewHidden
     case layoutChanged

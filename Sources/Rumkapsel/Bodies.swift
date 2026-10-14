@@ -28,13 +28,7 @@ extension Simulation {
         case .carry(let crate, let from, _):
             guard cargo[c.id] != nil else { finish(m); return }
             var spot = from
-            if m.load == .crate(crate), let st = fleet.stations[m.station] {
-                let behind = dropPoint(m, station: st)
-                dropLoad(m)
-                let cell = Cell(x: Int(behind.x.rounded()), y: Int(behind.y.rounded()))
-                spot = Spot(area: from.area, station: from.station, owner: from.owner, label: from.label, cell: cell,
-                            pos: SIMD3(st.offset.x + behind.x, 0.12, st.offset.y + behind.y))
-            }
+            if m.load == .crate(crate), let dropped = dropLoad(m) { spot = dropped }
             cargo[c.id]?.command = c.from(spot)
             cargo[c.id]?.carrier = nil
             cargo[c.id]?.hurry = false

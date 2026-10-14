@@ -4,14 +4,14 @@ import simd
 final class Vortex {
     let key: String
     let station: String
-    var waiting: [(crate: CrateRef, from: Spot)]
-    var flying: [(crate: CrateRef, from: Spot, at: Double)] = []
+    var waiting: [(crate: CrateRef, from: Spot, into: RocketID)]
+    var flying: [(crate: CrateRef, from: Spot, into: RocketID, at: Double)] = []
     let ring: SIMD3<Double>
     let openedAt: Double
     var closedAt: Double?
     var nextAt: Double
 
-    init(key: String, station: String, crates: [(crate: CrateRef, from: Spot)], ring: SIMD3<Double>, at clock: Double) {
+    init(key: String, station: String, crates: [(crate: CrateRef, from: Spot, into: RocketID)], ring: SIMD3<Double>, at clock: Double) {
         self.key = key; self.station = station; waiting = crates; self.ring = ring
         openedAt = clock
         nextAt = clock + Vortex.formSeconds
@@ -66,26 +66,33 @@ final class Vortex {
 }
 
 extension Simulation {
-    func openVortex(_ r: RocketJob, station: Station, from yard: Yard, crates numbers: [Int]) {
-        guard vortices[r.key] == nil, !numbers.isEmpty else { return }
-        let layout = station.layout(of: yard).filter { $0.repo == r.repo && !$0.carried && numbers.contains($0.number) }
-        guard !layout.isEmpty, let field = station.hall.padField else {
-            StationLog.write("release", "\(r.key) no vortex: nothing of \(numbers) on the \(yard) rows")
-            return
+    func openVortex(_ r: RocketJob, station: Station) {
+        guard vortices[r.key] == nil, let field = station.hall.padField, var view = shown[station.name] else { return }
+        var standing: [(crate: CrateRef, from: Spot, into: RocketID)] = []
+        for c in station.facts.crates.values.sorted(by: { $0.id < $1.id }) {
+            guard case .aboard(let rocket) = c.place, loads(r, rocket) else { continue }
+            let ref = CrateRef(station: station.name, repo: c.id.repo, number: c.id.number)
+            switch view.crates[c.id] {
+            case .row(let s)?: standing.append((ref, self.standing(station, c.id.repo, s), rocket))
+            case .parked(let p)?: standing.append((ref, p, rocket))
+            default: continue
+            }
         }
-        let middle = layout.map { $0.pos.x }.reduce(0, +) / Double(layout.count)
+        guard !standing.isEmpty else { return }
+        let middle = standing.map { $0.from.pos.x }.reduce(0, +) / Double(standing.count)
         let x = min(max(middle, station.offset.x + field.from.x + 0.6), station.offset.x + field.to.x - 0.6)
         let ring = SIMD3(x, Vortex.height, station.offset.y + field.from.y - 0.55)
-        let crates = layout.sorted { a, b in
-            let da = simd_distance(SIMD2(a.pos.x, a.pos.z), SIMD2(ring.x, ring.z)), db = simd_distance(SIMD2(b.pos.x, b.pos.z), SIMD2(ring.x, ring.z))
-            return abs(da - db) > 0.01 ? da < db : a.level > b.level
-        }.map { s -> (crate: CrateRef, from: Spot) in
-            (CrateRef(station: station.name, repo: s.repo, number: s.number), station.standing(s, in: yard))
+        let crates = standing.sorted { a, b in
+            let da = simd_distance(SIMD2(a.from.pos.x, a.from.pos.z), SIMD2(ring.x, ring.z)), db = simd_distance(SIMD2(b.from.pos.x, b.from.pos.z), SIMD2(ring.x, ring.z))
+            return abs(da - db) > 0.01 ? da < db : a.from.level > b.from.level
         }
         for c in crates {
-            station.ledger.order(repo: c.crate.repo, number: c.crate.number, to: .pad)
-            world.claim(c.crate)
+            let id = CrateID(repo: c.crate.repo, number: c.crate.number)
+            for (cid, job) in cargo where job.crate == id && job.command.crate?.station == station.name { callOff(cid) }
+            view.crates[id] = .vortex(c.into)
         }
+        shown[station.name] = view
+        settle(station.name)
         vortices[r.key] = Vortex(key: r.key, station: station.name, crates: crates, ring: ring, at: clock)
         StationLog.write("release", "\(r.key) vortex opens at \(String(format: "%.1f", clock)) for \(crates.map { "#\($0.crate.number)" }.joined(separator: " "))")
         cue(.redraw)
@@ -100,21 +107,19 @@ extension Simulation {
 
     func stepVortices() {
         for (key, v) in vortices {
-            guard let station = fleet.stations[v.station] else { vortices[key] = nil; continue }
+            guard fleet.stations[v.station] != nil else { vortices[key] = nil; continue }
             if v.closedAt == nil, clock >= v.nextAt, !v.waiting.isEmpty {
                 let next = v.waiting.removeFirst()
-                v.flying.append((next.crate, next.from, clock))
+                v.flying.append((next.crate, next.from, next.into, clock))
                 v.nextAt = clock + Vortex.every
             }
             for (i, f) in v.flying.enumerated().reversed() where clock - f.at >= Vortex.flightSeconds {
                 v.flying.remove(at: i)
-                world.setDown(f.crate, at: world.padSpot(station: station, repo: f.crate.repo, key: v.key))
-                landed(f.crate, in: .pad)
+                shown[v.station]?.crates[CrateID(repo: f.crate.repo, number: f.crate.number)] = .aboard(f.into)
             }
             if v.closedAt == nil, v.waiting.isEmpty, v.flying.isEmpty {
                 v.closedAt = clock
                 StationLog.write("release", "\(key) vortex closes at \(String(format: "%.1f", clock)), rocket \(rockets[key].map { "\($0.phaseKind)" } ?? "gone")")
-                fleet.save()
             }
             if let closed = v.closedAt, clock - closed >= Vortex.fadeSeconds { vortices[key] = nil }
         }

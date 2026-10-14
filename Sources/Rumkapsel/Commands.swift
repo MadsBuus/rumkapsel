@@ -9,7 +9,7 @@ struct CrateRef: Hashable {
     var words: String { "#\(number)" }
 }
 
-struct Spot {
+struct Spot: Equatable {
     enum Area: String, Codable { case office, storage, deck, tested, pad, decon }
     var area: Area
     var station: String
@@ -35,11 +35,10 @@ struct Spot {
 struct Command {
     let id: Int
     let kind: Kind
-    let after: [Int]
     let words: String
 
     enum Kind {
-        case carry(crate: CrateRef, from: Spot, to: Yard)
+        case carry(crate: CrateRef, from: Spot, to: Zone)
         case deliverOffice(order: Int)
         case goTo(place: Place)
         case bath(kind: Bath, back: Place, seconds: Double)
@@ -163,36 +162,34 @@ struct Command {
     private static var nextId = 0
     static func nextCommandId() -> Int { nextId += 1; return nextId }
 
-    init(kind: Kind, words: String, after: [Int] = []) {
+    init(kind: Kind, words: String) {
         self.id = Command.nextCommandId()
         self.kind = kind
         self.words = words
-        self.after = after
     }
 
-    private init(id: Int, kind: Kind, words: String, after: [Int]) {
-        self.id = id; self.kind = kind; self.words = words; self.after = after
-    }
-
-    func aimed(at yard: Yard) -> Command {
-        guard case .carry(let crate, let from, _) = kind else { return self }
-        return Command(id: id, kind: .carry(crate: crate, from: from, to: yard), words: "carrying \(crate.words) back to \(yard.words)", after: after)
+    private init(id: Int, kind: Kind, words: String) {
+        self.id = id; self.kind = kind; self.words = words
     }
 
     func from(_ spot: Spot) -> Command {
         guard case .carry(let crate, _, let to) = kind else { return self }
-        return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words, after: after)
+        return Command(id: id, kind: .carry(crate: crate, from: spot, to: to), words: words)
+    }
+
+    func carrying(from spot: Spot, to zone: Zone, words: String) -> Command {
+        guard case .carry(let crate, _, _) = kind else { return self }
+        return Command(id: id, kind: .carry(crate: crate, from: spot, to: zone), words: words)
     }
 
     func reworded(_ words: String) -> Command {
-        Command(id: id, kind: kind, words: words, after: after)
+        Command(id: id, kind: kind, words: words)
     }
 
     // MARK: the usual ones
 
-    static func carry(_ crate: CrateRef, from: Spot, to: Yard, after: [Int] = []) -> Command {
-        Command(kind: .carry(crate: crate, from: from, to: to),
-                words: "carrying \(crate.words) to \(to.words)", after: after)
+    static func carry(_ crate: CrateRef, from: Spot, to: Zone, words: String? = nil) -> Command {
+        Command(kind: .carry(crate: crate, from: from, to: to), words: words ?? "carrying \(crate.words) to \(to.words)")
     }
 
     static func deliverOffice(order: Int, name: String) -> Command {

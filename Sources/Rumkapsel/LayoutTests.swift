@@ -302,79 +302,15 @@ enum LayoutTests {
             }
         }
 
-        test("a full yard: every crate on its own zone's tiles, a tile to a repository, none sharing a place, every stack built from the floor") {
-            let a = fresh()
-            for (k, repo) in ["web", "api", "ios", "android"].enumerated() {
-                let base = 100 * (k + 1)
-                a.ledger.adopt(Ledger.Word(storage: Array(base..<base + 12), deck: Array(base + 50..<base + 62), cleared: Array(base + 50..<base + 56)), repo: repo)
-            }
-            for (yard, zones) in [(Yard.storage, [0: a.hall.storageCells]), (Yard.deck, [0: a.hall.clearedCells, 1: a.hall.stagedCells])] {
-                let layout = a.layout(of: yard)
-                expect(layout.count == 48, "\(yard) holds all 48: \(layout.count)")
-                for s in layout { expect(zones[s.group]?.contains(s.cell) == true, "\(yard) #\(s.number) stands in its zone, not on \(s.cell)") }
-                for (place, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)|\($0.level)" }) where here.count > 1 {
-                    expect(false, "\(yard) \(place) holds \(here.count) crates")
-                }
-                for (tile, here) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
-                    expect(false, "\(yard) tile \(tile) mixes \(Set(here.map(\.repo)).sorted())")
-                }
-                for (column, stack) in Dictionary(grouping: layout, by: { "\($0.group)|\($0.column)" }) {
-                    expect(Set(stack.map(\.level)) == Set(0..<stack.count), "\(yard) column \(column) is built from the floor: \(stack.map(\.level).sorted())")
-                }
-            }
-        }
-
-        test("each repository piles in its own column, untested under tested and waiting under that; the first by the walkway, the next a column away") {
-            let a = fresh()
-            a.ledger.adopt(Ledger.Word(storage: [1, 2], deck: Array(10..<20), cleared: Array(10..<16)), repo: "web")
-            _ = a.layout(of: .deck); _ = a.layout(of: .storage)
-            a.ledger.adopt(Ledger.Word(storage: [30], deck: [40, 41], cleared: [40]), repo: "ios")
-            let deck = a.layout(of: .deck), storage = a.layout(of: .storage)
-            func columns(_ repo: String, _ cells: [YardSlot]) -> Set<Int> { Set(cells.filter { $0.repo == repo }.map(\.cell.x)) }
-            let walkway = a.hall.walkwayCells[0].x
-            let web = columns("web", deck + storage), ios = columns("ios", deck + storage)
-            expect(web == [walkway - 1], "web's tested, untested and waiting all in the column by the walkway: \(web.sorted())")
-            expect(ios == [walkway - 3], "ios a column away from web: \(ios.sorted())")
-            let tested = deck.filter { $0.repo == "web" && $0.cleared }
-            expect(tested.contains { $0.cell.y == a.hall.clearedGrid[0][0].y }, "web's tested pile starts by the field")
-            for (cell, here) in Dictionary(grouping: deck + storage, by: { "\($0.cell)" }) where Set(here.map(\.repo)).count > 1 {
-                expect(false, "tile \(cell) mixes \(Set(here.map(\.repo)).sorted())")
-            }
-        }
-
-        test("the facts' yard spots stand exactly where the ledger's yard draws the same columns") {
-            let a = fresh()
-            a.ledger.adopt(Ledger.Word(storage: Array(1...14), deck: [], cleared: []), repo: "web")
-            a.ledger.adopt(Ledger.Word(storage: [20, 21], deck: [30, 31, 32], cleared: [31]), repo: "api")
-            _ = a.ledger.adoptDecon(open: [40, 41, 42], repo: "bot")
-            var f = Facts()
-            var old: [CrateID: YardSlot] = [:]
-            for yard in [Yard.storage, .deck, .decon] {
-                for s in a.layout(of: yard) {
-                    let zone: Zone = yard == .storage ? .waiting : yard == .decon ? .decon : s.group == 0 ? .cleared : .testing
-                    let id = CrateID(repo: s.repo, number: s.number)
-                    f.crates[id] = CrateFact(id: id, place: CrateFact.Place(zone), seq: s.level * 1000 + f.crates.count, column: s.column)
-                    old[id] = s
-                }
-            }
-            let spots = Layout.spots(f, a.yard)
-            expect(spots.count == old.count && old.count == 22, "every crate drawn: \(spots.count) of \(old.count)")
-            for (id, s) in old {
-                guard let n = spots[id] else { continue }
-                expect(n.cell == s.cell && n.level == s.level && simd_distance(n.pos, s.pos) < 1e-9 && n.yaw == s.yaw,
-                       "\(id): \(n.cell) L\(n.level) \(n.pos) against \(s.cell) L\(s.level) \(s.pos)")
-            }
-        }
-
         test("a station keeps its facts across a save, and an older save brings its facts over from the ledger") {
             let a = fresh()
-            a.ledger.adopt(Ledger.Word(storage: [1, 2], deck: [3], cleared: [3]), repo: "web")
             let news: [Event] = [(1, Stage.stored), (2, .stored), (4, .qa), (5, .stored)].map { .work(WorkNews(crate: CrateID(repo: "web", number: $0.0), stage: $0.1)) }
             _ = Rules.apply([.policy(repo: "web", RepoFacts(hasStaging: true, hasCleared: true))] + news + [.launched(repo: "web", hotfix: 5)],
                             at: Date(timeIntervalSince1970: 0), to: &a.facts, yard: a.yard)
             guard let json = try? JSONEncoder().encode(a.saved), let saved = try? JSONDecoder().decode(Station.Saved.self, from: json) else {
                 return expect(false, "the save round-trips")
             }
+            expect(saved.ledger == nil, "no ledger is written any more")
             let b = Station(name: "work")
             b.restore(saved)
             var want = a.facts
@@ -383,27 +319,27 @@ enum LayoutTests {
             expect(b.facts == want, "the same facts but what flew: \(b.facts.crates.keys.sorted())")
             var old = saved
             old.facts = nil
+            old.ledger = LegacyLedger(crates: [
+                "web|1": .init(repo: "web", number: 1, wanted: "storage", placed: "storage"),
+                "web|2": .init(repo: "web", number: 2, wanted: "storage", placed: "storage"),
+                "web|3": .init(repo: "web", number: 3, wanted: "deck", placed: "deck", cleared: true),
+            ])
             let c = Station(name: "work")
             c.restore(old)
             expect(c.facts.crates.mapValues(\.place) == [CrateID(repo: "web", number: 1): .waiting, CrateID(repo: "web", number: 2): .waiting,
                                                          CrateID(repo: "web", number: 3): .cleared], "from the ledger: \(c.facts.crates.mapValues(\.place))")
-            let broken = String(decoding: json, as: UTF8.self).replacingOccurrences(of: "\"nextSeq\"", with: "\"nextSeqOld\"")
+            var both = saved
+            both.ledger = old.ledger
+            guard let bothJSON = try? JSONEncoder().encode(both) else { return expect(false, "the old save encodes") }
+            let broken = String(decoding: bothJSON, as: UTF8.self).replacingOccurrences(of: "\"place\"", with: "\"placeOld\"")
             let d = Station(name: "work")
             if let s = try? JSONDecoder().decode(Station.Saved.self, from: Data(broken.utf8)) { d.restore(s) } else { expect(false, "unreadable facts keep the save readable") }
             expect(d.facts.crates.count == 3 && Set(d.rooms.keys) == Set(b.rooms.keys), "unreadable facts come over from the ledger, the rooms as saved")
-        }
-
-        test("restacked, a repository's untested crates stand in the column of its tested ones, whoever is in storage") {
-            let a = fresh()
-            for (repo, n) in [("api", 30), ("android", 31), ("bot", 32)] { a.ledger.adopt(Ledger.Word(storage: [n], deck: [], cleared: []), repo: repo) }
-            a.ledger.adopt(Ledger.Word(storage: [], deck: [33], cleared: [33]), repo: "ios")
-            a.ledger.adopt(Ledger.Word(storage: [], deck: Array(10..<20), cleared: Array(14..<20)), repo: "web")
-            _ = a.layout(of: .storage); _ = a.layout(of: .deck)
-            a.ledger.forgetSlots()
-            _ = a.layout(of: .storage)
-            let deck = a.layout(of: .deck).filter { $0.repo == "web" }
-            let tested = Set(deck.filter(\.cleared).map(\.cell.x)), untested = Set(deck.filter { !$0.cleared }.map(\.cell.x))
-            expect(untested == tested, "web's untested in columns \(untested.sorted()), its tested in \(tested.sorted())")
+            var trimmed = String(decoding: json, as: UTF8.self)
+            for key in ["homes", "launches", "staging", "alien"] { trimmed = trimmed.replacingOccurrences(of: "\"\(key)\"", with: "\"\(key)Gone\"") }
+            let e = Station(name: "work")
+            if let s = try? JSONDecoder().decode(Station.Saved.self, from: Data(trimmed.utf8)), s.unreadable == nil { e.restore(s) } else { expect(false, "fields a save lacks take their defaults") }
+            expect(e.facts.crates.mapValues(\.place) == b.facts.crates.mapValues(\.place), "a save missing newer fields keeps its crates")
         }
 
         test("the yard is one hall: three zones of eight tiles, each beside an aisle or behind one, a walkway to the field") {

@@ -56,7 +56,7 @@ enum Layout {
             for (column, stack) in stacks {
                 let tile = column / 2
                 let cell = grid[min(tile / width, grid.count - 1)][tile % width]
-                let side = stacks[column ^ 1] != nil ? (column % 2 == 0 ? -0.25 : 0.25) : 0
+                let side = column % 2 == 0 ? -0.25 : 0.25
                 for (level, c) in stack.sorted(by: { $0.seq < $1.seq }).enumerated() {
                     let (jx, jz, yaw) = zone == .waiting ? jitter(repo: c.id.repo, number: c.id.number) : (0, 0, 0)
                     let pos = SIMD3(g.offset.x + Double(cell.x) + side + jx, Double(level) * Hands.level, g.offset.y + Double(cell.y) + jz)

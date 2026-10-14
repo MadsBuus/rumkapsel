@@ -43,17 +43,11 @@ struct Expect {
             if case .releaseMerged(_, let r, _, _, _, let p) = $0 { return r == repo && p == production }; return false
         }
     }
-    static func crateCleared(_ repo: String) -> Expect {
-        event("crateCleared \(repo)") { if case .crateCleared(_, let r, _) = $0 { return r == repo }; return false }
-    }
     static func boardMoved(_ repo: String, to stage: WorldEvent.Stage) -> Expect {
         event("boardMoved \(repo) -> \(stage)") { if case .boardMoved(let it, _, let to) = $0 { return it.repo == repo && to == stage }; return false }
     }
-    static func deconCleared(_ repo: String) -> Expect {
-        event("deconCleared \(repo)") { if case .deconCleared(_, let r, _) = $0 { return r == repo }; return false }
-    }
-    static func officeMerged(_ key: String) -> Expect {
-        event("officeMerged \(key)") { if case .officeMerged(_, let k, _, _) = $0 { return k == key }; return false }
+    static func arrived(_ number: Int, in zone: Zone) -> Expect {
+        event("arrived #\(number) in \(zone)") { if case .log(let t) = $0 { return t.contains("#\(number)") && t.hasSuffix(" to \(zone.words)") }; return false }
     }
     static func officeOpened(_ keyPrefix: String, _ arrival: WorldEvent.Arrival, board: String? = nil, peer: String? = nil) -> Expect {
         event("officeOpened \(keyPrefix)… \(arrival)\(board.map { " board(\($0))" } ?? "")\(peer.map { " peer(\($0))" } ?? "")") {
@@ -82,9 +76,9 @@ struct Expect {
 
     // MARK: commands
 
-    static func carry(_ number: Int? = nil, to yard: Yard) -> Expect {
-        command("carry \(number.map { "#\($0)" } ?? "any crate") to \(yard)") {
-            if case .carry(let crate, _, let to) = $0 { return to == yard && (number == nil || crate.number == number) }; return false
+    static func carry(_ number: Int? = nil, to zone: Zone) -> Expect {
+        command("carry \(number.map { "#\($0)" } ?? "any crate") to \(zone)") {
+            if case .carry(let crate, _, let to) = $0 { return to == zone && (number == nil || crate.number == number) }; return false
         }
     }
     static func deliverOffice(by who: String) -> Expect {
@@ -132,8 +126,12 @@ struct Scenario {
         self.floor = floor
     }
 
-    @MainActor static func crates(_ sim: SimulatorController, _ yard: Yard, _ repo: String) -> Int {
-        sim.station.world.fleet.stations["work"]?.ledger.crates(of: repo).filter { $0.stands(in: yard) }.count ?? 0
+    @MainActor static func crates(_ sim: SimulatorController, _ zones: Set<Zone>, _ repo: String) -> Int {
+        sim.station.world.fleet.stations["work"]?.facts.crates.values.filter { $0.id.repo == repo && $0.zone.map(zones.contains) == true }.count ?? 0
+    }
+
+    @MainActor static func fact(_ sim: SimulatorController, _ repo: String, _ number: Int) -> CrateFact? {
+        sim.station.world.fleet.stations["work"]?.facts.crates[CrateID(repo: repo, number: number)]
     }
 
     @MainActor static func commands(_ sim: SimulatorController) -> [(command: Command, by: String)] {
@@ -155,10 +153,10 @@ enum Scenarios {
             ("Merge PR", 4.8),
         ], tail: 192, expects: [
             .log("PR #298 open"),
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
         ], floor: { sim in
-            Scenario.crates(sim, .storage, "ios") > 0 ? nil : "no ios crate stands in storage"
+            Scenario.crates(sim, [.waiting], "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
 
         Scenario("a branch with no issue: opened, merged and prompted again, still one office", [
@@ -168,7 +166,7 @@ enum Scenarios {
             ("Merge PR", 4.8),
             ("Prompt", 4.8),
         ], tail: 192, hold: 60, expects: [
-            .carry(to: .storage),
+            .carry(to: .waiting),
         ], floor: { sim in
             let reopened = Scenario.count(sim, .officeOpened("task:ios/claude/", .appear), after: "Merge PR")
                 + Scenario.count(sim, .officeOpened("task:ios/claude/", .shuttle), after: "Merge PR")
@@ -186,15 +184,14 @@ enum Scenarios {
             .log("hotfix #298"),
             .log("as a hotfix"),
             .rocket(.launch, "ios"),
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .carry(298, to: .waiting),
         ], floor: { sim in
             let rockets = sim.station.simulation.rockets
             if rockets.keys.contains(where: { $0.contains("hotfix") }) { return "the hotfix rocket is still on the pad: \(rockets.keys.sorted())" }
             guard let release = rockets["work|ios"] else { return "the release rocket went: \(rockets.keys.sorted())" }
             if release.isLaunching { return "the release rocket launched with the hotfix" }
-            let ledger = sim.station.world.fleet.stations["work"]?.ledger
-            return ledger?["ios", 298] == nil ? nil : "#298 is still on the floor"
+            if case .aboard? = Scenario.fact(sim, "ios", 298)?.place { return nil }
+            return Scenario.fact(sim, "ios", 298) == nil ? nil : "#298 is still on the floor"
         }),
 
         Scenario("teammate branch then PR: one shuttle, one crate", [
@@ -233,18 +230,18 @@ enum Scenarios {
         ], tail: 160, expects: [
             .stagingOpened("web"),
             .stagingMerged("web"),
-            .carry(to: .deck),
+            .carry(to: .testing),
         ], floor: { sim in
-            Scenario.crates(sim, .deck, "web") > 0 ? nil : "nothing of web stands on the deck"
+            Scenario.crates(sim, [.testing, .cleared], "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
         Scenario("the board moves storage to QA and the yard sees it first: the crates are still carried", [
             ("Target: web#455", 0),
             ("Board: Catch up (yard first)", 4.8),
         ], tail: 160, expects: [
-            .carry(to: .deck),
+            .carry(to: .testing),
         ], floor: { sim in
-            Scenario.crates(sim, .deck, "web") > 0 ? nil : "nothing of web stands on the deck"
+            Scenario.crates(sim, [.testing, .cleared], "web") > 0 ? nil : "nothing of web stands on the deck"
         }),
 
         Scenario("staging release closes: the crates stay in storage", [
@@ -255,9 +252,9 @@ enum Scenarios {
             .stagingOpened("web"),
             .stagingClosed("web"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, .deck, "web")
+            let deck = Scenario.crates(sim, [.testing, .cleared], "web")
             if deck > 2 { return "\(deck) web crates on the deck after a release that never merged" }
-            let storage = Scenario.crates(sim, .storage, "web")
+            let storage = Scenario.crates(sim, [.waiting], "web")
             return storage >= 2 ? nil : "only \(storage) web crates in storage"
         }),
 
@@ -267,12 +264,11 @@ enum Scenarios {
             ("Open PR", 32),
             ("Merge PR", 4.8),
         ], tail: 720, expects: [
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
             .rocket(.launch, "ios"),
+            .carry(298, to: .waiting),
         ], floor: { sim in
-            let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
-            return row?.placed == nil ? nil : "#298 is still placed in \(String(describing: row?.placed)) after the launch"
+            let zone = Scenario.fact(sim, "ios", 298)?.zone
+            return zone == nil ? nil : "#298 is still placed in \(String(describing: zone)) after the launch"
         }),
 
         Scenario("a repository without staging: merged work waits in storage and the rocket loads from there", [
@@ -285,12 +281,12 @@ enum Scenarios {
             ("Release: Production merges", 4.8),
         ], tail: 224, expects: [
             .rocket(.standBy, "ios"),
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
             .releaseMerged("ios", production: true),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let stored = Scenario.crates(sim, .storage, "ios")
+            let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after lift-off"
         }),
 
@@ -301,15 +297,15 @@ enum Scenarios {
             ("Merge PR", 128),
             ("Release: Tag", 4.8),
         ], tail: 224, expects: [
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
             .rocket(.launch, "ios"),
         ], floor: { sim in
             let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
                 + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
                 - Scenario.count(sim, .rocket(.load(0), "ios"), after: "Release: Tag")
             if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times before any tag" }
-            let stored = Scenario.crates(sim, .storage, "ios")
+            let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 0 ? nil : "\(stored) ios crates left in storage after the tag"
         }),
 
@@ -320,15 +316,14 @@ enum Scenarios {
             ("Stage: stored", 128),
             ("Stage: shipped", 4.8),
         ], tail: 64, expects: [
-            .carry(298, to: .storage),
+            .carry(298, to: .waiting),
         ], forbids: [
             .rocket(.launch, "ios"),
         ], floor: { sim in
             let standing = Scenario.count(sim, .rocket(.standBy, "ios"), after: "Repo: Ships on tags")
                 + Scenario.count(sim, .rocket(.load(0), "ios"), after: "Repo: Ships on tags")
             if standing > 0 { return "a rocket stood or loaded for ios's work \(standing) times" }
-            let row = sim.station.world.fleet.stations["work"]?.ledger["ios", 298]
-            return row?.stands(in: .storage) == true ? "#298 still stands in storage after it shipped" : nil
+            return Scenario.fact(sim, "ios", 298)?.zone == .waiting ? "#298 still stands in storage after it shipped" : nil
         }),
 
         Scenario("the stage panel alone: said stored, cleared and shipped, the crate goes from storage up", [
@@ -339,11 +334,11 @@ enum Scenarios {
             ("Stage: cleared", 96),
             ("Stage: shipped", 4.8),
         ], tail: 224, expects: [
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let stored = Scenario.crates(sim, .storage, "ios")
+            let stored = Scenario.crates(sim, [.waiting], "ios")
             return stored == 1 ? nil : "\(stored) ios crates left in storage; #280 alone should be"
         }),
 
@@ -355,13 +350,13 @@ enum Scenarios {
             ("Stage: cleared", 96),
             ("Stage: shipped", 4.8),
         ], tail: 224, expects: [
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
-            .carry(298, to: .deck),
-            .crateCleared("ios"),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
+            .carry(298, to: .testing),
+            .carry(298, to: .cleared),
             .rocket(.launch, "ios"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, .deck, "ios")
+            let deck = Scenario.crates(sim, [.testing, .cleared], "ios")
             return deck == 1 ? nil : "\(deck) ios crates left on the deck; #280 alone should be"
         }),
 
@@ -373,31 +368,28 @@ enum Scenarios {
         ], tail: 192, expects: [
             .rocket(.standBy, "web"),
             .releaseOpened("web", untested: true),
-            .crateCleared("web"),
             .rocket(.load(2), "web"),
+            .carry(to: .cleared),
             .rocket(.steam, "web"),
             .releaseMerged("web", production: true),
             .rocket(.launch, "web"),
         ], floor: { sim in
-            let deck = Scenario.crates(sim, .deck, "web")
+            let deck = Scenario.crates(sim, [.testing, .cleared], "web")
             return deck == 0 ? nil : "\(deck) web crates on the deck after lift-off"
         }),
 
-        Scenario("ready to ship moved back to QA: nothing carried, the crate stands untested", [
+        Scenario("ready to ship moved back to QA: the crate is carried back to the untested rows and stands there", [
             ("Target: web#455", 0),
             ("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)", 32),
-        ], tail: 16, expects: [
+        ], tail: 64, expects: [
             .press("Board: Move web#431 to \(ConfigStore.shared.current.statuses.deck)"),
+            .carry(431, to: .testing),
         ], floor: { sim in
-            let carried = Scenario.commands(sim).contains {
-                if case .carry(let crate, let from, _) = $0.command.kind { return crate.number == 431 && from.area == .tested }; return false
+            guard let station = sim.station.fleet.stations.values.first, let fact = station.facts.crates[CrateID(repo: "web", number: 431)] else {
+                return "#431 is gone"
             }
-            if carried { return "#431 was carried off its stack" }
-            guard let station = sim.station.fleet.stations.values.first,
-                  let slot = station.layout(of: .deck).first(where: { $0.repo == "web" && $0.number == 431 }) else {
-                return "#431 is not on the deck"
-            }
-            if slot.cleared { return "#431 still stands with the tested" }
+            if fact.zone == .cleared { return "#431 still stands with the tested" }
+            guard fact.zone == .testing, let slot = Layout.spots(station.facts, station.yard)[fact.id] else { return "#431 is not on the deck" }
             guard let node = sim.station.crateNode(CrateRef(station: station.name, repo: "web", number: 431)) else { return "#431 is not drawn" }
             let off = simd_distance(SIMD2(Double(node.position.x), Double(node.position.z)), SIMD2(slot.pos.x, slot.pos.z))
             return off < 0.05 ? nil : "#431 is drawn \(off) from its place in the untested row"
@@ -411,7 +403,7 @@ enum Scenarios {
             .log("PR #455 open"),
             .log("#455 booking flow: pull request closed, not merged"),
         ], forbids: [
-            .carry(455, to: .storage),
+            .carry(455, to: .waiting),
         ]),
 
         Scenario("a teammate's pull request closed unmerged: red, then the office clears", [
@@ -425,7 +417,7 @@ enum Scenarios {
             .log("pull request closed, not merged"),
             .officeArchived("work|task:api#5140", reason: "pull request closed"),
         ], forbids: [
-            .carry(5140, to: .storage),
+            .carry(5140, to: .waiting),
         ]),
 
         Scenario("a bot's pull request: an object in decon, merged, cleared into storage", [
@@ -433,18 +425,17 @@ enum Scenarios {
             ("Bot: Open PR", 32),
             ("Bot: Merge PR", 4.8),
         ], tail: 192, expects: [
-            .event("deconArrived") { if case .deconArrived = $0 { return true }; return false },
             .log("in decon"),
-            .deconCleared("ios"),
-            .carry(to: .storage),
+            .log(Words.current.clearedDecon),
+            .carry(to: .waiting),
         ], forbids: [
             .officeOpened("task:ios#", .shuttle),
         ], floor: { sim in
             let st = sim.station.world.fleet.stations["work"]!
-            if Scenario.crates(sim, .decon, "ios") > 0 { return "an object is still in decon" }
-            guard let row = st.ledger.crates(of: "ios").first(where: \.alien) else { return "the cleared object left the ledger" }
-            if row.placed != .storage || row.heading != nil { return "the object is \(String(describing: row.placed)), not in storage" }
-            return Scenario.crates(sim, .storage, "ios") > 0 ? nil : "no ios crate stands in storage"
+            if Scenario.crates(sim, [.decon], "ios") > 0 { return "an object is still in decon" }
+            guard let object = st.facts.crates.values.first(where: { $0.id.repo == "ios" && $0.alien }) else { return "the cleared object left the facts" }
+            if object.zone != .waiting { return "the object is \(object.place), not in storage" }
+            return Scenario.crates(sim, [.waiting], "ios") > 0 ? nil : "no ios crate stands in storage"
         }),
 
         Scenario("a bot's pull request closed unmerged: ejected from decon, nothing carried", [
@@ -455,12 +446,12 @@ enum Scenarios {
             .log("in decon"),
             .log("ejected from decon, never cleared"),
         ], forbids: [
-            .carry(to: .storage),
-            .deconCleared("web"),
+            .carry(to: .waiting),
+            .log(Words.current.clearedDecon),
         ], floor: { sim in
             let st = sim.station.world.fleet.stations["work"]!
-            if Scenario.crates(sim, .decon, "web") > 0 { return "an object is still in decon" }
-            return st.ledger.crates(of: "web").contains(where: \.alien) ? "the ejected object is still in the ledger" : nil
+            if Scenario.crates(sim, [.decon], "web") > 0 { return "an object is still in decon" }
+            return st.facts.crates.values.contains { $0.id.repo == "web" && $0.alien } ? "the ejected object is still in the facts" : nil
         }),
 
         Scenario("a neighbour's minion takes a turn in the gym, then goes back to its office", [
@@ -527,11 +518,11 @@ enum Scenarios {
             ("Merge PR", 9.6),
             ("Wedge carrier", 4.8),
         ], tail: 448, expects: [
-            .officeMerged("task:ios#298"),
-            .carry(298, to: .storage),
+            .arrived(298, in: .waiting),
+            .carry(298, to: .waiting),
             .press("Wedge carrier"),
             .log("gives up carrying #298"),
-            .carry(298, to: .storage),
+            .carry(298, to: .waiting),
         ], allowGiveUp: true, floor: { sim in
             var carriers: [String] = []
             for r in sim.model.records {
@@ -639,7 +630,8 @@ final class ScenarioRunner {
             }
             if !hit { return "never saw \(want.words)" }
         }
-        if let m = sim.station.world.feed.unexplained.first { return "facts disagree with the ledger · " + m }
+        if let lag = sim.station.simulation.lag() { return "the picture never caught up · " + lag }
+        if sim.station.simulation.snapped > 0 { return "the playback watchdog had to snap \(sim.station.simulation.snapped) crate(s) to their facts" }
         return s.floor?(sim)
     }
 
@@ -651,15 +643,16 @@ final class ScenarioRunner {
             say("--- \(s.name) ---")
             for l in sim.model.logLines { say("    " + l) }
             if let st = sim.station.world.fleet.stations["work"] {
-                for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
-                    say("    crate  \(c.repo)#\(c.number): placed \(String(describing: c.placed)) wanted \(String(describing: c.wanted)) heading \(String(describing: c.heading)) at \(String(describing: c.at))")
-                }
+                let view = sim.station.simulation.shown[st.name] ?? Shown()
                 for c in st.facts.crates.values.sorted(by: { $0.id < $1.id }) {
-                    say("    fact  \(c.id): \(c.place) column \(c.column.map(String.init) ?? "-") stage \(c.stage.map(String.init(describing:)) ?? "-")\(c.alien ? " alien" : "")")
+                    say("    fact  \(c.id): \(c.place) column \(c.column.map(String.init) ?? "-") stage \(c.stage.map(String.init(describing:)) ?? "-")\(c.alien ? " alien" : "") · shown \(sim.station.simulation.describe(view.crates[c.id]))")
+                }
+                for job in sim.station.simulation.cargo.values.sorted(by: { $0.command.id < $1.command.id }) {
+                    say("    move  \(job.command.words) · \(job.rank) · \(job.carrier ?? "nobody")\(job.blockedBy.isEmpty ? "" : " · waits on \(job.blockedBy.sorted())")")
                 }
             }
             for r in sim.station.simulation.rockets.values {
-                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · vortex \(sim.station.simulation.vortices[r.key] != nil), aboard \(sim.station.world.aboard(station: r.station, repo: r.repo))")
+                say("    rocket  \(r.key): \(r.stage) phase \(r.phaseKind) · vortex \(sim.station.simulation.vortices[r.key] != nil), pending \(sim.station.simulation.pending(r))")
             }
             for m in sim.station.minions.values.sorted(by: { $0.home.name < $1.home.name }) {
                 let spot = m.fetchSpot.map { " fetchSpot \(Int($0.x.rounded())),\(Int($0.y.rounded()))" } ?? ""

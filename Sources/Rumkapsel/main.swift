@@ -41,7 +41,7 @@ enum WindowPlace {
 }
 
 enum Scripted {
-    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-ledger" || $0 == "--dump-bodies" || $0.hasSuffix("-tests") }
+    static let run = CommandLine.arguments.contains { $0 == "--scenarios" || $0 == "--snapshot" || $0 == "--dump-floor" || $0 == "--dump-colors" || $0 == "--dump-facts" || $0 == "--dump-bodies" || $0.hasSuffix("-tests") }
 }
 
 @MainActor
@@ -77,7 +77,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         let snapshotPath = args.firstIndex(of: "--snapshot").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
 
         if args.contains(where: { $0 == "--scenarios" || $0.hasSuffix("-tests") }) { Words.pinned = Vocabulary() }
-        if args.contains("--ledger-tests") { LedgerTests.run() }
         if args.contains("--rule-tests") { RuleTests.run() }
         if args.contains("--work-tests") { WorkTests.run() }
         if args.contains("--deploy-tests") { DeployTests.run() }
@@ -95,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--idle-tests") { IdleTests.run() }
         if args.contains("--walk-tests") { WalkTests.run() }
         if args.contains("--sim-tests") { SimulationTests.run() }
+        if args.contains("--playback-tests") { PlaybackTests.run() }
         if let i = args.firstIndex(of: "--github-diag") {
             let seconds = args.count > i + 1 ? Double(args[i + 1]) ?? 120 : 120
             let only = args.firstIndex(of: "--repo").flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil }
@@ -241,12 +241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 exit(0)
             }
         }
-        if let i = args.firstIndex(of: "--dump-ledger") {
+        if let i = args.firstIndex(of: "--dump-facts") {
             let next = args.count > i + 1 ? args[i + 1] : nil
             let seconds = next.flatMap(Double.init) ?? 25
             let only = next.flatMap { Double($0) == nil ? $0 : nil } ?? (args.count > i + 2 ? args[i + 2] : nil)
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-                FileHandle.standardError.write((self!.controller.ledgerReport(only: only) + "\n").data(using: .utf8)!)
+                FileHandle.standardError.write((self!.controller.factsReport(only: only) + "\n").data(using: .utf8)!)
                 exit(0)
             }
         }
@@ -342,9 +342,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         develop.addItem(.separator())
         let bodies = develop.addItem(withTitle: "Copy Body Report", action: #selector(copyBodies), keyEquivalent: "b")
         bodies.keyEquivalentModifierMask = [.command, .shift]
-        let ledger = develop.addItem(withTitle: "Copy Ledger Report", action: #selector(copyLedger), keyEquivalent: "l")
-        ledger.keyEquivalentModifierMask = [.command, .shift]
+        let facts = develop.addItem(withTitle: "Copy Facts Report", action: #selector(copyFacts), keyEquivalent: "l")
+        facts.keyEquivalentModifierMask = [.command, .shift]
         develop.addItem(withTitle: "Restack the Yard", action: #selector(restackYard), keyEquivalent: "")
+        develop.addItem(withTitle: "Skip to the Facts", action: #selector(skipToFacts), keyEquivalent: "")
         develop.addItem(.separator())
         develop.addItem(withTitle: "Rehearse Launch", action: #selector(rehearseLaunch), keyEquivalent: "")
         develop.addItem(withTitle: "Rehearse Failed Launch", action: #selector(rehearseFailedLaunch), keyEquivalent: "")
@@ -389,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
     @objc func resetView() { controller.resetView() }
     @objc func restackYard() { controller.restackYard() }
+    @objc func skipToFacts() { controller.simulation.skip() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
     @objc func toggleNeighbours() { controller.toggleNeighbours() }
@@ -420,7 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func copyBodies() { copy(controller.bodiesReport(only: nil), what: "body report") }
-    @objc func copyLedger() { copy(controller.ledgerReport(only: nil), what: "ledger report") }
+    @objc func copyFacts() { copy(controller.factsReport(only: nil), what: "facts report") }
     @objc func rehearseLaunch() { controller.rehearseLaunch(.live) }
     @objc func rehearseFailedLaunch() { controller.rehearseLaunch(.failed) }
 

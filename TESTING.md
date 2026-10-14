@@ -2,27 +2,29 @@
 
 ## The gate
 
-Every change runs all of it before it is committed; it takes half a minute.
+Every change runs all of it before it is committed; `./test.sh` does exactly this in a throwaway support folder, in about
+twenty seconds.
 
 ```bash
 swift build --build-system native
 .build/debug/Rumkapsel --scenarios
 .build/debug/Rumkapsel --rule-tests
+.build/debug/Rumkapsel --playback-tests
 .build/debug/Rumkapsel --sim-tests
 .build/debug/Rumkapsel --idle-tests
 .build/debug/Rumkapsel --walk-tests
-.build/debug/Rumkapsel --ledger-tests
 .build/debug/Rumkapsel --work-tests
 .build/debug/Rumkapsel --deploy-tests
 .build/debug/Rumkapsel --pipeline-tests
 .build/debug/Rumkapsel --layout-tests
 .build/debug/Rumkapsel --spacelog-tests
+.build/debug/Rumkapsel --look-tests
 ```
 
 The native build system is named because Xcode 26.1's default lays the products out where the debug binary
 cannot find the Sparkle framework beside it; the app bundle is fine either way. `--scenarios staging` runs
 the scenarios whose name contains a word; `--scenarios-verbose` prints each
-scenario's whole log, ledger and bodies. For a look at the picture, `--simulator --snapshot out.png
+scenario's whole log, facts, what is shown and bodies. For a look at the picture, `--simulator --snapshot out.png
 --simulate "Target: web#455,Open PR,Merge PR" --delay 19` renders a frame after those presses, without
 taking the keyboard; `Set: <knob> = <value>` in that list sets the board up first, and a move that
 needs ground it has not got lays it itself, so no press depends on the order of the ones before it.
@@ -36,7 +38,7 @@ numbered pictures from the delay on, for a contact sheet or a gif.
 - `--scenarios` builds a station of its own per scenario, with a made-up org, presses simulator buttons,
   and steps station time in 1/30 s ticks in a tight loop. No frames are drawn and no wall clock is
   involved. A scenario is judged on the record of events and commands and on the floor at the end.
-- `--ledger-tests`, `--pipeline-tests` and the body rules are model-only: facts in, rules out, no station.
+- `--rule-tests`, `--playback-tests`, `--pipeline-tests` and the body rules are model-only: facts in, rules out, no station.
 - The suite runs the exact code the app runs, scene-side logic included, which is where most bugs have
   lived: walks, doorways, deliveries, carries. That is its strength. Its weakness is the same fact: every
   tick drags SceneKit bookkeeping along, so a station second costs milliseconds, and model rules cannot

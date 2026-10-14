@@ -84,12 +84,15 @@ final class RocketJob {
     var welding = false
     var seam = 0
     var deployRunning = false
+    var launch: RocketID?
+    var loadSince: Double?
 
     init(station: String, repo: String, hotfix: Int? = nil, command: Command) {
         self.station = station; self.repo = repo; self.hotfix = hotfix; self.command = command
     }
 
     var key: String { RocketKey.of(station: station, repo: repo, hotfix: hotfix) }
+    static let claimWithin = 5.0
 
     var stage: Command.RocketStage {
         if case .rocket(let s, _, _) = command.kind { return s }
@@ -134,12 +137,6 @@ extension Simulation {
         take(r, command)
     }
 
-    func landed(_ crate: CrateRef, in yard: Yard) {
-        guard let station = fleet.stations[crate.station] else { return }
-        world.landed(station: station, repo: crate.repo, number: crate.number, in: yard, at: now)
-        if yard == .storage, world.shipsOnMerge(station: station.name, repo: crate.repo) { launchOnMerge(station: station, repo: crate.repo) }
-    }
-
     func launchOnMerge(station: Station, repo: String) {
         let key = station.name + "|" + repo
         guard rockets[key] == nil else { return }
@@ -163,11 +160,8 @@ extension Simulation {
             cue(.rocketLoading(key: r.key))
             loadCrates(r)
         case .climb:
-            if r.hotfix != nil { world.hotfixAboard(r.key) } else { world.clearPad(station: r.station, repo: r.repo) }
-            if world.releases.mergeLaunches.contains(r.key) { world.forgetShipped(station: r.station, repo: r.repo) }
             cue(.liftOff(key: r.key))
             r.until = clock + 15
-            fleet.save()
         default:
             if r.isSteaming { cue(.steam(key: r.key)) }
         }
@@ -188,22 +182,24 @@ extension Simulation {
             switch r.phaseKind {
             case .load:
                 guard r.isLaunching else { advanceRocket(r); continue }
+                if r.launch == nil { r.launch = claim(r) }
+                if r.launch == nil {
+                    r.loadSince = r.loadSince ?? clock
+                    if clock - (r.loadSince ?? clock) < RocketJob.claimWithin { continue }
+                }
                 guard r.kick == .docked else { continue }
                 if let v = vortices[r.key] {
-                    if v.closedAt != nil { advanceRocket(r) }
+                    if v.closedAt != nil, !pending(r) { advanceRocket(r) }
                     continue
                 }
                 loadCrates(r)
-                if vortices[r.key] == nil, !world.hotfixCrateComing(r.key) { advanceRocket(r) }
+                if vortices[r.key] == nil, !pending(r) { advanceRocket(r) }
             case .climb:
                 if clock >= r.until {
                     rockets[r.key] = nil
                     world.releases.hotfixLoads[r.key] = nil
+                    world.releases.mergeLaunches.remove(r.key)
                     cue(.rocketGone(key: r.key))
-                    if world.releases.mergeLaunches.remove(r.key) != nil, let st = fleet.stations[r.station],
-                       st.ledger.crates(of: r.repo).contains(where: { $0.placed == .storage }) {
-                        launchOnMerge(station: st, repo: r.repo)
-                    }
                 }
             default: continue
             }
@@ -219,27 +215,24 @@ extension Simulation {
         take(r, .rocket(.steam, station: r.station, repo: r.repo))
     }
 
-    private func loadSource(_ r: RocketJob) -> Yard {
-        r.hotfix == nil && world.stagingIsDeck(station: r.station, repo: r.repo) ? .deck : .storage
+    private func claim(_ r: RocketJob) -> RocketID? {
+        guard let st = fleet.stations[r.station] else { return nil }
+        let taken = Set(rockets.values.compactMap(\.launch))
+        let mine: (RocketID) -> Bool
+        if let n = r.hotfix {
+            let crate = world.releases.hotfixLoads[r.key]?.crate ?? n
+            mine = { $0 == "\(r.repo)|hotfix#\(crate)" }
+        } else if world.releases.mergeLaunches.contains(r.key) {
+            mine = { $0.hasPrefix(r.repo + "|merge#") }
+        } else {
+            mine = { $0.hasPrefix(r.repo + "|release#") }
+        }
+        return st.facts.launches.sorted { ($0.value, $0.key) < ($1.value, $1.key) }.first { mine($0.key) && !taken.contains($0.key) }?.key
     }
 
     private func loadCrates(_ r: RocketJob) {
-        guard r.kick == .docked, let station = fleet.stations[r.station] else { return }
-        if r.hotfix != nil {
-            guard r.isLaunching, let n = world.releases.hotfixLoads[r.key]?.crate,
-                  station.ledger.crates(of: r.repo).contains(where: { $0.number == n && $0.stands(in: .storage) }) else { return }
-            openVortex(r, station: station, from: .storage, crates: [n])
-            return
-        }
-        let yard = loadSource(r)
-        let repo = r.repo
-        let standing = station.ledger.crates(of: repo).filter { $0.stands(in: yard) }.map(\.number)
-        func shipped(_ n: Int) -> Bool? { world.works.find(repo: repo, crate: n).map { r in r.stage.map { $0 >= .shipped } ?? true } }
-        var launching = false
-        if case .rocket(.launch, _, _) = r.command.kind { launching = world.works.records(repo: repo).contains { r in r.stage.map { $0 >= .shipped } ?? false } }
-        let numbers = launching ? standing.filter { shipped($0) ?? true } : standing
-        guard !numbers.isEmpty, r.isLaunching else { return }
-        openVortex(r, station: station, from: yard, crates: numbers)
+        guard r.kick == .docked, r.isLaunching, let station = fleet.stations[r.station] else { return }
+        openVortex(r, station: station)
     }
 
     func refreshRockets() {

@@ -62,17 +62,15 @@ extension StationController {
             }
             if clock > 7, !demoMerged, let st = fleet.stations["work"], let room = st.rooms["task:tattoodo-web#450"] {
                 demoMerged = true
-                let key = roomKey(st, room)
-                for (i, c) in room.cells.prefix(3).enumerated() {
-                    let b = SCNNode(geometry: SCNBox(width: 0.26, height: 0.26, length: 0.26, chamferRadius: 0))
-                    b.geometry!.firstMaterial = lit(NSColor(rgb: (0.6, 0.4, 0.9)))
-                    b.position = v3(st.offset.x + Double(c.x) + Double(i) * 0.1 - 0.2, 0.13, st.offset.y + Double(c.y))
-                    b.name = "box:" + key
-                    markerRoot.addChildNode(b)
-                }
-                haulMergedBoxes(station: st, key: key, roomName: room.name, repo: room.repo ?? "work", number: 450)
+                let crate = CrateID(repo: room.repo ?? "work", number: 450)
+                world.learn(.policy(repo: crate.repo, RepoFacts(hasStaging: true, hasCleared: true)))
+                world.learn(.work(WorkNews(crate: crate, office: room.key, stage: .ready)))
+                world.learn(.work(WorkNews(crate: crate, office: room.key, stage: .stored)))
             }
-            if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 { demoStaged = true; stageCargo(station: st, repo: "tattoodo-web") }
+            if clock > 16, !demoStaged, let st = fleet.stations["work"], (st.stored["tattoodo-web"] ?? 0) > 0 {
+                demoStaged = true
+                world.learn(.work(WorkNews(crate: CrateID(repo: "tattoodo-web", number: 450), stage: .qa)))
+            }
             if clock > 30, let r = simulation.rockets["work|tattoodo-web"], r.stage.rank == 0, let st = fleet.stations["work"] {
                 simulation.rocket(station: st.name, repo: "tattoodo-web", label: r.label, untested: false, tall: true, cargo: 0,
                                   command: .rocket(.launch, station: st.name, repo: "tattoodo-web"))
@@ -178,10 +176,6 @@ extension StationController {
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for cue in simulation.drainCues() { play(cue) }
-        for (id, node) in cargoNodes where simulation.cargo[id] == nil && !crateMoving(node) {
-            node.removeFromParentNode()
-            cargoNodes[id] = nil
-        }
     }
 
     func mirrorLoad(_ m: Minion) {
@@ -216,7 +210,13 @@ extension StationController {
 
     private func nodeFor(_ load: Body.Load, _ m: Minion) -> SCNNode? {
         switch load {
-        case .crate: return m.current.flatMap { cargoNodes[$0.id] }
+        case .crate(let c):
+            if let n = crateNodes[c.key] { return n }
+            let n = looseCrate(c)
+            n.position = m.node.position
+            markerRoot.addChildNode(n)
+            crateNodes[c.key] = n
+            return n
         case .office(let key): return boxes[key]
         }
     }
@@ -230,7 +230,6 @@ extension StationController {
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
         case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }
-        case .landed(let job): job.onDone()
         case .reveal(let key): reveal(key)
         case .foldCrate(let key):
             if let crate = boxes.removeValue(forKey: key) {
@@ -291,7 +290,9 @@ extension StationController {
                 moveCrate(pkg, legs: [MotionLeg(to: at, seconds: 0.35, ease: .easeOut, scale: 1)])
             } else { markersDirty = true }
         case .redraw: markersDirty = true
-        case .carryOrdered(let id, let crate): carryOrdered(id: id, crate: crate)
+        case .hatch(let station): hatchBlink(station: station)
+        case .appear(let station, let id): appearing.insert("\(station)|\(id.repo)|\(id.number)")
+        case .vanish(let station, let id): vanish(station, id)
         case .sweep(let up): drone.sweep(up: up)
         case .crateOrdered(let key, let station, let slot, let repo): crateOrdered(key: key, station: station, slot: slot, repo: repo)
         case .crateDropped(let key, let station, let slot): crateDropped(key: key, station: station, slot: slot)

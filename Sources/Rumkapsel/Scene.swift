@@ -257,7 +257,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         get { simulation.cargo }
         set { simulation.cargo = newValue }
     }
-    var cargoNodes: [Int: SCNNode] = [:]
+    var crateNodes: [String: SCNNode] = [:]
+    var crateLooks: [String: String] = [:]
+    var appearing: Set<String> = []
     var droneRacks: [String: SCNNode] = [:]
     var fields: [String: HangarField] = [:]
     var padFields: [String: HangarField] = [:]
@@ -277,7 +279,6 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var bubbleIcons: [SKSpriteNode] = []
     var hatchLights: [String: SCNNode] = [:]
     private var askedGitHubAt = Date.distantPast
-    var incoming: Set<String> = []
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
     var bubbleCursor: CGPoint?
@@ -496,6 +497,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         world.hasPackage = { [weak self] key in self?.markerRoot.childNodes.contains { $0.name == "box:" + key } ?? false }
         simulation.onEvent = { [weak self] event in self?.handle(event) }
         simulation.onLog = { [weak self] text in self?.logEvent(text) }
+        simulation.packageCell = { [weak self] st, key in st.rooms[key].flatMap { self?.packageCell(st, $0) } }
         peers.onSnapshot = { [weak self] snap in self?.enqueue { self?.receivePeer(snap) } }
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
@@ -569,7 +571,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         } }.sorted().joined()
         timed("github") { handle(world.applyGitHub(now: now, timed: { n, b in self.timed(n, b) })) }
         if world.placementsLeft { enqueue { [weak self] in self?.onGitHubUpdate() } }
-        reconcileYards()
+        handle(world.reconcileYards())
         if sig != localSignature { localSignature = sig; layoutDirty = true } else { markersDirty = true }
         refreshRockets()
         flushScene()
@@ -936,7 +938,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var peerDeliveries: [String] = []
 
     func flushScene(firstRun: Bool = false) {
-        timed("yards") { reconcileYards() }
+        timed("yards") { handle(world.reconcileYards()) }
         timed("lights") { lightRooms() }
         if wasLooking, !floorSettling {
             wasLooking = false
@@ -1022,23 +1024,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let m = minions[session], m.place == .room(from) { m.place = .room(to) }
         case .officeArchived(let station, let key, let roomKey, let name, let hall, let announce, let reason):
             archive(station: station, key: key, roomKey: roomKey, name: name, hall: hall, announce: announce, reason: reason)
-        case .officeMerged(let stationName, let key, let repo, let number):
-            guard let station = fleet.stations[stationName], let room = station.rooms[key] else { return }
-            haulMergedBoxes(station: station, key: stationName + "|" + key, roomName: room.name, repo: repo, number: number)
-        case .carryToDeck(let stationName, let repo, let commands):
-            guard let station = fleet.stations[stationName] else { return }
-            stageCargo(station: station, repo: repo, commands: commands)
-        case .crateCleared(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
-            carryAcrossDeck(station: station, repo: repo, number: number)
         case .crewRoster(let members):
             setCrewRoster(members)
-        case .deconArrived(let stationName, let repo, let numbers):
-            hatchBlink(station: stationName)
-            for n in numbers { incoming.insert("decon:\(stationName)|\(repo)|\(n)") }
-        case .deconCleared(let stationName, let repo, let number):
-            guard let station = fleet.stations[stationName] else { return }
-            haulCleared(station: station, repo: repo, number: number)
         case .crewActivity(let a):
             playCrew(a)
         case .stagingOpened(let stationName, let repo, let number):
@@ -1046,14 +1033,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case .stagingMerged(let stationName, let repo, let number):
             logEvent("\(repo): staging release #\(number) merged")
             simulation.stagingMerged(station: stationName, repo: repo, number: number)
-            if let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .stagingClosed(let stationName, let repo, let number):
             logEvent("\(repo): staging release #\(number) closed, not merged")
             simulation.stagingClosed(station: stationName, repo: repo, number: number)
-        case .releaseOpened, .releaseMerged(_, _, _, _, _, true):
+        case .releaseOpened, .releaseMerged:
             break
-        case .releaseMerged(let stationName, let repo, _, _, _, false):
-            if ConfigStore.shared.current.project == nil, let st = fleet.stations[stationName] { stageCargo(station: st, repo: repo) }
         case .rocketCommand(let stationName, let repo, let label, let untested, let tall, let cargo, let command, let hotfix):
             simulation.rocket(station: stationName, repo: repo, hotfix: hotfix, label: label, untested: untested, tall: tall, cargo: cargo, command: command)
         case .prompt(let stationName, let key, let minionId, let count):

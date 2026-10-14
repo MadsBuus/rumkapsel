@@ -19,16 +19,6 @@ extension World {
     func stagingIsDeck(station: String, repo: String) -> Bool {
         root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).hasStaging } ?? !ConfigStore.shared.current.stagingBranch.isEmpty
     }
-    func shipsOnMerge(station: String, repo: String) -> Bool {
-        root(station: station, repo: repo).map { github.pipeline(repoRoot: $0).shipsOnMerge } ?? false
-    }
-    func forgetShipped(station: String, repo: String) {
-        guard let st = fleet.stations[station] else { return }
-        for c in st.ledger.crates(of: repo) where c.placed == .pad {
-            report(crate: c.number, repo: repo, .shipped, by: releases.mergeLaunches.contains(station + "|" + repo) ? .git : .pulls, at: now)
-            st.ledger.forget(repo: repo, number: c.number)
-        }
-    }
     func deckInUse(station: String) -> Bool {
         let roots = repoRoots.filter { $0.value.station == station }.map(\.key)
         return roots.isEmpty ? !ConfigStore.shared.current.stagingBranch.isEmpty : roots.contains { github.pipeline(repoRoot: $0).hasStaging }
@@ -81,9 +71,10 @@ extension World {
             guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
             let pr = launch.pr
             let key = RocketKey.of(station: info.station, repo: info.repo, hotfix: pr.number)
-            let crate = hotfixRecord(repo: info.repo, pr: pr).number
-            releases.hotfixLoads[key] = (crate, now)
-            learn(.launched(repo: info.repo, hotfix: crate ?? pr.number), repo: info.repo)
+            let record = hotfixRecord(repo: info.repo, pr: pr)
+            releases.hotfixLoads[key] = (record.number, now)
+            learn(.launched(repo: info.repo, hotfix: record.number ?? pr.number), repo: info.repo)
+            works.report(record, .shipped, by: .git, at: pr.mergedAt ?? now)
             assignPads()
             events.append(.chime(pr.number))
             events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
@@ -109,21 +100,6 @@ extension World {
         guard release.hasPrefix("#"), let n = Int(release.dropFirst()), let root = root(station: station, repo: repo),
               github.hotfixes(repoRoot: root).contains(where: { $0.number == n }) else { return station + "|" + repo }
         return RocketKey.of(station: station, repo: repo, hotfix: n)
-    }
-
-    func hotfixCrateComing(_ key: String) -> Bool {
-        guard let load = releases.hotfixLoads[key], let n = load.crate, now.timeIntervalSince(load.at) < 120 else { return false }
-        let p = RocketKey.parts(key)
-        guard let station = fleet.stations[p.station] else { return false }
-        if let row = station.ledger[p.repo, n] { return !row.stands(in: .pad) }
-        return works.find(repo: p.repo, crate: n).flatMap { office(for: $0) } != nil
-    }
-
-    func hotfixAboard(_ key: String) {
-        let p = RocketKey.parts(key)
-        guard let n = releases.hotfixLoads[key]?.crate, let station = fleet.stations[p.station] else { return }
-        if let r = works.find(repo: p.repo, crate: n) { works.report(r, .shipped, by: .pulls, at: now) }
-        station.ledger.forget(repo: p.repo, number: n)
     }
 
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
@@ -193,7 +169,6 @@ extension World {
                 works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
                 if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
             }
-            for c in station.ledger.crates(of: info.repo) where c.placed == .pad { report(crate: c.number, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
             releases.announced = releases.announced.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
             events.append(.log(pr.tag ? "\(info.repo) \(Words.current.launchedTo) \(pr.title)"
                                        : "\(info.repo) \(Words.current.launchedTo) \(pr.base): \(pr.title)"))
@@ -212,7 +187,6 @@ extension World {
                 guard station.hasPad, !w.isEmpty, !workflow(repo: info.repo).shipped.isEmpty, !releases.mergeLaunches.contains(key),
                       !github.pipeline(repoRoot: root).shipsAtOnce, releases.padSlotOf[key] != nil else { continue }
                 let cleared = clearedToLoad(repo: info.repo, station: station.name)
-                if !cleared { events += standDown(station: station, repo: info.repo) }
                 events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                    station: station, repo: info.repo, waiting: w.count, cleared: cleared))
                 continue
@@ -234,18 +208,10 @@ extension World {
                 }
             }
             let cleared = pr.isProduction && ((labelClears && !boardClears) || clearedToLoad(repo: info.repo, station: station.name))
-            if !cleared { events += standDown(station: station, repo: info.repo) }
             events.append(wish(cleared ? .load(cargoWaiting(station: station, repo: info.repo)) : .standBy,
                                station: station, repo: info.repo, pr: pr, cleared: cleared))
         }
         return events + applyStaging()
-    }
-
-    private func standDown(station: Station, repo: String) -> [WorldEvent] {
-        let yard: Yard = stagingIsDeck(station: station.name, repo: repo) ? .deck : .storage
-        let back = station.ledger.unload(repo: repo, to: yard)
-        guard !back.isEmpty else { return [] }
-        return [.log("\(repo): not cleared to ship, \(back.count) back off the rocket"), .layoutChanged]
     }
 
     private func applyStaging() -> [WorldEvent] {
@@ -277,12 +243,16 @@ extension World {
         return events
     }
 
-    func releaseUnderway(station: Station, repo: String, root: String) -> Bool {
-        rocketBusy(station.name + "|" + repo) || github.hasPendingLaunch(repoRoot: root)
-            || (github.openReleases(repoRoot: root)?.contains(where: \.isProduction) ?? false)
+    func reconcileYards() -> [WorldEvent] {
+        for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station.hasPad {
+            for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name {
+                if let c = github.cargo(repoRoot: root) { reconcile(repo: info.repo, root: root, cargo: c) }
+            }
+        }
+        return stationEvents()
     }
 
-    func reconcile(station: Station, repo: String, root: String, cargo c: GitHubResolver.Cargo) {
+    func reconcile(repo: String, root: String, cargo c: GitHubResolver.Cargo) {
         if github.pipeline(repoRoot: root).shipsOnMerge { return }
         for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? now) }
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? now) }
@@ -298,37 +268,12 @@ extension World {
                 works.report(r, .shipped, by: .board, at: now)
             }
         }
-        station.ledger.adopt(yardWord(repo: repo, station: station), repo: repo)
-        let open = station.ledger.disagreements(repo: repo)
-        guard !open.isEmpty else { return }
-        let underway = releaseUnderway(station: station, repo: repo, root: root)
-        let due = carriesDueToDeck(repo: repo)
-        for crate in open {
-            if underway, crate.placed == .deck { continue }
-            if crate.placed == .storage, due.contains(crate.number) { continue }
-            station.ledger.snap(repo: repo, number: crate.number)
+        guard c.exact || c.source == .board, feed.swept.insert(repo).inserted else { return }
+        let held = works.records(repo: repo).compactMap { r -> Int? in
+            let inYard = r.stage.map { $0 >= .stored && $0 < .shipped } ?? false
+            return inYard || r.pulls.keys.contains(where: listed.contains) ? r.number : nil
         }
-    }
-
-    func yardWord(repo: String, station: Station) -> Ledger.Word {
-        var word = Ledger.Word(storage: [], deck: [])
-        let deck = stagingIsDeck(station: station.name, repo: repo)
-        for r in works.records(repo: repo) {
-            guard let n = r.number, let stage = r.stage else { continue }
-            switch stage {
-            case .stored: word.storage.append(n)
-            case .qa, .cleared: if deck { word.deck.append(n) } else { word.storage.append(n) }
-            default: continue
-            }
-            if stage >= .cleared { word.cleared.append(n) }
-            if let at = r.stagedAt { word.updated[n] = at }
-        }
-        return word
-    }
-
-    func slotNow(for crate: CrateRef, toward yard: Yard) -> Spot? {
-        guard let station = fleet.stations[crate.station] else { return nil }
-        return yard == .pad ? padSpot(station: station, repo: crate.repo) : station.spot(for: crate, toward: yard)
+        learn(.sweep(repo: repo, keep: listed.union(held).sorted()), repo: repo)
     }
 
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
@@ -358,16 +303,4 @@ extension World {
         releases.padSlotOf.filter { $0.key.hasPrefix(station.name + "|") }.sorted { $0.value < $1.value }.map(\.key)
     }
     func padKeys() -> Set<String> { Set(releases.padSlotOf.keys) }
-
-    func padSpot(station: Station, repo: String, key: String? = nil) -> Spot {
-        let slots = padSlots(station: station)
-        let slot = releases.padSlotOf[key ?? station.name + "|" + repo] ?? 0
-        let pc = slots[slot % slots.count]
-        let foot = SIMD2(pc.x, pc.y + 1.05)
-        let stand = Cell(x: Int(foot.x.rounded()), y: Int(foot.y.rounded()))
-        func off(_ c: Cell) -> Double { simd_distance(SIMD2(Double(c.x), Double(c.y)), foot) }
-        let cell = station.hall.padCells.contains(stand) ? stand : (station.hall.padCells.min { off($0) < off($1) } ?? Cell(x: 0, y: 0))
-        return Spot(area: .pad, station: station.name, owner: repo, label: repo, cell: cell,
-                    pos: SIMD3(station.offset.x + foot.x, 0, station.offset.y + foot.y))
-    }
 }

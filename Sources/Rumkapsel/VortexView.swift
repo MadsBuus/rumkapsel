@@ -94,7 +94,9 @@ extension StationController {
 
     private func pulledNode(_ view: VortexView, _ crate: CrateRef) -> SCNNode {
         if let n = view.crates[crate.key] { return n }
-        let n = looseCrate(crate)
+        let n = crateNodes[crate.key] ?? looseCrate(crate)
+        stopCrate(n)
+        n.removeFromParentNode()
         propRoot.addChildNode(n)
         view.crates[crate.key] = n
         return n

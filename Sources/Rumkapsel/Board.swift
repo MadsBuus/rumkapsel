@@ -2,6 +2,7 @@ import Foundation
 
 enum Rank: Int, Comparable {
     case idle
+    case tidy
     case crew
     case desk
     case qa
@@ -52,7 +53,7 @@ extension Simulation {
         }
         for (id, job) in cargo where job.carrier == nil {
             guard case .carry(let crate, let from, _) = job.command.kind else { continue }
-            guard job.command.after.allSatisfy({ cargo[$0] == nil }) else { continue }
+            guard job.blockedBy.isEmpty else { continue }
             out.append(Opening(work: .carry(id), rank: rank(of: job.command), station: crate.station, at: from.cell,
                                postedAt: job.postedAt, gaveUp: job.gaveUp, prefer: job.prefer))
         }
@@ -75,7 +76,7 @@ extension Simulation {
               !rockets.values.contains(where: { $0.station == station.name && $0.isSteaming }) else { return false }
         return world.repoRoots.contains { _, info in
             guard info.station == station.name, world.workflow(repo: info.repo).has(.cleared) else { return false }
-            let alien = Set(station.ledger.crates(of: info.repo).filter(\.alien).map(\.number))
+            let alien = Set(station.facts.crates.values.filter { $0.alien && $0.id.repo == info.repo }.map(\.id.number))
             return world.works.records(repo: info.repo).contains { r in r.stage == .qa && !(r.number.map(alien.contains) ?? false) }
         }
     }

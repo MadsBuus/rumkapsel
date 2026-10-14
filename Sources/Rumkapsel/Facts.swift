@@ -64,6 +64,21 @@ struct CrateFact: Codable, Equatable {
     var cleared: Bool { alien || (stage.map { $0 >= .cleared } ?? false) }
     var zone: Zone? { place.zone }
     var onRow: Bool { zone?.isRow ?? false }
+
+    init(id: CrateID, place: Place, stage: Stage? = nil, alien: Bool = false, seq: Int, column: Int? = nil, closedAt: Date? = nil) {
+        self.id = id; self.place = place; self.stage = stage; self.alien = alien; self.seq = seq; self.column = column; self.closedAt = closedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(CrateID.self, forKey: .id)
+        place = try c.decode(Place.self, forKey: .place)
+        stage = try c.decodeIfPresent(Stage.self, forKey: .stage)
+        alien = try c.decodeIfPresent(Bool.self, forKey: .alien) ?? false
+        seq = try c.decodeIfPresent(Int.self, forKey: .seq) ?? 0
+        column = try c.decodeIfPresent(Int.self, forKey: .column)
+        closedAt = try c.decodeIfPresent(Date.self, forKey: .closedAt)
+    }
 }
 
 struct StagingFact: Codable, Equatable {
@@ -77,6 +92,21 @@ struct RepoFacts: Codable, Equatable {
     var hasStaging = false, hasCleared = false, shipsOnMerge = false, shipsOnTag = false
     var ships = true, shipsAtOnce = false
     var loadZones: [Zone] { hasStaging ? [.testing, .cleared] : [.waiting] }
+
+    init(hasStaging: Bool = false, hasCleared: Bool = false, shipsOnMerge: Bool = false, shipsOnTag: Bool = false, ships: Bool = true, shipsAtOnce: Bool = false) {
+        self.hasStaging = hasStaging; self.hasCleared = hasCleared; self.shipsOnMerge = shipsOnMerge; self.shipsOnTag = shipsOnTag
+        self.ships = ships; self.shipsAtOnce = shipsAtOnce
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hasStaging = try c.decodeIfPresent(Bool.self, forKey: .hasStaging) ?? false
+        hasCleared = try c.decodeIfPresent(Bool.self, forKey: .hasCleared) ?? false
+        shipsOnMerge = try c.decodeIfPresent(Bool.self, forKey: .shipsOnMerge) ?? false
+        shipsOnTag = try c.decodeIfPresent(Bool.self, forKey: .shipsOnTag) ?? false
+        ships = try c.decodeIfPresent(Bool.self, forKey: .ships) ?? true
+        shipsAtOnce = try c.decodeIfPresent(Bool.self, forKey: .shipsAtOnce) ?? false
+    }
 }
 
 struct Facts: Codable, Equatable {
@@ -88,6 +118,20 @@ struct Facts: Codable, Equatable {
     var homes: [String: Int] = [:]
     var staging: [String: StagingFact] = [:]
     var launches: [RocketID: Date] = [:]
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scheme = try c.decodeIfPresent(Int.self, forKey: .scheme) ?? 0
+        nextSeq = try c.decodeIfPresent(Int.self, forKey: .nextSeq) ?? 0
+        repos = try c.decodeIfPresent([String: RepoFacts].self, forKey: .repos) ?? [:]
+        crates = try c.decodeIfPresent([CrateID: CrateFact].self, forKey: .crates) ?? [:]
+        homes = try c.decodeIfPresent([String: Int].self, forKey: .homes) ?? [:]
+        staging = try c.decodeIfPresent([String: StagingFact].self, forKey: .staging) ?? [:]
+        launches = try c.decodeIfPresent([RocketID: Date].self, forKey: .launches) ?? [:]
+        nextSeq = max(nextSeq, (crates.values.map(\.seq).max() ?? -1) + 1)
+    }
 
     mutating func take() -> Int { defer { nextSeq += 1 }; return nextSeq }
 

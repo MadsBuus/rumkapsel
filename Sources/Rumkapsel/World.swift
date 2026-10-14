@@ -48,15 +48,10 @@ final class World {
         return nil
     }
 
-    func carriesDueToDeck(repo: String) -> Set<Int> {
-        Set(transitions.compactMap { $0.record.repo == repo && $0.t.to == .qa && $0.t.from != nil && $0.t.from != .cleared ? $0.record.number : nil })
-    }
-
     func stationEvents() -> [WorldEvent] {
         var events: [WorldEvent] = []
         var waiting: [(record: WorkBook.Record, t: Transition)] = []
         var launches: Set<String> = []
-        var toDeck: [String: [Int]] = [:]
         var clearedThisPass = false
         for (record, t) in transitions {
             switch t.to {
@@ -68,19 +63,8 @@ final class World {
                 if let number = record.pulls.keys.min() {
                     events.append(.pullRequestOpened(repo: record.repo, number: number, author: author, roomKey: room.key))
                 }
-            case .qa where t.from == .cleared:
-                continue
-            case .qa where t.from != nil:
-                guard let info = repoRoots.first(where: { $0.value.repo == record.repo }), let station = fleet.stations[info.value.station],
-                      let number = record.number, isReady(record.repo) else { continue }
-                guard station.hasPad, !station.hall.deckCells.isEmpty, github.pipeline(repoRoot: info.key).hasStaging else { continue }
-                let row = station.ledger[record.repo, number]
-                if row?.placed == .deck || row?.heading == .deck { continue }
-                guard row?.placed == .storage, !(row?.inTransit ?? false) else { waiting.append((record, t)); continue }
-                toDeck[station.name + "|" + record.repo, default: []].append(number)
             case .cleared where t.from != nil:
-                guard let info = repoRoots.values.first(where: { $0.repo == record.repo }), let number = record.number, isReady(record.repo) else { continue }
-                events.append(.crateCleared(station: info.station, repo: record.repo, number: number))
+                guard repoRoots.values.contains(where: { $0.repo == record.repo }), isReady(record.repo) else { continue }
                 clearedThisPass = true
             case .shipped where t.from != nil:
                 guard !releases.hotfixRecords.contains(record.id), let (root, info) = repoRoots.first(where: { $0.value.repo == record.repo }).map({ ($0.key, $0.value) }) else { continue }
@@ -92,12 +76,6 @@ final class World {
         }
         transitions = waiting
         if !launches.isEmpty { assignPads() }
-        for (key, numbers) in toDeck.sorted(by: { $0.key < $1.key }) {
-            let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
-            guard let station = fleet.stations[parts[0]] else { continue }
-            let commands = station.carryToDeck(repo: parts[1], numbers: numbers)
-            if !commands.isEmpty { events.append(.carryToDeck(station: station.name, repo: parts[1], commands: commands)) }
-        }
         for key in launches.sorted() {
             guard let station = fleet.stations[String(key.split(separator: "|")[0])] else { continue }
             let repo = String(key.split(separator: "|", maxSplits: 1)[1])
@@ -146,30 +124,16 @@ final class World {
     }
     func stage(office key: String, repo: String?) -> Stage? { repo.flatMap { works.find(officeKey: key, repo: $0) }?.stage }
 
-    // MARK: a crate's row, from the floor's side
-
-    func crate(_ c: CrateRef) -> Ledger.Crate? { fleet.stations[c.station]?.ledger[c.repo, c.number] }
-    func isCarried(_ c: CrateRef) -> Bool { crate(c)?.isCarried ?? false }
-    func area(of c: CrateRef) -> Spot.Area? { crate(c)?.area }
-    func carriedCount(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.carriedCount(repo: repo) ?? 0 }
-    func aboard(station: String, repo: String) -> Int { fleet.stations[station]?.ledger.aboard(repo: repo) ?? 0 }
-
-    func claim(_ c: CrateRef) { fleet.stations[c.station]?.ledger.claim(repo: c.repo, number: c.number) }
-    func pickedUp(_ c: CrateRef, by minion: String) { fleet.stations[c.station]?.ledger.pickedUp(repo: c.repo, number: c.number, by: minion) }
-    func setDown(_ c: CrateRef, at spot: Spot) {
-        fleet.stations[c.station]?.ledger.setDown(repo: c.repo, number: c.number, at: spot)
-    }
-    func forgetPlacement(_ c: CrateRef) { fleet.stations[c.station]?.ledger.forgetPlacement(repo: c.repo, number: c.number) }
-    func dropped(by minion: String) { for st in fleet.stations.values { st.ledger.dropped(by: minion) } }
-    func clearPad(station: String, repo: String) { fleet.stations[station]?.ledger.clearPad(repo: repo) }
-
     // MARK: office hauls
 
-    func haulOrdered(office key: String, crate: CrateRef) { officeCrates[key] = crate; claim(crate) }
+    func haulOrdered(office key: String, crate: CrateRef) { officeCrates[key] = crate }
     func haulOrdered(office key: String) -> Bool { officeCrates[key] != nil }
     func haulLanded(office key: String) -> Bool {
-        guard let c = officeCrates[key], let row = crate(c), let area = row.area else { return false }
-        return area != .office
+        guard let c = officeCrates[key], let station = fleet.stations[c.station] else { return false }
+        guard let fact = station.facts.crates[CrateID(repo: c.repo, number: c.number)] else {
+            return works.find(repo: c.repo, crate: c.number)?.stage.map { $0 >= .shipped } ?? false
+        }
+        return fact.place != .office(String(key.dropFirst(c.station.count + 1)))
     }
     func haulUnderway(office key: String) -> Bool { haulOrdered(office: key) && !haulLanded(office: key) }
     func forgetOffice(_ key: String) { officeCrates[key] = nil }
@@ -435,7 +399,7 @@ final class World {
                     events.append(.log("\(room.name): pull request closed, not merged"))
                 }
                 if state != nil, !closed { closedAt[key] = nil }
-                if merged, station.hasPad, !haulOrdered(office: key) { events += haulMerged(station: station, room: room) }
+                if merged, station.hasPad, !haulOrdered(office: key) { haulMerged(station: station, room: room) }
                 let cleared = (merged && (!station.hasPad || haulLanded(office: key) || nothingToHaul.contains(key)))
                     || (closed && now.timeIntervalSince(closedAt[key] ?? now) > World.closedWindow)
                 let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
@@ -599,7 +563,7 @@ final class World {
         for old in ["kind:bots", "kind:mail"] where station.rooms[old] != nil { station.removeRoom(key: old); changed = true }
         var deconMoved = false
         events += screen(station: station, open: open, feed: feed, moved: &deconMoved)
-        let inDecon = station.ledger.allCrates.contains { $0.alien && $0.placed == .decon }
+        let inDecon = station.facts.crates.values.contains { $0.zone == .decon }
         guard !open.isEmpty || !feed.isEmpty || !boardOffices.isEmpty || inDecon else {
             if changed || deconMoved { events.append(changed ? .layoutChanged : .markersChanged) }
             noteAnswered()
@@ -630,7 +594,6 @@ final class World {
             crewRoomInfo[key]?.state = state
             let closedUnmerged = !(stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false)
             if closedUnmerged {
-                if let n = known?.number { station.ledger.forget(repo: room.repo ?? "", number: n) }
                 if closedAt[key] == nil {
                     closedAt[key] = now
                     learnClosed(office: room.key, repo: room.repo)
@@ -638,9 +601,7 @@ final class World {
                 }
                 if now.timeIntervalSince(closedAt[key] ?? now) < World.closedWindow { continue }
             } else if !haulOrdered(office: key), station.hasPad {
-                let merged = haulMerged(station: station, room: room)
-                hauling = !merged.isEmpty
-                events += merged
+                hauling = haulMerged(station: station, room: room)
                 if isReady(room.repo) { events.append(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             }
             guard !station.hasPad || !(hauling || haulUnderway(office: key)) else { continue }
@@ -737,15 +698,11 @@ final class World {
         let cfg = ConfigStore.shared.current
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name && cfg.crewEnabled(repo: info.repo) {
             guard github.teamOpenPRs(repoRoot: root) != nil else { continue }
-            let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }
-            let (arrived, gone) = station.ledger.adoptDecon(open: bots.map(\.pr.number), repo: info.repo)
-            learn(.decon(repo: info.repo, open: bots.map(\.pr.number)), repo: info.repo)
-            if !arrived.isEmpty { moved = true }
-            if !arrived.isEmpty, isReady(info.repo) { events.append(.deconArrived(station: station.name, repo: info.repo, numbers: arrived)) }
-            for n in arrived where isReady(info.repo) {
-                let title = bots.first { $0.pr.number == n }?.pr.title ?? ""
-                events.append(.log("\(Words.current.unidentified) #\(n) in \(Words.current.inDecon) · \(title.prefix(48))"))
-            }
+            let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }.map(\.pr.number)
+            let known = station.facts.crates.values.filter { $0.id.repo == info.repo }
+            if bots.contains(where: { n in !known.contains { $0.id.number == n } }) { moved = true }
+            learn(.decon(repo: info.repo, open: bots, quiet: deconHeard.insert(info.repo).inserted), repo: info.repo)
+            let gone = known.filter { $0.zone == .decon && !bots.contains($0.id.number) && !deconSettled.contains($0.id) }.map(\.id.number).sorted()
             for n in gone {
                 var state: String?
                 if feed.contains(where: { $0.repo == info.repo && $0.e.kind == "pr_close" && $0.e.prNumber == n }) { state = "CLOSED" }
@@ -756,14 +713,13 @@ final class World {
                 }
                 guard let state else { continue }
                 moved = true
+                deconSettled.insert(CrateID(repo: info.repo, number: n))
                 if state == "MERGED", station.hasPad {
-                    station.ledger.order(repo: info.repo, number: n, to: .storage)
-                    events.append(.deconCleared(station: station.name, repo: info.repo, number: n))
+                    events.append(.log("#\(n) \(Words.current.clearedDecon)"))
+                    learn(.work(WorkNews(crate: CrateID(repo: info.repo, number: n), stage: .stored)), repo: info.repo)
                     report(crate: n, repo: info.repo, .stored, by: .pulls, at: now)
                 } else {
-                    station.ledger.forget(repo: info.repo, number: n)
                     learn(.deconClosed(CrateID(repo: info.repo, number: n)), repo: info.repo)
-                    events.append(.log("#\(n) \(Words.current.ejected)" + (state == "MERGED" ? "" : ", never cleared")))
                 }
             }
         }
@@ -857,20 +813,21 @@ final class World {
 
     // MARK: commands the reconciler issues
 
-    private func haulMerged(station: Station, room: Room) -> [WorldEvent] {
+    @discardableResult
+    private func haulMerged(station: Station, room: Room) -> Bool {
         let key = roomKey(station, room)
-        guard station.hasPad, !haulOrdered(office: key) else { return [] }
-        guard hasPackage(key) else { nothingToHaul.insert(key); return [] }
+        guard station.hasPad, !haulOrdered(office: key) else { return false }
+        guard hasPackage(key) else { nothingToHaul.insert(key); return false }
         let repo = room.repo ?? "work"
         let pull = pulls.pull(ownOffice: room)
         let known = works.find(officeKey: room.key, repo: repo)
-        guard let prNumber = pull?.number ?? known?.pulls.keys.min(), prNumber > 0 else { nothingToHaul.insert(key); return [] }
+        guard let prNumber = pull?.number ?? known?.pulls.keys.min(), prNumber > 0 else { nothingToHaul.insert(key); return false }
         let record = works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull?.closes.first, pull: prNumber, pullState: pull?.state)
-        guard let number = record.number else { return [] }
-        if record.quiet { nothingToHaul.insert(key); return [] }
+        guard let number = record.number else { return false }
+        if record.quiet { nothingToHaul.insert(key); return false }
         haulOrdered(office: key, crate: CrateRef(station: station.name, repo: repo, number: number))
         works.report(record, .stored, by: .pulls, at: now)
-        return [.officeMerged(station: station.name, key: room.key, repo: repo, number: number)]
+        return true
     }
 
     private(set) var closedAt: [String: Date] = [:]
@@ -878,15 +835,8 @@ final class World {
     func isClosed(_ roomKey: String) -> Bool { closedAt[roomKey] != nil }
 
     private var nothingToHaul: Set<String> = []
-
-    func landed(station: Station, repo: String, number: Int, in yard: Yard, at now: Date) {
-        station.ledger.landed(repo: repo, number: number, in: yard, at: now)
-        fleet.save()
-    }
-
-    func unorder(_ crate: CrateRef) {
-        fleet.stations[crate.station]?.ledger.unorder(repo: crate.repo, number: crate.number)
-    }
+    private var deconSettled: Set<CrateID> = []
+    private var deconHeard: Set<String> = []
 }
 
 struct SeenPerson: Codable, Equatable {

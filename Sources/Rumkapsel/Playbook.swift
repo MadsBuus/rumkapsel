@@ -14,31 +14,32 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
     init(floatLiteral value: Double) { self = .beat(value) }
     init(integerLiteral value: Int) { self = .beat(Double(value)) }
 
-    static func crate(_ n: Int, _ words: String, _ holds: @escaping (Ledger.Crate) -> Bool) -> PlaybookWait {
-        .until("#\(n) \(words)") { c in c.fleet.stations.values.contains { $0.ledger["web", n].map(holds) ?? false } }
+    static func crate(_ n: Int, _ words: String, _ holds: @escaping (Shown.At) -> Bool) -> PlaybookWait {
+        .until("#\(n) \(words)") { c in c.simulation.shown.values.contains { $0.crates[CrateID(repo: "web", number: n)].map(holds) ?? false } }
     }
-    static func inStorage(_ n: Int) -> PlaybookWait { crate(n, "in storage") { $0.stands(in: .storage) } }
-    static func onDeck(_ n: Int) -> PlaybookWait { crate(n, "back on the deck") { $0.area == .deck && !$0.inTransit } }
-    static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on the cleared rows") { $0.area == .tested && !$0.inTransit } }
+    static func inStorage(_ n: Int) -> PlaybookWait { crate(n, "in storage") { if case .row(let s) = $0 { return s.zone == .waiting }; return false } }
+    static func onStack(_ n: Int) -> PlaybookWait { crate(n, "on the cleared rows") { if case .row(let s) = $0 { return s.zone == .cleared }; return false } }
     static func pickedUp(_ n: Int) -> PlaybookWait {
         .until("#\(n) picked up") { c in c.minions.values.contains { m in
             if m.carried != nil, case .crate(let crate)? = m.load { return crate.number == n }
             return false
         } }
     }
-    static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { $0.area == .pad } }
+    static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { if case .aboard = $0 { return true }; return false } }
     static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
     static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.world.padKeys().contains { $0.hasSuffix("|web") } }
     static let bodyOnDeck = PlaybookWait.until("somebody in the hall") { c in
         c.minions.values.contains { m in c.fleet.stations[m.station]?.hall.cells.contains(m.cell) ?? false }
     }
     static let toStaged = PlaybookWait.until("web's crates going to the staged rows") { c in
-        c.fleet.stations.values.contains { $0.ledger.crates(of: "web").contains { $0.heading == .deck } }
+        c.simulation.cargo.values.contains { $0.crate.repo == "web" && $0.spot?.zone == .testing }
     }
     static let stagedDown = PlaybookWait.until("web's crates down on the staged rows") { c in
         c.fleet.stations.values.contains { st in
-            let web = st.ledger.crates(of: "web")
-            return web.contains { $0.placed == .deck && !$0.cleared } && !web.contains { $0.heading == .deck || $0.placed == .storage }
+            let web = st.facts.crates.values.filter { $0.id.repo == "web" }
+            let view = c.simulation.shown[st.name] ?? Shown()
+            return web.contains { $0.zone == .testing } && !web.contains { $0.zone == .waiting }
+                && web.allSatisfy { f in if case .row(let s)? = view.crates[f.id] { return s.zone == f.zone }; return f.zone == nil }
         }
     }
     static func welderUp(_ repo: String) -> PlaybookWait {

@@ -62,9 +62,9 @@ enum RuleTests {
             expect(f.crates[id("ios", 1)]?.place == .waiting && f.crates[id("ios", 2)]?.place == .waiting, "no testing rows: both wait in storage")
             expect(f.crates[id("ios", 1)]?.cleared == true && f.crates[id("ios", 2)]?.cleared == false, "#1 tested, #2 not")
             apply(&f, [.launched(repo: "ios", hotfix: nil)], at: t0 + 60)
-            expect([1, 2].allSatisfy { f.crates[id("ios", $0)]?.place == .aboard("ios") }, "the tag takes both aboard")
+            expect([1, 2].allSatisfy { released(f.crates[id("ios", $0)], "ios") }, "the tag takes both aboard")
             apply(&f, [work("ios", 1, .shipped), work("ios", 2, .shipped)], at: t0 + 70)
-            expect([1, 2].allSatisfy { f.crates[id("ios", $0)]?.place == .aboard("ios") }, "shipped after the launch changes nothing")
+            expect([1, 2].allSatisfy { released(f.crates[id("ios", $0)], "ios") }, "shipped after the launch changes nothing")
             apply(&f, [work("ios", 3, .stored, quiet: true)])
             apply(&f, [work("ios", 3, .shipped)])
             expect(f.crates[id("ios", 3)] == nil, "shipped with no tag: gone")
@@ -75,7 +75,7 @@ enum RuleTests {
             apply(&w, [.policy(repo: "web", staged), work("web", 1, .stored, quiet: true), work("web", 2, .qa, quiet: true), work("web", 3, .cleared, quiet: true)])
             apply(&w, [.launched(repo: "web", hotfix: nil)])
             expect(w.crates[id("web", 1)]?.place == .waiting, "with staging, storage stays behind")
-            expect([2, 3].allSatisfy { w.crates[id("web", $0)]?.place == .aboard("web") }, "the testing and cleared rows go aboard")
+            expect([2, 3].allSatisfy { released(w.crates[id("web", $0)], "web") }, "the testing and cleared rows go aboard")
         }
 
         test("closed unmerged: red at once, gone ten minutes later") {
@@ -218,11 +218,57 @@ enum RuleTests {
             var r = f
             Layout.relayout(&r, yard: g)
             expect(r == f, "migrated facts are already laid out")
-            var ledger = Ledger()
-            ledger.adopt(Ledger.Word(storage: [1], deck: [2, 3], cleared: [3]), repo: "web")
-            let mine = (try? JSONEncoder().encode(ledger)).flatMap { try? JSONDecoder().decode(LegacyLedger.self, from: $0) }
-            let back = mine.map { Facts.migrate($0, yard: g) }
-            expect(back?.crates.mapValues(\.place) == [id("web", 1): .waiting, id("web", 2): .testing, id("web", 3): .cleared], "today's ledger encodes into the legacy shape")
+        }
+
+        test("the source's first full answer sweeps the rows of what it no longer has, quietly, and nothing else") {
+            var f = stored("web", [1, 2, 3, 4, 5, 6])
+            apply(&f, [work("web", 9, .ready, office: true), .decon(repo: "web", open: [40])])
+            let fx = apply(&f, [.sweep(repo: "web", keep: [1, 3, 5, 6])])
+            expect(fx == [.quiet(.crate(id("web", 4))), .quiet(.crate(id("web", 2)))], "no shrinking: the picture snaps: \(fx)")
+            expect(Set(f.crates.keys) == Set([1, 3, 5, 6, 9, 40].map { id("web", $0) }), "#2 and #4 gone, the office and decon untouched: \(f.crates.keys.sorted())")
+            expect(tallest(f) <= 3 && f.homes["web"] == 3, "still a good yard at home")
+            let before = f
+            apply(&f, [.sweep(repo: "ios", keep: [])])
+            expect(f == before, "another repository's answer touches nothing of web")
+        }
+
+        test("each release launch is a rocket of its own: the second takes only what came after the first") {
+            var f = stored("web", [1])
+            apply(&f, [work("web", 1, .qa), .launched(repo: "web", hotfix: nil)])
+            apply(&f, [work("web", 2, .stored, quiet: true), work("web", 2, .qa), .launched(repo: "web", hotfix: nil)], at: t0 + 30)
+            guard case .aboard(let first)? = f.crates[id("web", 1)]?.place, case .aboard(let second)? = f.crates[id("web", 2)]?.place else {
+                return expect(false, "both aboard")
+            }
+            expect(first != second && f.launches.count == 2, "two rockets: \(first), \(second)")
+        }
+
+        test("a first answer is never news: decon arrivals and a first policy place crates quietly") {
+            var f = Facts()
+            let fx = apply(&f, [.decon(repo: "web", open: [7], quiet: true)])
+            expect(f.crates[id("web", 7)]?.zone == .decon && fx == [.quiet(.crate(id("web", 7)))], "in decon, no hatch, no line: \(fx)")
+            var g = Facts()
+            apply(&g, [work("web", 3, .qa, quiet: true)])
+            let first = apply(&g, [.policy(repo: "web", staged)])
+            expect(g.crates[id("web", 3)]?.zone == .testing && first == [.quiet(.crate(id("web", 3)))], "a first policy re-places quietly: \(first)")
+        }
+
+        test("a crate leaving from under a pile keeps the pile's order when there is nowhere else to go") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "web", staged)])
+            for n in 1...12 { apply(&f, [work("web", n, .stored, quiet: true)]) }
+            for (k, repo) in ["a", "b", "c"].enumerated() { apply(&f, [.policy(repo: repo, staged)] + (0..<12).map { work(repo, 100 * (k + 1) + $0, .stored, quiet: true) }) }
+            let column = column(f, "web", 1)
+            let above = f.crates.values.filter { $0.zone == .waiting && $0.column == column && $0.id != id("web", 1) }.sorted { $0.seq < $1.seq }.map(\.id)
+            apply(&f, [work("web", 1, .qa)])
+            let after = f.crates.values.filter { $0.zone == .waiting && $0.column == column }.sorted { $0.seq < $1.seq }.map(\.id)
+            expect(above.count == 2 && after == above, "the two above stay in order: \(above) then \(after)")
+        }
+
+        test("aboard a launched rocket, a later word from the source does not bring a crate back to the rows") {
+            var f = stored("web", [1])
+            apply(&f, [work("web", 1, .qa), .launched(repo: "web", hotfix: nil)])
+            apply(&f, [work("web", 1, .qa), work("web", 1, .stored)], at: t0 + 30)
+            expect(released(f.crates[id("web", 1)], "web"), "still aboard: \(String(describing: f.crates[id("web", 1)]?.place))")
         }
 
         if failures > 0 { print("rules: \(failures) failed"); exit(1) }
@@ -231,6 +277,11 @@ enum RuleTests {
     }
 
     private static func id(_ repo: String, _ n: Int) -> CrateID { CrateID(repo: repo, number: n) }
+
+    private static func released(_ c: CrateFact?, _ repo: String) -> Bool {
+        if case .aboard(let rocket)? = c?.place { return rocket.hasPrefix(repo + "|release#") }
+        return false
+    }
 
     private static func work(_ repo: String, _ n: Int, _ stage: Stage, office: Bool = false, quiet: Bool = false, closed: Bool = false) -> Event {
         .work(WorkNews(crate: id(repo, n), office: office ? "task:\(repo)#\(n)" : nil, stage: stage, closed: closed, quiet: quiet))

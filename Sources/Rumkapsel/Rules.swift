@@ -13,11 +13,12 @@ enum StagingNews: Equatable { case opened(Int), merged(Int), closed(Int), deploy
 enum Event: Equatable {
     case policy(repo: String, RepoFacts)
     case work(WorkNews)
-    case decon(repo: String, open: [Int])
+    case decon(repo: String, open: [Int], quiet: Bool = false)
     case deconClosed(CrateID)
     case renumbered(from: CrateID, to: CrateID)
     case staging(repo: String, StagingNews)
     case launched(repo: String, hotfix: Int?)
+    case sweep(repo: String, keep: [Int])
     case restack
     case tick
 }
@@ -40,22 +41,23 @@ enum Rules {
         for event in events {
             switch event {
             case .policy(let repo, let r):
+                let first = f.repos[repo] == nil
                 f.repos[repo] = r
                 for id in f.crates.values.filter({ $0.id.repo == repo }).sorted(by: { $0.seq < $1.seq }).map(\.id) {
                     guard let c = f.crates[id], let stage = c.stage else { continue }
-                    put(id, place(stage, r, office: nil, old: c.place), &f, g)
+                    if put(id, place(stage, r, office: nil, old: c.place), &f, g), first { fx.append(.quiet(.crate(id))) }
                 }
             case .work(let news):
                 work(news, now, &f, g, &fx, &arrived)
-            case .decon(let repo, let open):
+            case .decon(let repo, let open, let quiet):
                 let new = Set(open).sorted().filter { f.crates[CrateID(repo: repo, number: $0)] == nil }
                 guard !new.isEmpty else { continue }
-                fx.append(.hatch(repo: repo))
+                if !quiet { fx.append(.hatch(repo: repo)) }
                 for number in new {
                     let id = CrateID(repo: repo, number: number)
                     put(id, .decon, &f, g)
                     f.crates[id]?.alien = true
-                    fx.append(.log("\(Words.current.unidentified) #\(number) in \(Words.current.inDecon)"))
+                    fx.append(quiet ? .quiet(.crate(id)) : .log("\(Words.current.unidentified) #\(number) in \(Words.current.inDecon)"))
                 }
             case .deconClosed(let id):
                 guard f.crates[id]?.zone == .decon else { continue }
@@ -74,11 +76,17 @@ enum Rules {
                 staging(repo, news, &f)
             case .launched(let repo, let hotfix):
                 let r = f.repo(repo)
-                let rocket = hotfix.map { "\(repo)|hotfix#\($0)" } ?? repo
+                let rocket = hotfix.map { "\(repo)|hotfix#\($0)" } ?? "\(repo)|release#\(f.take())"
                 let going = hotfix.map { [CrateID(repo: repo, number: $0)] }
                     ?? f.crates.values.filter { $0.id.repo == repo && $0.zone.map(r.loadZones.contains) == true }.sorted { $0.seq > $1.seq }.map(\.id)
                 f.launches[rocket] = now
                 for id in going where f.crates[id] != nil { put(id, .aboard(rocket), &f, g) }
+            case .sweep(let repo, let keep):
+                let kept = Set(keep)
+                for c in f.crates.values.filter({ $0.id.repo == repo && $0.onRow && !kept.contains($0.id.number) }).sorted(by: { $0.seq > $1.seq }) {
+                    put(c.id, nil, &f, g)
+                    fx.append(.quiet(.crate(c.id)))
+                }
             case .restack:
                 Layout.relayout(&f, yard: g)
             case .tick:
@@ -195,12 +203,18 @@ enum Rules {
         f.crates[c.id]?.column = nil
         guard zone.isRow else { return }
         let above = f.crates.values.filter { $0.zone == zone && $0.column == column && $0.seq > c.seq }.sorted { $0.seq > $1.seq }.map(\.id)
+        var stay: [CrateID] = []
         for id in above {
             f.crates[id]?.column = nil
-            let to = Layout.pickColumn(id.repo, zone, f, g, avoiding: column) ?? column
+            guard let to = Layout.pickColumn(id.repo, zone, f, g, avoiding: column) else { stay.append(id); continue }
             let seq = f.take()
             f.crates[id]?.seq = seq
             f.crates[id]?.column = to
+        }
+        for id in stay.reversed() {
+            let seq = f.take()
+            f.crates[id]?.seq = seq
+            f.crates[id]?.column = column
         }
     }
 }

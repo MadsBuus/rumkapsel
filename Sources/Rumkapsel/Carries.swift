@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 enum Patience {
     static let giveUpAfter = 10.0
@@ -15,14 +16,23 @@ extension Simulation {
         m.landing = Body.Landing(pos: spot.pos, yaw: spot.yaw)
     }
 
-    func dropLoad(_ m: B) {
-        guard m.hasLoad, let station = fleet.stations[m.station] else { return }
+    @discardableResult
+    func dropLoad(_ m: B) -> Spot? {
+        guard m.hasLoad, let station = fleet.stations[m.station] else { return nil }
         let at = dropPoint(m, station: station)
         let behind = SIMD3(station.offset.x + at.x, 0.12, station.offset.y + at.y)
+        let load = m.load
         m.load = nil
         m.settingDownOn = nil
         m.landing = Body.Landing(pos: behind, yaw: nil, dropped: true)
-        world.dropped(by: m.id)
+        guard case .crate(let crate)? = load else { return nil }
+        var area = Spot.Area.storage
+        if let job = m.current.flatMap({ cargo[$0.id] }), case .carry(_, let from, _) = job.command.kind { area = from.area }
+        let spot = Spot(area: area, station: station.name, owner: crate.repo, label: crate.repo,
+                        cell: Cell(x: Int(at.x.rounded()), y: Int(at.y.rounded())), pos: behind)
+        shown[station.name]?.crates[CrateID(repo: crate.repo, number: crate.number)] = .parked(spot)
+        cue(.redraw)
+        return spot
     }
 
     func dropPoint(_ m: B, station: Station) -> SIMD2<Double> {
@@ -46,33 +56,15 @@ extension Simulation {
     }
 
     func forget(_ m: B) {
-        if m.current?.crate != nil { dropLoad(m) }
-        for (id, c) in cargo where c.carrier == m.id { cargo[id]?.carrier = nil }
-        world.dropped(by: m.id)
+        let dropped = m.current?.crate != nil ? dropLoad(m) : nil
+        for (id, c) in cargo where c.carrier == m.id {
+            cargo[id]?.carrier = nil
+            if let dropped { cargo[id]?.command = c.command.from(dropped) }
+        }
         bodies[m.id] = nil
     }
 
     // MARK: carries
-
-    @discardableResult
-    func carry(_ command: Command, roomKey: String = "", rank: Rank = .yard, onDone: @escaping () -> Void) -> Bool {
-        guard let crate = command.crate, case .carry(_, _, let yard) = command.kind, let station = fleet.stations[crate.station] else { return false }
-        world.claim(crate)
-        station.ledger.order(repo: crate.repo, number: crate.number, to: yard)
-        guard let aim = world.slotNow(for: crate, toward: yard) else { return false }
-        cargo[command.id] = Cargo(command: command, onDone: onDone, carrier: nil, roomKey: roomKey, aim: aim, postedAt: clock, rank: rank)
-        cue(.carryOrdered(id: command.id, crate: crate))
-        return true
-    }
-
-    func cancelCarries(roomKey: String) {
-        for (id, c) in cargo where c.roomKey == roomKey {
-            if case .carry(_, _, let to) = c.command.kind, to == .storage { continue }
-            if let crate = c.command.crate { world.forgetPlacement(crate); world.unorder(crate) }
-            cargo[id] = nil
-            if let who = c.carrier, let m = bodies[who] { loseLoad(m); world.dropped(by: m.id); finish(m) }
-        }
-    }
 
     func hurryCarriers() {
         for (id, job) in cargo where job.carrier != nil && !job.hurry {
@@ -84,34 +76,6 @@ extension Simulation {
             if m.current?.id == id { m.current = m.current?.reworded(words) }
             onEvent(.log("\(m.home.name): \(words)"))
         }
-    }
-
-    func callOffCarriesTakenBack() {
-        for (id, job) in cargo {
-            guard case .carry(let crate, let from, _) = job.command.kind, let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number],
-                  row.heading == .deck, row.placed == .storage, row.wanted == .storage, row.movedAt == nil else { continue }
-            cancelCarry(id, backTo: from)
-        }
-    }
-
-    func cancelCarry(_ id: Int, backTo from: Spot) {
-        guard let job = cargo[id], let crate = job.command.crate, let yard = Yard(area: from.area) else { return }
-        if let who = job.carrier, let m = bodies[who], m.load == .crate(crate) {
-            let back = job.command.aimed(at: yard)
-            cargo[id]?.command = back
-            cargo[id]?.aim = from
-            world.unorder(crate)
-            if m.current?.id == back.id { m.current = back }
-            if m.phaseKind == .haul { walk(m, to: standCell(fleet.stations[m.station]!, near: from.cell)) }
-            onEvent(.log("\(crate.words): back where it was, the board changed its mind"))
-            return
-        }
-        if let who = job.carrier, let m = bodies[who], m.current?.id == id { finish(m) }
-        world.forgetPlacement(crate)
-        world.unorder(crate)
-        cargo[id] = nil
-        cue(.redraw)
-        onEvent(.log("\(crate.words): stays put, the board changed its mind"))
     }
 
     // MARK: deliveries
@@ -232,6 +196,7 @@ extension Simulation {
             case .walk:
                 advance(m); return .spent
             case .approach:
+                if !job.blockedBy.isEmpty { m.waitingOn = Words.current.cratesOnTop; return .spent }
                 guard atArmsLength(m, of: boxAt, dt: dt) else { return .spent }
                 advance(m)
                 startLift(m, height: from.pos.y, far: tossFrom(station, to: from.cell) != nil)
@@ -241,12 +206,18 @@ extension Simulation {
                 if (toBox.x * toBox.x + toBox.y * toBox.y).squareRoot() > 0.05 { m.facing = atan2(toBox.x, toBox.y) }
                 guard liftDue(m) else { return .spent }
                 if m.load == nil {
+                    guard stillAt(job, from) else {
+                        cargo[id] = nil
+                        finish(m)
+                        return .spent
+                    }
                     m.load = .crate(crate)
-                    world.pickedUp(crate, by: m.id)
+                    shown[station.name]?.crates[job.crate] = .hands(m.id)
+                    settle(station.name)
+                    cue(.redraw)
                 }
                 if clock < m.phaseUntil { return .spent }
                 advance(m)
-                reaim(id)
                 walk(m, to: standCell(station, near: (cargo[id]?.aim ?? to).cell))
                 return .spent
             case .haul:
@@ -254,6 +225,7 @@ extension Simulation {
             default:
                 let spot = SIMD2(to.pos.x - station.offset.x, to.pos.z - station.offset.y)
                 if m.phaseUntil == 0 {
+                    if !job.blockedBy.isEmpty { m.waitingOn = Words.current.roomOnTheRow; return .spent }
                     guard atArmsLength(m, of: spot, dt: dt) else { return .spent }
                     startSetDown(m, on: to, far: tossFrom(station, to: to.cell) != nil)
                     return .spent
@@ -261,11 +233,13 @@ extension Simulation {
                 let toSpot = spot - m.pos
                 if (toSpot.x * toSpot.x + toSpot.y * toSpot.y).squareRoot() > 0.05 { m.facing = atan2(toSpot.x, toSpot.y) }
                 if clock < m.phaseUntil { return .spent }
-                putDown(m, on: to)
-                world.setDown(crate, at: to)
-                if let yard = Yard(area: to.area) { landed(crate, in: yard) }
+                let on = m.settingDownOn ?? to
+                putDown(m, on: on)
+                let row = job.spot.flatMap { simd_distance($0.pos, on.pos) < 0.3 ? $0 : nil }
+                shown[station.name]?.crates[job.crate] = row.map { .row($0) } ?? .parked(on)
+                settle(station.name)
                 cargo[id] = nil
-                cue(.landed(job))
+                cue(.redraw)
                 finish(m)
                 return .spent
             }

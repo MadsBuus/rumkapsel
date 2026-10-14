@@ -251,11 +251,15 @@ final class Station {
     }
     var hall: Hall { blocks.hall }
 
-    var ledger = Ledger()
     var facts = Facts()
-    var stored: [String: Int] { ledger.counts(in: .storage) }
+    var stored: [String: Int] { counts([.waiting]) }
     var storedBoxes: Int { stored.values.reduce(0, +) }
-    var staged: [String: Int] { ledger.counts(in: .deck) }
+    var staged: [String: Int] { counts([.testing, .cleared]) }
+    private func counts(_ zones: Set<Zone>) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for c in facts.crates.values where c.zone.map(zones.contains) == true { out[c.id.repo, default: 0] += 1 }
+        return out
+    }
     var monolithPosition: SIMD2<Double> { SIMD2(Double(plan.monolith.x), Double(plan.monolith.y)) }
     var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
         if let b = bedCache { return b }
@@ -747,9 +751,12 @@ final class Station {
         var hallway: [Cell]?
         var rooms: [String: SavedRoom]
         var stored: Int?
-        var ledger: Ledger?
+        var ledger: LegacyLedger?
         var facts: Facts?
         var placement: String?
+        var unreadable: String?
+
+        enum CodingKeys: String, CodingKey { case spine, hallway, rooms, stored, ledger, facts, placement }
     }
     struct SavedRoom: Codable {
         var name: String; var repo: String?; var color: RGB; var cells: [Cell]; var lastActive: Date
@@ -761,7 +768,7 @@ final class Station {
         Saved(spine: spineHalfLength, hallway: dug, rooms: rooms.mapValues {
             SavedRoom(name: $0.name, repo: $0.repo, color: $0.color, cells: $0.cells, lastActive: $0.lastActive, worktree: $0.worktree,
                       branch: $0.branch, repoRoot: $0.repoRoot, openedAt: $0.openedAt)
-        }, stored: storedBoxes, ledger: ledger, facts: savedFacts, placement: OfficePlacement.current.rawValue)
+        }, stored: storedBoxes, ledger: nil, facts: savedFacts, placement: OfficePlacement.current.rawValue)
     }
 
     private var savedFacts: Facts {
@@ -773,10 +780,7 @@ final class Station {
 
     func restore(_ s: Saved, relayout: Bool = false) {
         dug = relayout ? [] : (s.hallway ?? []).filter { !plan.plaza.contains($0) }
-        ledger = s.ledger ?? Ledger()
-        if ledger.slotsDrawnBy != Ledger.slotScheme { ledger.forgetSlots() }
-        ledger.forgetTransit()
-        facts = s.facts ?? Facts.migrate(LegacyLedger(ledger), yard: yard)
+        facts = s.facts ?? Facts.migrate(s.ledger ?? LegacyLedger(crates: [:]), yard: yard)
         if facts.scheme != Facts.scheme { facts.scheme = Facts.scheme; Layout.relayout(&facts, yard: yard) }
         let kept = s.rooms.filter { key, _ in key != "kind:hangar" && key != "kind:bots" && key != "kind:mail" && !key.hasPrefix("crew:") }
         if relayout {
@@ -811,8 +815,8 @@ extension Station.Saved {
         hallway = try c.decodeIfPresent([Cell].self, forKey: .hallway)
         rooms = try c.decode([String: Station.SavedRoom].self, forKey: .rooms)
         stored = try c.decodeIfPresent(Int.self, forKey: .stored)
-        ledger = try c.decodeIfPresent(Ledger.self, forKey: .ledger)
-        facts = try? c.decodeIfPresent(Facts.self, forKey: .facts)
+        ledger = try? c.decodeIfPresent(LegacyLedger.self, forKey: .ledger)
+        do { facts = try c.decodeIfPresent(Facts.self, forKey: .facts) } catch { facts = nil; unreadable = "\(error)" }
         placement = try c.decodeIfPresent(String.self, forKey: .placement)
     }
 }
@@ -960,8 +964,12 @@ final class Fleet {
     func load(alone: Bool) {
         loaded = true
         guard persists else { return }
-        guard let data = try? Data(contentsOf: Fleet.saveURL),
-              let saved = try? JSONDecoder().decode(Saved.self, from: data) else { return }
+        guard let data = try? Data(contentsOf: Fleet.saveURL) else { return }
+        let saved: Saved
+        do { saved = try JSONDecoder().decode(Saved.self, from: data) } catch { return keepUnreadable(data, why: "\(error)") }
+        for (name, s) in saved.stations.sorted(by: { $0.key < $1.key }) {
+            if let why = s.unreadable { keepUnreadable(data, why: "\(name)'s facts: \(why)") }
+        }
         repoColors = saved.palette == Fleet.paletteVersion ? saved.repoColors : [:]
         Fleet.publish(repoColors)
         for (name, s) in saved.stations where name != "crew" && name != "private" {
@@ -976,5 +984,12 @@ final class Fleet {
             stations[name] = station
         }
         recolorRooms()
+    }
+
+    private func keepUnreadable(_ data: Data, why: String) {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let aside = Fleet.saveURL.deletingPathExtension().appendingPathExtension("unreadable-\(stamp).json")
+        try? data.write(to: aside)
+        StationLog.write("facts", "the save could not be read (\(why)); kept it as \(aside.lastPathComponent)")
     }
 }

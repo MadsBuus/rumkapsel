@@ -77,15 +77,15 @@ extension StationController {
         }
         for s in simulation.flights { StationLog.write("dump", "shuttle: \(s.command.words) phase \(s.phaseKind)") }
         for st in fleet.stations.values {
-            for c in st.ledger.allCrates.sorted(by: { ($0.repo, $0.number) < ($1.repo, $1.number) }) {
-                StationLog.write("dump", "crate \(c.repo)#\(c.number): wanted \(c.wanted.map(\.words) ?? "nowhere") placed \(c.placed.map(\.words) ?? "nowhere")\(c.heading.map { " heading \($0.words)" } ?? "")\(c.movedAt != nil ? " moved by hand" : "")")
+            let view = simulation.shown[st.name] ?? Shown()
+            for c in st.facts.crates.values.sorted(by: { $0.id < $1.id }) {
+                StationLog.write("dump", "crate \(c.id): fact \(c.place) · shown \(simulation.describe(view.crates[c.id]))")
             }
         }
         for (id, job) in cargo { StationLog.write("dump", "cargo \(id): \(job.command.words) carrier \(job.carrier ?? "none") aim \(job.aim.cell.x),\(job.aim.cell.y) at \(String(format: "%.2f,%.2f", job.aim.pos.x, job.aim.pos.z))") }
     }
 
     func archive(station: String, key: String, roomKey: String, name: String, hall: Cell?, announce: Bool, reason: String) {
-        simulation.cancelCarries(roomKey: key)
         for m in minions.values where m.station == station && m.home.key == roomKey { clearPyramids(m) }
         stationAnchors[station]?.childNodes.filter { $0.name == "room:" + key }.forEach { $0.removeFromParentNode() }
         world.forgetOffice(key)
@@ -256,79 +256,7 @@ extension StationController {
         drone.ping(seed: seed)
     }
 
-    // MARK: hauling
-
-    func carry(_ command: Command, node: SCNNode, roomKey: String = "", rank: Rank = .yard, onDone: @escaping () -> Void) {
-        guard simulation.carry(command, roomKey: roomKey, rank: rank, onDone: onDone) else { return }
-        node.name = "haul"
-        cargoNodes[command.id] = node
-    }
-
-    func carryOrdered(id: Int, crate: CrateRef) {
-        guard cargoNodes[id] == nil, let node = crateNode(crate) else { return }
-        node.name = "haul"
-        cargoNodes[id] = node
-    }
-
-    func crateNode(_ crate: CrateRef) -> SCNNode? {
-        let tail = ":\(crate.station)|\(crate.repo)|\(crate.number)"
-        return markerRoot.childNodes.first { ($0.name ?? "") == "storage" + tail || ($0.name ?? "") == "deck" + tail || ($0.name ?? "") == "decon" + tail }
-    }
-
-    func haulCleared(station: Station, repo: String, number: Int) {
-        let crate = CrateRef(station: station.name, repo: repo, number: number)
-        logEvent("#\(number) \(Words.current.clearedDecon)")
-        guard let node = crateNode(crate), let command = station.carryFromDecon(repo: repo, number: number) else {
-            world.unorder(crate)
-            simulation.landed(crate, in: .storage)
-            rebuildMarkers(); refreshRockets()
-            return
-        }
-        carry(command, node: node) { [weak self] in
-            guard let self else { return }
-            node.removeFromParentNode()
-            rebuildMarkers()
-            if let grown = crateNode(crate) { grown.scale = SCNVector3(0.79, 0.79, 0.79); grown.runAction(.scale(to: 1, duration: 0.5)) }
-            refreshRockets()
-        }
-    }
-
-    func haulMergedBoxes(station: Station, key: String, roomName: String, repo: String, number: Int) {
-        guard let pkg = markerRoot.childNodes.first(where: { $0.name == "box:" + key }),
-              let room = station.rooms[key.split(separator: "|", maxSplits: 1).map(String.init).last ?? ""] else { return }
-        logEvent("\(roomName): merged, \(Words.current.toStorage)")
-        let at = pkg.position
-        let exact = Spot(area: .office, station: station.name, owner: room.key, label: room.name,
-                         cell: Cell(x: Int((Double(at.x) - station.offset.x).rounded()), y: Int((Double(at.z) - station.offset.y).rounded())),
-                         pos: SIMD3(Double(at.x), Double(at.y), Double(at.z)))
-        let command = station.carryToStorage(room: room, repo: repo, number: number).from(exact)
-        carry(command, node: pkg, roomKey: key) { [weak self] in
-            guard let self else { return }
-            pkg.removeFromParentNode()
-            rebuildMarkers()
-            refreshRockets()
-        }
-    }
-
-    func stageCargo(station: Station, repo: String, commands: [Command]? = nil) {
-        let list = commands ?? station.carryToDeck(repo: repo, numbers: station.ledger.crates(of: repo).filter { $0.placed == .storage }.map(\.number))
-        var started = 0
-        for command in list {
-            guard let crate = command.crate, let node = crateNode(crate) else {
-                if let crate = command.crate { world.unorder(crate) }
-                continue
-            }
-            started += 1
-            carry(command, node: node) { [weak self] in
-                guard let self else { return }
-                node.removeFromParentNode()
-                rebuildMarkers()
-                refreshRockets()
-            }
-        }
-        guard started > 0 else { return }
-        logEvent("\(repo): deployed to staging, \(Words.current.toDeck)")
-    }
+    func crateNode(_ crate: CrateRef) -> SCNNode? { crateNodes[crate.key] }
 
     // MARK: crew
 
@@ -368,18 +296,6 @@ extension StationController {
             react(m, .writing, place: .room(m.home.key), minutes: 8, words: "\(who) filing \(a.label)")
             addPyramid(for: m)
         default: break
-        }
-    }
-
-    func carryAcrossDeck(station: Station, repo: String, number: Int) {
-        for command in station.carryToTested(repo: repo, number: number) {
-            guard let crate = command.crate, let node = crateNode(crate) else { world.unorder(command.crate!); continue }
-            carry(command, node: node, rank: .release) { [weak self] in
-                guard let self else { return }
-                node.removeFromParentNode()
-                if crate.number == number { drone.ping(seed: number) }
-                rebuildMarkers()
-            }
         }
     }
 }

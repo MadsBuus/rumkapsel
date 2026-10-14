@@ -106,20 +106,6 @@ extension StationController {
         }
     }
 
-    private func mine(_ slot: YardSlot) -> Bool { !slot.alien && world.isMine(repo: slot.repo, number: slot.number) }
-
-    func reconcileYards() {
-        for station in fleet.stations.values where station.hasPad {
-            let before = (station.stored, station.staged)
-            for (root, info) in world.repoRoots where info.station == station.name {
-                if let c = github.cargo(repoRoot: root) { world.reconcile(station: station, repo: info.repo, root: root, cargo: c) }
-            }
-            if before.0 != station.stored || before.1 != station.staged { markersDirty = true }
-        }
-        for e in world.stationEvents() { handle(e) }
-        simulation.callOffCarriesTakenBack()
-    }
-
     func rebuildMarkers() {
         var keep: Set<ObjectIdentifier> = []
         var signatures: [String: String] = [:]
@@ -133,7 +119,7 @@ extension StationController {
                 let boxOpacity = 1.0
                 if room.branch == nil {
                     guard let cb = world.crewBoxes[key] ?? world.peerBoxes[key] else { continue }
-                    if world.haulOrdered(office: key) { continue }
+                    if world.haulOrdered(office: key) || crateLeft(station, room) { continue }
                     count = min(16, max(1, cb.count))
                     let peer = world.crewRoomInfo[key] == nil ? world.peerPull(key) : nil
                     let prNumber = world.crewPull(key) ?? peer?.pull
@@ -144,7 +130,7 @@ extension StationController {
                 } else {
                     let local = world.localState(room)
                     let dirtyFiles = room.worktree.map { github.dirtyFiles(worktree: $0) } ?? 0
-                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) { continue }
+                    if (local.commits == 0 && dirtyFiles == 0) || world.haulOrdered(office: key) || crateLeft(station, room) { continue }
                     pr = room.repoRoot.flatMap { github.pull(branch: room.branch!, repoRoot: $0) }
                     count = min(16, Int(pow(Double(local.commits), 0.7).rounded(.up)))
                     ghosts = min(8, Int(pow(Double(dirtyFiles), 0.6).rounded(.up)))
@@ -254,63 +240,9 @@ extension StationController {
                 }
                 lastBoxCount[key] = count + ghosts
             }
-            for yard in [Yard.storage, .deck, .decon] where station.hasPad {
-                let area = yard.rawValue
-                let layout = station.layout(of: yard).filter { !$0.carried }
-                let prefix = "\(area):\(station.name)|"
-                var standing: [String: [SCNNode]] = [:]
-                for n in markerRoot.childNodes where (n.name ?? "").hasPrefix(prefix) { standing[n.name!, default: []].append(n) }
-                let wanted = Set(layout.map { prefix + "\($0.repo)|\($0.number)" })
-                func vacated(_ from: SIMD3<Double>, _ to: SIMD3<Double>) -> Bool {
-                    standing.allSatisfy { name, nodes in
-                        !wanted.contains(name) || nodes.allSatisfy { n in
-                            let p = n.position
-                            return !(abs(Double(p.x) - to.x) < 0.001 && abs(Double(p.z) - to.z) < 0.001
-                                     && Double(p.y) < from.y - 0.05 && Double(p.y) > to.y - 0.05)
-                        }
-                    }
-                }
-                for slot in layout {
-                    let name = prefix + "\(slot.repo)|\(slot.number)"
-                    let spec = (slot.cleared ? "tested" : "untested") + (slot.alien ? " alien" : "") + (mine(slot) ? " mine" : "")
-                    if markerSignatures[name] == spec, let n = standing[name]?.first, !keep.contains(ObjectIdentifier(n)) {
-                        keep.insert(ObjectIdentifier(n))
-                        signatures[name] = spec
-                        let at = SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z))
-                        let heading = crateMotions[ObjectIdentifier(n)]?.legs.last?.to ?? at
-                        if abs(heading.x - slot.pos.x) > 0.001 || abs(heading.y - slot.pos.y) > 0.001 || abs(heading.z - slot.pos.z) > 0.001
-                            || abs(Double(n.eulerAngles.y) - slot.yaw) > 0.001 {
-                            stopCrate(n)
-                            if abs(at.x - slot.pos.x) < 0.001, abs(at.z - slot.pos.z) < 0.001, at.y > slot.pos.y + 0.05, area == "decon" || vacated(at, slot.pos) {
-                                moveCrate(n, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds, ease: .easeIn)])
-                            } else {
-                                n.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
-                                n.eulerAngles.y = slot.yaw
-                            }
-                        }
-                        continue
-                    }
-                    let c = slot.alien ? Palette.alien.darker(0.3).mixed(with: NSColor(fleet.color(forRepo: slot.repo)).darker(0.3), 0.35) : NSColor(fleet.color(forRepo: slot.repo))
-                    let band = area == "decon" ? Palette.alienLight.darker(0.3) : slot.cleared ? Props.passedGreen
-                        : area == "deck" ? Props.waitingAmber : NSColor(rgb: (0.3, 0.32, 0.38))
-                    let words = crateWords(repo: slot.repo, number: slot.number)
-                    let pkg = Props.package(color: c, band: band, size: area == "decon" ? 0.3 : 0.38, mine: mine(slot), number: slot.number,
-                                            title: words.title, who: words.who)
-                    pkg.position = v3(slot.pos.x, slot.pos.y, slot.pos.z)
-                    pkg.eulerAngles.y = slot.yaw
-                    pkg.name = name
-                    pkg.enumerateChildNodes { c, _ in c.name = pkg.name }
-                    markerRoot.addChildNode(pkg)
-                    if incoming.remove(name) != nil {
-                        pkg.position.y = CGFloat(slot.pos.y + 1.2)
-                        moveCrate(pkg, legs: [MotionLeg(to: slot.pos, seconds: Hands.settleSeconds * 1.5, ease: .easeIn)])
-                    }
-                    keep.insert(ObjectIdentifier(pkg))
-                    signatures[name] = spec
-                }
-            }
+            if station.hasPad { drawCrates(station, keep: &keep) }
         }
-        for n in markerRoot.childNodes where !keep.contains(ObjectIdentifier(n)) && n.name != "haul" { n.removeFromParentNode() }
+        for n in markerRoot.childNodes where !keep.contains(ObjectIdentifier(n)) { n.removeFromParentNode() }
         packages = packages.filter { $0.value.parent != nil }
         packageBuilt = packageBuilt.filter { packages[$0.key] != nil }
         markerSignatures = signatures
@@ -460,20 +392,174 @@ enum OfficeLight { case occupied, empty, dark }
 
 extension StationController {
     func restackYard() {
-        for station in fleet.stations.values { station.ledger.forgetSlots() }
         world.learn(.restack)
-        fleet.save()
-        rebuildMarkers()
         logEvent("the yard restacked")
     }
 
     func looseCrate(_ crate: CrateRef) -> SCNNode {
-        let row = fleet.stations[crate.station]?.ledger[crate.repo, crate.number]
-        let alien = row?.alien == true
+        let alien = fleet.stations[crate.station]?.facts.crates[CrateID(repo: crate.repo, number: crate.number)]?.alien == true
         let color = alien ? Palette.alien.darker(0.3) : NSColor(fleet.color(forRepo: crate.repo))
         let words = crateWords(repo: crate.repo, number: crate.number)
         return Props.package(color: color, band: NSColor(rgb: (0.3, 0.32, 0.38)), size: 0.38,
                              mine: !alien && world.isMine(repo: crate.repo, number: crate.number), number: crate.number,
                              title: words.title, who: words.who)
+    }
+
+    private func crateLeft(_ station: Station, _ room: Room) -> Bool {
+        guard let repo = room.repo, let n = world.works.find(officeKey: room.key, repo: repo)?.number,
+              let at = simulation.shown[station.name]?.crates[CrateID(repo: repo, number: n)] else { return false }
+        return at != .office(room.key)
+    }
+
+    private func drawCrates(_ station: Station, keep: inout Set<ObjectIdentifier>) {
+        let view = simulation.shown[station.name] ?? Shown()
+        var live: Set<String> = []
+        for (id, at) in view.crates.sorted(by: { $0.key < $1.key }) {
+            let key = "\(station.name)|\(id.repo)|\(id.number)"
+            if case .office = at {} else if let n = crateNodes[key], let office = packages.first(where: { $0.value === n })?.key {
+                packages[office] = nil
+                packageBuilt[office] = nil
+            }
+            let pos: SIMD3<Double>, yaw: Double, zone: Zone
+            switch at {
+            case .hands:
+                live.insert(key)
+                if let n = crateNodes[key] { dress(n, station, id, zone: heading(station, id)) }
+                continue
+            case .vortex:
+                live.insert(key)
+                continue
+            case .aboard:
+                continue
+            case .office(let room):
+                live.insert(key)
+                let office = station.name + "|" + room
+                if let pkg = packages[office] {
+                    if let old = crateNodes[key], old !== pkg { stopCrate(old); old.removeFromParentNode() }
+                    crateNodes[key] = pkg
+                    crateLooks[key] = nil
+                    keep.insert(ObjectIdentifier(pkg))
+                } else if let n = crateNodes[key] ?? (world.haulOrdered(office: office) ? crateNode(station, id, zone: .waiting, at: officeAt(station, room), yaw: 0) : nil) {
+                    rack(n)
+                    let to = officeAt(station, room)
+                    if !crateMoving(n), simd_distance(position(n), to) > 0.001 { n.position = v3(to.x, to.y, to.z) }
+                    keep.insert(ObjectIdentifier(n))
+                }
+                continue
+            case .row(let s): pos = s.pos; yaw = s.yaw; zone = s.zone
+            case .parked(let p): pos = p.pos; yaw = p.yaw; zone = Zone(area: p.area) ?? .waiting
+            case .falling(let to, let from, let since):
+                live.insert(key)
+                crateNodes[key].map(rack)
+                let n = crateNode(station, id, zone: to.zone, at: from, yaw: to.yaw)
+                if !crateMoving(n), simd_distance(position(n), to.pos) > 0.01 {
+                    let left = since + Hands.settleSeconds - clock
+                    if left > 0.05 { moveCrate(n, legs: [MotionLeg(to: to.pos, seconds: left, ease: .easeIn)]) } else { n.position = v3(to.pos.x, to.pos.y, to.pos.z) }
+                }
+                keep.insert(ObjectIdentifier(n))
+                continue
+            }
+            live.insert(key)
+            crateNodes[key].map(rack)
+            let fresh = crateNodes[key] == nil
+            let n = crateNode(station, id, zone: zone, at: pos, yaw: yaw)
+            if fresh, appearing.remove(key) != nil {
+                n.scale = SCNVector3(0.05, 0.05, 0.05)
+                moveCrate(n, legs: [MotionLeg(to: pos, seconds: 0.4, ease: .easeOut, scale: 1)])
+            }
+            if let heading = crateMotions[ObjectIdentifier(n)]?.legs.last?.to, simd_distance(heading, pos) > 0.01 { stopCrate(n) }
+            if !crateMoving(n), simd_distance(position(n), pos) > 0.001 || abs(Double(n.eulerAngles.y) - yaw) > 0.001 {
+                n.position = v3(pos.x, pos.y, pos.z)
+                n.eulerAngles.y = CGFloat(yaw)
+            }
+            keep.insert(ObjectIdentifier(n))
+        }
+        for (key, n) in crateNodes where key.hasPrefix(station.name + "|") && !live.contains(key) {
+            crateNodes[key] = nil
+            crateLooks[key] = nil
+            stopCrate(n)
+            guard n.parent === markerRoot else { n.removeFromParentNode(); continue }
+            keep.insert(ObjectIdentifier(n))
+            let fade = SCNAction.scale(to: 0.01, duration: 0.35); fade.timingMode = .easeIn
+            n.runAction(.sequence([fade, .removeFromParentNode()]))
+        }
+    }
+
+    private func heading(_ station: Station, _ id: CrateID) -> Zone {
+        guard let job = simulation.cargo.values.first(where: { $0.crate == id && $0.command.crate?.station == station.name }) else { return .waiting }
+        return job.spot?.zone ?? Zone(area: job.aim.area) ?? .waiting
+    }
+
+    func vanish(_ station: String, _ id: CrateID) {
+        let key = "\(station)|\(id.repo)|\(id.number)"
+        appearing.remove(key)
+        crateLooks[key] = nil
+        guard let n = crateNodes.removeValue(forKey: key) else { return }
+        stopCrate(n)
+        n.removeFromParentNode()
+    }
+
+    private func position(_ n: SCNNode) -> SIMD3<Double> { SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z)) }
+
+    private func officeAt(_ station: Station, _ room: String) -> SIMD3<Double> {
+        let cell = station.rooms[room].map { packageCell(station, $0) } ?? station.doorCell(of: room) ?? Cell(x: 0, y: 0)
+        return SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
+    }
+
+    private func rack(_ n: SCNNode) {
+        guard n.parent !== markerRoot else { return }
+        let at = n.worldPosition
+        stopCrate(n)
+        n.removeFromParentNode()
+        markerRoot.addChildNode(n)
+        n.position = markerRoot.convertPosition(at, from: nil)
+    }
+
+    private func crateNode(_ station: Station, _ id: CrateID, zone: Zone, at pos: SIMD3<Double>, yaw: Double) -> SCNNode {
+        let key = "\(station.name)|\(id.repo)|\(id.number)"
+        if let n = crateNodes[key], crateMoving(n) || n.parent !== markerRoot && n.parent != nil { return n }
+        let n = crateNodes[key] ?? {
+            let made = SCNNode()
+            made.position = v3(pos.x, pos.y, pos.z)
+            made.eulerAngles.y = CGFloat(yaw)
+            markerRoot.addChildNode(made)
+            return made
+        }()
+        crateNodes[key] = n
+        dress(n, station, id, zone: zone)
+        return n
+    }
+
+    private func dress(_ n: SCNNode, _ station: Station, _ id: CrateID, zone: Zone) {
+        let key = "\(station.name)|\(id.repo)|\(id.number)"
+        let fact = station.facts.crates[id]
+        let alien = fact?.alien ?? false
+        let closed = fact?.closedAt != nil
+        let mine = !alien && world.isMine(repo: id.repo, number: id.number)
+        let look = "\(zone.rawValue)|\(alien)|\(mine)|\(closed)"
+        guard crateLooks[key] != look else { return }
+        let repo = NSColor(fleet.color(forRepo: id.repo))
+        let color = closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : alien ? Palette.alien.darker(0.3).mixed(with: repo.darker(0.3), 0.35) : repo
+        let band = zone == .decon ? Palette.alienLight.darker(0.3) : zone == .cleared ? Props.passedGreen
+            : zone == .testing ? Props.waitingAmber : NSColor(rgb: (0.3, 0.32, 0.38))
+        let words = crateWords(repo: id.repo, number: id.number)
+        let clothes = Props.package(color: color, band: band, size: zone == .decon ? 0.3 : 0.38, mine: mine, number: id.number,
+                                    title: words.title, who: words.who)
+        n.childNodes.forEach { $0.removeFromParentNode() }
+        clothes.childNodes.forEach { n.addChildNode($0) }
+        n.opacity = 1
+        n.name = "\(zone.drawn):\(key)"
+        n.enumerateChildNodes { c, _ in c.name = n.name }
+        crateLooks[key] = look
+    }
+}
+
+extension Zone {
+    var drawn: String {
+        switch self {
+        case .waiting: return "storage"
+        case .testing, .cleared: return "deck"
+        case .decon: return "decon"
+        }
     }
 }
