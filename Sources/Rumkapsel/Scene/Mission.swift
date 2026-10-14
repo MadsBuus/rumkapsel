@@ -12,6 +12,8 @@ struct Mission {
     let station: String
     var rocket = ""
     var started: Double
+    var climbed: Double?
+    var pad: SIMD3<Double>?
     var expected: Double
     var release: String
     var ended: (outcome: DeployOutcome, at: Double, progress: Double)?
@@ -38,12 +40,14 @@ struct Mission {
             case .failed, .lost: return end.progress
             }
         }
-        let e = max(0, clock - started), launch = launchSeconds, share = Mission.separationShare
-        let f = e < launch ? share * e / launch : share + (1 - share) * (e - launch) / max(1, expected - launch)
+        let e = max(0, clock - tZero), launch = launchSeconds, share = Mission.separationShare
+        let f = e < launch ? share * e / launch : share + (1 - share) * (e - launch) / max(1, flight - launch)
         return f < 1 ? Mission.curve(f) : 0.92 + 0.05 * (1 - exp(-(f - 1) * 1.5))
     }
 
-    var launchSeconds: Double { min(Mission.liftoff, max(1, expected) * Mission.separationShare) }
+    var tZero: Double { climbed ?? started }
+    var flight: Double { climbed.map { max(2 * Mission.liftoff, expected - ($0 - started)) } ?? expected }
+    var launchSeconds: Double { min(Mission.liftoff, max(1, flight) * Mission.separationShare) }
 
     static func curve(_ f: Double) -> Double { 0.92 * (0.35 * f + 0.65 * (1 - pow(1 - f, 4))) }
     static let separationShare: Double = {
@@ -150,7 +154,7 @@ extension StationController {
         missionShown = ""
         placePlanets()
         logEvent("\(repo): liftoff, deploying to production")
-        if let (key, r, _) = padRocket(m), let at = r.climbing, let v = rocketViews[key], !v.node.isHidden,
+        if let (key, r, _) = padRocket(m, climbing: true), let at = r.climbing, let v = rocketViews[key], !v.node.isHidden,
            let st = fleet.stations[RocketKey.parts(key).station] {
             v.node.childNode(withName: "hold", recursively: false)?.removeFromParentNode()
             let leaving = v.node.clone()
@@ -163,6 +167,7 @@ extension StationController {
             drone.sweep(up: true)
             v.node.isHidden = true
             hiddenRockets.append(v.node)
+            mission?.climbed = at
         }
         settleColony(repo)
         Colonies.hoist(planets[repo]?.childNode(withName: "colony", recursively: false), repo: repo, release: release,
@@ -180,6 +185,7 @@ extension StationController {
             scene.rootNode.addChildNode(missionCamera)
         }
         let pad = missionPad(mission!)
+        mission?.pad = pad
         puff(at: pad + SIMD3(0, 0.3, 0), up: SIMD3(0, 1, 0), color: NSColor(white: 0.95, alpha: 1), count: 80, spread: 80, speed: 0.4, life: 1.2, size: 0.03)
         stepMission()
         DispatchQueue.main.async { [self] in openMissionScreen() }
@@ -273,10 +279,11 @@ extension StationController {
         return a.station == b.station && a.repo == b.repo && a.hotfix == b.hotfix
     }
 
-    func padRocket(_ m: Mission) -> (key: String, rocket: ShownRocket, launched: Bool)? {
+    func padRocket(_ m: Mission, climbing: Bool = false) -> (key: String, rocket: ShownRocket, launched: Bool)? {
         guard let st = fleet.stations[RocketKey.parts(m.rocket).station] else { return nil }
         let all = simulation.shownRockets(st).filter { missionFlies(m, $0.key) }
             .map { ($0.key, $0.rocket, st.facts.rockets[String($0.key.dropFirst(st.name.count + 1))]?.launched == true) }
+        if climbing { return all.filter { $0.1.climbing != nil }.max { $0.1.climbing! < $1.1.climbing! } }
         return all.first { $0.2 && $0.1.climbing == nil } ?? all.first { $0.1.climbing == nil } ?? all.first
     }
 
@@ -375,7 +382,7 @@ extension StationController {
         missionCraft.simdOrientation = simd_quatf(simd_float3x3(columns: (f(x), f(heading), f(z))))
         let since = separated ? clock - (mission?.separatedAt ?? clock) : -1
         let tipBurns = m.ended == nil ? since >= Mission.correction.lowerBound : burning
-        let coasting = m.ended == nil && clock - m.started < Mission.undock
+        let coasting = m.ended == nil && clock - m.tZero < Mission.undock
         if coasting { fireThrusters(often: true) }
         if let air = missionCraft.childNode(withName: "lifter plume", recursively: true) {
             air.isHidden = !burning || separated || coasting
@@ -386,7 +393,7 @@ extension StationController {
         let dt = max(0, min(0.1, clock - m.lastStep))
         mission?.lastStep = clock
         let centreOfCraft = craft + heading * 0.6 * 0.55 * scale
-        let onboard = landing == nil && clock - m.started < m.launchSeconds * Mission.toTheMast && m.ended?.outcome.signalLost != true
+        let onboard = landing == nil && clock - m.tZero < m.launchSeconds * Mission.toTheMast && m.ended?.outcome.signalLost != true
         let atColony = (landing ?? 0) >= Mission.colonyCut
         var at: SIMD3<Double>, look: SIMD3<Double>, up: SIMD3<Double>, fov: Double
         if onboard, let mount = (missionCraft.value(forKey: "lifter") as? SCNNode)?.childNode(withName: "down cam", recursively: false)?.simdWorldTransform {
@@ -474,7 +481,7 @@ extension StationController {
         missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
         if let end = m.ended, end.outcome.signalLost { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
 
-        let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.started) / 60, Int(clock - m.started) % 60)
+        let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.tZero) / 60, Int(clock - m.tZero) % 60)
         let landed = (landing ?? 0) >= 10.5
         let auto = m.ended == nil && clock - m.shownAt > 60, ended = m.ended != nil
         let camera = onboard ? "Onboard" : atColony ? "At the colony" : "From the station"
@@ -584,8 +591,9 @@ extension StationController {
     }
 
     private func missionPad(_ m: Mission) -> SIMD3<Double> {
-        if let rocket = padRocket(m).flatMap({ rocketViews[$0.key] })?.node {
-            let p = rocket.worldPosition
+        if let pad = m.pad { return pad }
+        if let (key, r, _) = padRocket(m), let st = fleet.stations[RocketKey.parts(key).station] {
+            let p = padPosition(station: st, slot: r.slot)
             return SIMD3(Double(p.x), Double(p.y), Double(p.z))
         }
         let st = fleet.stations[m.station] ?? fleet.ordered.first
