@@ -261,6 +261,7 @@ The first exact count after launch takes away row crates it does not list (`.swe
 | Trigger | Event | Code |
 |---|---|---|
 | The board's QA column, or git `production..staging` | QA → the crate to the testing rows | `World.reconcile` |
+| With the board, a stored crate's pull request in git `production..staging` | QA by git, forward only: a card the board left behind still goes across, and the board saying storage again does not bring it back | `World.reconcile` |
 | A staging release pull request opens, merges or closes | `.staging(.opened/.merged/.closed)`; after a merge the git counts find its crates in `production..staging` | `World.applyStaging` |
 | A staging deploy starts or ends | `.staging(.deploy)`: the tip is welded while it runs | `World.swift` |
 

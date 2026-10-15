@@ -198,6 +198,11 @@ extension World {
         for n in c.storageNumbers { report(crate: n, repo: repo, .stored, by: c.source, at: c.updated[n] ?? now) }
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? now) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? now) }
+        for pull in c.staged {
+            guard let r = works.find(repo: repo, pull: pull) ?? github.task(repo: repo, pull: pull).flatMap({ works.find(repo: repo, crate: $0) }),
+                  r.stage == .stored else { continue }
+            works.report(r, .qa, by: .git, at: now)
+        }
         let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
