@@ -1120,7 +1120,16 @@ final class SimulatorModel: ObservableObject {
                                            url: pr.url, labels: pr.labels, mergedAt: station.now, production: pr.production, staging: pr.staging)
             if ConfigStore.shared.current.project != nil { launches.append((repo, releases[repo]![i])) }
             pushGitHub()
-            if !name.hasSuffix("(board lags)") { move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck) }
+            if name.hasSuffix("(board lags)") {
+                let stored = board.indices.filter { board[$0].repo == repo && board[$0].status == statuses.storage }
+                for i in stored { board[i].prURLs = ["https://example.invalid/\(repo)/pull/\(board[i].number + 1000)"] }
+                var git = GitHubResolver.Cargo(storage: 0, deck: stored.count, storageNumbers: [], deckNumbers: stored.map { board[$0].number + 1000 })
+                git.exact = true
+                github.inject(cargo: git, for: root(repo))
+                pushGitHub()
+            } else {
+                move(board.filter { $0.repo == repo && $0.status == statuses.storage }, to: statuses.deck)
+            }
         case "Release: Staging closes":
             guard let i = openRelease(repo, production: false) else { return }
             let pr = releases[repo]![i]

@@ -52,6 +52,15 @@ enum IntakeTests {
             expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "#440 and #441 on the deck: \(describe(place(rig, "web", 440))), \(describe(place(rig, "web", 441)))")
         }
 
+        test("staging merges and the board leaves cards behind: what git finds on staging goes to the deck anyway, and stays") {
+            let (rig, sim) = org([("Target: web#455", 0), ("Release: Staging opens", 80), ("Release: Staging merges (board lags)", 10)])
+            saw(sim, [.staging("web", "open"), .staging("web", "merged")])
+            expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "#440 and #441 on the deck: \(describe(place(rig, "web", 440))), \(describe(place(rig, "web", 441)))")
+            rig.simulateGitHub()
+            rig.advance(30)
+            expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "the board still saying storage does not pull them back: \(describe(place(rig, "web", 440)))")
+        }
+
         test("a staging release that closes unmerged: the crates stay in storage") {
             let (rig, sim) = org([("Target: web#455", 0), ("Release: Staging opens", 80), ("Release: Staging closes", 30)])
             saw(sim, [.staging("web", "open"), .staging("web", "closed, not merged")])
@@ -177,6 +186,74 @@ enum IntakeTests {
             then(rig, sim, [("Session ends", 160)])
             expect(!rig.scanned("api", 5158), "the session is gone from the scan")
             expect(station(rig).rooms["task:api#5158"] != nil && station(rig).facts.offices["task:api#5158"] != nil, "the office stays")
+        }
+
+        test("a workspace's project office becomes its task office when a branch is checked out, whichever session is scanned first") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            let rig = Rig(), github = rig.world.github
+            let base = NSTemporaryDirectory() + "rumkapsel-one-\(UUID().uuidString)"
+            let root = base + "/notes", cwd = base + "/notes-ws"
+            for d in [root, cwd] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            github.inject(login: "me")
+            github.inject(owner: "me/notes", for: root)
+            github.inject(openPRs: [], for: root)
+            github.inject(releases: [], for: root)
+            func session(_ id: String, branch: String?, subagent: Bool) -> SessionInfo {
+                SessionInfo(id: id, cwd: cwd, repo: "notes", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                            area: nil, title: nil, branch: branch, toolCount: 0, isSubagent: subagent, cwdExists: true, promptCount: 1,
+                            queuedCount: 0, eventMarkers: [:])
+            }
+            rig.simulate(scan: ScanResult(sessions: [session("main", branch: nil, subagent: false)]))
+            rig.advance(16)
+            let before = station(rig).rooms.keys.filter { !$0.hasPrefix("kind:") }
+            expect(before.count == 1 && before.allSatisfy { $0.hasPrefix("proj:") }, "a project office first: \(before.sorted())")
+            let opened = rig.officesOpened
+            for _ in 0..<4 {
+                let homes = Dictionary(uniqueKeysWithValues: station(rig).rooms.keys.filter { !$0.hasPrefix("kind:") }.prefix(1)
+                    .map { ("main", World.MinionHome(station: "work", key: $0, idle: false)) })
+                rig.simulate(scan: ScanResult(sessions: [session("sub", branch: "claude/feature", subagent: true),
+                                                         session("main", branch: "claude/feature", subagent: false)]), homes: homes)
+                rig.advance(6)
+            }
+            let after = station(rig).rooms.keys.filter { !$0.hasPrefix("kind:") }
+            expect(after.count == 1 && after.allSatisfy { $0.hasPrefix("task:notes") }, "one task office for the workspace: \(after.sorted())")
+            expect(rig.officesOpened - opened <= 1, "it opened once, not once a scan: \(rig.officesOpened - opened)")
+        }
+
+        test("a workspace switched from a pull request's branch to a new one holds the new office, opened once") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            let rig = Rig(), github = rig.world.github
+            let base = NSTemporaryDirectory() + "rumkapsel-switch-\(UUID().uuidString)"
+            let root = base + "/notes", cwd = base + "/notes-ws"
+            for d in [root, cwd] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            github.inject(login: "me")
+            github.inject(owner: "me/notes", for: root)
+            github.inject(releases: [], for: root)
+            github.inject(pull: PullRequest(number: 12, title: "first", state: "OPEN", reviewDecision: "", isDraft: false, url: "https://example.invalid/notes/12"),
+                          for: "claude/first", repoRoot: root)
+            github.inject(openPRs: [OpenPR(number: 12, title: "first", author: "me", isBot: false, branch: "claude/first",
+                                           url: "https://example.invalid/notes/12", createdAt: rig.now)], for: root)
+            func session(_ id: String, branch: String, subagent: Bool) -> SessionInfo {
+                SessionInfo(id: id, cwd: cwd, repo: "notes", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                            area: nil, title: nil, branch: branch, toolCount: 0, isSubagent: subagent, cwdExists: true, promptCount: 1,
+                            queuedCount: 0, eventMarkers: [:])
+            }
+            rig.simulateGitHub()
+            rig.simulate(scan: ScanResult(sessions: [session("main", branch: "claude/first", subagent: false)]))
+            rig.advance(16)
+            expect(station(rig).rooms["task:notes#12"] != nil, "the pull request's office: \(station(rig).rooms.keys.sorted())")
+            let opened = rig.officesOpened
+            for _ in 0..<4 {
+                rig.simulate(scan: ScanResult(sessions: [session("main", branch: "claude/second", subagent: false)]))
+                rig.advance(6)
+            }
+            let after = station(rig).rooms.keys.filter { !$0.hasPrefix("kind:") }
+            expect(after.contains { $0.contains("claude/second") }, "the workspace holds the new branch's office: \(after.sorted())")
+            expect(rig.officesOpened - opened == 1, "opened once, not once a scan: \(rig.officesOpened - opened)")
         }
 
         test("a plain repository: main only, pull requests, no board, release tags: an office, the crate in storage on merge, up on a tag") {
@@ -370,7 +447,11 @@ final class Rig: SimStation {
     }
 
     func handle(_ events: [WorldEvent]) { events.forEach(handle) }
-    func handle(_ event: WorldEvent) { sim?.onEvent?(event) }
+    private(set) var officesOpened = 0
+    func handle(_ event: WorldEvent) {
+        if case .office(_, .opened, _) = event { officesOpened += 1 }
+        sim?.onEvent?(event)
+    }
     func after(_ seconds: Double, _ run: @escaping () -> Void) { timers.append((model.clock + seconds, run)) }
 
     private var scan = ScanResult()
@@ -379,10 +460,12 @@ final class Rig: SimStation {
         scan.sessions.contains { $0.repo == repo && $0.branch?.hasPrefix("gh-\(number)/") == true }
     }
 
-    func simulate(scan: ScanResult) {
+    func simulate(scan: ScanResult) { simulate(scan: scan, homes: [:]) }
+
+    func simulate(scan: ScanResult, homes: [String: World.MinionHome]) {
         pending.append { [unowned self] in
             self.scan = scan
-            handle(world.applyScan(scan, now: now, minionHomes: [:]))
+            handle(world.applyScan(scan, now: now, minionHomes: homes))
         }
     }
 

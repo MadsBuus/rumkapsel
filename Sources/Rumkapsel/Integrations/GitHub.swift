@@ -228,6 +228,7 @@ final class GitHubResolver {
     struct Cargo: Equatable {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
+        var staged: [Int] = []
         var source: Source = .git
         var exact = false
         var at = Date.distantPast
@@ -255,7 +256,9 @@ final class GitHubResolver {
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
             let updated = Dictionary(mine.compactMap { it in it.updatedAt.map { (it.number, $0) } }, uniquingKeysWith: { a, _ in a })
-            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated, source: .board)
+            let staged = cargo[repoRoot].flatMap { $0.exact ? $0.deckNumbers : nil } ?? []
+            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated,
+                         staged: staged, source: .board)
             }
         }
         guard var c = cargo[repoRoot] else { return nil }
@@ -1578,6 +1581,7 @@ extension GitHubResolver {
             for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
         }
         project = (items, at)
+        for it in items { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
         lock.unlock()
         notify()
     }

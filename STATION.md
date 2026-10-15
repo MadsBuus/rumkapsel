@@ -113,7 +113,8 @@ moves through it one way: in from the hallway at the back, out through the field
   across the near one, with a toss when a crate stands there: the gravity is low, so it drifts over.
 - **A repository that doesn't ship** keeps a merged crate in storage for a day; then it fades where it
   stands, carried by nobody (`Rules.unshippedFor`, on the tick).
-- **A staging release** that merges sends its repository's stored crates across to the testing rows.
+- **A staging release** that merges sends its repository's stored crates across to the testing rows,
+  whether or not the board has moved their cards: what git finds on staging is on staging.
   A tester's tick sends a crate to the cleared rows.
 - **The pad wall** is a field, the same sheet the ships fly through: glass until a vortex forms, then
   striped while it runs.
@@ -155,6 +156,9 @@ moves through it one way: in from the hallway at the back, out through the field
 
 - One office per piece of work. It belongs to whoever has the branch checked out; teammates' offices are
   darker and carry their name on the floor.
+- A workspace holds one office at a time: the one for the branch checked out there, decided by its own
+  session, never by a subagent or an older transcript in the same folder. A workspace's office without a
+  branch becomes the branch's office when one is checked out; one for another branch ends.
 - An office arrives in one of three ways. By **shuttle**, for a new session or a teammate's new work: the
   shuttle lands a hexagon on its berth, a minion carries it to the doorway of the empty plot and sets it
   down just inside, the hexagon folds open and the floor unfolds from it tile by tile away from the door,

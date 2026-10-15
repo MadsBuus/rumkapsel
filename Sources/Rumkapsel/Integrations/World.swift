@@ -347,7 +347,9 @@ final class World {
 
             scans += 1
             var sessionRooms: Set<String> = []
+            var holds: [String: String] = [:]
             let cfg = ConfigStore.shared.current
+            let deciders = World.deciders(result.sessions)
             for s in result.sessions where s.cwdExists && Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) != "hidden"
                 && (Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo) == "work" || now.timeIntervalSince(s.lastModified) < World.roomsWindow) {
                 let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
@@ -356,15 +358,15 @@ final class World {
                     github.refreshCommits(worktree: s.cwd)
                     if let current = github.currentBranch(worktree: s.cwd), current != branch { continue }
                 }
-                let home = homeFor(s, station: stationName)
+                let home = homeFor(deciders[s.cwd] ?? s, station: stationName)
                 sessionRooms.insert("\(stationName)|\(home.key)")
+                holds["\(stationName)|\(s.cwd)"] = home.key
                 let held = settling && station.rooms[home.key] == nil
-                if !held, let m = minionHomes[s.id], m.key != home.key, station.rooms[home.key] == nil, station.rooms[m.key] != nil,
-                   !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == stationName }) {
-                    let promoted = m.key.hasPrefix("proj:") && home.key.hasPrefix("task:") && !firstRun && m.idle
-                    station.renameRoom(from: m.key, to: home.key, name: home.name)
-                    learn(.renamed(from: m.key, to: home.key), station: stationName)
-                    events.append(.office(station: stationName, .renamed(from: m.key, to: home.key)))
+                if !held, station.rooms[home.key] == nil, let from = previousOffice(of: s, home: home, in: station, minionHomes: minionHomes) {
+                    let promoted = from.key.hasPrefix("proj:") && home.key.hasPrefix("task:") && !firstRun && (minionHomes[s.id]?.idle ?? true)
+                    station.renameRoom(from: from.key, to: home.key, name: home.name)
+                    learn(.renamed(from: from.key, to: home.key), station: stationName)
+                    events.append(.office(station: stationName, .renamed(from: from.key, to: home.key)))
                     if promoted { events.append(.log("\(home.name): branch created")) }
                     changed = true
                 }
@@ -397,8 +399,9 @@ final class World {
                     if stage(office: room.key, repo: room.repo).map({ $0 >= .stored }) == true { continue }
                     if let w = room.worktree { byWorkspace[w, default: []].append(room) }
                 }
-                for (_, rooms) in byWorkspace where rooms.count > 1 {
-                    let keep = rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
+                for (w, rooms) in byWorkspace where rooms.count > 1 {
+                    let holding = holds["\(station.name)|\(w)"]
+                    let keep = rooms.first { $0.key == holding } ?? rooms.first { $0.key.contains("#") } ?? rooms.min { $0.key < $1.key }
                     for room in rooms where room !== keep {
                         events += drop(station: station, room: room, announce: false, reason: "one workspace, one office")
                         changed = true
@@ -496,6 +499,18 @@ final class World {
             if changed { events.append(.layoutChanged) }
             return events
         }
+    }
+
+    static func deciders(_ sessions: [SessionInfo]) -> [String: SessionInfo] {
+        Dictionary(grouping: sessions, by: \.cwd).compactMapValues { here in
+            here.max { ($0.isSubagent ? 0 : 1, $0.lastModified) < ($1.isSubagent ? 0 : 1, $1.lastModified) }
+        }
+    }
+
+    private func previousOffice(of s: SessionInfo, home: Home, in station: Station, minionHomes: [String: MinionHome]) -> Room? {
+        if let m = minionHomes[s.id], m.station == station.name, m.key != home.key, let r = station.rooms[m.key],
+           !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == station.name }) { return r }
+        return station.rooms.values.first { $0.key.hasPrefix("proj:") && $0.worktree == s.cwd && $0.key != home.key }
     }
 
     func homeFor(_ s: SessionInfo, station: String) -> Home {
