@@ -1,4 +1,4 @@
-## What's new in 0.67
+## What's new in 0.68
 
-- A card points out settings the repository disagrees with, and unshipped crates fade after a day
-- A new repository sets itself up: found anywhere, detected, and announced quietly
+- A workspace holds one office, and what is on staging goes to the deck whatever the board says
+- A galley off the lounge: coffee to carry back, and a printed bite eaten on the couch
