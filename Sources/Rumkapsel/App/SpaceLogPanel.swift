@@ -11,7 +11,7 @@ extension StationController {
         let config = ConfigStore.shared.current
         var titles: [String: [Int: String]] = [:]
         for (root, info) in world.repoRoots { for pr in github.teamOpenPRs(repoRoot: root) ?? [] { titles[info.repo, default: [:]][pr.number] = pr.title } }
-        return SpaceLog.Facts(repos: repos, board: config.project == nil ? [] : github.projectItems() ?? [], statuses: config.statuses,
+        return SpaceLog.Facts(repos: repos, board: config.project == nil ? [] : github.board.items ?? [], statuses: config.statuses,
                               me: github.myLogin(), name: { [world] in world.crewName($0) },
                               title: { [github] repo, n in
             if let t = github.work(repo: repo, number: n)?.title, !t.isEmpty { return t }

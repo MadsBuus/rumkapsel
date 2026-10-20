@@ -433,7 +433,7 @@ final class World {
                     if state != nil, !closed { closedAt[key] = nil }
                     status(station, room)
                     let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
-                        && (cfg.project == nil || github.liveProjectItems() != nil)
+                        && (cfg.project == nil || github.board.liveItems != nil)
                     let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
                     let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
                     let lan = peerOffices[key] != nil
@@ -458,7 +458,7 @@ final class World {
             }
             if firstRun, seen == nil { remember(Set(repoRoots.values.map(\.repo)).union(cfg.repos.keys).union(fleet.repoColors.keys)) }
             github.intervalMinutes = cfg.githubMinutes
-            if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
+            if let p = cfg.project { github.board.refresh(owner: p.owner, number: p.number) }
             github.watch(repoRoots.mapValues { $0.station == "work" }, board: cfg.project.map { ($0.owner, $0.number) })
             for (root, info) in repoRoots {
                 github.refreshReleases(repoRoot: root)
@@ -525,10 +525,7 @@ final class World {
         }
     }
 
-    private func applyBoardMoves() -> [WorldEvent] {
-        let st = ConfigStore.shared.current.statuses
-        return github.takeProjectMoves().map { .boardMoved(item: $0.item, from: $0.from, to: st.stage(of: $0.item.status)) }
-    }
+    private func applyBoardMoves() -> [WorldEvent] { hear(github.board.reports()) }
 
     static let placementsPerPass = 1
     private(set) var placementsLeft = false
@@ -561,7 +558,7 @@ final class World {
             for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
         var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
-        if cfg.project != nil, !me.isEmpty, let items = github.liveProjectItems() {
+        if cfg.project != nil, !me.isEmpty, let items = github.board.liveItems {
             let workRepos = Set(repoRoots.values.filter { $0.station == "work" && cfg.crewEnabled(repo: $0.repo) }.map(\.repo))
             var branched: Set<String> = []
             let recent = now.addingTimeInterval(-14 * 24 * 3600)
@@ -811,7 +808,7 @@ final class World {
             else if markers { events.append(.markersChanged) }
 
             if let b = snap.project, let p = cfg.project, b.owner == p.owner, b.number == p.number {
-                github.adoptProject(b.items, at: b.at)
+                github.board.adopt(b.items, at: b.at)
                 events += applyBoardMoves()
             }
             for k in snap.github ?? [] where cfg.shared(repo: k.repo) {

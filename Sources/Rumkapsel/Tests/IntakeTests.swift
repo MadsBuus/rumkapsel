@@ -64,7 +64,7 @@ enum IntakeTests {
         test("a saved board is history: a stale Shipped on it launches nothing, and the live board confirming storage says nothing") {
             let (rig, _) = org([("Target: web#455", 0)])
             let github = rig.world.github
-            guard let live = github.projectItems() else { return expect(false, "a board") }
+            guard let live = github.board.items else { return expect(false, "a board") }
             let shipped = ConfigStore.shared.current.statuses.shipped
             github.inject(savedProject: live.map { it in
                 guard it.repo == "web", it.number == 440 else { return it }

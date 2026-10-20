@@ -24,7 +24,7 @@ enum GitHubDiag {
         let end = Date().addingTimeInterval(seconds)
         var lastMoves = 0
         while Date() < end {
-            if let p = cfg.project { github.refreshProject(owner: p.owner, number: p.number) }
+            if let p = cfg.project { github.board.refresh(owner: p.owner, number: p.number) }
             github.watch(Dictionary(uniqueKeysWithValues: roots.map { ($0, true) }), board: cfg.project.map { ($0.owner, $0.number) })
             for root in roots {
                 github.refreshReleases(repoRoot: root)
@@ -37,8 +37,10 @@ enum GitHubDiag {
                 }
             }
             for case let .deploy(root, production, change, _) in github.deployments.reports() { say("deploy: \(root) \(production ? "production" : "staging") \(change)") }
-            let moves = github.takeProjectMoves()
-            if !moves.isEmpty { for m in moves { say("board moved: \(m.item.repo)#\(m.item.number) \(m.from ?? "-") -> \(m.item.status) at \(m.item.updatedAt.map { "\($0)" } ?? "?"), seen \(Date())") }; lastMoves += moves.count }
+            for case let .cardMoved(item, from) in github.board.reports() {
+                say("board moved: \(item.repo)#\(item.number) \(from ?? "-") -> \(item.status) at \(item.updatedAt.map { "\($0)" } ?? "?"), seen \(Date())")
+                lastMoves += 1
+            }
             Thread.sleep(forTimeInterval: 5)
         }
         Thread.sleep(forTimeInterval: 3)
