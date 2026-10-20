@@ -84,7 +84,7 @@ extension World {
     }
 
     private func flyAtMerge(repoRoot: String, station: String, repo: String, pr: ReleasePR) -> [WorldEvent] {
-        guard let d = github.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
+        guard let d = github.deployments.deploys(repoRoot: repoRoot).first(where: \.production), let newest = d.newest else { return [] }
         let merged = pr.mergedAt ?? now
         guard now.timeIntervalSince(merged) < Deployments.recent else { return [] }
         if let began = newest.startedAt, began > merged.addingTimeInterval(-120) { return [] }

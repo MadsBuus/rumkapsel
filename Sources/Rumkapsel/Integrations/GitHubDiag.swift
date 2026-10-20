@@ -32,11 +32,11 @@ enum GitHubDiag {
                 say("\(root): \(p.trunk) · ships on \(p.ship) · \(p.source): \(p.why)"
                     + (github.cargo(repoRoot: root).map { " · storage \($0.storageNumbers) deck \($0.deckNumbers)" } ?? ""))
                 github.refreshOpenPRs(repoRoot: root)
-                for d in github.deploys(repoRoot: root) {
+                for d in github.deployments.deploys(repoRoot: root) {
                     say("  deploys on \(d.branch): usual \(Int(d.usual))s · newest \(d.newest.map { "\($0.workflow) \($0.status) \($0.conclusion) \($0.release)" } ?? "none")")
                 }
             }
-            for d in github.takeDeploys() { say("deploy: \(d.repoRoot) \(d.production ? "production" : "staging") \(d.change)") }
+            for case let .deploy(root, production, change, _) in github.deployments.reports() { say("deploy: \(root) \(production ? "production" : "staging") \(change)") }
             let moves = github.takeProjectMoves()
             if !moves.isEmpty { for m in moves { say("board moved: \(m.item.repo)#\(m.item.number) \(m.from ?? "-") -> \(m.item.status) at \(m.item.updatedAt.map { "\($0)" } ?? "?"), seen \(Date())") }; lastMoves += moves.count }
             Thread.sleep(forTimeInterval: 5)
