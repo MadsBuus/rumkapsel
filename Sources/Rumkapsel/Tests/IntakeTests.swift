@@ -86,7 +86,7 @@ enum IntakeTests {
             let github = rig.world.github
             guard let root = rig.world.repoRoots.first(where: { $0.value.repo == "web" })?.key else { return expect(false, "web's checkout") }
             let offices = station(rig).rooms.count
-            github.inject(savedOpenPRs: (github.teamOpenPRs(repoRoot: root) ?? []) + [OpenPR(number: 440, title: "stored work", author: "kim", isBot: false,
+            github.inject(savedOpenPRs: (github.pulls.teamOpenPRs(repoRoot: root) ?? []) + [OpenPR(number: 440, title: "stored work", author: "kim", isBot: false,
                                          branch: "kim/stored", url: "https://example.invalid/web/440", createdAt: rig.now)], for: root)
             rig.simulateGitHub()
             rig.advance(20)

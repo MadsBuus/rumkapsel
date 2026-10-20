@@ -31,7 +31,7 @@ enum GitHubDiag {
                 let p = github.pipeline(repoRoot: root)
                 say("\(root): \(p.trunk) · ships on \(p.ship) · \(p.source): \(p.why)"
                     + (github.cargo(repoRoot: root).map { " · storage \($0.storageNumbers) deck \($0.deckNumbers)" } ?? ""))
-                github.refreshOpenPRs(repoRoot: root)
+                github.pulls.refreshOpenPRs(repoRoot: root)
                 for d in github.deployments.deploys(repoRoot: root) {
                     say("  deploys on \(d.branch): usual \(Int(d.usual))s · newest \(d.newest.map { "\($0.workflow) \($0.status) \($0.conclusion) \($0.release)" } ?? "none")")
                 }

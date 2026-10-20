@@ -22,7 +22,7 @@ struct PeerSnapshot: Codable {
     var since: Date
     var offices: [Office]
     var minions: [Minion]
-    var github: [GitHubResolver.Knowledge]?
+    var github: [PullSource.Knowledge]?
     var project: GitHubResolver.ProjectKnowledge?
     var twoWay: Bool? = nil
     var sentAt: Date? = nil

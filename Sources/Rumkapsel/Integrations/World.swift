@@ -149,7 +149,7 @@ final class World {
 
     var settling: Bool { waitsForGitHub && scans < World.officeGraceScans && !allReady && !knewAlready }
 
-    private var knewAlready: Bool { github.hasAnswers }
+    private var knewAlready: Bool { github.pulls.hasAnswers }
 
     func reset() {
         fleet.save()
@@ -180,7 +180,7 @@ final class World {
     func localState(_ room: Room) -> (local: Bool, commits: Int) {
         guard room.key.hasPrefix("task:"), let w = room.worktree else { return (false, 0) }
         var pushed = github.branchPushed(worktree: w) ?? true
-        if let b = room.branch, let r = room.repoRoot, github.pull(branch: b, repoRoot: r) != nil { pushed = true }
+        if let b = room.branch, let r = room.repoRoot, github.pulls.pull(branch: b, repoRoot: r) != nil { pushed = true }
         return (!pushed, github.commitsAhead(worktree: w) ?? 0)
     }
 
@@ -191,7 +191,7 @@ final class World {
 
     func checksFailing(_ room: Room) -> Bool {
         if room.branch == nil, let po = peerPull("work|" + room.key) { return po.pullState == "OPEN" && po.checks == "failure" }
-        guard let b = room.branch, let r = room.repoRoot, let pr = github.pull(branch: b, repoRoot: r) else { return false }
+        guard let b = room.branch, let r = room.repoRoot, let pr = github.pulls.pull(branch: b, repoRoot: r) else { return false }
         return pr.state == "OPEN" && pr.checks == "failure"
     }
 
@@ -215,7 +215,7 @@ final class World {
 
     var stillLooking: Bool {
         guard waitsForGitHub, scans < World.lookingScans else { return false }
-        return repoRoots.isEmpty || repoRoots.keys.contains { !github.answered(repoRoot: $0) }
+        return repoRoots.isEmpty || repoRoots.keys.contains { !github.pulls.answered(repoRoot: $0) }
     }
     static let lookingScans = 60
 
@@ -223,7 +223,7 @@ final class World {
         guard waitsForGitHub else { return true }
         guard let repo else { return true }
         let roots = repoRoots.filter { $0.value.repo == repo }.map(\.key)
-        return !roots.isEmpty && roots.contains { github.answered(repoRoot: $0) }
+        return !roots.isEmpty && roots.contains { github.pulls.answered(repoRoot: $0) }
     }
 
     func peerLive(_ key: String) -> Bool {
@@ -340,7 +340,7 @@ final class World {
                 fleet.load(alone: peerSnapshots.isEmpty)
                 if seen == nil, let data = try? Data(contentsOf: World.seenURL), let names = try? JSONDecoder().decode([String].self, from: data) { seen = Set(names) }
                 restored()
-                if waitsForGitHub { github.loadKnowledge() }
+                if waitsForGitHub { github.pulls.load() }
                 changed = true
                 events.append(.worldLoaded)
             }
@@ -389,7 +389,7 @@ final class World {
                 if let room = station.rooms[home.key], !home.key.hasPrefix("kind:") {
                     room.worktree = s.cwd
                     if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
-                    if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
+                    if let b = room.branch, let r = room.repoRoot { github.pulls.refresh(branch: b, repoRoot: r) }
                     if let w = room.worktree { github.refreshCommits(worktree: w) }
                 }
             }
@@ -462,27 +462,12 @@ final class World {
             github.watch(repoRoots.mapValues { $0.station == "work" }, board: cfg.project.map { ($0.owner, $0.number) })
             for (root, info) in repoRoots {
                 github.refreshReleases(repoRoot: root)
-                if info.station == "work" { github.refreshOpenPRs(repoRoot: root) }
+                if info.station == "work" { github.pulls.refreshOpenPRs(repoRoot: root) }
             }
             events += hear(github.deployments.reports())
             events += lostDeploys()
             events += applyBoardMoves()
-            for change in github.takeStateChanges() {
-                for station in fleet.stations.values {
-                    for room in station.rooms.values where room.branch == change.branch {
-                        if let repo = room.repo { works.note(repo: repo, branch: change.branch, issue: change.pr.closes.first, pull: change.pr.number, pullState: change.pr.state) }
-                    }
-                }
-                for station in fleet.stations.values {
-                    for room in station.rooms.values where room.branch == change.branch {
-                        guard let repo = room.repo else { continue }
-                        report(pullState: change.pr.state, record: works.find(repo: repo, pull: change.pr.number), at: now)
-                    }
-                }
-                let who = Work(repo: "", branch: change.branch).label
-                events.append(.log("\(who): \(change.pr.summary)"))
-                events.append(.chime(change.pr.number))
-            }
+            events += hear(github.pulls.reports())
             events += stationEvents()
             if changed { events.append(.layoutChanged) }
             return events
@@ -502,7 +487,7 @@ final class World {
     }
 
     func homeFor(_ s: SessionInfo, station: String) -> Home {
-        let pr = s.branch.flatMap { b in s.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+        let pr = s.branch.flatMap { b in s.repoRoot.flatMap { github.pulls.pull(branch: b, repoRoot: $0) } }
         let home = works.note(repo: s.repo, branch: s.branch, folder: s.cwd, issue: pr?.closes.first, pull: pr?.number, pullState: pr?.state)
             .work(branch: s.branch).home
         if let at = retired["\(station)|\(home.key)"], now.timeIntervalSince(at) < World.holdWindow {
@@ -551,11 +536,11 @@ final class World {
         var open: [(repo: String, pr: OpenPR)] = []
         var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" && cfg.crewEnabled(repo: info.repo) {
-            for pr in github.teamOpenPRs(repoRoot: root) ?? [] where !Work.longLived.contains(pr.branch) {
+            for pr in github.pulls.teamOpenPRs(repoRoot: root) ?? [] where !Work.longLived.contains(pr.branch) {
                 let checkedOutHere = station.rooms.values.contains { $0.worktree != nil && $0.repo == info.repo && ($0.branch == pr.branch || $0.key == Work(repo: info.repo, branch: pr.branch, pull: pr.number).officeKey) }
                 if pr.author != me || !checkedOutHere { open.append((info.repo, pr)) }
             }
-            for e in github.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
+            for e in github.pulls.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
         var boardOffices: [(repo: String, item: ProjectItem, login: String)] = []
         if cfg.project != nil, !me.isEmpty, let items = github.board.liveItems {
@@ -697,10 +682,10 @@ final class World {
 
     private func noteAnswered() {
         let before = readyRepos.count
-        for (root, info) in repoRoots where info.station == "work" && github.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
+        for (root, info) in repoRoots where info.station == "work" && github.pulls.teamOpenPRs(repoRoot: root) != nil { readyRepos.insert(info.repo) }
         if waitsForGitHub, readyRepos.count != before || Date().timeIntervalSince(savedKnowledgeAt) > 60 {
             savedKnowledgeAt = Date()
-            github.saveKnowledge(repoRoots.mapValues(\.repo))
+            github.pulls.save(repoRoots.mapValues(\.repo))
             if seenPeople != savedPeople { savedPeople = seenPeople; SeenPerson.save(seenPeople) }
         }
     }
@@ -710,7 +695,7 @@ final class World {
         var events: [WorldEvent] = []
         let cfg = ConfigStore.shared.current
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name && cfg.crewEnabled(repo: info.repo) {
-            guard github.teamOpenPRs(repoRoot: root) != nil else { continue }
+            guard github.pulls.teamOpenPRs(repoRoot: root) != nil else { continue }
             let bots = open.filter { $0.repo == info.repo && $0.pr.isBot }.map(\.pr.number)
             let known = station.facts.crates.values.filter { $0.id.repo == info.repo }
             if bots.contains(where: { n in !known.contains { $0.id.number == n } }) { moved = true }
@@ -721,8 +706,8 @@ final class World {
                 if feed.contains(where: { $0.repo == info.repo && $0.e.kind == "pr_close" && $0.e.prNumber == n }) { state = "CLOSED" }
                 else if feed.contains(where: { $0.repo == info.repo && $0.e.kind == "pr_merge" && $0.e.prNumber == n }) { state = "MERGED" }
                 else {
-                    github.refresh(pull: n, repoRoot: root)
-                    if github.pullAnswered(number: n, repoRoot: root) { state = github.pull(number: n, repoRoot: root)?.state }
+                    github.pulls.refresh(pull: n, repoRoot: root)
+                    if github.pulls.pullAnswered(number: n, repoRoot: root) { state = github.pulls.pull(number: n, repoRoot: root)?.state }
                 }
                 guard let state else { continue }
                 moved = true
@@ -812,7 +797,7 @@ final class World {
                 events += applyBoardMoves()
             }
             for k in snap.github ?? [] where cfg.shared(repo: k.repo) {
-                for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.adopt(k, repoRoot: root) }
+                for (root, info) in repoRoots where info.repo == k.repo && info.station == "work" { github.pulls.adopt(k, repoRoot: root) }
             }
             return events
         }

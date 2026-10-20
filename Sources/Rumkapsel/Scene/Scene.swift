@@ -576,7 +576,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         }
         let sig = fleet.stations.values.flatMap { st in st.rooms.values.map { r in
             let l = world.localState(r)
-            let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
+            let checks = r.branch.flatMap { b in r.repoRoot.flatMap { github.pulls.pull(branch: b, repoRoot: $0)?.checks } } ?? ""
             return "\(st.name)|\(r.key):\(l.local):\(l.commits > 0):\(checks)"
         } }.sorted().joined()
         timed("github") { handle(world.applyGitHub(now: now, timed: { n, b in self.timed(n, b) })) }
@@ -773,7 +773,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         for r in station.rooms.values where r.worktree != nil && !r.key.hasPrefix("kind:") && (r.repo.map { cfg.shared(repo: $0) } ?? false)
             && now.timeIntervalSince(r.lastActive) < World.roomsWindow {
             let key = roomKey(station, r)
-            let pr = r.branch.flatMap { b in r.repoRoot.flatMap { github.pull(branch: b, repoRoot: $0) } }
+            let pr = r.branch.flatMap { b in r.repoRoot.flatMap { github.pulls.pull(branch: b, repoRoot: $0) } }
             offices.append(PeerSnapshot.Office(key: r.key, name: r.name, repo: r.repo ?? "", branch: r.branch, color: r.color, cells: r.cells,
                                                pushed: r.branch != nil && !world.localState(r).local,
                                                startedAt: world.roomCreated[key] ?? .distantPast, lastActive: r.lastActive,
@@ -785,10 +785,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                                 activity: $0.activity.label, waiting: $0.activity == .waiting, cones: $0.cones.count,
                                 doing: doing($0), callsign: $0.callsign)
         }
-        var knowledge: [GitHubResolver.Knowledge]?
+        var knowledge: [PullSource.Knowledge]?
         var board: GitHubResolver.ProjectKnowledge?
         if withGitHub {
-            knowledge = world.repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
+            knowledge = world.repoRoots.filter { $0.value.station == "work" && cfg.shared(repo: $0.value.repo) }.compactMap { github.pulls.knowledge(repoRoot: $0.key, repo: $0.value.repo) }
             if let p = cfg.project { board = github.projectKnowledge(owner: p.owner, number: p.number) }
         }
         let colors = fleet.repoColors.filter { cfg.shared(repo: $0.key) && cfg.repos[$0.key]?.color == nil }
@@ -1233,14 +1233,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             github.invalidate()
             for station in fleet.stations.values {
                 for room in station.rooms.values {
-                    if let b = room.branch, let r = room.repoRoot { github.refresh(branch: b, repoRoot: r) }
+                    if let b = room.branch, let r = room.repoRoot { github.pulls.refresh(branch: b, repoRoot: r) }
                     if let w = room.worktree { github.refreshCommits(worktree: w) }
                 }
             }
             github.intervalMinutes = ConfigStore.shared.current.githubMinutes
         for (root, info) in world.repoRoots {
             github.refreshReleases(repoRoot: root)
-            if info.station == "work" { github.refreshOpenPRs(repoRoot: root) }
+            if info.station == "work" { github.pulls.refreshOpenPRs(repoRoot: root) }
         }
             logEvent("asking github…")
         }
