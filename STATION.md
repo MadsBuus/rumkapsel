@@ -159,6 +159,8 @@ moves through it one way: in from the hallway at the back, out through the field
 - A workspace holds one office at a time: the one for the branch checked out there, decided by its own
   session, never by a subagent or an older transcript in the same folder. A workspace's office without a
   branch becomes the branch's office when one is checked out; one for another branch ends.
+- A piece of work belongs to one repository. Branches with the same name in two repositories are two
+  pieces of work, and an office never changes repository.
 - An office arrives in one of three ways. By **shuttle**, for a new session or a teammate's new work: the
   shuttle lands a hexagon on its berth, a minion carries it to the doorway of the empty plot and sets it
   down just inside, the hexagon folds open and the floor unfolds from it tile by tile away from the door,

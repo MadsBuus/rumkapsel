@@ -508,9 +508,9 @@ final class World {
     }
 
     private func previousOffice(of s: SessionInfo, home: Home, in station: Station, minionHomes: [String: MinionHome]) -> Room? {
-        if let m = minionHomes[s.id], m.station == station.name, m.key != home.key, let r = station.rooms[m.key],
+        if let m = minionHomes[s.id], m.station == station.name, m.key != home.key, let r = station.rooms[m.key], r.repo == home.repo,
            !minionHomes.contains(where: { $0.key != s.id && $0.value.key == m.key && $0.value.station == station.name }) { return r }
-        return station.rooms.values.first { $0.key.hasPrefix("proj:") && $0.worktree == s.cwd && $0.key != home.key }
+        return station.rooms.values.first { $0.key.hasPrefix("proj:") && $0.repo == home.repo && $0.worktree == s.cwd && $0.key != home.key }
     }
 
     func homeFor(_ s: SessionInfo, station: String) -> Home {
