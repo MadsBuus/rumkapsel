@@ -39,6 +39,11 @@ shown at once. Only changes after it are news.
 Every scan asks the base-interval sources; each answers from its cache until its interval is up. A failed
 call keeps the previous answer.
 
+What was saved on disk last time (`board.json`, the open pull requests and the feed in
+`rumkapsel.github.json`) is history: until its source has answered live, or a neighbour has, it moves no
+stage, opens no office and counts no crate. The saved facts stand until then, and the board is asked for
+at once on start.
+
 **Detectors.** Cheap conditional reads (`Integrations/Detectors.swift`) that say *something moved*; the
 resolver ticks them every second on its own (`GitHubResolver.watch`), each first ask jittered. A 304 costs
 nothing against the rate limit and is not parsed. Requests go out one at a time. The pace is the app's:
