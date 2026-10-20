@@ -2,6 +2,7 @@ import Foundation
 
 enum Report {
     case deploy(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)
+    case cardMoved(ProjectItem, from: String?)
 }
 
 extension World {
@@ -21,6 +22,8 @@ extension World {
                     events.append(.deployEnded(station: info.station, repo: info.repo, production: production, outcome: outcome))
                     if !production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
                 }
+            case .cardMoved(let item, let from):
+                events.append(.boardMoved(item: item, from: from, to: ConfigStore.shared.current.statuses.stage(of: item.status)))
             }
         }
         return events

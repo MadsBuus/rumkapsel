@@ -502,7 +502,7 @@ extension StationController {
 
     func openCrate(_ id: CrateID) {
         let repo = id.repo, n = id.number
-        if let item = github.projectItems()?.first(where: { $0.repo == repo && $0.number == n }), let url = URL(string: item.url) {
+        if let item = github.board.items?.first(where: { $0.repo == repo && $0.number == n }), let url = URL(string: item.url) {
             DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             return
         }

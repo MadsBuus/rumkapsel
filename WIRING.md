@@ -33,7 +33,7 @@ shown at once. Only changes after it are news.
 | Pull request detector | the 20 most recently updated pull requests, conditional (ETag) | 5 s focused, 10 s active, 60 s idle | `GitHubResolver.detectPulls` |
 | Activity feed | each repository's events, conditional (ETag), team repositories only | 60 s (GitHub's `X-Poll-Interval`), 3 min idle | `GitHubResolver.detectFeed` |
 | Deploys | Actions runs on push to the staging and production branches, conditional (ETag) | 30 s focused, 1 min active, 2 min idle; 5 s while hot | `DeploySource`, `Integrations/Deployments.swift` |
-| Board | one GitHub project, one single-select field | the items updated since yesterday, conditional (REST, ETag): 10 s focused, 20 s active, 60 s idle, 5 s while hot; the whole board at the base interval whatever the deltas, a fresher item kept | `GitHubResolver.detectBoard`, `refreshProject` |
+| Board | one GitHub project, one single-select field | the items updated since yesterday, conditional (REST, ETag): 10 s focused, 20 s active, 60 s idle, 5 s while hot; the whole board at the base interval whatever the deltas, a fresher item kept | `BoardSource` (`Integrations/ProjectBoard.swift`) |
 | Neighbours | offices, minions, colours, GitHub knowledge | looked at twice a second and sent on a change, at least every 3 s; GitHub knowledge every 30 s | `Integrations/Peers.swift`, `Scene/Scene.swift` (`makeSnapshot`) |
 
 Every scan asks the base-interval sources; each answers from its cache until its interval is up. A failed

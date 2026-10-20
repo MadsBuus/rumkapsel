@@ -165,11 +165,11 @@ enum GitHubTests {
                 ProjectItem(repo: "web", number: 1, title: "t", status: status, assignees: [], prURLs: [], url: "", updatedAt: t0.addingTimeInterval(at))
             }
             r.inject(project: [item("QA", 100)], at: t0.addingTimeInterval(100), quiet: true)
-            _ = r.takeProjectMoves()
-            r.adoptProject([item("In Development", 50)], at: t0.addingTimeInterval(200))
-            expect(r.projectItems()?.first?.status == "QA" && r.takeProjectMoves().isEmpty, "the older read keeps the newer status, no move")
-            r.adoptProject([item("Shipped", 150)], at: t0.addingTimeInterval(300))
-            expect(r.projectItems()?.first?.status == "Shipped", "a newer read wins")
+            _ = r.board.reports()
+            r.board.adopt([item("In Development", 50)], at: t0.addingTimeInterval(200))
+            expect(r.board.items?.first?.status == "QA" && r.board.reports().isEmpty, "the older read keeps the newer status, no move")
+            r.board.adopt([item("Shipped", 150)], at: t0.addingTimeInterval(300))
+            expect(r.board.items?.first?.status == "Shipped", "a newer read wins")
         }
 
         test("a board item from the REST project API becomes the resolver's item") {

@@ -122,7 +122,6 @@ final class GitHubResolver {
     func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
     private var fromCache: Set<String> = []
     private var savedOnly: Set<String> = []
-    private var boardSaved = false
 
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
@@ -147,11 +146,7 @@ final class GitHubResolver {
 
     struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
     struct ProjectKnowledge: Codable { var owner: String; var number: Int; var items: [ProjectItem]; var at: Date }
-    func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? {
-        lock.lock(); defer { lock.unlock() }
-        guard let p = project else { return nil }
-        return ProjectKnowledge(owner: owner, number: number, items: p.0, at: p.1)
-    }
+    func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? { board.knowledge(owner: owner, number: number) }
 
     func knowledge(repoRoot: String, repo: String) -> Knowledge? {
         lock.lock(); defer { lock.unlock() }
@@ -220,9 +215,8 @@ final class GitHubResolver {
                     if let issue = tasks[repo]?[pr.number] { if note(repo: repo, number: issue, author: pr.author) { learned = true } }
                 }
             }
-            let board = learned ? project : nil
             lock.unlock()
-            if let (items, at) = board { saveBoard(items, at: at) }
+            if learned { saveBoard() }
             if changed || first { DispatchQueue.main.async { self.onUpdate?() } }
         }
     }
@@ -244,21 +238,15 @@ final class GitHubResolver {
     var baseInterval: TimeInterval { interval }
     private var branchesOnGitHub: [String: Set<String>] = [:]
     private var pipelineCheckedAt: [String: Date] = [:]
-    private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
 
     func cargo(repoRoot: String) -> Cargo? {
         lock.lock(); defer { lock.unlock() }
-        if ConfigStore.shared.current.project != nil, boardSaved || (project != nil && owners[repoRoot] == nil) { return nil }
-        if let items = project?.0, let owner = owners[repoRoot] {
+        if ConfigStore.shared.current.project != nil, !board.live || (board.items != nil && owners[repoRoot] == nil) { return nil }
+        if let items = board.items, let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
             let mine = items.filter { $0.repo == repo && !$0.status.isEmpty }
-            let decided = pipelines[repoRoot]?.boardColumns
-            if decided == nil, mine.contains(where: { [st.storage, st.deck, st.cleared].contains($0.status) }), !boardYards.contains(repo) {
-                boardYards.insert(repo)
-                if let (all, at) = project { saveBoard(all, at: at) }
-            }
-            if !mine.isEmpty, decided ?? boardYards.contains(repo) {
+            if board.usesColumns(repo, decided: pipelines[repoRoot]?.boardColumns) {
             let storage = mine.filter { $0.status == st.storage }.map(\.number).sorted()
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
@@ -278,13 +266,13 @@ final class GitHubResolver {
 
     // MARK: project board
 
-    private lazy var project: ([ProjectItem], Date)? = {
-        let saved = GitHubResolver.loadBoard()
-        boardSaved = saved != nil
-        return saved
-    }() { didSet { BoardNumbers.note(project?.0 ?? []) } }
+    private(set) lazy var board: BoardSource = {
+        let file = GitHubResolver.loadBoardFile()
+        let b = BoardSource(github: self, saved: file.map { ($0.items, $0.at) }, yards: file?.yards ?? [])
+        watch.add { [weak b] in b?.checks() ?? [] }
+        return b
+    }()
     private var owners: [String: String] = GitHubResolver.loadBoardFile()?.owners ?? [:]
-    private var projectMoves: [(item: ProjectItem, from: String?)] = []
 
     private static var boardURL: URL {
         let dir = AppSupport.root.appendingPathComponent("Rumkapsel", isDirectory: true)
@@ -298,16 +286,11 @@ final class GitHubResolver {
         guard let data = try? Data(contentsOf: boardURL) else { return nil }
         return try? JSONDecoder().decode(SavedBoard.self, from: data)
     }
-    private static func loadBoard() -> ([ProjectItem], Date)? {
-        let board = loadBoardFile().map { ($0.items, $0.at) }
-        BoardNumbers.note(board?.0 ?? [])
-        return board
-    }
-    private func saveBoard(_ items: [ProjectItem], at: Date) {
-        if frozen { return }
-        let saved = SavedBoard(items: items, at: at, owners: owners,
+    func saveBoard() {
+        guard !frozen, let file = board.file else { return }
+        let saved = SavedBoard(items: file.items, at: file.at, owners: owners,
                                tasks: tasks.mapValues { Dictionary(uniqueKeysWithValues: $0.map { (String($0.key), $0.value) }) },
-                               yards: boardYards.sorted(),
+                               yards: file.yards,
                                works: works.mapValues { Dictionary(uniqueKeysWithValues: $0.sorted { $0.key > $1.key }.prefix(500).map { (String($0.key), $0.value) }) })
         if let data = try? JSONEncoder().encode(saved) { try? data.write(to: GitHubResolver.boardURL) }
     }
@@ -363,9 +346,10 @@ final class GitHubResolver {
     private var boardIndex: [String: ProjectItem] = [:]
     private var boardIndexAt: Date?
     private func boardItem(repo: String, number: Int) -> ProjectItem? {
-        if boardIndexAt != project?.1 {
-            boardIndex = Dictionary((project?.0 ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
-            boardIndexAt = project?.1
+        let at = board.fetchedAt
+        if boardIndexAt != at {
+            boardIndex = Dictionary((board.items ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
+            boardIndexAt = at
         }
         return boardIndex["\(repo)#\(number)"]
     }
@@ -386,9 +370,8 @@ final class GitHubResolver {
         let repo = String(owner.split(separator: "/").last ?? "")
         let known = tasks[repo]?[pr.number]
         if known != issue { tasks[repo, default: [:]][pr.number] = issue }
-        let snapshot = project
         lock.unlock()
-        if known != issue, let (items, at) = snapshot { saveBoard(items, at: at) }
+        if known != issue { saveBoard() }
     }
 
     private func noteAuthor(_ o: [String: Any], number: Int, repoRoot: String, issue: Int?) {
@@ -399,147 +382,29 @@ final class GitHubResolver {
         let repo = String(owner.split(separator: "/").last ?? "")
         var learned = note(repo: repo, number: number, title: o["title"] as? String, author: login, at: at)
         if let issue { learned = note(repo: repo, number: issue, author: login) || learned }
-        let snapshot = learned ? project : nil
         lock.unlock()
-        if let (items, at) = snapshot { saveBoard(items, at: at) }
+        if learned { saveBoard() }
     }
 
     func task(repo: String, pull: Int) -> Int? {
         lock.lock(); defer { lock.unlock() }
         return tasks[repo]?[pull]
     }
+    func noteTasks(_ items: [ProjectItem]) {
+        lock.lock()
+        for it in items { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
+        lock.unlock()
+    }
+
     func pulls(repo: String, task: Int) -> [Int] {
         lock.lock(); defer { lock.unlock() }
         return (tasks[repo] ?? [:]).filter { $0.value == task }.map(\.key).sorted()
     }
     private func learned(owner: String, repoRoot: String) {
         lock.lock(); owners[repoRoot] = owner; lock.unlock()
-        if let (items, at) = project { saveBoard(items, at: at) }
+        saveBoard()
     }
 
-    func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
-    func liveProjectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return boardSaved ? nil : project?.0 }
-    func projectFetchedAt() -> Date? { lock.lock(); defer { lock.unlock() }; return project?.1 }
-
-    func takeProjectMoves() -> [(item: ProjectItem, from: String?)] {
-        lock.lock(); defer { lock.unlock() }
-        let out = projectMoves; projectMoves = []; return out
-    }
-
-    func refreshProject(owner: String, number: Int) {
-        if frozen { return }
-        lock.lock()
-        if Date().timeIntervalSince(projectFullAt) < interval { lock.unlock(); return }
-        if inFlight.contains("project") { lock.unlock(); return }
-        inFlight.insert("project")
-        projectFullAt = Date()
-        lock.unlock()
-        trace("ask project (whole board)")
-        queue.async { [self] in
-            defer { lock.lock(); inFlight.remove("project"); lock.unlock() }
-            let fieldName = GitHubResolver.quoted(ConfigStore.shared.current.statusField)
-            let iso = ISO8601DateFormatter()
-            var items: [ProjectItem] = []
-            var cursor = "null"
-            for _ in 0..<6 {
-                let query = """
-                { organization(login: "\(owner)") { projectV2(number: \(number)) { items(first: 100, after: \(cursor)) {
-                  pageInfo { hasNextPage endCursor }
-                  nodes { updatedAt
-                    fieldValueByName(name: \(fieldName)) { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-                    content { ... on Issue { number title url state repository { name } assignees(first: 5) { nodes { login } }
-                      closedByPullRequestsReferences(first: 5) { nodes { url state } } } } } } } } }
-                """
-                guard let out = run(["gh", "api", "graphql", "-f", "query=" + query], cwd: FileManager.default.homeDirectoryForCurrentUser.path),
-                      let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any],
-                      let itemsObj = ((obj["data"] as? [String: Any])?["organization"] as? [String: Any]).flatMap({ $0["projectV2"] as? [String: Any] })?["items"] as? [String: Any],
-                      let nodes = itemsObj["nodes"] as? [[String: Any]] else { trace("project read failed at page \(cursor)"); return }
-                for o in nodes {
-                    guard let content = o["content"] as? [String: Any], let n = content["number"] as? Int,
-                          let repo = (content["repository"] as? [String: Any])?["name"] as? String else { continue }
-                    let status = (o["fieldValueByName"] as? [String: Any])?["name"] as? String ?? ""
-                    let assignees = ((content["assignees"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []).compactMap { $0["login"] as? String }
-                    let prs = ((content["closedByPullRequestsReferences"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? [])
-                        .filter { $0["state"] as? String == "OPEN" }.compactMap { $0["url"] as? String }
-                    items.append(ProjectItem(repo: repo, number: n, title: content["title"] as? String ?? "", status: status, assignees: assignees,
-                                             prURLs: prs, url: content["url"] as? String ?? "", updatedAt: (o["updatedAt"] as? String).flatMap(iso.date(from:)), state: content["state"] as? String ?? "OPEN"))
-                }
-                let page = itemsObj["pageInfo"] as? [String: Any]
-                guard page?["hasNextPage"] as? Bool == true, let end = page?["endCursor"] as? String else { break }
-                cursor = "\"\(end)\""
-            }
-            adoptProject(items, at: Date())
-        }
-    }
-
-    private var projectFullAt = Date.distantPast
-    private var boardFields: (status: Int, pulls: Int?)?
-
-    private func detectBoard(owner: String, number: Int) {
-        let key = "watch:board"
-        let base = "orgs/\(owner)/projectsV2/\(number)"
-        lock.lock(); var fields = boardFields; lock.unlock()
-        if fields == nil {
-            guard let answer = ask(key, base + "/fields") else { return }
-            guard let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]],
-                  let status = arr.first(where: { $0["name"] as? String == ConfigStore.shared.current.statusField })?["id"] as? Int
-            else { tune(key) { $0.failed() }; trace("board: no \(ConfigStore.shared.current.statusField) field"); return }
-            fields = (status, arr.first { $0["data_type"] as? String == "linked_pull_requests" }?["id"] as? Int)
-            lock.lock(); boardFields = fields; lock.unlock()
-        }
-        guard let fields else { return }
-        let day = DateFormatter()
-        day.dateFormat = "yyyy-MM-dd"; day.timeZone = TimeZone(identifier: "UTC"); day.locale = Locale(identifier: "en_US_POSIX")
-        let since = day.string(from: Date().addingTimeInterval(-24 * 3600))
-        let ids = ([fields.status] + (fields.pulls.map { [$0] } ?? [])).map(String.init).joined(separator: ",")
-        guard let answer = ask(key, base + "/items?per_page=100&fields=\(ids)&q=updated:%3E%3D\(since)", cache: base + "/items"), answer.changed,
-              let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
-        if arr.count >= 100 {
-            trace("board: a full page since \(since), reading the whole board")
-            lock.lock(); projectFullAt = .distantPast; lock.unlock()
-            refreshProject(owner: owner, number: number)
-            return
-        }
-        let fresh = arr.compactMap { ProjectItem(rest: $0, status: fields.status) }
-        lock.lock()
-        guard let (current, _) = project else { lock.unlock(); return }
-        var merged = current
-        var moved: [(ProjectItem, String?)] = []
-        for var f in fresh {
-            if let i = merged.firstIndex(where: { $0.repo == f.repo && $0.number == f.number }) {
-                if fields.pulls == nil { f.prURLs = merged[i].prURLs }
-                if merged[i] != f { if merged[i].status != f.status { moved.append((f, merged[i].status)) }; merged[i] = f }
-            } else { merged.append(f); moved.append((f, nil)) }
-        }
-        let changed = merged != current
-        if changed { project = (merged, Date()); projectMoves += moved }
-        for it in fresh { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
-        lock.unlock()
-        trace("board: \(fresh.count) item(s) updated since \(since), \(moved.count) moved")
-        if changed {
-            saveBoard(merged, at: Date())
-            DispatchQueue.main.async { self.onUpdate?() }
-        }
-    }
-
-    func adoptProject(_ items: [ProjectItem], at: Date) {
-        lock.lock()
-        guard at > (project?.1 ?? .distantPast) else { lock.unlock(); return }
-        let previous = project?.0
-        let wasSaved = boardSaved
-        boardSaved = false
-        let held = Dictionary((previous ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
-        let items = items.map { it in
-            wasSaved ? it : held["\(it.repo)#\(it.number)"].flatMap { h in (h.updatedAt ?? .distantPast) > (it.updatedAt ?? .distantPast) ? h : nil } ?? it
-        }
-        if previous != nil, !wasSaved {
-            for it in items where held["\(it.repo)#\(it.number)"]?.status != it.status { projectMoves.append((it, held["\(it.repo)#\(it.number)"]?.status)) }
-        }
-        let changed = previous != items || wasSaved
-        project = (items, at)
-        lock.unlock()
-        if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
-    }
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
@@ -782,9 +647,8 @@ final class GitHubResolver {
                 if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
             }
         }
-        let board = learned ? project : nil
         lock.unlock()
-        if let (items, at) = board { saveBoard(items, at: at) }
+        if learned { saveBoard() }
         let p = pipeline(repoRoot: repoRoot)
         if GitHubResolver.fresh(events, since: known).contains(where: { e in
             e.kind == "release" || e.kind == "push" && !(e.branch ?? "").isEmpty && [p.staging, p.production].contains(e.branch ?? "")
@@ -864,7 +728,6 @@ final class GitHubResolver {
     var pace: Pace { get { watch.pace } set { watch.pace = newValue } }
 
     private var watched: [String: Bool] = [:]
-    private var board: (owner: String, number: Int)?
     private var gits: [String: GitWatch] = [:]
     private var fetchedAt: [String: Date] = [:]
     private let watching = DispatchQueue(label: "rumkapsel.github.watch", qos: .utility, attributes: .concurrent)
@@ -873,11 +736,11 @@ final class GitHubResolver {
         if frozen { return }
         lock.lock()
         watched = roots
-        self.board = board
         for gone in gits.keys where roots[gone] == nil { gits[gone] = nil }
         let fresh = roots.keys.filter { gits[$0] == nil }
         lock.unlock()
         _ = deployments
+        self.board.watch(board)
         watch.start()
         for root in fresh {
             let w = GitWatch(root: root) { [weak self] change in self?.heard(change, repoRoot: root) }
@@ -897,7 +760,6 @@ final class GitHubResolver {
             out.append(.init(root + "#watch:pulls", .pulls) { self.detectPulls(root) })
             if team { out.append(.init(root + "#watch:feed", .feed) { self.detectFeed(root) }) }
         }
-        if let b = board, project != nil { out.append(.init("watch:board", .board) { self.detectBoard(owner: b.owner, number: b.number) }) }
         out.append(.init("watch:limits", Detector(every: [300, 300, 300])) { self.http.readLimits() })
         return out
     }
@@ -1380,9 +1242,10 @@ extension GitHubResolver {
         guard frozen else { return }
         lock.lock()
         openPRs = [:]; feeds = [:]; releases = [:]; cargo = [:]; pulls = [:]; commits = [:]; pipelines = [:]
-        pushed = [:]; dirty = [:]; owners = [:]; project = nil
-        projectMoves = []; pendingLaunches = []; stateChanges = []; me = nil
+        pushed = [:]; dirty = [:]; owners = [:]
+        pendingLaunches = []; stateChanges = []; me = nil
         lock.unlock()
+        board.reset()
     }
 
     func inject(login: String) {
@@ -1449,7 +1312,7 @@ extension GitHubResolver {
 
     func inject(savedProject items: [ProjectItem]) {
         guard frozen else { return }
-        lock.lock(); project = (items, Date()); boardSaved = true; lock.unlock()
+        board.inject(saved: items)
         notify()
     }
 
@@ -1461,15 +1324,8 @@ extension GitHubResolver {
 
     func inject(project items: [ProjectItem], at: Date = Date(), quiet: Bool = false) {
         guard frozen else { return }
-        lock.lock()
-        if !quiet, let previous = project?.0 {
-            let before = Dictionary(previous.map { ("\($0.repo)#\($0.number)", $0.status) }, uniquingKeysWith: { a, _ in a })
-            for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
-        }
-        project = (items, at)
-        boardSaved = false
-        for it in items { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
-        lock.unlock()
+        board.inject(items, at: at, quiet: quiet)
+        noteTasks(items)
         notify()
     }
 

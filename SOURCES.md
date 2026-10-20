@@ -67,7 +67,7 @@ Each stage is a green PR with nothing different on screen.
 1. **The plumbing and the first source.** `Watch` takes the scheduler out of `GitHubResolver` (the timer,
    the detectors, `ask`, heat). `Intake`, `Report` and `World.hear` come in, and Deploys moves out as
    `DeploySource`, saying its starts and ends through the door. Done.
-2. **The resolver split**, one source per PR: Pull requests, Releases, Board, Git. Each takes its reads,
+2. **The resolver split**, one source per PR: Board (done), Pull requests, Releases, Git. Each takes its reads,
    cache, saved copy and detector out of `GitHubResolver` and says its reports, and the deciding that
    World does on them stays in World.
 3. **Transcripts and Neighbours** as sources.
