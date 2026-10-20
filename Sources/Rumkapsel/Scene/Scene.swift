@@ -283,19 +283,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hudClock = 0.0
     var legendSignature = ""
     var eventLabels: [(SKLabelNode, Double)] = []
-    var mission: Mission?
+    var flights: [MissionFeed] = []
+    var loadingFlights: [Mission] = []
+    var missions: [Mission] { flights.map(\.mission) + loadingFlights }
     var walker: Walker?
     var rehearsals = 0
-    let missionCamera = SCNNode()
-    let missionCraft = SCNNode()
-    var hiddenRockets: [SCNNode] = []
-    var missionView: SCNView?
-    var missionScreen: MissionScreen?
-    var missionUserSmall = false, missionUserOpened = false
-    var missionSize = 0
-    var missionOrbit = SIMD2<Double>(0, 0)
-    var queuedMissions: [Mission] = []
-    var missionShown = ""
     let planetRoot = SCNNode()
     var planets: [String: SCNNode] = [:]
     var spaceLogButton: SpaceLogButton?
@@ -415,7 +407,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
         }
         view.onClick = { [weak self] node in
-            if let self, missionView != nil, missionSize > 0 { DispatchQueue.main.async { self.setMissionSize(0) } }
+            if let self { DispatchQueue.main.async { for f in self.flights where f.size > 0 { self.setSize(f, 0) } } }
             let n = node?.name ?? ""
             if StationController.crate(named: n) == nil && !n.hasPrefix("box:") { self?.closeStory() }
             if n.hasPrefix("minion:") {

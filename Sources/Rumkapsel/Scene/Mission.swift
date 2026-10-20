@@ -98,7 +98,7 @@ extension StationController {
 
     func placePlanets() {
         var repos = Set(world.repoRoots.filter { !github.pipeline(repoRoot: $0.key).production.isEmpty }.map(\.value.repo))
-        if let m = mission { repos.insert(m.repo) }
+        for f in flights { repos.insert(f.mission.repo) }
         let names = repos.sorted()
         guard names != planets.keys.sorted() || planetRoot.parent == nil else { return }
         if planetRoot.parent == nil { scene.rootNode.addChildNode(planetRoot) }
@@ -130,28 +130,25 @@ extension StationController {
     func beginMission(station: String, repo: String, expected: TimeInterval, release: String, elapsed: TimeInterval = 0) {
         var m = Mission(repo: repo, station: station, started: clock - elapsed, expected: expected, release: release)
         m.rocket = world.rocketKey(station: station, repo: repo, release: release)
-        if var current = mission, current.repo == repo, current.ended == nil {
-            current.started = min(current.started, m.started); current.expected = expected
-            if !release.isEmpty { current.release = release }
-            mission = current
+        if let f = flights.first(where: { $0.mission.rocket == m.rocket && $0.mission.ended == nil }) {
+            f.mission.started = min(f.mission.started, m.started); f.mission.expected = expected
+            if !release.isEmpty { f.mission.release = release }
             return
         }
-        if let i = queuedMissions.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
-            queuedMissions[i].started = min(queuedMissions[i].started, m.started); queuedMissions[i].expected = expected
+        if let i = loadingFlights.firstIndex(where: { $0.rocket == m.rocket && $0.ended == nil }) {
+            loadingFlights[i].started = min(loadingFlights[i].started, m.started); loadingFlights[i].expected = expected
             return
         }
-        if mission != nil || rocketLoading(m) {
-            if !queuedMissions.contains(where: { $0.repo == repo }) { queuedMissions.append(m) }
-            return
-        }
+        if rocketLoading(m) { loadingFlights.append(m); return }
         launch(m)
     }
 
     private func launch(_ m: Mission) {
-        mission = m
-        mission?.shownAt = clock
+        let f = MissionFeed(m)
+        f.mission.shownAt = clock
+        if flights.count >= MissionFeed.most, let gone = flights.first(where: { $0.mission.ended != nil }) ?? flights.first { land(gone) }
+        flights.append(f)
         let repo = m.repo, release = m.release
-        missionShown = ""
         placePlanets()
         logEvent("\(repo): liftoff, deploying to production")
         if let (key, r, _) = padRocket(m, climbing: true), let at = r.climbing, let v = rocketViews[key], !v.node.isHidden,
@@ -166,54 +163,51 @@ extension StationController {
             pose(leaving, at: padPosition(station: st, slot: r.slot), t: clock - at)
             drone.sweep(up: true)
             v.node.isHidden = true
-            hiddenRockets.append(v.node)
-            mission?.climbed = at
+            f.hidden.append(v.node)
+            f.mission.climbed = at
         }
         settleColony(repo)
         Colonies.hoist(planets[repo]?.childNode(withName: "colony", recursively: false), repo: repo, release: release,
                        color: NSColor(fleet.color(forRepo: repo)))
-        buildMissionCraft(repo: repo, release: release, hotfix: RocketKey.parts(m.rocket).hotfix != nil)
+        buildCraft(f, repo: repo, release: release, hotfix: RocketKey.parts(m.rocket).hotfix != nil)
         scene.lightingEnvironment.contents = FlightCraft.environment
-        if missionCamera.camera == nil {
-            let cam = SCNCamera()
-            cam.fieldOfView = 58
-            cam.zNear = 0.01
-            cam.zFar = 600
-            cam.categoryBitMask = ~(Pick.launching | Pick.air)
-            FlightCraft.film(cam)
-            missionCamera.camera = cam
-            scene.rootNode.addChildNode(missionCamera)
-        }
-        let pad = missionPad(mission!)
-        mission?.pad = pad
+        let cam = SCNCamera()
+        cam.fieldOfView = 58
+        cam.zNear = 0.01
+        cam.zFar = 600
+        cam.categoryBitMask = ~(Pick.launching | Pick.air)
+        FlightCraft.film(cam)
+        f.camera.camera = cam
+        scene.rootNode.addChildNode(f.camera)
+        let pad = missionPad(f.mission)
+        f.mission.pad = pad
         puff(at: pad + SIMD3(0, 0.3, 0), up: SIMD3(0, 1, 0), color: NSColor(white: 0.95, alpha: 1), count: 80, spread: 80, speed: 0.4, life: 1.2, size: 0.03)
-        stepMission()
-        DispatchQueue.main.async { [self] in openMissionScreen() }
+        step(f)
+        DispatchQueue.main.async { [self] in openScreen(f) }
     }
 
-    private func clearMission() {
-        mission = nil
-        hiddenRockets.forEach { $0.isHidden = false }
-        hiddenRockets = []
-        planets.values.forEach { $0.childNode(withName: "air", recursively: false)?.opacity = 1 }
-        DispatchQueue.main.async { [self] in closeMissionScreen() }
+    private func land(_ f: MissionFeed) {
+        flights.removeAll { $0 === f }
+        f.hidden.forEach { $0.isHidden = false }
+        f.hidden = []
+        f.craft.removeFromParentNode()
+        f.camera.removeFromParentNode()
+        if flights.isEmpty { planets.values.forEach { $0.childNode(withName: "air", recursively: false)?.opacity = 1 } }
+        DispatchQueue.main.async { [self] in closeScreen(f); stackScreens() }
     }
 
     func rehearseLaunch(_ outcome: DeployOutcome) {
         enqueue { [self] in
-            if let m = mission {
-                guard m.rehearsal != nil else { return }
-                clearMission()
-            }
+            if let f = flights.first(where: { $0.mission.rehearsal != nil }) { land(f) }
             placePlanets()
             guard let repo = planets.keys.sorted().first ?? world.repoRoots.values.map(\.repo).sorted().first else { return }
             let station = world.repoRoots.values.first { $0.repo == repo }?.station ?? fleet.ordered.first?.name ?? "work"
             rehearsals += 1
             let id = rehearsals
             beginMission(station: station, repo: repo, expected: 45, release: latestRelease(repo) ?? "rehearsal")
-            mission?.rehearsal = id
+            flights.last?.mission.rehearsal = id
             after(outcome == .live ? 45 : 25) { [weak self] in
-                guard let self, self.mission?.rehearsal == id else { return }
+                guard let self, self.flights.contains(where: { $0.mission.rehearsal == id }) else { return }
                 self.endMission(repo: repo, outcome: outcome)
             }
         }
@@ -247,18 +241,17 @@ extension StationController {
     }
 
     func endMission(repo: String, outcome: DeployOutcome) {
-        if let i = queuedMissions.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
-            queuedMissions[i].ended = (outcome, clock, queuedMissions[i].progress(at: clock))
-            queuedMissions[i].took = clock - queuedMissions[i].started
-        }
-        if var m = mission, m.repo == repo, m.ended == nil {
-            m.ended = (outcome, clock, m.progress(at: clock))
-            m.took = clock - m.started
-            mission = m
+        if let i = loadingFlights.firstIndex(where: { $0.repo == repo && $0.ended == nil }) {
+            loadingFlights[i].ended = (outcome, clock, loadingFlights[i].progress(at: clock))
+            loadingFlights[i].took = clock - loadingFlights[i].started
+        } else if let f = flights.first(where: { $0.mission.repo == repo && $0.mission.ended == nil }) {
+            f.mission.ended = (outcome, clock, f.mission.progress(at: clock))
+            f.mission.took = clock - f.mission.started
         }
         switch outcome {
         case .live:
-            let took = mission.flatMap { $0.repo == repo ? $0.took : nil } ?? queuedMissions.first { $0.repo == repo }?.took ?? 0
+            let took = flights.first { $0.mission.repo == repo && $0.mission.ended?.at == clock }?.mission.took
+                ?? loadingFlights.first { $0.repo == repo }?.took ?? 0
             logEvent("\(repo): landed, live in \(Mission.duration(took))")
         case .failed: logEvent("\(repo): the deploy failed")
         case .lost: logEvent("\(repo): no deploy seen")
@@ -267,8 +260,8 @@ extension StationController {
     }
 
     func turnPlanets(dt: Double) {
-        let landing = mission.flatMap { $0.ended?.outcome == .live ? $0.repo : nil }
-        for (repo, node) in planets where repo != landing {
+        let landing = Set(flights.compactMap { $0.mission.ended?.outcome == .live ? $0.mission.repo : nil })
+        for (repo, node) in planets where !landing.contains(repo) {
             guard let globe = node.childNode(withName: "globe", recursively: false) else { continue }
             globe.eulerAngles.y += CGFloat(dt * 2 * .pi / 600)
         }
@@ -292,18 +285,19 @@ extension StationController {
     }
 
     func stepMission() {
-        if mission == nil, let i = queuedMissions.firstIndex(where: { !rocketLoading($0) }) {
-            launch(queuedMissions.remove(at: i))
-            return
+        for (i, m) in loadingFlights.enumerated().reversed() where !rocketLoading(m) {
+            loadingFlights.remove(at: i)
+            var m = m
+            if let end = m.ended { m.ended = (end.outcome, clock, m.progress(at: end.at)) }
+            launch(m)
         }
-        guard let m = mission else { return }
+        for f in flights { step(f) }
+    }
+
+    private func step(_ f: MissionFeed) {
+        let m = f.mission
         if let end = m.ended, clock - end.at > (end.outcome.signalLost ? 5 : end.outcome == .live ? 24 : 8) {
-            clearMission()
-            if !queuedMissions.isEmpty {
-                var next = queuedMissions.removeFirst()
-                if let end = next.ended { next.ended = (end.outcome, clock, next.progress(at: end.at)) }
-                launch(next)
-            }
+            land(f)
             return
         }
         let s = m.progress(at: clock)
@@ -357,46 +351,46 @@ extension StationController {
                 craft -= heading * (FlightCraft.tipBase - FlightCraft.standDepth) * 0.55 * scale * e
             }
             burning = l < 1 || (l >= 4 && l < 10)
-            if let tip = missionCraft.childNode(withName: "tip", recursively: false) {
+            if let tip = f.craft.childNode(withName: "tip", recursively: false) {
                 FlightCraft.feet(tip, out: ease((l - 8) / 1.2))
                 FlightCraft.strain(tip, heat: l >= 4 && l < 7.5 ? sin(.pi * (l - 4) / 3.5) : 0)
             }
-            if l >= 8.4, !m.dustRaised { mission?.dustRaised = true; raiseDust(at: planet + normal * r, normal: normal, color: NSColor(fleet.color(forRepo: m.repo))) }
+            if l >= 8.4, !m.dustRaised { f.mission.dustRaised = true; raiseDust(at: planet + normal * r, normal: normal, color: NSColor(fleet.color(forRepo: m.repo))) }
         }
         if s >= Mission.separation, !m.separated, m.ended?.outcome.signalLost != true {
-            mission?.separated = true
-            mission?.separatedAt = clock
-            separateStage(heading: heading)
+            f.mission.separated = true
+            f.mission.separatedAt = clock
+            separateStage(f, heading: heading)
         }
-        let separated = mission?.separated ?? false
-        missionCraft.scale = SCNVector3(0.55 * scale, 0.55 * scale, 0.55 * scale)
-        missionCraft.position = v3(craft.x, craft.y, craft.z)
+        let separated = f.mission.separated
+        f.craft.scale = SCNVector3(0.55 * scale, 0.55 * scale, 0.55 * scale)
+        f.craft.position = v3(craft.x, craft.y, craft.z)
         var side = m.cameraSide ?? SIMD3(centre.x - pad.x, 0, centre.z - pad.z)
         side -= heading * simd_dot(side, heading)
         if simd_length(side) < 1e-4 { side = tangent - heading * simd_dot(tangent, heading) }
         side /= max(1e-6, simd_length(side))
-        mission?.cameraSide = side
+        f.mission.cameraSide = side
         let bearing = FlightCraft.cameraBearing, square = simd_cross(side, heading)
         let x = side * cos(bearing) - square * sin(bearing), z = side * sin(bearing) + square * cos(bearing)
-        func f(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3(Float(v.x), Float(v.y), Float(v.z)) }
-        missionCraft.simdOrientation = simd_quatf(simd_float3x3(columns: (f(x), f(heading), f(z))))
-        let since = separated ? clock - (mission?.separatedAt ?? clock) : -1
+        func float(_ v: SIMD3<Double>) -> SIMD3<Float> { SIMD3(Float(v.x), Float(v.y), Float(v.z)) }
+        f.craft.simdOrientation = simd_quatf(simd_float3x3(columns: (float(x), float(heading), float(z))))
+        let since = separated ? clock - f.mission.separatedAt : -1
         let tipBurns = m.ended == nil ? since >= Mission.correction.lowerBound : burning
         let coasting = m.ended == nil && clock - m.tZero < Mission.undock
-        if coasting { fireThrusters(often: true) }
-        if let air = missionCraft.childNode(withName: "lifter plume", recursively: true) {
+        if coasting { fireThrusters(f, often: true) }
+        if let air = f.craft.childNode(withName: "lifter plume", recursively: true) {
             air.isHidden = !burning || separated || coasting
             FlightCraft.air(air, thin: s / Mission.space)
         }
-        missionCraft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
+        f.craft.childNode(withName: "tip plume", recursively: true)?.isHidden = !separated || !tipBurns
 
         let dt = max(0, min(0.1, clock - m.lastStep))
-        mission?.lastStep = clock
+        f.mission.lastStep = clock
         let centreOfCraft = craft + heading * 0.6 * 0.55 * scale
         let onboard = landing == nil && clock - m.tZero < m.launchSeconds * Mission.toTheMast && m.ended?.outcome.signalLost != true
         let atColony = (landing ?? 0) >= Mission.colonyCut
         var at: SIMD3<Double>, look: SIMD3<Double>, up: SIMD3<Double>, fov: Double
-        if onboard, let mount = (missionCraft.value(forKey: "lifter") as? SCNNode)?.childNode(withName: "down cam", recursively: false)?.simdWorldTransform {
+        if onboard, let mount = (f.craft.value(forKey: "lifter") as? SCNNode)?.childNode(withName: "down cam", recursively: false)?.simdWorldTransform {
             func column(_ c: SIMD4<Float>) -> SIMD3<Double> { SIMD3(Double(c.x), Double(c.y), Double(c.z)) }
             at = column(mount.columns.3)
             let forward = -column(mount.columns.2)
@@ -411,7 +405,7 @@ extension StationController {
             let want = pad + (centreOfCraft - pad) * 0.6
             let was = m.colonyLook ?? want
             look = was + (want - was) * (1 - exp(-dt * 2.5))
-            mission?.colonyLook = look
+            f.mission.colonyLook = look
             up = normal
             fov = 40
         } else {
@@ -428,13 +422,13 @@ extension StationController {
             var velocity = m.trackVelocity + ((target - was) * 18 - m.trackVelocity * 5.5) * dt
             if m.trackAim == nil { velocity = .zero }
             var aim = was + velocity * dt
-            mission?.trackAim = aim
-            mission?.trackVelocity = velocity
+            f.mission.trackAim = aim
+            f.mission.trackVelocity = velocity
             let distance = max(0.5, simd_length(aim - at))
             let size = 1.4 * 0.55 * scale
             let want = min(35, max(0.6, 2 * atan(size * 1.2 / distance) * 180 / .pi)) * (1 + 0.07 * sin(clock * 0.45) + 0.04 * sin(clock * 1.7))
             let zoom = m.trackFov + (want - m.trackFov) * (1 - exp(-dt * 0.9))
-            mission?.trackFov = zoom
+            f.mission.trackFov = zoom
             let frame = distance * tan(zoom * .pi / 360)
             let sx: Double = sin(clock * 13.1) + 0.6 * sin(clock * 29.7)
             let sy: Double = sin(clock * 17.3 + 2) + 0.5 * sin(clock * 31.1)
@@ -449,7 +443,7 @@ extension StationController {
             up = SIMD3(0, 1, 0)
             fov = zoom
         }
-        missionCamera.camera?.fieldOfView = CGFloat(fov)
+        f.camera.camera?.fieldOfView = CGFloat(fov)
         let sky = scene.rootNode.childNode(withName: "flight stars", recursively: false) ?? {
             let n = FlightCraft.stars()
             scene.rootNode.addChildNode(n)
@@ -457,14 +451,14 @@ extension StationController {
         }()
         sky.simdPosition = SIMD3(Float(at.x), Float(at.y), Float(at.z))
         if separated {
-            if flipping { fireThrusters(often: true) } else if m.ended == nil { fireThrusters(often: Mission.correction.contains(since)) }
+            if flipping { fireThrusters(f, often: true) } else if m.ended == nil { fireThrusters(f, often: Mission.correction.contains(since)) }
         }
         up /= max(0.001, simd_length(up))
-        if missionSize == 2, missionOrbit != .zero {
+        if f.size == 2, f.orbit != .zero {
             let pivot = at
             var side = simd_cross(at - pivot, up)
             side /= max(0.001, simd_length(side))
-            let turn = simd_quatd(angle: missionOrbit.x, axis: up) * simd_quatd(angle: missionOrbit.y, axis: side)
+            let turn = simd_quatd(angle: f.orbit.x, axis: up) * simd_quatd(angle: f.orbit.y, axis: side)
             at = pivot + turn.act(at - pivot)
             look = pivot + turn.act(look - pivot)
             up = turn.act(up)
@@ -477,23 +471,23 @@ extension StationController {
             let z: Double = sin(t * 19.7 + 2.1) + 0.5 * sin(t * 33.1)
             look += SIMD3(x, y, z) * k
         }
-        missionCamera.position = v3(at.x, at.y, at.z)
-        missionCamera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
-        if let end = m.ended, end.outcome.signalLost { missionCamera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
+        f.camera.position = v3(at.x, at.y, at.z)
+        f.camera.look(at: v3(look.x, look.y, look.z), up: v3(up.x, up.y, up.z), localFront: SCNVector3(0, 0, -1))
+        if let end = m.ended, end.outcome.signalLost { f.camera.eulerAngles.z += CGFloat((clock - end.at) * 2.4) }
 
         let clockText = "T+" + String(format: "%02d:%02d", Int(clock - m.tZero) / 60, Int(clock - m.tZero) % 60)
         let landed = (landing ?? 0) >= 10.5
         let auto = m.ended == nil && clock - m.shownAt > 60, ended = m.ended != nil
         let camera = onboard ? "Onboard" : atColony ? "At the colony" : "From the station"
         let shown = clockText + "|" + m.phase(at: clock) + "|" + camera + "|\(landed)|\(auto)|\(ended)"
-        guard shown != missionShown else { return }
-        missionShown = shown
+        guard shown != f.shown else { return }
+        f.shown = shown
         let phase = m.phase(at: clock), usual = "usually \(Int((m.expected / 60).rounded())) min", outcome = m.ended?.outcome
         let repo = m.repo
         DispatchQueue.main.async { [self] in
-            missionScreen?.show(repo: repo, camera: camera, clock: clockText, phase: phase, usual: usual, outcome: outcome,
+            f.screen?.show(repo: repo, camera: camera, clock: clockText, phase: phase, usual: usual, outcome: outcome,
                                  success: landed ? (title: "\(repo) is live", detail: "Landed after \(Mission.duration(m.took ?? clock - m.started))") : nil)
-            sizeMission(auto: auto, ended: ended, chip: "▲  \(repo)  ·  \(clockText)  ·  \(phase)")
+            sizeMission(f, auto: auto, ended: ended, chip: "▲  \(repo)  ·  \(clockText)  ·  \(phase)")
         }
     }
 
@@ -543,16 +537,14 @@ extension StationController {
         }
     }()
 
-    private func buildMissionCraft(repo: String, release: String, hotfix: Bool) {
-        missionCraft.childNodes.forEach { $0.removeFromParentNode() }
-        missionCraft.removeAllActions()
+    private func buildCraft(_ f: MissionFeed, repo: String, release: String, hotfix: Bool) {
         let (lifter, tip) = FlightCraft.build(color: NSColor(fleet.color(forRepo: repo)), repo: repo, release: release, hotfix: hotfix)
         FlightCraft.mountCameras(lifter: lifter, tip: tip)
-        missionCraft.addChildNode(lifter)
-        missionCraft.addChildNode(tip)
-        missionCraft.setValue(lifter, forKey: "lifter")
-        missionCraft.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.onboard }
-        if missionCraft.parent == nil { scene.rootNode.addChildNode(missionCraft) }
+        f.craft.addChildNode(lifter)
+        f.craft.addChildNode(tip)
+        f.craft.setValue(lifter, forKey: "lifter")
+        f.craft.enumerateHierarchy { n, _ in n.categoryBitMask = Pick.onboard }
+        scene.rootNode.addChildNode(f.craft)
     }
 
     func prepareFlight() {
@@ -560,13 +552,13 @@ extension StationController {
         view.prepare([lifter, tip]) { _ in }
     }
 
-    private func fireThrusters(often settling: Bool) {
-        guard let m = mission else { return }
+    private func fireThrusters(_ f: MissionFeed, often settling: Bool) {
+        let m = f.mission
         let every = settling ? 0.22 : 4.5
         guard clock - m.lastThrust >= every else { return }
-        mission?.lastThrust = clock
+        f.mission.lastThrust = clock
         var pods: [SCNNode] = []
-        missionCraft.enumerateHierarchy { n, _ in if n.name == "rcs", (n.value(forKey: "facesCamera") as? Bool) != true { pods.append(n) } }
+        f.craft.enumerateHierarchy { n, _ in if n.name == "rcs", (n.value(forKey: "facesCamera") as? Bool) != true { pods.append(n) } }
         guard !pods.isEmpty, let local = pods[Int(clock * 7) % pods.count].value(forKey: "nozzle") as? SIMD3<Double> else { return }
         let pod = pods[Int(clock * 7) % pods.count]
         let at = pod.simdConvertPosition(SIMD3(Float(local.x), Float(local.y), Float(local.z)), to: nil)
@@ -576,8 +568,8 @@ extension StationController {
             .enumerateHierarchy { n, _ in n.categoryBitMask = Pick.onboard }
     }
 
-    private func separateStage(heading: SIMD3<Double>) {
-        guard let lifter = missionCraft.childNode(withName: "lifter", recursively: false) else { return }
+    private func separateStage(_ f: MissionFeed, heading: SIMD3<Double>) {
+        guard let lifter = f.craft.childNode(withName: "lifter", recursively: false) else { return }
         let at = SIMD3(Double(lifter.worldPosition.x), Double(lifter.worldPosition.y), Double(lifter.worldPosition.z))
             + heading * FlightCraft.lifterTop * 0.55
         puff(at: at, up: -heading, color: NSColor(white: 0.95, alpha: 1),
@@ -605,58 +597,70 @@ extension StationController {
         return SIMD3(Double(p.x), Double(p.y), Double(p.z))
     }
 
-    func openMissionScreen() {
-        if missionView == nil {
-            let frame = missionFrame
-            let pip = SCNView(frame: frame, options: [SCNView.Option.preferredRenderingAPI.rawValue: SCNRenderingAPI.metal.rawValue])
-            pip.scene = scene
-            pip.pointOfView = missionCamera
-            pip.backgroundColor = Looks.current.background
-            pip.preferredFramesPerSecond = 24
-            pip.antialiasingMode = .none
-            pip.isPlaying = true
-            pip.rendersContinuously = true
-            let screen = MissionScreen(frame: frame)
-            screen.onClick = { [weak self] p in
-                guard let self else { return }
-                if !openLandedFlag(near: p) { setMissionSize(min(2, missionSize + 1)) }
-            }
-            screen.onOrbit = { [weak self] dx, dy in
-                guard let self, missionSize == 2 else { return }
-                missionOrbit = SIMD2(max(-0.9, min(0.9, missionOrbit.x - dx * 0.006)), max(-0.5, min(0.5, missionOrbit.y + dy * 0.006)))
-            }
-            screen.onClose = { [weak self] in
-                guard let self else { return }
-                if missionSize != 0 { setMissionSize(missionSize - 1) } else { missionUserSmall = true; sizeMission(auto: false, ended: false, chip: "") }
-            }
-            pip.autoresizingMask = [.minXMargin]
-            screen.autoresizingMask = [.minXMargin]
-            view.addSubview(pip)
-            view.addSubview(screen)
-            missionView = pip
-            missionScreen = screen
-            setMissionSize(1)
+    func openScreen(_ f: MissionFeed) {
+        guard f.view == nil else { return }
+        let pip = SCNView(frame: smallFrame, options: [SCNView.Option.preferredRenderingAPI.rawValue: SCNRenderingAPI.metal.rawValue])
+        pip.scene = scene
+        pip.pointOfView = f.camera
+        pip.backgroundColor = Looks.current.background
+        pip.preferredFramesPerSecond = 24
+        pip.antialiasingMode = .none
+        pip.isPlaying = true
+        pip.rendersContinuously = true
+        let screen = MissionScreen(frame: smallFrame)
+        screen.onClick = { [weak self, weak f] p in
+            guard let self, let f else { return }
+            if !openLandedFlag(f, near: p) { setSize(f, min(2, f.size + 1)) }
         }
-        missionView?.isHidden = false
-        missionScreen?.isHidden = false
+        screen.onOrbit = { [weak f] dx, dy in
+            guard let f, f.size == 2 else { return }
+            f.orbit = SIMD2(max(-0.9, min(0.9, f.orbit.x - dx * 0.006)), max(-0.5, min(0.5, f.orbit.y + dy * 0.006)))
+        }
+        screen.onClose = { [weak self, weak f] in
+            guard let self, let f else { return }
+            if f.size != 0 { setSize(f, f.size - 1) } else { f.userSmall = true; stackScreens() }
+        }
+        view.addSubview(pip)
+        view.addSubview(screen)
+        f.view = pip
+        f.screen = screen
+        f.size = flights.filter { $0.view != nil }.count == 1 ? 1 : 0
+        if f.size == 0 { for o in flights where o !== f && o.size == 1 { o.size = 0 } }
+        stackScreens()
     }
 
-    func closeMissionScreen() {
-        missionView?.removeFromSuperview(); missionView = nil
-        missionScreen?.removeFromSuperview(); missionScreen = nil
-        missionUserSmall = false; missionUserOpened = false
-        missionSize = 0; missionOrbit = .zero
+    func closeScreen(_ f: MissionFeed) {
+        f.view?.removeFromSuperview(); f.view = nil
+        f.screen?.removeFromSuperview(); f.screen = nil
     }
 
-    var missionFrame: NSRect { NSRect(x: view.bounds.width - 12 - 384, y: 44, width: 384, height: 232) }
+    var smallFrame: NSRect { NSRect(x: view.bounds.width - 12 - 384, y: 44, width: 384, height: 232) }
 
-    func sizeMission(auto: Bool, ended: Bool, chip text: String) {
-        guard let pip = missionView, let screen = missionScreen else { return }
-        pip.isHidden = missionUserSmall; screen.isHidden = missionUserSmall
+    func stackScreens() {
+        var y: CGFloat = 44
+        for f in flights {
+            guard let pip = f.view, let screen = f.screen else { continue }
+            pip.isHidden = f.userSmall; screen.isHidden = f.userSmall
+            guard !f.userSmall else { continue }
+            let w = f.size == 1 ? min(view.bounds.width * 0.55, 820) : 384
+            let frame = f.size == 2 ? view.bounds : NSRect(x: view.bounds.width - 12 - w, y: y, width: w, height: w * 232 / 384)
+            if f.size != 2 { y += frame.height + 8 }
+            pip.frame = frame; screen.frame = frame
+            pip.autoresizingMask = f.size == 2 ? [.width, .height] : [.minXMargin]
+            screen.autoresizingMask = f.size == 2 ? [.width, .height] : [.minXMargin]
+            if f.size == 2 { view.addSubview(pip, positioned: .above, relativeTo: nil); view.addSubview(screen, positioned: .above, relativeTo: pip) }
+            screen.needsDisplay = true
+        }
     }
 
-    private func openLandedFlag(near p: NSPoint) -> Bool {
-        guard let m = mission, m.ended?.outcome == .live, let pip = missionView,
+    func sizeMission(_ f: MissionFeed, auto: Bool, ended: Bool, chip text: String) {
+        guard let pip = f.view, let screen = f.screen else { return }
+        pip.isHidden = f.userSmall; screen.isHidden = f.userSmall
+    }
+
+    private func openLandedFlag(_ f: MissionFeed, near p: NSPoint) -> Bool {
+        let m = f.mission
+        guard m.ended?.outcome == .live, let pip = f.view,
               let flag = planets[m.repo]?.childNode(withName: "colony", recursively: false)?.childNode(withName: "cloth", recursively: true) else { return false }
         let at = pip.projectPoint(flag.presentation.worldPosition)
         guard at.z < 1, hypot(Double(at.x - p.x), Double(at.y - p.y)) < 40,
@@ -667,22 +671,32 @@ extension StationController {
         return true
     }
 
-    func setMissionSize(_ size: Int) {
-        guard let pip = missionView, let screen = missionScreen else { return }
-        missionSize = max(0, min(2, size))
-        if missionSize != 2 { missionOrbit = .zero }
-        let full = missionSize == 2
-        let w = min(view.bounds.width * 0.55, 820), medium = NSRect(x: view.bounds.width - 12 - w, y: 44, width: w, height: w * 232 / 384)
-        let frame = full ? view.bounds : missionSize == 1 ? medium : missionFrame
-        pip.frame = frame; screen.frame = frame
-        pip.autoresizingMask = full ? [.width, .height] : [.minXMargin]
-        screen.autoresizingMask = full ? [.width, .height] : [.minXMargin]
-        screen.needsDisplay = true
+    func setSize(_ f: MissionFeed, _ size: Int) {
+        f.size = max(0, min(2, size))
+        if f.size != 2 { f.orbit = .zero }
+        if f.size > 0 { for o in flights where o !== f { o.size = 0; o.orbit = .zero } }
+        stackScreens()
     }
 
     func missionTakes(point p: NSPoint) -> Bool {
-        missionScreen.map { !$0.isHidden && $0.frame.contains(p) } ?? false
+        flights.contains { $0.screen.map { !$0.isHidden && $0.frame.contains(p) } ?? false }
     }
+}
+
+final class MissionFeed {
+    var mission: Mission
+    let craft = SCNNode()
+    let camera = SCNNode()
+    var view: SCNView?
+    var screen: MissionScreen?
+    var shown = ""
+    var size = 0
+    var orbit = SIMD2<Double>(0, 0)
+    var userSmall = false
+    var hidden: [SCNNode] = []
+    static let most = 3
+
+    init(_ mission: Mission) { self.mission = mission }
 }
 
 final class MissionScreen: NSView {

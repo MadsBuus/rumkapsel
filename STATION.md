@@ -212,7 +212,9 @@ moves through it one way: in from the hallway at the back, out through the field
   release rocket keeps its cargo.
 - **A repository that ships on every merge** sends each merged crate up in a rocket of its own.
 - A production deploy is flown: an onboard camera rides the rocket to its repository's planet and
-  lands it at the colony, timed on how long its deploys usually take.
+  lands it at the colony, timed on how long its deploys usually take. Every rocket that lifts off gets
+  its own flight and screen at once, whatever else is in the air: screens stack at the side, up to three,
+  and the oldest landed one gives way.
 
 ## Decon
 
