@@ -313,7 +313,7 @@ moves through it one way: in from the hallway at the back, out through the field
 - An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue the
   pull request closes, else the pull request's own number. One crate per task, however many pull
   requests it took; its hover names the task and whose work it is. Its click opens its story: each step
-  from the event log with its time, what moved it and the wait between, and how long it took from the
+  from the event log with its time and what moved it, said as what happened (#5762 merged, staging release #5769 merged), and how long it took from the
   merge to production. The story's title, or a double click on the crate, opens the task.
 - A closed issue is finished work, whatever column the board left it in: it never makes an office.
 - Every repository has its own way to production, read from what it did (see
