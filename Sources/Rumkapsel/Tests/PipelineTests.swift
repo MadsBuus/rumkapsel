@@ -69,6 +69,19 @@ enum PipelineTests {
             expect(!p.why.contains("from develop, production"), "a back-merge is no release: \(p.why)")
         }
 
+        test("a rocket waiting for a release links to what that release would carry") {
+            let staged = Pipeline(trunk: "develop", staging: "staging", production: "production")
+            expect(staged.waitingURL(owner: "o/api", tag: nil) == "https://github.com/o/api/compare/production...staging", "through staging: \(staged.waitingURL(owner: "o/api", tag: nil))")
+            let direct = Pipeline(trunk: "develop", staging: "", production: "master")
+            expect(direct.waitingURL(owner: "o/android", tag: nil) == "https://github.com/o/android/compare/master...develop", "straight from the trunk: \(direct.waitingURL(owner: "o/android", tag: nil))")
+            var tags = Pipeline(trunk: "main", staging: "", production: "")
+            tags.ship = .tag
+            expect(tags.waitingURL(owner: "o/r", tag: "v1.2") == "https://github.com/o/r/compare/v1.2...main", "since the last tag: \(tags.waitingURL(owner: "o/r", tag: "v1.2"))")
+            var merge = Pipeline(trunk: "main", staging: "", production: "")
+            merge.ship = .merge
+            expect(merge.waitingURL(owner: "o/bot", tag: nil) == "https://github.com/o/bot", "every merge ships: the repository")
+        }
+
         test("no releases and a workflow deploying on push: every merge ships, as release-note-bot does") {
             let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, deploysOnPush: true)
             expect(p.shipsOnMerge && p.trunk == "main" && p.source == "workflow", "ships on merge from main, got \(p.ship) from \(p.trunk), \(p.source)")
