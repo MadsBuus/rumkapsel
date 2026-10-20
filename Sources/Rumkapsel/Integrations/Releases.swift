@@ -210,7 +210,7 @@ extension World {
             if c.source == .git, c.exact, !listed.contains(n), !r.pulls.keys.contains(where: listed.contains),
                let at = r.stagedAt, at < c.at {
                 works.report(r, .shipped, by: .git, at: c.at)
-            } else if !shippedColumn.isEmpty, github.projectItems()?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {
+            } else if !shippedColumn.isEmpty, github.liveProjectItems()?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {
                 works.report(r, .shipped, by: .board, at: now)
             }
         }

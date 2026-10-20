@@ -121,10 +121,12 @@ final class GitHubResolver {
     private var failedAt: [String: Date] = [:]
     func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
     private var fromCache: Set<String> = []
+    private var savedOnly: Set<String> = []
+    private var boardSaved = false
 
     func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
         lock.lock(); defer { lock.unlock() }
-        return openPRs[repoRoot]?.0
+        return savedOnly.contains("o:" + repoRoot) ? nil : openPRs[repoRoot]?.0
     }
 
     private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
@@ -139,7 +141,7 @@ final class GitHubResolver {
     func loadKnowledge() {
         guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
               let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
-        for (root, k) in saved { adopt(k, repoRoot: root) }
+        for (root, k) in saved { adopt(k, repoRoot: root, saved: true) }
         lock.lock(); fromCache.formUnion(saved.keys); lock.unlock()
     }
 
@@ -159,16 +161,18 @@ final class GitHubResolver {
         return Knowledge(repo: repo, openPRs: prs?.0, prsAt: prs?.1, feed: f.map { Array($0.0.filter { $0.at > recent }.prefix(80)) }, feedAt: f?.1)
     }
 
-    func adopt(_ k: Knowledge, repoRoot: String) {
+    func adopt(_ k: Knowledge, repoRoot: String, saved: Bool = false) {
         var changed = false
         lock.lock()
         if let prs = k.openPRs, let at = k.prsAt, at > (openPRs[repoRoot]?.1 ?? .distantPast) {
             changed = openPRs[repoRoot]?.0 != prs
             openPRs[repoRoot] = (prs, at)
+            if saved { savedOnly.insert("o:" + repoRoot) } else { savedOnly.remove("o:" + repoRoot) }
         }
         if let f = k.feed, let at = k.feedAt, at > (feeds[repoRoot]?.1 ?? .distantPast) {
             changed = changed || feeds[repoRoot]?.0 != f
             feeds[repoRoot] = (f, at)
+            if saved { savedOnly.insert("f:" + repoRoot) } else { savedOnly.remove("f:" + repoRoot) }
         }
         lock.unlock()
         if changed { DispatchQueue.main.async { self.onUpdate?() } }
@@ -206,7 +210,7 @@ final class GitHubResolver {
                 }
             }
             lock.lock()
-            let changed = openPRs[repoRoot]?.0 != found
+            let changed = openPRs[repoRoot]?.0 != found || savedOnly.remove("o:" + repoRoot) != nil
             openPRs[repoRoot] = (found, Date())
             let first = answeredLive.insert(repoRoot).inserted
             var learned = false
@@ -241,7 +245,7 @@ final class GitHubResolver {
 
     func cargo(repoRoot: String) -> Cargo? {
         lock.lock(); defer { lock.unlock() }
-        if ConfigStore.shared.current.project != nil, project != nil, owners[repoRoot] == nil { return nil }
+        if ConfigStore.shared.current.project != nil, boardSaved || (project != nil && owners[repoRoot] == nil) { return nil }
         if let items = project?.0, let owner = owners[repoRoot] {
             let repo = String(owner.split(separator: "/").last ?? "")
             let st = ConfigStore.shared.current.statuses
@@ -271,7 +275,11 @@ final class GitHubResolver {
 
     // MARK: project board
 
-    private var project: ([ProjectItem], Date)? = GitHubResolver.loadBoard() { didSet { BoardNumbers.note(project?.0 ?? []) } }
+    private lazy var project: ([ProjectItem], Date)? = {
+        let saved = GitHubResolver.loadBoard()
+        boardSaved = saved != nil
+        return saved
+    }() { didSet { BoardNumbers.note(project?.0 ?? []) } }
     private var owners: [String: String] = GitHubResolver.loadBoardFile()?.owners ?? [:]
     private var projectMoves: [(item: ProjectItem, from: String?)] = []
 
@@ -407,6 +415,7 @@ final class GitHubResolver {
     }
 
     func projectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return project?.0 }
+    func liveProjectItems() -> [ProjectItem]? { lock.lock(); defer { lock.unlock() }; return boardSaved ? nil : project?.0 }
     func projectFetchedAt() -> Date? { lock.lock(); defer { lock.unlock() }; return project?.1 }
 
     func takeProjectMoves() -> [(item: ProjectItem, from: String?)] {
@@ -460,7 +469,7 @@ final class GitHubResolver {
         }
     }
 
-    private lazy var projectFullAt = project?.1 ?? .distantPast
+    private var projectFullAt = Date.distantPast
     private var boardFields: (status: Int, pulls: Int?)?
 
     private func detectBoard(owner: String, number: Int) {
@@ -514,14 +523,16 @@ final class GitHubResolver {
         lock.lock()
         guard at > (project?.1 ?? .distantPast) else { lock.unlock(); return }
         let previous = project?.0
+        let wasSaved = boardSaved
+        boardSaved = false
         let held = Dictionary((previous ?? []).map { ("\($0.repo)#\($0.number)", $0) }, uniquingKeysWith: { a, _ in a })
         let items = items.map { it in
-            held["\(it.repo)#\(it.number)"].flatMap { h in (h.updatedAt ?? .distantPast) > (it.updatedAt ?? .distantPast) ? h : nil } ?? it
+            wasSaved ? it : held["\(it.repo)#\(it.number)"].flatMap { h in (h.updatedAt ?? .distantPast) > (it.updatedAt ?? .distantPast) ? h : nil } ?? it
         }
-        if previous != nil {
+        if previous != nil, !wasSaved {
             for it in items where held["\(it.repo)#\(it.number)"]?.status != it.status { projectMoves.append((it, held["\(it.repo)#\(it.number)"]?.status)) }
         }
-        let changed = previous != items
+        let changed = previous != items || wasSaved
         project = (items, at)
         lock.unlock()
         if changed { saveBoard(items, at: at); DispatchQueue.main.async { self.onUpdate?() } }
@@ -828,7 +839,7 @@ final class GitHubResolver {
     }
     func feed(repoRoot: String) -> [FeedEvent]? {
         lock.lock(); defer { lock.unlock() }
-        return feeds[repoRoot]?.0
+        return savedOnly.contains("f:" + repoRoot) ? nil : feeds[repoRoot]?.0
     }
 
     private func detectFeed(_ repoRoot: String) {
@@ -850,7 +861,7 @@ final class GitHubResolver {
         let events = GitHubResolver.feedEvents(arr)
         lock.lock()
         let known = feeds[repoRoot]?.0
-        let changed = known != events
+        let changed = known != events || savedOnly.remove("f:" + repoRoot) != nil
         feeds[repoRoot] = (events, Date())
         var learned = false
         if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
@@ -1523,7 +1534,7 @@ extension GitHubResolver {
 
     func inject(openPRs prs: [OpenPR], for repoRoot: String) {
         guard frozen else { return }
-        lock.lock(); openPRs[repoRoot] = (prs, Date()); lock.unlock()
+        lock.lock(); openPRs[repoRoot] = (prs, Date()); savedOnly.remove("o:" + repoRoot); lock.unlock()
         notify()
     }
 
@@ -1573,6 +1584,18 @@ extension GitHubResolver {
         notify()
     }
 
+    func inject(savedProject items: [ProjectItem]) {
+        guard frozen else { return }
+        lock.lock(); project = (items, Date()); boardSaved = true; lock.unlock()
+        notify()
+    }
+
+    func inject(savedOpenPRs prs: [OpenPR], for repoRoot: String) {
+        guard frozen else { return }
+        lock.lock(); openPRs[repoRoot] = (prs, Date()); savedOnly.insert("o:" + repoRoot); lock.unlock()
+        notify()
+    }
+
     func inject(project items: [ProjectItem], at: Date = Date(), quiet: Bool = false) {
         guard frozen else { return }
         lock.lock()
@@ -1581,6 +1604,7 @@ extension GitHubResolver {
             for it in items where before["\(it.repo)#\(it.number)"] != it.status { projectMoves.append((it, before["\(it.repo)#\(it.number)"])) }
         }
         project = (items, at)
+        boardSaved = false
         for it in items { for url in it.prURLs { if let n = Int(url.split(separator: "/").last ?? "") { tasks[it.repo, default: [:]][n] = it.number } } }
         lock.unlock()
         notify()

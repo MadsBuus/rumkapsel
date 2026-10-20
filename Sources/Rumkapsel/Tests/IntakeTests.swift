@@ -61,6 +61,39 @@ enum IntakeTests {
             expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "the board still saying storage does not pull them back: \(describe(place(rig, "web", 440)))")
         }
 
+        test("a saved board is history: a stale Shipped on it launches nothing, and the live board confirming storage says nothing") {
+            let (rig, _) = org([("Target: web#455", 0)])
+            let github = rig.world.github
+            guard let live = github.projectItems() else { return expect(false, "a board") }
+            let shipped = ConfigStore.shared.current.statuses.shipped
+            github.inject(savedProject: live.map { it in
+                guard it.repo == "web", it.number == 440 else { return it }
+                return ProjectItem(repo: it.repo, number: it.number, title: it.title, status: shipped, assignees: it.assignees,
+                                   prURLs: it.prURLs, url: it.url, updatedAt: it.updatedAt, state: it.state)
+            })
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(place(rig, "web", 440) == .waiting, "#440 still in storage: \(describe(place(rig, "web", 440)))")
+            expect(!station(rig).facts.rockets.values.contains { $0.launched }, "no rocket launched")
+            github.inject(project: live, quiet: true)
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(place(rig, "web", 440) == .waiting, "the live board agrees: still in storage")
+        }
+
+        test("a saved list of open pull requests is history: a stale one does not pull a stored crate back into an office") {
+            let (rig, _) = org([("Target: web#455", 0)])
+            let github = rig.world.github
+            guard let root = rig.world.repoRoots.first(where: { $0.value.repo == "web" })?.key else { return expect(false, "web's checkout") }
+            let offices = station(rig).rooms.count
+            github.inject(savedOpenPRs: (github.teamOpenPRs(repoRoot: root) ?? []) + [OpenPR(number: 440, title: "stored work", author: "kim", isBot: false,
+                                         branch: "kim/stored", url: "https://example.invalid/web/440", createdAt: rig.now)], for: root)
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(place(rig, "web", 440) == .waiting, "#440 still in storage: \(describe(place(rig, "web", 440)))")
+            expect(station(rig).rooms.count == offices, "no office for it: \(station(rig).rooms.count) rooms against \(offices)")
+        }
+
         test("a staging release that closes unmerged: the crates stay in storage") {
             let (rig, sim) = org([("Target: web#455", 0), ("Release: Staging opens", 80), ("Release: Staging closes", 30)])
             saw(sim, [.staging("web", "open"), .staging("web", "closed, not merged")])
