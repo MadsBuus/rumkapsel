@@ -35,6 +35,13 @@ struct Pipeline: Equatable {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
     }
 
+    func waitingURL(owner: String, tag: String?) -> String {
+        let repo = "https://github.com/\(owner)"
+        if shipsOnTag, let tag { return "\(repo)/compare/\(tag)...\(trunk)" }
+        guard ship == .release, !production.isEmpty else { return repo }
+        return "\(repo)/compare/\(production)...\(hasStaging ? staging : trunk)"
+    }
+
     func overridden(by o: AppConfig.RepoOverride?) -> Pipeline {
         guard let o, o.setsPipeline else { return self }
         var p = self

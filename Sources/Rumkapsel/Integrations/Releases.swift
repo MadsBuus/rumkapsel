@@ -104,9 +104,7 @@ extension World {
 
     func waitingURL(repo: String) -> String {
         guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return "" }
-        let p = github.pipeline(repoRoot: root)
-        let shipped = github.releases(repoRoot: root)?.first(where: \.tag)?.head ?? p.production
-        return shipped.isEmpty ? "https://github.com/\(owner)" : "https://github.com/\(owner)/compare/\(shipped)...\(p.trunk)"
+        return github.pipeline(repoRoot: root).waitingURL(owner: owner, tag: github.releases(repoRoot: root)?.first(where: \.tag)?.head)
     }
 
     func launchShipped(_ r: WorkBook.Record, _ t: Transition) {

@@ -189,6 +189,9 @@ moves through it one way: in from the hallway at the back, out through the field
   runs down the side.
 - It comes in two pieces. The **tip** is the staging release: while staging deploys, a drone welds it
   panel by panel at the pace that deploy usually takes. The **kick stage** is the production release.
+- Clicking a rocket opens its release: the release pull request when one is open, else what the next
+  release would carry: production against staging, or against the trunk where there is no staging, or
+  the trunk since the last tag.
 - A rocket stands on a pad slot wherever a repository has work waiting to ship. A fresh launch, a
   docked rocket, a hotfix and a rocket being welded come first; a rocket only standing by gives its slot
   to them.
