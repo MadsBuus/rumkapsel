@@ -61,6 +61,14 @@ enum PipelineTests {
             expect(p.source == "history", "from history, got \(p.source): \(p.why)")
         }
 
+        test("more merges back than releases forward after a run of hotfixes: still away from the trunk, as api's history had it on 2026-10-20") {
+            let merges = features("develop", 60) + times(M(base: "staging", head: "develop"), 25) + times(M(base: "staging", head: "production"), 4)
+                + times(M(base: "production", head: "staging"), 3) + times(M(base: "develop", head: "staging"), 4) + times(M(base: "production", head: "gh-9/hotfix-prod"), 4)
+            let p = PipelineDetection.detect(branches: ["develop", "staging", "production"], merges: merges, file: nil)
+            expect(flow(p) == "develop → staging → production", "got \(flow(p)): \(p.why)")
+            expect(!p.why.contains("from develop, production"), "a back-merge is no release: \(p.why)")
+        }
+
         test("no releases and a workflow deploying on push: every merge ships, as release-note-bot does") {
             let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, deploysOnPush: true)
             expect(p.shipsOnMerge && p.trunk == "main" && p.source == "workflow", "ships on merge from main, got \(p.ship) from \(p.trunk), \(p.source)")

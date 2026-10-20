@@ -98,10 +98,8 @@ enum PipelineDetection {
             frontier = next
         }
         let releases = candidates.filter { c in
-            let forward = edges["\(c.head)>\(c.base)", default: 0], back = edges["\(c.base)>\(c.head)", default: 0]
-            if forward != back { return forward > back }
-            guard let h = fromTrunk[c.head], let b = fromTrunk[c.base] else { return false }
-            return h < b
+            if let h = fromTrunk[c.head], let b = fromTrunk[c.base], h != b { return h < b }
+            return edges["\(c.head)>\(c.base)", default: 0] > edges["\(c.base)>\(c.head)", default: 0]
         }
         if !releases.isEmpty {
             var perBase: [String: Int] = [:]
