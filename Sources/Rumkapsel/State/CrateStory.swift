@@ -3,7 +3,6 @@ import Foundation
 enum CrateStory {
     enum Line: Equatable {
         case step(at: String, what: String, why: String)
-        case wait(String)
     }
 
     struct Told: Equatable {
@@ -18,15 +17,11 @@ enum CrateStory {
         var told = Told()
         let start = steps.first.map(\.from) ?? current
         var here = start
-        var since: Date?
         if let here { told.lines.append(.step(at: "", what: place(here), why: unknown)) }
         for s in steps {
-            if let since, let here, s.at.timeIntervalSince(since) >= 60 { told.lines.append(.wait("\(place(here)) \(span(s.at.timeIntervalSince(since)))")) }
             told.lines.append(.step(at: clock(s.at, now: now), what: what(s), why: why(s)))
             here = s.to
-            since = s.at
         }
-        if let here, let since { told.lines.append(.wait("\(place(here)) for \(span(now.timeIntervalSince(since))) so far")) }
         told.footer = lead(steps, from: start, now: now, still: here != nil)
         return told
     }
@@ -104,35 +99,55 @@ enum CrateStory {
     static func why(_ s: EventLog.Step) -> String {
         if let b = s.baseline { return b == "start" || b == "migrated" ? "while the station was closed" : "" }
         guard let e = s.event else { return "" }
+        let w = Words.current
         switch e {
         case .work(let news):
+            let pull = "#\(news.pull ?? news.crate.number)"
             switch news.by {
-            case .board?: return news.stage == .cleared ? "the tester" : "the board"
+            case .board?: return "its card moved to \(column(news.stage))"
             case .git?:
-                if news.stage == .qa { return s.staging.map { "staging release #\($0)" } ?? "the staging release" }
-                return news.stage == .shipped ? "the release" : "git"
-            case .pulls?: return news.stage == .cleared ? "the production release" : "its pull request"
-            case .session?: return "a session"
+                if news.stage == .qa { return s.staging.map { "staging release #\($0) merged" } ?? "git found it on staging" }
+                return news.stage == .shipped ? "git found it in production" : "git"
+            case .pulls?:
+                switch news.stage {
+                case .ready: return "\(pull) opened"
+                case .stored: return "\(pull) merged"
+                case .cleared: return "the production release opened without an untested label"
+                case .inbound, .working: return "\(pull) closed unmerged"
+                default: return "\(pull)"
+                }
+            case .session?: return "a session started on it"
             case .deploy?: return "the deploy"
-            case .neighbour?: return "a neighbour"
+            case .neighbour?: return "a neighbour said so"
             case nil: return ""
             }
-        case .staging(_, .merged(let n)): return "staging release #\(n)"
+        case .staging(_, .merged(let n)): return "staging release #\(n) merged"
         case .staging: return "the staging release"
         case .launched(_, let hotfix, _, let label):
-            if let hotfix { return "hotfix #\(hotfix)" }
-            return label.firstMatch(of: #/ · #(\d+)/#).map { "production release #\($0.1)" } ?? "the production release"
-        case .release: return "the production release"
-        case .hotfixes: return "a hotfix"
+            if let hotfix { return "hotfix #\(hotfix) merged" }
+            return label.firstMatch(of: #/ · #(\d+)/#).map { "production release #\($0.1) merged" } ?? "the production release merged"
+        case .release: return "the production release opened"
+        case .hotfixes: return "a hotfix opened"
         case .decon: return "a pull request from outside"
         case .deconClosed: return "closed unscreened"
-        case .renumbered: return "a new number"
-        case .office(.gone): return "its \(Words.current.office) closed"
-        case .office: return "its \(Words.current.office)"
-        case .policy: return "the repository's way to production"
-        case .sweep: return "a count of the yard"
-        case .restack: return "a restack"
+        case .renumbered: return "its number changed"
+        case .office(.gone): return "its \(w.office) closed"
+        case .office: return "its \(w.office)"
+        case .policy(let repo, let facts): return "\(repo)'s way to production changed: \(facts.hasStaging ? "through testing" : "no testing")"
+        case .sweep: return "the yard was counted without it"
+        case .restack: return "the yard was restacked"
         case .tick: return ""
+        }
+    }
+
+    private static func column(_ stage: Stage) -> String {
+        switch stage {
+        case .inbound, .working: return "in development"
+        case .ready: return "in review"
+        case .stored: return "ready for staging"
+        case .qa: return "QA"
+        case .cleared: return "ready to ship"
+        case .shipped: return "shipped"
         }
     }
 

@@ -8,6 +8,7 @@ struct WorkNews: Equatable {
     var quiet = false
     var link = ""
     var by: Source?
+    var pull: Int?
 }
 
 enum OfficeNews: Equatable {

@@ -155,10 +155,6 @@ final class CrateStoryPanel: NSView {
                 let small = NSMutableParagraphStyle()
                 small.firstLineHeadIndent = column; small.headIndent = column; small.paragraphSpacing = 4
                 add((why.isEmpty ? " " : why) + "\n", [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: Palette.dim, .paragraphStyle: small])
-            case .wait(let words):
-                let p = NSMutableParagraphStyle()
-                p.firstLineHeadIndent = column + 14; p.headIndent = column + 14; p.paragraphSpacingBefore = 2; p.paragraphSpacing = 8
-                add(words + "\n", [.font: SpaceLogStyle.italic(12), .foregroundColor: SpaceLogStyle.amber.withAlphaComponent(0.7), .paragraphStyle: p])
             }
         }
         if let footer = f.told.footer {
