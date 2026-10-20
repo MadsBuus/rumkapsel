@@ -139,6 +139,32 @@ enum SimulationTests {
             expect(sim.visitLog.first.map { $0.kind == "galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
         }
 
+        test("a probe researches in trips between the monolith and its office, and docks with its minion when done") {
+            let (sim, station, _) = fixture()
+            _ = station.ensureRoom(key: "task:web#455", name: "#455 booking", repo: "web", color: Colors.repos[0], lastActive: Date())
+            guard let office = station.rooms["task:web#455"] else { return expect(false, "an office on the station") }
+            let home = Home(key: office.key, name: office.name, repo: office.repo ?? "r", issue: nil)
+            let parent = Body(id: "parent", station: "work", home: home, cwd: "", toolCount: 0, isSubagent: false, start: office.cells[0])
+            parent.state = .settled; parent.activity = .coding("x"); parent.busy = true
+            sim.bodies[parent.id] = parent
+            let probe = Body(id: "probe", station: "work", home: home, cwd: "", toolCount: 0, isSubagent: true, start: office.cells[0])
+            probe.state = .settled; probe.activity = .researching; probe.busy = true
+            sim.bodies[probe.id] = probe
+            sim.send(probe, to: sim.restPlace(probe))
+            expect(step(sim, seconds: 40, until: { probe.place == .core && probe.path.isEmpty }), "out to the monolith")
+            expect(step(sim, seconds: 40, until: { probe.place == .room(office.key) && probe.path.isEmpty }), "home with the answer: \(probe.place)")
+            expect(step(sim, seconds: 40, until: { probe.place == .core && probe.path.isEmpty }), "and out again")
+            probe.activity = .exploring
+            sim.send(probe, to: sim.restPlace(probe))
+            expect(step(sim, seconds: 40, until: { probe.place == .room(office.key) && probe.path.isEmpty }), "reading code, it stays in its office")
+            parent.pos = probe.pos
+            expect(step(sim, seconds: 5, until: { probe.cell != parent.cell && probe.path.isEmpty }), "someone on its tile: it buzzes off to a free one")
+            probe.state = .leaving
+            expect(step(sim, seconds: 40, until: { sim.bodies[probe.id] == nil }), "done, it docks and is gone")
+            let distance = abs(probe.pos.x - parent.pos.x) + abs(probe.pos.y - parent.pos.y)
+            expect(distance < 2, "it docked at its minion: \(distance) tiles off")
+        }
+
         test("nothing but rest moves a body with a visit in hand: a send during the bath changes nothing") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

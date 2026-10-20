@@ -272,6 +272,7 @@ final class Simulation<B: Body> {
     }
 
     func restPlace(_ m: B) -> Place {
+        if m.isSubagent { return probePlace(m) }
         let place = Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
         if case .room(let key) = place, let st = fleet.stations[m.station], !standing(st, key) { return .lounge }
         return place
@@ -324,7 +325,8 @@ final class Simulation<B: Body> {
         }
         else {
             let door: Cell? = { if case .room(let k) = place { return station.doorCell(of: k) }; return nil }()
-            let spots = cells.filter { $0 != door && !station.thresholds.contains($0) }
+            var spots = cells.filter { $0 != door && !station.thresholds.contains($0) }
+            if m.isSubagent { spots = unclaimed(spots, by: m) }
             guard let t = (spots.isEmpty ? cells : spots).randomElement() else { return }
             target = t
         }
@@ -800,15 +802,18 @@ final class Simulation<B: Body> {
                     return .spent
                 }
             }
+            if m.isSubagent, settled { makeRoom(m, station: station); tripOn(m, station: station) }
             if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                 if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
             } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !m.isJumping(at: clock) {
                 let door: Cell? = { if case .room(let k) = m.place { return station.doorCell(of: k) }; return nil }()
-                let choices = station.cells(of: m.place).filter { $0 != m.cell && $0 != door && !station.thresholds.contains($0) }
+                var choices = station.cells(of: m.place).filter { $0 != m.cell && $0 != door && !station.thresholds.contains($0) }
+                if m.isSubagent { choices = unclaimed(choices, by: m) }
                 if let dest = choices.randomElement() { m.path = route(m, to: dest) }
                 m.nextWanderAt = clock + (m.isPacing(at: clock) ? Double.random(in: 2.5...6) : m.busy ? Double.random(in: 2...5) : Double.random(in: 8...20))
             }
         case .leaving:
+            if m.isSubagent { return dock(m, station: station, dt: dt) }
             guard let ship = pickup(for: m), case .flight(_, _, let slot) = ship.command.kind, slot < station.hangarSlots.count else {
                 if station.hangarSlots.isEmpty || station.hangarCells.contains(m.cell) {
                     m.opacity -= dt * 1.2

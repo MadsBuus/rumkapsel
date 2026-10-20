@@ -169,7 +169,7 @@ extension StationController {
             guard how != .gone, simulation.bodies[m.id] != nil, let station = fleet.stations[m.station] else { undraw(m); continue }
             if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }
             if how != .waking { mirrorLoad(m) }
-            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: 0)
+            m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: m.isSubagent ? Probe.hover(clock: clock, phase: m.bobPhase) : 0)
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for station in fleet.stations.values { tendKitchen(station) }

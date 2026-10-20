@@ -104,7 +104,8 @@ enum Place: Hashable {
     static let pad = Place.room("kind:pad")
 
     static func forActivity(_ a: Activity, home: String, isSubagent: Bool, night: Bool = true) -> Place {
-        if isSubagent || a == .researching { return .core }
+        if a == .researching { return .core }
+        if isSubagent { return .room(home) }
         if a == .sleeping { return night ? .quarters : .lounge }
         if a == .qa { return .room("kind:deck") }
         return .room(home)
