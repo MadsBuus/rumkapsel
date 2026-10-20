@@ -239,6 +239,9 @@ final class GitHubResolver {
     }
     private var cargo: [String: Cargo] = [:]
     private var pipelines: [String: Pipeline] = [:]
+    func pipelineKnown(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pipelines[repoRoot] != nil }
+    func watchedRoots() -> [String] { lock.lock(); defer { lock.unlock() }; return frozen ? [] : Array(watched.keys) }
+    var baseInterval: TimeInterval { interval }
     private var branchesOnGitHub: [String: Set<String>] = [:]
     private var pipelineCheckedAt: [String: Date] = [:]
     private var boardYards: Set<String> = Set(GitHubResolver.loadBoardFile()?.yards ?? [])
@@ -540,11 +543,6 @@ final class GitHubResolver {
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
-    private var deployNewest: [String: DeployRun] = [:]
-    private var deployUsual: [String: TimeInterval] = [:]
-    private var deployWatchedSince: [String: Date] = [:]
-    private var deployWorkflows: [String: (names: Set<String>, at: Date)] = [:]
-    private var pendingDeploys: [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] = []
     private var stateChanges: [(branch: String, pr: PullRequest, previous: PullRequest?)] = []
     private var feeds: [String: ([FeedEvent], Date)] = [:]
     private var askedWho = false
@@ -625,76 +623,6 @@ final class GitHubResolver {
     func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
         lock.lock(); defer { lock.unlock() }
         let out = pendingLaunches; pendingLaunches = []; return out
-    }
-
-    func takeDeploys() -> [(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)] {
-        lock.lock(); defer { lock.unlock() }
-        let out = pendingDeploys; pendingDeploys = []; return out
-    }
-
-    func deploys(repoRoot: String) -> [(branch: String, production: Bool, newest: DeployRun?, usual: TimeInterval)] {
-        let branches = deployBranches(pipeline(repoRoot: repoRoot))
-        lock.lock(); defer { lock.unlock() }
-        return branches.map { ($0.branch, $0.production, deployNewest[repoRoot + "|" + $0.branch], deployUsual[repoRoot + "|" + $0.branch] ?? Deployments.fallback) }
-    }
-
-    private func deployBranches(_ p: Pipeline) -> [(branch: String, production: Bool)] {
-        if p.shipsOnMerge { return [(p.trunk, true)] }
-        return [(p.staging, false), (p.production, true)].filter { !$0.branch.isEmpty }
-    }
-
-    private var runsSeen: [String: String] = [:]
-    private var runsFallbackAt: [String: Date] = [:]
-
-    private func detectRuns(_ repoRoot: String) {
-        let key = repoRoot + "#watch:runs"
-        lock.lock(); let known = pipelines[repoRoot] != nil; let owner = owners[repoRoot]; lock.unlock()
-        guard known else { return }
-        let branches = deployBranches(pipeline(repoRoot: repoRoot))
-        let workflows = branches.map { deployingWorkflows(branch: $0.branch, repoRoot: repoRoot) }
-        let shape = "\(branches.map(\.branch))|\(workflows.map { $0.sorted() })"
-        var all: [DeployRun]
-        if let owner, let answer = ask(key, "repos/\(owner)/actions/runs?event=push&per_page=60") {
-            lock.lock(); let same = runsSeen[repoRoot] == shape; runsSeen[repoRoot] = shape; lock.unlock()
-            guard answer.changed || !same, let o = try? JSONSerialization.jsonObject(with: answer.data) as? [String: Any],
-                  let arr = o["workflow_runs"] as? [[String: Any]] else { return }
-            all = arr.compactMap(DeployRun.init(api:))
-        } else if owner == nil || !http.hasToken {
-            lock.lock()
-            let due = Date().timeIntervalSince(runsFallbackAt[repoRoot] ?? .distantPast) >= interval
-            if due { runsFallbackAt[repoRoot] = Date() }
-            lock.unlock()
-            guard due, let out = run(["gh", "run", "list", "--event", "push", "--limit", "60",
-                                      "--json", "databaseId,workflowName,headBranch,status,conclusion,startedAt,updatedAt,displayTitle"], cwd: repoRoot),
-                  let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return }
-            all = arr.compactMap(DeployRun.init(json:))
-        } else { return }
-        var running = false, ended = false
-        for ((branch, production), deploying) in zip(branches, workflows) {
-            let key = repoRoot + "|" + branch
-            let runs = Deployments.deploys(all.filter { $0.branch == branch }, deploying: deploying)
-            lock.lock()
-            if Deployments.isStale(runs, known: deployNewest[key]) { lock.unlock(); trace("deploys \(branch): stale answer, left alone"); continue }
-            let first = deployNewest[key] == nil
-            if deployWatchedSince[key] == nil { deployWatchedSince[key] = Date() }
-            let changes = Deployments.changes(was: deployNewest[key], runs: runs, firstLook: first, at: Date(), watchingSince: deployWatchedSince[key])
-            let usual = Deployments.usual(runs)
-            deployUsual[key] = usual
-            if let newest = runs.first {
-                deployNewest[key] = newest
-                let age = newest.startedAt.map { Date().timeIntervalSince($0) } ?? 0
-                running = running || newest.running && age < max(3 * usual, 1800)
-            }
-            for c in changes {
-                pendingDeploys.append((repoRoot, production, c, usual))
-                if case .ended = c { ended = true }
-            }
-            lock.unlock()
-            for c in changes { trace("deploy \(branch) \(c)") }
-        }
-        tune(key) { if running { $0.heat(for: 60, Date()) } else if ended { $0.cool() } }
-        lock.lock(); let any = !pendingDeploys.isEmpty; lock.unlock()
-        if any { DispatchQueue.main.async { self.onUpdate?() } }
     }
 
     struct Seen: Equatable { let updated: String; let open: Bool; let merged: Bool }
@@ -809,23 +737,6 @@ final class GitHubResolver {
         if byBranch != nil { refresh(branch: branch, repoRoot: repoRoot) }
     }
 
-    private func deployingWorkflows(branch: String, repoRoot: String) -> Set<String> {
-        let key = repoRoot + "|" + branch
-        lock.lock(); let cached = deployWorkflows[key]; lock.unlock()
-        if let cached, Date().timeIntervalSince(cached.at) < 3600 { return cached.names }
-        var names = Set<String>()
-        let ref = run(["git", "rev-parse", "--verify", "-q", "origin/\(branch)"], cwd: repoRoot) != nil ? "origin/\(branch)" : "HEAD"
-        if let listing = run(["git", "ls-tree", "--name-only", ref, ".github/workflows/"], cwd: repoRoot), let files = String(data: listing, encoding: .utf8) {
-            for path in files.split(separator: "\n") where path.hasSuffix(".yml") || path.hasSuffix(".yaml") {
-                guard let data = run(["git", "show", "\(ref):\(path)"], cwd: repoRoot), let text = String(data: data, encoding: .utf8) else { continue }
-                guard Deployments.deploys(onPushTo: branch, workflow: text) else { continue }
-                names.insert(Deployments.name(ofWorkflow: text) ?? String(path.split(separator: "/").last ?? ""))
-            }
-        }
-        lock.lock(); deployWorkflows[key] = (names, Date()); lock.unlock()
-        return names
-    }
-
     func takeStateChanges() -> [(branch: String, pr: PullRequest, previous: PullRequest?)] {
         lock.lock(); defer { lock.unlock() }
         let out = stateChanges; stateChanges = []; return out
@@ -937,28 +848,24 @@ final class GitHubResolver {
 
     // MARK: watching
 
-    private var isFront = false
-    private var lastWork = Date.distantPast
-    private var pinned: Pace?
-    var front: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return isFront }
-        set { lock.lock(); isFront = newValue; lock.unlock() }
-    }
-    var worked: Date {
-        get { lock.lock(); defer { lock.unlock() }; return lastWork }
-        set { lock.lock(); lastWork = newValue; lock.unlock() }
-    }
-    var pace: Pace {
-        get { lock.lock(); defer { lock.unlock() }; return paceLocked(Date()) }
-        set { lock.lock(); pinned = newValue; lock.unlock() }
-    }
-    private func paceLocked(_ now: Date) -> Pace { pinned ?? .of(front: isFront, worked: lastWork, now: now) }
+    private(set) lazy var watch: Watch = {
+        let w = Watch(http: http)
+        w.trace = { [weak self] in self?.trace($0) }
+        w.add { [weak self] in self?.checks() ?? [] }
+        return w
+    }()
+    private(set) lazy var deployments: DeploySource = {
+        let d = DeploySource(github: self)
+        watch.add { [weak d] in d?.checks() ?? [] }
+        return d
+    }()
+    var front: Bool { get { watch.front } set { watch.front = newValue } }
+    var worked: Date { get { watch.worked } set { watch.worked = newValue } }
+    var pace: Pace { get { watch.pace } set { watch.pace = newValue } }
 
     private var watched: [String: Bool] = [:]
     private var board: (owner: String, number: Int)?
-    private var detectors: [String: Detector] = [:]
     private var gits: [String: GitWatch] = [:]
-    private var ticker: DispatchSourceTimer?
     private var fetchedAt: [String: Date] = [:]
     private let watching = DispatchQueue(label: "rumkapsel.github.watch", qos: .utility, attributes: .concurrent)
 
@@ -969,85 +876,41 @@ final class GitHubResolver {
         self.board = board
         for gone in gits.keys where roots[gone] == nil { gits[gone] = nil }
         let fresh = roots.keys.filter { gits[$0] == nil }
-        if ticker == nil {
-            let t = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "rumkapsel.github.tick"))
-            t.schedule(deadline: .now() + .milliseconds(Int.random(in: 0...1000)), repeating: 1)
-            t.setEventHandler { [weak self] in self?.tick() }
-            t.resume()
-            ticker = t
-        }
         lock.unlock()
+        _ = deployments
+        watch.start()
         for root in fresh {
             let w = GitWatch(root: root) { [weak self] change in self?.heard(change, repoRoot: root) }
             lock.lock(); gits[root] = w; lock.unlock()
         }
     }
 
-    private func tick() {
-        let now = Date()
-        guard !frozen, http.open else { return }
-        let stretch = http.stretch
-        lock.lock()
-        let pace = paceLocked(now)
-        var due: [(key: String, run: () -> Void)] = []
-        func check(_ key: String, _ fresh: Detector, _ run: @escaping () -> Void) {
-            var d = detectors[key] ?? fresh
-            if detectors[key] == nil { d.start(now, pace: pace, jitter: .random(in: 0...3)) }
-            guard d.due(now, pace: pace, stretch: stretch), !inFlight.contains(key) else { detectors[key] = d; return }
-            d.asking(now)
-            detectors[key] = d
-            inFlight.insert(key)
-            due.append((key, run))
-        }
+    private func checks() -> [Watch.Check] {
+        lock.lock(); defer { lock.unlock() }
+        guard !frozen else { return [] }
+        var out: [Watch.Check] = []
         for (root, team) in watched {
-            check(root + "#watch:runs", .runs) { self.detectRuns(root) }
             guard owners[root] != nil else {
-                check(root + "#watch:owner", Detector(every: [300, 300, 300])) { self.learnOwner(root) }
+                out.append(.init(root + "#watch:owner", Detector(every: [300, 300, 300])) { self.learnOwner(root) })
                 continue
             }
-            check(root + "#watch:pulls", .pulls) { self.detectPulls(root) }
-            if team { check(root + "#watch:feed", .feed) { self.detectFeed(root) } }
+            out.append(.init(root + "#watch:pulls", .pulls) { self.detectPulls(root) })
+            if team { out.append(.init(root + "#watch:feed", .feed) { self.detectFeed(root) }) }
         }
-        if let b = board, project != nil { check("watch:board", .board) { self.detectBoard(owner: b.owner, number: b.number) } }
-        check("watch:limits", Detector(every: [300, 300, 300])) { self.http.readLimits() }
-        lock.unlock()
-        for d in due { watching.async { [self] in d.run(); lock.lock(); inFlight.remove(d.key); lock.unlock() } }
+        if let b = board, project != nil { out.append(.init("watch:board", .board) { self.detectBoard(owner: b.owner, number: b.number) }) }
+        out.append(.init("watch:limits", Detector(every: [300, 300, 300])) { self.http.readLimits() })
+        return out
     }
 
-    private func ask(_ key: String, _ path: String, cache: String? = nil) -> GitHubHTTP.Answer? {
-        let answer = http.get(path, key: cache)
-        let failed = answer == nil && http.open
-        tune(key) { if let answer { $0.heard(pollInterval: answer.pollInterval) } else if failed { $0.failed() } }
-        if failed { trace("\(key): no answer, next try in \(Int(detector(key)?.backoff ?? 0))s") }
-        return answer
-    }
+    private func ask(_ key: String, _ path: String, cache: String? = nil) -> GitHubHTTP.Answer? { watch.ask(key, path, cache: cache) }
 
-    private func detector(_ key: String) -> Detector? { lock.lock(); defer { lock.unlock() }; return detectors[key] }
+    private func tune(_ key: String, _ change: (inout Detector) -> Void) { watch.tune(key, change) }
 
-    private func tune(_ key: String, _ change: (inout Detector) -> Void) {
-        lock.lock(); defer { lock.unlock() }
-        tuneLocked(key, change)
-    }
+    private func tuneLocked(_ key: String, _ change: (inout Detector) -> Void) { watch.tune(key, change) }
 
-    private func tuneLocked(_ key: String, _ change: (inout Detector) -> Void) {
-        guard var d = detectors[key] else { return }
-        change(&d)
-        detectors[key] = d
-    }
+    func ring(repoRoot: String) { watch.ring(repoRoot: repoRoot) }
 
-    func ring(repoRoot: String) {
-        lock.lock(); defer { lock.unlock() }
-        ringLocked(repoRoot: repoRoot)
-    }
-
-    private func ringLocked(repoRoot: String?) {
-        let now = Date()
-        for k in detectors.keys where repoRoot.map({ k.hasPrefix($0 + "#watch:") }) ?? true {
-            detectors[k]?.ring()
-            if k.hasSuffix("#watch:pulls") || k.hasSuffix("#watch:runs") { detectors[k]?.heat(for: 30, now) }
-        }
-        tuneLocked("watch:board") { $0.heat(for: 120, now) }
-    }
+    private func ringLocked(repoRoot: String?) { watch.ring(repoRoot: repoRoot) }
 
     private func heard(_ change: GitChange, repoRoot: String) {
         let now = Date()
@@ -1294,7 +1157,7 @@ final class GitHubResolver {
     }
 
     static var diag = ProcessInfo.processInfo.environment["GITHUB_DIAG"] != nil
-    private func trace(_ text: String) {
+    func trace(_ text: String) {
         StationLog.write("github", text)
         guard GitHubResolver.diag else { return }
         FileHandle.standardError.write("GH \(ISO8601DateFormatter().string(from: Date())) \(text)\n".data(using: .utf8)!)
@@ -1486,7 +1349,7 @@ final class GitHubResolver {
         }
     }
 
-    private func run(_ args: [String], cwd: String) -> Data? { runReporting(args, cwd: cwd, errors: false).data }
+    func run(_ args: [String], cwd: String) -> Data? { runReporting(args, cwd: cwd, errors: false).data }
 
     private func runReporting(_ args: [String], cwd: String, errors: Bool = true) -> (data: Data?, err: String) {
         guard FileManager.default.fileExists(atPath: cwd), args.first != "gh" || http.ghOpen else { return (nil, "") }

@@ -464,19 +464,7 @@ final class World {
                 github.refreshReleases(repoRoot: root)
                 if info.station == "work" { github.refreshOpenPRs(repoRoot: root) }
             }
-            for d in github.takeDeploys() {
-                guard let info = repoRoots[d.repoRoot] else { continue }
-                if d.production { releases.awaitingDeploy[d.repoRoot] = nil }
-                switch d.change {
-                case .started(let run, let elapsed):
-                    events.append(.deployStarted(station: info.station, repo: info.repo, production: d.production, expected: d.usual,
-                                                 release: run.release, elapsed: elapsed))
-                    if !d.production { learn(.staging(repo: info.repo, .deploy(.running(since: now.addingTimeInterval(-elapsed), usual: d.usual))), repo: info.repo) }
-                case .ended(_, let outcome):
-                    events.append(.deployEnded(station: info.station, repo: info.repo, production: d.production, outcome: outcome))
-                    if !d.production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
-                }
-            }
+            events += hear(github.deployments.reports())
             events += lostDeploys()
             events += applyBoardMoves()
             for change in github.takeStateChanges() {

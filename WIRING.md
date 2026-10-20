@@ -32,7 +32,7 @@ shown at once. Only changes after it are news.
 | Pull requests | your branch's pull request, by branch or number; the team's open list; release and hotfix pull requests | the base interval (Settings › GitHub, 5 min by default) | `Integrations/GitHub.swift`, `Integrations/PullRequests.swift` |
 | Pull request detector | the 20 most recently updated pull requests, conditional (ETag) | 5 s focused, 10 s active, 60 s idle | `GitHubResolver.detectPulls` |
 | Activity feed | each repository's events, conditional (ETag), team repositories only | 60 s (GitHub's `X-Poll-Interval`), 3 min idle | `GitHubResolver.detectFeed` |
-| Deploys | Actions runs on push to the staging and production branches, conditional (ETag) | 30 s focused, 1 min active, 2 min idle; 5 s while hot | `GitHubResolver.detectRuns`, `Integrations/Deployments.swift` |
+| Deploys | Actions runs on push to the staging and production branches, conditional (ETag) | 30 s focused, 1 min active, 2 min idle; 5 s while hot | `DeploySource`, `Integrations/Deployments.swift` |
 | Board | one GitHub project, one single-select field | the items updated since yesterday, conditional (REST, ETag): 10 s focused, 20 s active, 60 s idle, 5 s while hot; the whole board at the base interval whatever the deltas, a fresher item kept | `GitHubResolver.detectBoard`, `refreshProject` |
 | Neighbours | offices, minions, colours, GitHub knowledge | looked at twice a second and sent on a change, at least every 3 s; GitHub knowledge every 30 s | `Integrations/Peers.swift`, `Scene/Scene.swift` (`makeSnapshot`) |
 
@@ -45,7 +45,7 @@ stage, opens no office and counts no crate. The saved facts stand until then, an
 at once on start.
 
 **Detectors.** Cheap conditional reads (`Integrations/Detectors.swift`) that say *something moved*; the
-resolver ticks them every second on its own (`GitHubResolver.watch`), each first ask jittered. A 304 costs
+one scheduler ticks them every second (`Watch`), each first ask jittered. A 304 costs
 nothing against the rate limit and is not parsed. Requests go out one at a time. The pace is the app's:
 **focused** when it is in front, **active** while a session worked in the last 10 minutes, else **idle**.
 A detector never polls faster than GitHub's `X-Poll-Interval`; one that gets no answer (403, 404, the

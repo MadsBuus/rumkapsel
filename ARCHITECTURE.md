@@ -64,6 +64,8 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Releases.swift` | releases, hotfixes, staging releases and the counts, turned into events |
 | `PullRequests.swift` | a pull request's state: yours by branch, a teammate's from the feed, then by number, then by branch |
 | `GitHub.swift` | `GitHubResolver`: every GitHub and git read, cached; the detectors' reads and what a change sets off; the counts |
+| `Watch.swift` | `Intake`, the protocol a source keeps; `Watch`: the one-second scheduler every source's checks run on, with the pace, `ask` (ETag) and heat |
+| `Report.swift` | `Report`, what a source says, and `World.hear`, the one door it comes in by |
 | `Detectors.swift` | `Pace`; `Detector`: one change detector's cadence by pace, heat, `X-Poll-Interval`, ring and failure backoff; `RateGate`: GitHub's rate headers; `FollowUps`: the read 15 s after a change |
 | `GitHubHTTP.swift` | conditional REST reads (ETag) with the `gh` token, behind the rate gate |
 | `GitWatch.swift` | FSEvents on a repository's `.git`: a commit, a worktree's checkout, remote refs or tags moving; which worktree belongs where |
@@ -71,7 +73,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Pipelines.swift` | `Pipeline` and `Ships`: a repository's way to production, detected, from `.github/rumkapsel.json`, or answered in Settings |
 | `Discovery.swift` | where repositories are found: a checkout's repository (worktrees join theirs), Conductor's workspaces, `git worktree list`, a GitHub remote |
 | `Setup.swift` | a repository's setup in words: the new-repository card and the setup check, from `World` |
-| `Deployments.swift` | which Actions runs are deploys, their usual length, starts and ends |
+| `Deployments.swift` | which Actions runs are deploys, their usual length, starts and ends; `DeploySource`, the first `Intake` |
 | `Scanner.swift` | the transcripts: sessions, activity, prompts |
 | `Watcher.swift` | FSEvents on a folder |
 | `Workspaces.swift` | whether a checkout is still open |
