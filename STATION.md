@@ -13,6 +13,7 @@ them what it likes on screen (`Vocabulary` in `State/Theme.swift`), but undernea
 | Thing | What it is |
 |---|---|
 | **minion** | a session at work, a teammate, or a neighbour's session |
+| **probe** | a session's subagent: a small hovering machine, launched from its minion and docking back with it |
 | **work** | one piece of work, with one id and every name it goes by: its branch, its checkout folder, `repo#PR`, `repo#issue` |
 | **office** | the room where one piece of work takes place: one office per work |
 | **shuttle** | brings a new office, or a new minion, to the bay |
@@ -58,8 +59,8 @@ arrive, so it never re-plans and two machines that share a station draw the same
 office needs is taken up again from its far end once nobody is on it, so a quiet station shrinks back.
 
 The monolith is the ancient artefact the game's minions researched. Here it stands for the outside
-world: sessions that search the web or talk to other systems send their subagents to it, and it
-answers with cones of light, never lightning.
+world: a session or a probe searching the web goes to it, and it answers with cones of light, never
+lightning.
 
 The **bay** at the end of the south arm is a hangar under the hull, open to space at its mouth behind
 the **field**: a sheet of light that holds the air in and lets ships through. Shuttles fly in through
@@ -251,6 +252,17 @@ moves through it one way: in from the hallway at the back, out through the field
 - Speed is what the task needs: carrying is slow, hurrying carriers less so; pacing is another pace, a
   stroll a third; getting up from bed takes a moment.
 - Every timing runs on the station clock.
+
+## Probes
+
+- A session's subagents are probes: small hovering machines with flat sides, its repository's colour
+  on a stripe and one eye. A probe lifts off its session's minion when the subagent starts and flies back
+  to dock with it, beside it, when the subagent is done. Nothing appears at the plaza.
+- Reading code, a probe hovers about its own office, sweeping a fan of light over the floor.
+- Researching the web, it shuttles: out to the monolith and its cone of light, home to its minion with a
+  shard of that light, out again, for as long as the research runs.
+- A probe settles only where nobody stands or is heading, and buzzes off to a free tile when someone
+  takes its own.
 
 ## Bodies
 

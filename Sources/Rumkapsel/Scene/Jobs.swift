@@ -7,10 +7,13 @@ extension StationController {
     func spawnMinion(_ s: SessionInfo, station: String, home: Home) -> Minion {
         let st = fleet.stations[station]
         let start: Cell
-        if s.isSubagent { start = st?.coreCenter ?? Cell(x: 0, y: 0) }
+        let parent = s.isSubagent ? minions.values.first { $0.station == station && !$0.isSubagent && $0.home.key == home.key } : nil
+        if let parent { start = parent.cell }
+        else if s.isSubagent { start = st?.rooms[home.key]?.cells.first ?? st?.coreCenter ?? Cell(x: 0, y: 0) }
         else if let cells = st?.rooms[home.key]?.cells, !cells.isEmpty { start = cells[minions.count % cells.count] }
         else { start = st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0) }
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
+        if let parent { m.pos = parent.pos }
         m.markers = s.eventMarkers
         m.promptCount = s.promptCount
         if !headless { m.wearSuit(badge: NSColor(fleet.color(forRepo: m.home.repo))) }

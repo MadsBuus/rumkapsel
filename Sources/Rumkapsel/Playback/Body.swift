@@ -151,6 +151,9 @@ class Body {
     var fare: Command.Fare? { if case .galley(let f, _, _) = current?.kind { return f }; return nil }
     var atCounter = false
     var mugUntil = 0.0
+    var tripHome = false
+    var tripSince = 0.0
+    var carrying: Bool { isSubagent && tripHome && !path.isEmpty }
     var mealUntil = 0.0, mealFor = 0.0
     enum Posture { case none, crouch, waist, reach, jump }
     var handsAt = 0

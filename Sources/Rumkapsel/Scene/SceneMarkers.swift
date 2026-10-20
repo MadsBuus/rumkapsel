@@ -266,7 +266,8 @@ extension StationController {
             live.insert(m.id)
             let mp = station.monolithPosition
             let from = SIMD3(station.offset.x + mp.x, 1.9, station.offset.y + mp.y)
-            let to = SIMD3(station.offset.x + m.pos.x, m.headHeight * 0.8, station.offset.y + m.pos.y)
+            let high = m.isSubagent ? m.headHeight / 2 + Probe.hover(clock: clock, phase: m.bobPhase) : m.headHeight * 0.8
+            let to = SIMD3(station.offset.x + m.pos.x, high, station.offset.y + m.pos.y)
             let cone = beams[m.id] ?? {
                 let n = Props.beam()
                 beamRoot.addChildNode(n)

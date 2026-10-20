@@ -98,6 +98,8 @@ final class SimulatorModel: ObservableObject {
     @Published private(set) var offices: [SimOffice] = []
 
     private var sessions: [String: SimSession] = [:]
+    private var probes: [String: [(id: String, activity: Activity)]] = [:]
+    private var nextProbe = 0
     private var board: [ProjectItem] = []
     private var feeds: [String: [FeedEvent]] = [:]
     private var releases: [String: [ReleasePR]] = [:]
@@ -239,7 +241,15 @@ final class SimulatorModel: ObservableObject {
             guard sessions[o.uid] != nil else { continue }
             github.inject(commits: o.commits, pushed: o.pushed, worktree: o.cwd)
         }
-        let live = offices.compactMap { o in sessions[o.uid].map { info(o, $0) } }
+        var live = offices.compactMap { o in sessions[o.uid].map { info(o, $0) } }
+        for o in offices {
+            guard let s = sessions[o.uid] else { continue }
+            for p in probes[o.uid] ?? [] {
+                live.append(SessionInfo(id: p.id, cwd: o.cwd, repo: o.repo, repoRoot: root(o.repo), owner: "simcorp", lastModified: s.last,
+                                        activity: p.activity, area: nil, title: nil, branch: o.branch, toolCount: 0, isSubagent: true,
+                                        cwdExists: true, promptCount: 0, queuedCount: 0, eventMarkers: [:]))
+            }
+        }
         station.simulate(scan: ScanResult(sessions: live.sorted { $0.id < $1.id }))
     }
 
@@ -739,6 +749,9 @@ final class SimulatorModel: ObservableObject {
                 button("Commit", "It commits", needsMine),
                 button("Switch branch", "It switches branch", needsMine),
                 button("Session ends", "The session ends", needsMine),
+                button("Probe: Read code", "It sends a probe to read code", needsMine),
+                button("Probe: Research", "It sends a probe to research the web", needsMine),
+                button("Probe: Done", "Its oldest probe is done", probes[target]?.isEmpty == false ? nil : .already("no probe out from this office")),
                 button("Open PR", "Opens a pull request",
                        mine && o?.pull != nil ? .already("this office already has a pull request") : needsMine),
                 button("Approve PR", "…is approved", needsOpenPull),
@@ -976,6 +989,16 @@ final class SimulatorModel: ObservableObject {
             pushScan()
         case "Session ends":
             sessions[target] = nil
+            probes[target] = nil
+            pushScan()
+        case "Probe: Read code", "Probe: Research":
+            guard sessions[target] != nil else { return }
+            nextProbe += 1
+            probes[target, default: []].append((id: "probe-\(nextProbe)", activity: name.hasSuffix("Research") ? .researching : .exploring))
+            pushScan()
+        case "Probe: Done":
+            guard probes[target]?.isEmpty == false else { return }
+            probes[target]?.removeFirst()
             pushScan()
         case "Switch branch":
             guard let i = index(target) else { return }

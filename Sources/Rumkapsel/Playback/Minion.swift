@@ -114,8 +114,12 @@ final class Minion: Body {
         legs.addChildNode(thighs); legs.addChildNode(shins)
         legs.opacity = 0
         let look = Looks.current
-        let figure = look.figure(id: id, crew: crew, height: h)
-        if let figure {
+        let figure = isSubagent ? nil : look.figure(id: id, crew: crew, height: h)
+        if isSubagent {
+            body.geometry = nil
+            visor.isHidden = true
+            body.addChildNode(Probe.build())
+        } else if let figure {
             body.geometry = nil
             visor.isHidden = true
             body.addChildNode(figure)
@@ -347,6 +351,7 @@ final class Minion: Body {
         setJetpack(o.jetpack, clock: clock)
         setMug(o.mug, clock: clock)
         setMeal(o.meal, clock: clock)
+        if isSubagent { Probe.show(body, scanning: o.scan, carrying: o.shard, clock: clock, phase: bobPhase) }
         stepFades(dt)
     }
 
@@ -581,6 +586,10 @@ final class Minion: Body {
 
 extension Minion {
     func wearSuit(badge: NSColor) {
+        if isSubagent {
+            body.childNode(withName: "stripe", recursively: true)?.geometry?.firstMaterial = lit(badge)
+            return
+        }
         guard figure == nil, let box = body.geometry as? SCNBox else { return }
         let kind: Suit.Kind = isPeer ? .neighbour : isCrew ? .crew : .white
         let key = Suit.key(badge, kind)
