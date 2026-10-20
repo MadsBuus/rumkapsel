@@ -6,22 +6,13 @@ and are not started unasked.
 
 ## Next
 
-1. **A restart tells stale news.** On start the saved GitHub answers (board, open pull requests) are
-   applied as news and taken back seconds later when fresh ones arrive: a made-up rocket and a phantom
-   "pull request open" in api-node-nest #5686's story. A saved answer is history, never news.
-2. **Work is joined across repositories by branch name.** A tattoodo-web branch named after an
-   api-node-nest issue swapped one office between the two repositories; a work's identity includes its
-   repository.
-3. **Several flights at once.** Overlapping production deploys show one flight and skip the other:
-   missions run one at a time, per repository. One flight per rocket, each with its own craft, camera and
-   screen, flown together, so every launch is filmed as it happens.
-4. **One `Source` protocol** for intake: local git, GitHub, the board and deployments as sources that all
+1. **One `Source` protocol** for intake: local git, GitHub, the board and deployments as sources that all
    report the same way, so new ones plug in.
-5. **Mission control, the room.** A control room of about 5×3 with consoles facing a wall of screens,
+2. **Mission control, the room.** A control room of about 5×3 with consoles facing a wall of screens,
    proposed by the pad with windows onto the launch slots; the flight screens become its wall. Its first
    screens show what the station already knows: lead time, crates waiting, deploys, failing checks.
    Needs the floor plans baked once more. The bay goes to five berths, like the pad.
-6. **Mission control, the inputs.** Monitors as sources: Sentry first, then AWS; alarms in the room.
+3. **Mission control, the inputs.** Monitors as sources: Sentry first, then AWS; alarms in the room.
 
 Later: the last scene glue into playback (office floor labels from the model's cells, neighbours' minions
 driven by playback); a give-up never drops a crate in the yard's lanes, so lane crates can be obstacles;

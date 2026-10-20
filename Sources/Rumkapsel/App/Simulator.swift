@@ -62,7 +62,7 @@ protocol SimStation: AnyObject {
     var world: World { get }
     var now: Date { get }
     var sim: SimHooks? { get }
-    var mission: Mission? { get }
+    var missions: [Mission] { get }
     func handle(_ events: [WorldEvent])
     func handle(_ event: WorldEvent)
     func after(_ seconds: Double, _ run: @escaping () -> Void)
@@ -807,10 +807,10 @@ final class SimulatorModel: ObservableObject {
                 button("Release: Hotfix merges", "The hotfix merges: it ships on its own",
                        hotfixPRs[repo]?.contains(where: { $0.state == "OPEN" }) == true ? nil : .missing("an open hotfix on \(repo)", { [weak self] in self?.run("Release: Hotfix opens") })),
                 button("Deploy: Production starts", "A production deploy starts (usually a minute)",
-                       station.mission == nil ? nil : .already("a deploy is in flight")),
-                button("Deploy: Goes live", "…it goes live", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
-                button("Deploy: Fails", "…it fails", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
-                button("Deploy: Cancelled", "…it is cancelled", station.mission?.ended == nil && station.mission != nil ? nil : .already("no deploy in flight")),
+                       inFlight(repo) ? .already("\(repo) is already in flight") : nil),
+                button("Deploy: Goes live", "…it goes live", inFlight(repo) ? nil : .already("no deploy of \(repo) in flight")),
+                button("Deploy: Fails", "…it fails", inFlight(repo) ? nil : .already("no deploy of \(repo) in flight")),
+                button("Deploy: Cancelled", "…it is cancelled", inFlight(repo) ? nil : .already("no deploy of \(repo) in flight")),
                 button("Deploy: Staging starts", "A staging deploy starts"),
                 button("Deploy: Staging goes live", "…staging is live"),
                 button("Deploy: Staging fails", "…the staging deploy fails"),
@@ -837,6 +837,8 @@ final class SimulatorModel: ObservableObject {
     var buttonNames: [String] { groups.flatMap(\.buttons).map(\.name) + timeNames }
 
     func quiesce() { peerBeat?.invalidate(); peerBeat = nil }
+
+    private func inFlight(_ repo: String) -> Bool { station.missions.contains { $0.repo == repo && $0.ended == nil } }
 
     private func deployStation(_ repo: String) -> String {
         station.world.repoRoots.values.first { $0.repo == repo }?.station ?? station.world.fleet.ordered.first?.name ?? "work"

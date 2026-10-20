@@ -52,7 +52,8 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
         .until("\(repo)'s weld nearly done") { c in c.simulation.shown.values.contains { $0.rockets.values.contains {
             $0.repo == repo && $0.welding && $0.welded >= Double(RocketGeometry.panels - 1) } } }
     }
-    static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.mission.map { $0.progress(at: c.clock) > 0.8 } ?? false }
+    static let flightFarOut = PlaybookWait.until("the flight far out") { c in c.missions.last.map { $0.progress(at: c.clock) > 0.8 } ?? false }
+    static let flightsFarOut = PlaybookWait.until("both flights far out") { c in c.missions.count >= 2 && c.missions.allSatisfy { $0.progress(at: c.clock) > 0.8 } }
     static let hotfixGone = PlaybookWait.until("the hotfix rocket climbed") { c in
         !c.simulation.shown.values.contains { $0.rockets.values.contains { if case .hotfix = $0.kind { return true }; return false } }
     }
@@ -155,6 +156,13 @@ enum Playbook {
         PlaybookEntry("release", "Production deploy from the pad", "the deploy starts at the merge: the vortex loads the rocket, it climbs off its pad and the flight takes it from there while the deck sinks",
                       [("16x", 0.5), ("Release: Production opens", 2), ("1x", 0.5), ("Release: Production merges", 1), ("Deploy: Production starts", .flightFarOut),
                        ("Deploy: Goes live", 30)],
+                      camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
+
+        PlaybookEntry("release", "Two production deploys at once", "web lifts off, then api a few seconds later: each has its own flight and screen, stacked, and each lands on its own",
+                      [("16x", 0.5), ("Target: web#455", 0.4), ("Release: Production opens", 2), ("Release: Production merges", 2),
+                       ("Target: api#5158", 0.4), ("Release: Production opens", 2), ("Release: Production merges", 2), ("1x", 0.5),
+                       ("Target: web#455", 0.4), ("Deploy: Production starts", 6), ("Target: api#5158", 0.4), ("Deploy: Production starts", .flightsFarOut),
+                       ("Deploy: Goes live", 8), ("Target: web#455", 0.4), ("Deploy: Goes live", 30)],
                       camera: .area("pad", 2.4), tail: 4, yard: true, rooms: [], crowd: true),
 
         PlaybookEntry("release", "Hotfix PR opened", "an express rocket with a red tip stands beside web's release rocket",

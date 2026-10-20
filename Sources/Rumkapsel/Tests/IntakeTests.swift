@@ -474,7 +474,7 @@ final class Rig: SimStation {
     let model = Simulation<Body>(world: World(demo: true))
     var world: World { model.world }
     var sim: SimHooks? { model.hooks }
-    var mission: Mission? { nil }
+    var missions: [Mission] { [] }
     private var timers: [(at: Double, run: () -> Void)] = []
     private var pending: [() -> Void] = []
     private var later: [() -> Void] = []
