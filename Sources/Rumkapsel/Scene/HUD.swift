@@ -350,7 +350,7 @@ extension StationController {
         if room.key == "kind:lounge" { parts.append("waiting on you for a while · they chat here before bed") }
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
-            if let pr = github.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
+            if let pr = github.pulls.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
             if let w = room.worktree, let n = github.commitsAhead(worktree: w) { parts.append("\(n) commits") }
             if let w = room.worktree, github.dirtyFiles(worktree: w) > 0 { parts.append("\(github.dirtyFiles(worktree: w)) files uncommitted") }
         }
@@ -528,7 +528,7 @@ extension StationController {
         guard let branch = room.branch, let root = room.repoRoot else { return }
         if world.localState(room).local { logEvent("\(room.name): not on github yet"); return }
         var url: URL?
-        if let pr = github.pull(branch: branch, repoRoot: root), let u = URL(string: pr.url) {
+        if let pr = github.pulls.pull(branch: branch, repoRoot: root), let u = URL(string: pr.url) {
             url = u
         } else if let owner = github.nameWithOwner(repoRoot: root) {
             if let m = branch.firstMatch(of: #/^gh-(\d+)\//#) {

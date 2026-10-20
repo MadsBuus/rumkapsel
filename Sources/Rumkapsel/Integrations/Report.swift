@@ -3,6 +3,7 @@ import Foundation
 enum Report {
     case deploy(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)
     case cardMoved(ProjectItem, from: String?)
+    case pullChanged(branch: String, PullRequest)
 }
 
 extension World {
@@ -24,6 +25,12 @@ extension World {
                 }
             case .cardMoved(let item, let from):
                 events.append(.boardMoved(item: item, from: from, to: ConfigStore.shared.current.statuses.stage(of: item.status)))
+            case .pullChanged(let branch, let pr):
+                let rooms = fleet.stations.values.flatMap { $0.rooms.values.filter { $0.branch == branch } }
+                for room in rooms { if let repo = room.repo { works.note(repo: repo, branch: branch, issue: pr.closes.first, pull: pr.number, pullState: pr.state) } }
+                for room in rooms { if let repo = room.repo { self.report(pullState: pr.state, record: works.find(repo: repo, pull: pr.number), at: now) } }
+                events.append(.log("\(Work(repo: "", branch: branch).label): \(pr.summary)"))
+                events.append(.chime(pr.number))
             }
         }
         return events

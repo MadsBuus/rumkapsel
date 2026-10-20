@@ -136,26 +136,26 @@ enum GitHubTests {
                 if merged { o["merged_at"] = updated }
                 return o
             }
-            let first = GitHubResolver.pullsMoved([pr(1, "a"), pr(2, "a", state: "closed", merged: true)], before: nil, releasesInto: ["staging", "production"], team: true)
+            let first = PullSource.moved([pr(1, "a"), pr(2, "a", state: "closed", merged: true)], before: nil, releasesInto: ["staging", "production"], team: true)
             expect(first.due == FollowUps.Due() && first.moved.isEmpty, "the first look is quiet")
-            let comment = GitHubResolver.pullsMoved([pr(1, "b"), pr(2, "b", state: "closed", merged: true)], before: first.seen, releasesInto: ["staging"], team: true)
+            let comment = PullSource.moved([pr(1, "b"), pr(2, "b", state: "closed", merged: true)], before: first.seen, releasesInto: ["staging"], team: true)
             expect(comment.due == FollowUps.Due(pulls: [.init(number: 1, branch: "b1"), .init(number: 2, branch: "b2")]),
                    "a comment or a push: those pull requests only, not the list or the releases, got \(comment.due)")
-            let merge = GitHubResolver.pullsMoved([pr(1, "c", state: "closed", merged: true), pr(3, "c")], before: comment.seen, releasesInto: ["staging"], team: true)
+            let merge = PullSource.moved([pr(1, "c", state: "closed", merged: true), pr(3, "c")], before: comment.seen, releasesInto: ["staging"], team: true)
             expect(merge.due.team && merge.due.releasing, "a merge and a new one: the open list and the releases")
-            let release = GitHubResolver.pullsMoved([pr(4, "d", base: "staging")], before: [4: .init(updated: "c", open: true, merged: false)], releasesInto: ["staging"], team: false)
+            let release = PullSource.moved([pr(4, "d", base: "staging")], before: [4: .init(updated: "c", open: true, merged: false)], releasesInto: ["staging"], team: false)
             expect(release.due.releasing && !release.due.team, "a release pull request labelled: the releases; no list for a repository off the team")
             let page = (1...20).map { pr($0 + 100, "z") }
-            let flood = GitHubResolver.pullsMoved(page, before: [1: .init(updated: "a", open: true, merged: false)], releasesInto: [], team: true)
+            let flood = PullSource.moved(page, before: [1: .init(updated: "a", open: true, merged: false)], releasesInto: [], team: true)
             expect(flood.due.all, "a full page with nothing seen before: everything followed is read again")
-            let calm = GitHubResolver.pullsMoved(page, before: flood.seen.merging([7: .init(updated: "a", open: true, merged: false)]) { a, _ in a }, releasesInto: [], team: true)
+            let calm = PullSource.moved(page, before: flood.seen.merging([7: .init(updated: "a", open: true, merged: false)]) { a, _ in a }, releasesInto: [], team: true)
             expect(!calm.due.all, "overlap with the last page: no flood")
         }
 
         test("feed events are new by id, not by time") {
             func e(_ id: String) -> FeedEvent { FeedEvent(at: t0, actor: "a", isBot: false, kind: "release", branch: nil, prNumber: nil, title: nil, url: nil, detail: "", id: id) }
-            expect(GitHubResolver.fresh([e("2"), e("1")], since: [e("1")]).map(\.id) == ["2"], "same second, new id: new")
-            expect(GitHubResolver.fresh([e("2")], since: nil).isEmpty, "the first look is quiet")
+            expect(PullSource.fresh([e("2"), e("1")], since: [e("1")]).map(\.id) == ["2"], "same second, new id: new")
+            expect(PullSource.fresh([e("2")], since: nil).isEmpty, "the first look is quiet")
         }
 
         test("a whole board read never undoes a fresher item from the delta") {
@@ -199,7 +199,7 @@ enum GitHubTests {
               "payload": {"action": "closed", "pull_request": {"number": 9, "merged": true, "title": "Bump", "head": {"ref": "dep/x"}}}},
              {"type": "WatchEvent", "created_at": "2026-10-14T08:02:00Z", "actor": {"login": "x"}, "payload": {}}]
             """
-            let events = GitHubResolver.feedEvents(try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [[String: Any]])
+            let events = PullSource.feedEvents(try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [[String: Any]])
             expect(events.map(\.kind) == ["push", "pr_merge"], "a push and a merge, got \(events.map(\.kind))")
             expect(events.first?.branch == "staging" && events.first?.detail == "3", "the push's branch and size")
             expect(events.last?.isBot == true && events.last?.prNumber == 9 && events.last?.branch == "dep/x", "the merge's pull request, by a bot")

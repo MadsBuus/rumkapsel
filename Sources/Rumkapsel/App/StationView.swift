@@ -208,7 +208,7 @@ extension StationController {
         guard let root else { return }
         github.invalidate(repoRoot: root)
         for r in station.rooms.values where r.repoRoot == root {
-            if let b = r.branch { github.refresh(branch: b, repoRoot: root) }
+            if let b = r.branch { github.pulls.refresh(branch: b, repoRoot: root) }
             if let w = r.worktree { github.refreshCommits(worktree: w) }
         }
         github.refreshReleases(repoRoot: root)

@@ -113,113 +113,8 @@ final class GitHubResolver {
     var frozen = false
     var injectSilently = false
     private var interval: TimeInterval { Double(intervalMinutes) * 60 }
-    private var openPRs: [String: ([OpenPR], Date)] = [:]
-
-    var hasAnswers: Bool { lock.lock(); defer { lock.unlock() }; return !openPRs.isEmpty }
-
-    private var answeredLive: Set<String> = []
-    private var failedAt: [String: Date] = [:]
-    func answered(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return answeredLive.contains(repoRoot) }
-    private var fromCache: Set<String> = []
-    private var savedOnly: Set<String> = []
-
-    func teamOpenPRs(repoRoot: String) -> [OpenPR]? {
-        lock.lock(); defer { lock.unlock() }
-        return savedOnly.contains("o:" + repoRoot) ? nil : openPRs[repoRoot]?.0
-    }
-
-    private static var cacheURL: URL { AppSupport.root.appendingPathComponent("rumkapsel.github.json") }
-
-    func saveKnowledge(_ roots: [String: String]) {
-        var out: [String: Knowledge] = [:]
-        for (root, repo) in roots { if let k = knowledge(repoRoot: root, repo: repo) { out[root] = k } }
-        guard !out.isEmpty, let json = try? JSONEncoder().encode(out) else { return }
-        Fleet.writing.async { try? json.write(to: GitHubResolver.cacheURL) }
-    }
-
-    func loadKnowledge() {
-        guard let data = try? Data(contentsOf: GitHubResolver.cacheURL),
-              let saved = try? JSONDecoder().decode([String: Knowledge].self, from: data) else { return }
-        for (root, k) in saved { adopt(k, repoRoot: root, saved: true) }
-        lock.lock(); fromCache.formUnion(saved.keys); lock.unlock()
-    }
-
-    struct Knowledge: Codable { var repo: String; var openPRs: [OpenPR]?; var prsAt: Date?; var feed: [FeedEvent]?; var feedAt: Date? }
     struct ProjectKnowledge: Codable { var owner: String; var number: Int; var items: [ProjectItem]; var at: Date }
     func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? { board.knowledge(owner: owner, number: number) }
-
-    func knowledge(repoRoot: String, repo: String) -> Knowledge? {
-        lock.lock(); defer { lock.unlock() }
-        let prs = openPRs[repoRoot], f = feeds[repoRoot]
-        guard prs != nil || f != nil else { return nil }
-        let recent = Date().addingTimeInterval(-24 * 3600)
-        return Knowledge(repo: repo, openPRs: prs?.0, prsAt: prs?.1, feed: f.map { Array($0.0.filter { $0.at > recent }.prefix(80)) }, feedAt: f?.1)
-    }
-
-    func adopt(_ k: Knowledge, repoRoot: String, saved: Bool = false) {
-        var changed = false
-        lock.lock()
-        if let prs = k.openPRs, let at = k.prsAt, at > (openPRs[repoRoot]?.1 ?? .distantPast) {
-            changed = openPRs[repoRoot]?.0 != prs
-            openPRs[repoRoot] = (prs, at)
-            if saved { savedOnly.insert("o:" + repoRoot) } else { savedOnly.remove("o:" + repoRoot) }
-        }
-        if let f = k.feed, let at = k.feedAt, at > (feeds[repoRoot]?.1 ?? .distantPast) {
-            changed = changed || feeds[repoRoot]?.0 != f
-            feeds[repoRoot] = (f, at)
-            if saved { savedOnly.insert("f:" + repoRoot) } else { savedOnly.remove("f:" + repoRoot) }
-        }
-        lock.unlock()
-        if changed { DispatchQueue.main.async { self.onUpdate?() } }
-    }
-
-    func refreshOpenPRs(repoRoot: String) {
-        if frozen { return }
-        lock.lock()
-        let remembered = fromCache.remove(repoRoot) != nil
-        if !remembered, let (_, at) = openPRs[repoRoot],
-           Date().timeIntervalSince(at) < interval { lock.unlock(); return }
-        if inFlight.contains("o:" + repoRoot) || Date().timeIntervalSince(failedAt["o:" + repoRoot] ?? .distantPast) < 60 { lock.unlock(); return }
-        inFlight.insert("o:" + repoRoot)
-        lock.unlock()
-        trace("ask openPRs \(repoRoot)")
-        queue.async { [self] in
-            defer { if landed("o:" + repoRoot) { refetchOpenPRs(repoRoot) } }
-            let iso = ISO8601DateFormatter()
-            var found: [OpenPR] = []
-            guard let out = run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else {
-                trace("openPRs \(repoRoot) failed")
-                lock.lock(); failedAt["o:" + repoRoot] = Date(); lock.unlock()
-                return
-            }
-            if let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                let stale = Date().addingTimeInterval(-14 * 24 * 3600)
-                for o in arr {
-                    if let u = (o["updatedAt"] as? String).flatMap(iso.date(from:)), u < stale { continue }
-                    let a = o["author"] as? [String: Any]
-                    let login = a?["login"] as? String ?? "?"
-                    let isBot = (a?["is_bot"] as? Bool ?? false) || GitHubResolver.isBot(login)
-                    found.append(OpenPR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", author: login, isBot: isBot,
-                                        branch: o["headRefName"] as? String ?? "", url: o["url"] as? String ?? "",
-                                        createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? Date()))
-                }
-            }
-            lock.lock()
-            let changed = openPRs[repoRoot]?.0 != found || savedOnly.remove("o:" + repoRoot) != nil
-            openPRs[repoRoot] = (found, Date())
-            let first = answeredLive.insert(repoRoot).inserted
-            var learned = false
-            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
-                for pr in found where !pr.isBot {
-                    if note(repo: repo, number: pr.number, title: pr.title, author: pr.author, at: pr.createdAt) { learned = true }
-                    if let issue = tasks[repo]?[pr.number] { if note(repo: repo, number: issue, author: pr.author) { learned = true } }
-                }
-            }
-            lock.unlock()
-            if learned { saveBoard() }
-            if changed || first { DispatchQueue.main.async { self.onUpdate?() } }
-        }
-    }
 
     private var releases: [String: ([ReleasePR], Date)] = [:]
     private var hotfixes: [String: ([ReleasePR], Date)] = [:]
@@ -359,11 +254,7 @@ final class GitHubResolver {
         return work(repo: repo, number: number)?.author == me
     }
 
-    private static func closes(_ o: [String: Any]) -> [Int] {
-        ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
-    }
-
-    private func noteTask(_ pr: PullRequest, repoRoot: String) {
+    func note(task pr: PullRequest, repoRoot: String) {
         guard let issue = pr.closes.first else { return }
         lock.lock()
         guard let owner = owners[repoRoot] else { lock.unlock(); return }
@@ -374,7 +265,34 @@ final class GitHubResolver {
         if known != issue { saveBoard() }
     }
 
-    private func noteAuthor(_ o: [String: Any], number: Int, repoRoot: String, issue: Int?) {
+    func note(open prs: [OpenPR], repoRoot: String) {
+        lock.lock()
+        var learned = false
+        if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+            for pr in prs where !pr.isBot {
+                if note(repo: repo, number: pr.number, title: pr.title, author: pr.author, at: pr.createdAt) { learned = true }
+                if let issue = tasks[repo]?[pr.number] { if note(repo: repo, number: issue, author: pr.author) { learned = true } }
+            }
+        }
+        lock.unlock()
+        if learned { saveBoard() }
+    }
+
+    func note(feed events: [FeedEvent], repoRoot: String) {
+        lock.lock()
+        var learned = false
+        if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+            for e in events where !e.isBot {
+                guard let n = e.prNumber else { continue }
+                let opened = e.kind == "pr_open" || e.kind == "issue_open"
+                if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
+            }
+        }
+        lock.unlock()
+        if learned { saveBoard() }
+    }
+
+    func note(author o: [String: Any], number: Int, repoRoot: String, issue: Int?) {
         let login = ((o["author"] as? [String: Any])?["login"] as? String) ?? ""
         let at = (o["createdAt"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
         lock.lock()
@@ -408,8 +326,6 @@ final class GitHubResolver {
     private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
     private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
-    private var stateChanges: [(branch: String, pr: PullRequest, previous: PullRequest?)] = []
-    private var feeds: [String: ([FeedEvent], Date)] = [:]
     private var askedWho = false
     private var me: String? = ConfigStore.shared.current.viewerLogin
 
@@ -490,77 +406,6 @@ final class GitHubResolver {
         let out = pendingLaunches; pendingLaunches = []; return out
     }
 
-    struct Seen: Equatable { let updated: String; let open: Bool; let merged: Bool }
-    private var pullsSeen: [String: [Int: Seen]] = [:]
-
-    private func detectPulls(_ repoRoot: String) {
-        guard let owner = nameWithOwner(repoRoot: repoRoot),
-              let answer = ask(repoRoot + "#watch:pulls", "repos/\(owner)/pulls?state=all&sort=updated&direction=desc&per_page=20"), answer.changed,
-              let arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
-        let p = pipeline(repoRoot: repoRoot)
-        lock.lock(); let before = pullsSeen[repoRoot]; let team = watched[repoRoot] == true; lock.unlock()
-        let (now, due, moved) = GitHubResolver.pullsMoved(arr, before: before, releasesInto: [p.staging, p.production], team: team)
-        for m in moved { trace("watch: #\(m.number) moved (\(m.head) → \(m.base)) at \(m.updated)") }
-        if due.all { trace("watch: more than a page moved in \(repoRoot), reading all it follows") }
-        lock.lock(); pullsSeen[repoRoot] = now; lock.unlock()
-        if due != FollowUps.Due() { fetch(due, repoRoot: repoRoot) }
-    }
-
-    static func pullsMoved(_ arr: [[String: Any]], before: [Int: Seen]?, releasesInto bases: [String], team: Bool)
-        -> (seen: [Int: Seen], due: FollowUps.Due, moved: [(number: Int, head: String, base: String, updated: String)]) {
-        var now: [Int: Seen] = [:]
-        var due = FollowUps.Due()
-        var moved: [(number: Int, head: String, base: String, updated: String)] = []
-        for o in arr {
-            guard let n = o["number"] as? Int, let updated = o["updated_at"] as? String else { continue }
-            let seen = Seen(updated: updated, open: o["state"] as? String == "open", merged: o["merged_at"] is String)
-            now[n] = seen
-            guard let before, before[n] != seen else { continue }
-            let was = before[n]
-            let base = (o["base"] as? [String: Any])?["ref"] as? String ?? ""
-            let head = (o["head"] as? [String: Any])?["ref"] as? String ?? ""
-            moved.append((n, head, base, updated))
-            due.pulls.insert(FollowUps.Pull(number: n, branch: head))
-            if was?.open != seen.open { due.team = team }
-            if (!base.isEmpty && bases.contains(base)) || (seen.merged && was?.merged != true) { due.releasing = true }
-        }
-        if let before, !before.isEmpty, arr.count >= 20, !now.contains(where: { before[$0.key] == $0.value }) { due.all = true }
-        return (now, due, moved)
-    }
-
-    private var followUps = FollowUps()
-    private var heavyAt: [String: Date] = [:]
-
-    private func fetch(_ due: FollowUps.Due, repoRoot: String, again: Bool = true) {
-        var due = due
-        lock.lock()
-        if due.all {
-            due.team = watched[repoRoot] == true
-            due.releasing = true
-            for k in pullsByNumber.keys where k.hasPrefix(repoRoot + "#") { if let n = Int(k.dropFirst(repoRoot.count + 1)) { due.pulls.insert(.init(number: n, branch: "")) } }
-            for k in pulls.keys where k.hasPrefix(repoRoot + "@") { due.pulls.insert(.init(number: 0, branch: String(k.dropFirst(repoRoot.count + 1)))) }
-        }
-        let heavy = (due.team || due.releasing) && (!again || Date().timeIntervalSince(heavyAt[repoRoot] ?? .distantPast) >= FollowUps.after)
-        if heavy { heavyAt[repoRoot] = Date() }
-        if due.releasing, again {
-            tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
-            tuneLocked("watch:board") { $0.heat(for: 120, Date()) }
-        }
-        let later = again && followUps.note(repoRoot, due)
-        lock.unlock()
-        if due.releasing, again { trace("hot \(repoRoot): deploys for \(Int(Deployments.findWithin))s, the board for 120s") }
-        for p in due.pulls { refetch(pull: p.number, branch: p.branch, repoRoot: repoRoot) }
-        if heavy, due.team { refetchOpenPRs(repoRoot) }
-        if heavy, due.releasing { refetchReleases(repoRoot) }
-        guard later else { return }
-        watching.asyncAfter(deadline: .now() + FollowUps.after) { [self] in
-            lock.lock(); let d = followUps.take(repoRoot); lock.unlock()
-            guard let d else { return }
-            trace("follow-up \(repoRoot): \(d.pulls.count) pull(s)\(d.team ? ", the open list" : "")\(d.releasing ? ", the releases" : "")")
-            fetch(d, repoRoot: repoRoot, again: false)
-        }
-    }
-
     private var rerun = Set<String>()
 
     private func staleLocked(_ flight: String) { if inFlight.contains(flight) { rerun.insert(flight) } }
@@ -571,15 +416,7 @@ final class GitHubResolver {
         return rerun.remove(flight) != nil
     }
 
-    private func refetchOpenPRs(_ repoRoot: String) {
-        lock.lock()
-        if let prs = openPRs[repoRoot] { openPRs[repoRoot] = (prs.0, .distantPast) }
-        staleLocked("o:" + repoRoot)
-        lock.unlock()
-        refreshOpenPRs(repoRoot: repoRoot)
-    }
-
-    private func refetchReleases(_ repoRoot: String) {
+    func refetchReleases(_ repoRoot: String) {
         lock.lock()
         if let r = releases[repoRoot] { releases[repoRoot] = (r.0, .distantPast) }
         staleLocked("r:" + repoRoot)
@@ -587,127 +424,19 @@ final class GitHubResolver {
         refreshReleases(repoRoot: repoRoot)
     }
 
-    private func refetch(pull n: Int, branch: String, repoRoot: String) {
-        let numbered = repoRoot + "#\(n)", branched = repoRoot + "@" + branch
-        lock.lock()
-        let byNumber = n > 0 ? pullsByNumber[numbered] : nil, byBranch = branch.isEmpty ? nil : pulls[branched]
-        if let byNumber { pullsByNumber[numbered] = (byNumber.0, .distantPast); staleLocked(numbered) }
-        if let byBranch {
-            pulls[branched] = (byBranch.0, .distantPast)
-            staleLocked(branched)
-            expected["pull:" + branched] = (Date().addingTimeInterval(180), 30)
-        }
-        lock.unlock()
-        if byNumber != nil { refresh(pull: n, repoRoot: repoRoot) }
-        if byBranch != nil { refresh(branch: branch, repoRoot: repoRoot) }
-    }
-
-    func takeStateChanges() -> [(branch: String, pr: PullRequest, previous: PullRequest?)] {
-        lock.lock(); defer { lock.unlock() }
-        let out = stateChanges; stateChanges = []; return out
-    }
-
     func myLogin() -> String? { lock.lock(); defer { lock.unlock() }; return me }
 
     func isBusy(repoRoot: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix(repoRoot + "@") || $0.hasPrefix("c:" + repoRoot) }
+        return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix("c:" + repoRoot) } || pulls.isBusy(repoRoot: repoRoot)
     }
-    func feed(repoRoot: String) -> [FeedEvent]? {
-        lock.lock(); defer { lock.unlock() }
-        return savedOnly.contains("f:" + repoRoot) ? nil : feeds[repoRoot]?.0
-    }
-
-    private func detectFeed(_ repoRoot: String) {
+    func askWho() {
         lock.lock(); let who = !askedWho; askedWho = true; lock.unlock()
-        if who {
-            if let a = http.get("user"), let o = try? JSONSerialization.jsonObject(with: a.data) as? [String: Any], let login = o["login"] as? String {
-                lock.lock(); let changed = me != login; me = login; lock.unlock()
-                if changed { ConfigStore.shared.update { $0.viewerLogin = login } }
-            } else { lock.lock(); askedWho = false; lock.unlock() }
-        }
-        guard let owner = nameWithOwner(repoRoot: repoRoot), let answer = ask(repoRoot + "#watch:feed", "repos/\(owner)/events?per_page=100") else { return }
-        guard answer.changed else {
-            lock.lock(); if let old = feeds[repoRoot] { feeds[repoRoot] = (old.0, Date()) }; lock.unlock()
-            return
-        }
-        guard var arr = try? JSONSerialization.jsonObject(with: answer.data) as? [[String: Any]] else { return }
-        if arr.count == 100, let more = http.get("repos/\(owner)/events?per_page=100&page=2"),
-           let next = try? JSONSerialization.jsonObject(with: more.data) as? [[String: Any]] { arr += next }
-        let events = GitHubResolver.feedEvents(arr)
-        lock.lock()
-        let known = feeds[repoRoot]?.0
-        let changed = known != events || savedOnly.remove("f:" + repoRoot) != nil
-        feeds[repoRoot] = (events, Date())
-        var learned = false
-        if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
-            for e in events where !e.isBot {
-                guard let n = e.prNumber else { continue }
-                let opened = e.kind == "pr_open" || e.kind == "issue_open"
-                if note(repo: repo, number: n, title: e.title, author: opened ? e.actor : nil, at: opened ? e.at : nil) { learned = true }
-            }
-        }
-        lock.unlock()
-        if learned { saveBoard() }
-        let p = pipeline(repoRoot: repoRoot)
-        if GitHubResolver.fresh(events, since: known).contains(where: { e in
-            e.kind == "release" || e.kind == "push" && !(e.branch ?? "").isEmpty && [p.staging, p.production].contains(e.branch ?? "")
-        }) { fetch(FollowUps.Due(releasing: true), repoRoot: repoRoot) }
-        if changed { DispatchQueue.main.async { self.onUpdate?() } }
-    }
-
-    static func fresh(_ events: [FeedEvent], since known: [FeedEvent]?) -> [FeedEvent] {
-        let seen = Set((known ?? []).compactMap(\.id))
-        guard !seen.isEmpty else { return [] }
-        return events.filter { $0.id.map { !seen.contains($0) } ?? false }
-    }
-
-    static func feedEvents(_ arr: [[String: Any]]) -> [FeedEvent] {
-        let iso = ISO8601DateFormatter()
-        var events: [FeedEvent] = []
-        for e in arr {
-            guard let at = (e["created_at"] as? String).flatMap(iso.date(from:)) else { continue }
-            let actor = (e["actor"] as? [String: Any])?["login"] as? String ?? "?"
-            let isBot = GitHubResolver.isBot(actor)
-            let payload = e["payload"] as? [String: Any] ?? [:]
-            let pr = payload["pull_request"] as? [String: Any]
-            let prNumber = pr?["number"] as? Int
-            let prBranch = (pr?["head"] as? [String: Any])?["ref"] as? String
-            func add(_ kind: String, branch: String?, detail: String = "") {
-                events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: kind, branch: branch, prNumber: prNumber,
-                                        title: pr?["title"] as? String, url: pr?["html_url"] as? String, detail: detail, id: e["id"] as? String))
-            }
-            switch e["type"] as? String ?? "" {
-            case "PushEvent":
-                let ref = (payload["ref"] as? String ?? "").replacingOccurrences(of: "refs/heads/", with: "")
-                let n = (payload["commits"] as? [[String: Any]])?.count ?? (payload["size"] as? Int ?? 1)
-                add("push", branch: ref, detail: "\(max(1, n))")
-            case "PullRequestEvent":
-                let action = payload["action"] as? String ?? ""
-                let merged = (pr?["merged"] as? Bool ?? false) || action == "merged"
-                if action == "opened" || action == "reopened" { add("pr_open", branch: prBranch) }
-                else if action == "closed" || action == "merged" { add(merged ? "pr_merge" : "pr_close", branch: prBranch) }
-            case "PullRequestReviewEvent":
-                add("review", branch: prBranch, detail: ((payload["review"] as? [String: Any])?["state"] as? String ?? "").lowercased())
-            case "PullRequestReviewCommentEvent":
-                add("comment", branch: prBranch)
-            case "IssueCommentEvent":
-                if let issue = payload["issue"] as? [String: Any], issue["pull_request"] != nil { add("comment", branch: nil) }
-            case "CreateEvent":
-                if payload["ref_type"] as? String == "branch" { add("branch_create", branch: payload["ref"] as? String) }
-            case "DeleteEvent":
-                if payload["ref_type"] as? String == "branch" { add("branch_delete", branch: payload["ref"] as? String) }
-            case "IssuesEvent":
-                if payload["action"] as? String == "opened", let issue = payload["issue"] as? [String: Any] {
-                    events.append(FeedEvent(at: at, actor: actor, isBot: isBot, kind: "issue_open", branch: nil, prNumber: issue["number"] as? Int,
-                                            title: issue["title"] as? String, url: issue["html_url"] as? String, detail: "", id: e["id"] as? String))
-                }
-            case "ReleaseEvent":
-                add("release", branch: nil, detail: ((payload["release"] as? [String: Any])?["tag_name"] as? String) ?? "")
-            default: break
-            }
-        }
-        return events
+        guard who else { return }
+        if let a = http.get("user"), let o = try? JSONSerialization.jsonObject(with: a.data) as? [String: Any], let login = o["login"] as? String {
+            lock.lock(); let changed = me != login; me = login; lock.unlock()
+            if changed { ConfigStore.shared.update { $0.viewerLogin = login } }
+        } else { lock.lock(); askedWho = false; lock.unlock() }
     }
 
     // MARK: watching
@@ -723,6 +452,11 @@ final class GitHubResolver {
         watch.add { [weak d] in d?.checks() ?? [] }
         return d
     }()
+    private(set) lazy var pulls: PullSource = {
+        let p = PullSource(github: self)
+        watch.add { [weak p] in p?.checks() ?? [] }
+        return p
+    }()
     var front: Bool { get { watch.front } set { watch.front = newValue } }
     var worked: Date { get { watch.worked } set { watch.worked = newValue } }
     var pace: Pace { get { watch.pace } set { watch.pace = newValue } }
@@ -730,7 +464,6 @@ final class GitHubResolver {
     private var watched: [String: Bool] = [:]
     private var gits: [String: GitWatch] = [:]
     private var fetchedAt: [String: Date] = [:]
-    private let watching = DispatchQueue(label: "rumkapsel.github.watch", qos: .utility, attributes: .concurrent)
 
     func watch(_ roots: [String: Bool], board: (owner: String, number: Int)?) {
         if frozen { return }
@@ -740,6 +473,7 @@ final class GitHubResolver {
         let fresh = roots.keys.filter { gits[$0] == nil }
         lock.unlock()
         _ = deployments
+        pulls.watch(roots)
         self.board.watch(board)
         watch.start()
         for root in fresh {
@@ -752,13 +486,11 @@ final class GitHubResolver {
         lock.lock(); defer { lock.unlock() }
         guard !frozen else { return [] }
         var out: [Watch.Check] = []
-        for (root, team) in watched {
+        for root in watched.keys {
             guard owners[root] != nil else {
                 out.append(.init(root + "#watch:owner", Detector(every: [300, 300, 300])) { self.learnOwner(root) })
                 continue
             }
-            out.append(.init(root + "#watch:pulls", .pulls) { self.detectPulls(root) })
-            if team { out.append(.init(root + "#watch:feed", .feed) { self.detectFeed(root) }) }
         }
         out.append(.init("watch:limits", Detector(every: [300, 300, 300])) { self.http.readLimits() })
         return out
@@ -783,15 +515,16 @@ final class GitHubResolver {
         for w in hit { if let c = commits[w] { commits[w] = (c.0, .distantPast) }; staleLocked("c:" + w) }
         if change.remote, !echo {
             ringLocked(repoRoot: repoRoot)
-            for (w, _) in links { if let b = checkedOut[w] { expected["pull:" + repoRoot + "@" + b] = (now.addingTimeInterval(180), 30) } }
         }
+        let expect = change.remote && !echo ? links.compactMap { checkedOut[$0.0] } : []
         lock.unlock()
+        for b in expect { pulls.expect(branch: b, repoRoot: repoRoot) }
         trace("git \(repoRoot): \(change.local ? "commit or checkout " : "")\(change.worktrees.isEmpty ? "" : "worktree \(change.worktrees.sorted()) ")\(change.remote ? "remote refs " : "")\(change.tags ? "tags " : "")\(echo ? "(our fetch) " : "")→ \(hit.count) checkout(s)")
         for w in hit { refreshCommits(worktree: w) }
-        if change.tags, !echo, pipeline(repoRoot: repoRoot).shipsOnTag { fetch(FollowUps.Due(releasing: true), repoRoot: repoRoot) }
+        if change.tags, !echo, pipeline(repoRoot: repoRoot).shipsOnTag { pulls.follow(FollowUps.Due(releasing: true), repoRoot: repoRoot) }
     }
 
-    private func learnOwner(_ repoRoot: String) {
+    func learnOwner(_ repoRoot: String) {
         guard let out = run(["gh", "repo", "view", "--json", "nameWithOwner"], cwd: repoRoot),
               let obj = try? JSONSerialization.jsonObject(with: out) as? [String: Any], let n = obj["nameWithOwner"] as? String else { return }
         learned(owner: n, repoRoot: repoRoot)
@@ -801,15 +534,15 @@ final class GitHubResolver {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
         ringLocked(repoRoot: repoRoot)
-        for k in pulls.keys where k.hasPrefix(repoRoot + "@") { pulls[k] = (pulls[k]!.0, old) }
         if let r = releases[repoRoot] { releases[repoRoot] = (r.0, old) }
+        pulls.invalidate(repoRoot: repoRoot)
     }
 
     func invalidate() {
         lock.lock(); defer { lock.unlock() }
         let old = Date.distantPast
         ringLocked(repoRoot: nil)
-        pulls = pulls.mapValues { ($0.0, old) }
+        pulls.invalidate(repoRoot: nil)
         commits = commits.mapValues { ($0.0, old) }
         releases = releases.mapValues { ($0.0, old) }
     }
@@ -1008,81 +741,18 @@ final class GitHubResolver {
 
     private let queue = DispatchQueue(label: "rumkapsel.github", qos: .utility, attributes: .concurrent)
 
-    private var expected: [String: (until: Date, every: TimeInterval)] = [:]
-
-    private func gate(_ key: String, base: TimeInterval) -> TimeInterval {
-        if let e = expected[key] {
-            if Date() < e.until { return e.every }
-            expected[key] = nil
-        }
-        return base
-    }
-
     static var diag = ProcessInfo.processInfo.environment["GITHUB_DIAG"] != nil
     func trace(_ text: String) {
         StationLog.write("github", text)
         guard GitHubResolver.diag else { return }
         FileHandle.standardError.write("GH \(ISO8601DateFormatter().string(from: Date())) \(text)\n".data(using: .utf8)!)
     }
-    private var pulls: [String: (PullRequest?, Date)] = [:]
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]
     private var dirty: [String: Int] = [:]
     private var inFlight = Set<String>()
     private let lock = NSLock()
     var onUpdate: (() -> Void)?
-
-    func pull(branch: String, repoRoot: String) -> PullRequest? {
-        lock.lock(); defer { lock.unlock() }
-        return pulls[repoRoot + "@" + branch]?.0
-    }
-
-    func pullAnswered(branch: String, repoRoot: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return pulls[repoRoot + "@" + branch] != nil
-    }
-
-    // MARK: a pull request by number
-
-    private var pullsByNumber: [String: (PullRequest?, Date)] = [:]
-
-    func pull(number: Int, repoRoot: String) -> PullRequest? {
-        lock.lock(); defer { lock.unlock() }
-        return pullsByNumber[repoRoot + "#\(number)"]?.0
-    }
-    func pullAnswered(number: Int, repoRoot: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return pullsByNumber[repoRoot + "#\(number)"] != nil
-    }
-
-    func refresh(pull number: Int, repoRoot: String) {
-        if frozen { return }
-        let key = repoRoot + "#\(number)"
-        lock.lock()
-        if let (_, at) = pullsByNumber[key], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
-        if inFlight.contains(key) { lock.unlock(); return }
-        inFlight.insert(key)
-        lock.unlock()
-        trace("ask pull \(key)")
-        queue.async { [self] in
-            defer { if landed(key) { refetch(pull: number, branch: "", repoRoot: repoRoot) } }
-            guard let out = run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,closingIssuesReferences"], cwd: repoRoot),
-                  let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
-            var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
-                                 state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
-                                 isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
-            pr.closes = GitHubResolver.closes(o)
-            lock.lock(); pullsByNumber[key] = (pr, Date()); lock.unlock()
-            noteTask(pr, repoRoot: repoRoot)
-            noteAuthor(o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
-            DispatchQueue.main.async { self.onUpdate?() }
-        }
-    }
-
-    func inject(pull pr: PullRequest, number: Int, repoRoot: String) {
-        guard frozen else { return }
-        lock.lock(); pullsByNumber[repoRoot + "#\(number)"] = (pr, Date()); lock.unlock()
-    }
 
     func commitsAhead(worktree: String) -> Int? {
         lock.lock(); defer { lock.unlock() }
@@ -1152,65 +822,6 @@ final class GitHubResolver {
         return owners[repoRoot]
     }
 
-    func refresh(branch: String, repoRoot: String) {
-        if frozen { return }
-        let key = repoRoot + "@" + branch
-        lock.lock()
-        if let (_, at) = pulls[key], Date().timeIntervalSince(at) < gate("pull:" + key, base: interval) { lock.unlock(); return }
-        if inFlight.contains(key) { lock.unlock(); return }
-        inFlight.insert(key)
-        lock.unlock()
-        trace("ask pull \(key)")
-
-        queue.async { [self] in
-            if nameWithOwner(repoRoot: repoRoot) == nil { learnOwner(repoRoot) }
-            var pr: PullRequest?
-            func parse(_ o: [String: Any]) -> PullRequest {
-                var checks = ""
-                if let rollup = o["statusCheckRollup"] as? [[String: Any]], !rollup.isEmpty {
-                    let conclusions = rollup.map { ($0["conclusion"] as? String ?? "").uppercased() }
-                    let statuses = rollup.map { ($0["status"] as? String ?? $0["state"] as? String ?? "").uppercased() }
-                    if conclusions.contains(where: { ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR"].contains($0) }) || statuses.contains("FAILURE") || statuses.contains("ERROR") { checks = "failure" }
-                    else if statuses.contains(where: { ["IN_PROGRESS", "QUEUED", "PENDING", "WAITING"].contains($0) }) || conclusions.contains("") { checks = "pending" }
-                    else { checks = "success" }
-                }
-                var pr = PullRequest(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "",
-                                     state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
-                                     isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
-                pr.checks = checks
-                pr.closes = GitHubResolver.closes(o)
-                noteTask(pr, repoRoot: repoRoot)
-                noteAuthor(o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
-                return pr
-            }
-            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,statusCheckRollup,closingIssuesReferences"
-            var answered = false
-            if let out = run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
-               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
-                pr = parse(o); answered = true
-            } else if let out = run(["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", fields], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                pr = arr.first.map(parse); answered = true
-            }
-            lock.lock()
-            if !answered, let old = pulls[key] {
-                pulls[key] = (old.0, Date().addingTimeInterval(60 - interval))
-                lock.unlock()
-                if landed(key) { refetch(pull: 0, branch: branch, repoRoot: repoRoot) }
-                return
-            }
-            let changed = pulls[key]?.0 != pr
-            if changed, let pr, let old = pulls[key] { stateChanges.append((branch, pr, old.0)) }
-            pulls[key] = (pr, Date())
-            if let pr, pr.state == "OPEN", pr.checks == "pending" || pr.reviewDecision == "APPROVED" {
-                expected["pull:" + key] = (Date().addingTimeInterval(180), 30)
-            }
-            lock.unlock()
-            if landed(key) { refetch(pull: 0, branch: branch, repoRoot: repoRoot) }
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
-        }
-    }
-
     func run(_ args: [String], cwd: String) -> Data? { runReporting(args, cwd: cwd, errors: false).data }
 
     private func runReporting(_ args: [String], cwd: String, errors: Bool = true) -> (data: Data?, err: String) {
@@ -1241,10 +852,11 @@ extension GitHubResolver {
     func simulationReset() {
         guard frozen else { return }
         lock.lock()
-        openPRs = [:]; feeds = [:]; releases = [:]; cargo = [:]; pulls = [:]; commits = [:]; pipelines = [:]
+        releases = [:]; cargo = [:]; commits = [:]; pipelines = [:]
         pushed = [:]; dirty = [:]; owners = [:]
-        pendingLaunches = []; stateChanges = []; me = nil
+        pendingLaunches = []; me = nil
         lock.unlock()
+        pulls.reset()
         board.reset()
     }
 
@@ -1260,23 +872,24 @@ extension GitHubResolver {
 
     func inject(openPRs prs: [OpenPR], for repoRoot: String) {
         guard frozen else { return }
-        lock.lock(); openPRs[repoRoot] = (prs, Date()); savedOnly.remove("o:" + repoRoot); lock.unlock()
+        pulls.inject(open: prs, for: repoRoot, saved: false)
         notify()
     }
 
     func inject(pull pr: PullRequest?, for branch: String, repoRoot: String, changed: Bool = true) {
         guard frozen else { return }
-        lock.lock()
-        let previous = pulls[repoRoot + "@" + branch]?.0
-        pulls[repoRoot + "@" + branch] = (pr, Date())
-        if changed, let pr { stateChanges.append((branch, pr, previous)) }
-        lock.unlock()
+        pulls.inject(pull: pr, for: branch, repoRoot: repoRoot, changed: changed)
         notify()
+    }
+
+    func inject(pull pr: PullRequest, number: Int, repoRoot: String) {
+        guard frozen else { return }
+        pulls.inject(pull: pr, number: number, repoRoot: repoRoot)
     }
 
     func inject(feed events: [FeedEvent], for repoRoot: String) {
         guard frozen else { return }
-        lock.lock(); feeds[repoRoot] = (events, Date()); lock.unlock()
+        pulls.inject(feed: events, for: repoRoot)
         notify()
     }
 
@@ -1318,7 +931,7 @@ extension GitHubResolver {
 
     func inject(savedOpenPRs prs: [OpenPR], for repoRoot: String) {
         guard frozen else { return }
-        lock.lock(); openPRs[repoRoot] = (prs, Date()); savedOnly.insert("o:" + repoRoot); lock.unlock()
+        pulls.inject(open: prs, for: repoRoot, saved: true)
         notify()
     }
 

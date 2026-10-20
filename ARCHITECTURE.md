@@ -62,7 +62,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 |---|---|
 | `World.swift` | the model's front door: rooms, offices, crew, decon, neighbours; turns answers into reports and events |
 | `Releases.swift` | releases, hotfixes, staging releases and the counts, turned into events |
-| `PullRequests.swift` | a pull request's state: yours by branch, a teammate's from the feed, then by number, then by branch |
+| `PullRequests.swift` | `PullSource`: the open lists, single pull requests by branch and by number, the feed, the pull request detector and its follow-ups, the saved copy (`rumkapsel.github.json`), and state changes as reports; `PullRequests`: a pull request's state, yours by branch, a teammate's from the feed, then by number, then by branch |
 | `GitHub.swift` | `GitHubResolver`: every GitHub and git read, cached; the detectors' reads and what a change sets off; the counts |
 | `Watch.swift` | `Intake`, the protocol a source keeps; `Watch`: the one-second scheduler every source's checks run on, with the pace, `ask` (ETag) and heat |
 | `ProjectBoard.swift` | `BoardSource`: the project board's reads (the whole board and the deltas), whether it has answered live, card moves as reports, and which repositories count their yard by its columns |
