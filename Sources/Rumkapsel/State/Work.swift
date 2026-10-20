@@ -132,7 +132,7 @@ final class WorkBook {
     var onTransition: ((Record, Transition) -> Void)?
 
     func find(repo: String, branch: String) -> Record? { byBranch["\(repo)|\(branch)"].flatMap { records[$0] } }
-    func find(folder: String) -> Record? { byFolder[folder].flatMap { records[$0] } }
+    func find(repo: String, folder: String) -> Record? { byFolder["\(repo)|\(folder)"].flatMap { records[$0] } }
     func find(repo: String, issue: Int) -> Record? { byIssue["\(repo)#\(issue)"].flatMap { records[$0] } }
     func find(repo: String, pull: Int) -> Record? { byPull["\(repo)!\(pull)"].flatMap { records[$0] } }
     func find(repo: String, crate n: Int) -> Record? {
@@ -167,7 +167,7 @@ final class WorkBook {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
             if let n = Work.issue(inBranch: branch, repo: repo), let r = find(repo: repo, issue: n) { found.append(r) }
         }
-        if let folder, let r = find(folder: folder) {
+        if let folder, let r = find(repo: repo, folder: folder) {
             let named = branch.flatMap { Work.notWork.contains($0) ? nil : $0 }
             if named == nil || r.branches.isEmpty || r.branches.contains(named!) { found.append(r) }
         }
@@ -183,7 +183,7 @@ final class WorkBook {
             records[record.id] = record
         }
         if let branch, !Work.notWork.contains(branch) { record.branches.insert(branch); byBranch["\(repo)|\(branch)"] = record.id }
-        if let folder { record.folders.insert(folder); byFolder[folder] = record.id }
+        if let folder { record.folders.insert(folder); byFolder["\(repo)|\(folder)"] = record.id }
         if let issue { record.issue = record.issue ?? issue; byIssue["\(repo)#\(issue)"] = record.id }
         if let n = record.branchIssue { byIssue["\(repo)#\(n)"] = record.id }
         if let pull { record.pulls[pull] = pullState ?? record.pulls[pull] ?? "OPEN"; byPull["\(repo)!\(pull)"] = record.id }
@@ -195,7 +195,7 @@ final class WorkBook {
 
     private func merge(_ other: Record, into record: Record) {
         for b in other.branches { record.branches.insert(b); byBranch["\(record.repo)|\(b)"] = record.id }
-        for f in other.folders { record.folders.insert(f); byFolder[f] = record.id }
+        for f in other.folders { record.folders.insert(f); byFolder["\(record.repo)|\(f)"] = record.id }
         if let i = other.issue { record.issue = record.issue ?? i; byIssue["\(record.repo)#\(i)"] = record.id }
         if let n = other.branchIssue { byIssue["\(record.repo)#\(n)"] = record.id }
         for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }

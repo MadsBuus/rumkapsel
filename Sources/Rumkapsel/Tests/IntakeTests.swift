@@ -255,6 +255,41 @@ enum IntakeTests {
             expect(rig.officesOpened - opened <= 1, "it opened once, not once a scan: \(rig.officesOpened - opened)")
         }
 
+        test("one session working in two repositories' checkouts: each keeps its own office, none renamed across") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            let rig = Rig(), github = rig.world.github
+            let base = NSTemporaryDirectory() + "rumkapsel-two-\(UUID().uuidString)"
+            let web = base + "/web", api = base + "/web/.context/api"
+            for d in [web, api] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            github.inject(login: "me")
+            for (root, repo) in [(web, "web"), (api, "api")] {
+                github.inject(owner: "me/" + repo, for: root)
+                github.inject(openPRs: [], for: root)
+                github.inject(releases: [], for: root)
+            }
+            func session(in cwd: String, _ repo: String) -> SessionInfo {
+                SessionInfo(id: "main", cwd: cwd, repo: repo, repoRoot: cwd, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                            area: nil, title: nil, branch: "gh-77/sign-in", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 1,
+                            queuedCount: 0, eventMarkers: [:])
+            }
+            var lastCwd = api
+            rig.simulate(scan: ScanResult(sessions: [session(in: api, "api")]))
+            rig.advance(16)
+            for (cwd, repo) in [(web, "web"), (api, "api"), (web, "web")] {
+                let held = station(rig).rooms.values.first { !$0.key.hasPrefix("kind:") && $0.worktree == lastCwd }?.key
+                let homes = held.map { ["main": World.MinionHome(station: "work", key: $0, idle: false)] } ?? [:]
+                rig.simulate(scan: ScanResult(sessions: [session(in: cwd, repo)]), homes: homes)
+                lastCwd = cwd
+                rig.advance(6)
+            }
+            let rooms = station(rig).rooms.values.filter { !$0.key.hasPrefix("kind:") }
+            expect(rooms.contains { $0.key.hasPrefix("task:api") && $0.repo == "api" }, "api's office stays api's: \(rooms.map(\.key).sorted())")
+            expect(rooms.contains { $0.key.hasPrefix("task:web") && $0.repo == "web" }, "web's work has its own office: \(rooms.map(\.key).sorted())")
+            expect(rooms.allSatisfy { $0.key.hasPrefix("task:\($0.repo ?? "")") }, "no office named for another repository: \(rooms.map { "\($0.key)@\($0.repo ?? "")" })")
+        }
+
         test("a workspace switched from a pull request's branch to a new one holds the new office, opened once") {
             ConfigStore.shared.update { $0.useProject = false }
             defer { ConfigStore.shared.update { $0.useProject = nil } }

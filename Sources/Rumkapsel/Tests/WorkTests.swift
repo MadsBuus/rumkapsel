@@ -82,8 +82,10 @@ enum WorkTests {
             expect(opened === first && opened.work().officeKey == "task:web#460", "the pull request names it once open")
             let linked = book.note(repo: "web", issue: 128, pull: 460)
             expect(linked === first && linked.number == 128 && linked.work().officeKey == "task:web#460", "the issue is the crate; the office keeps the pull request's name")
-            expect(book.find(repo: "web", issue: 128) === first && book.find(folder: "/w/search") === first, "found by any name")
+            expect(book.find(repo: "web", issue: 128) === first && book.find(repo: "web", folder: "/w/search") === first, "found by any name")
             expect(book.count == 1, "one record, got \(book.count)")
+            let elsewhere = book.note(repo: "api", branch: "feature/search", folder: "/w/search")
+            expect(elsewhere !== first && elsewhere.repo == "api" && first.repo == "web", "the same folder and branch in another repository is other work")
         }
 
         test("a board issue and a checkout of its branch are one record, whichever came first") {
