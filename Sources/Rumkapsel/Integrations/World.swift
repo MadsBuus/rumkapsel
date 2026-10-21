@@ -159,6 +159,11 @@ final class World {
         repoRoots = [:]
         readyRepos = []
         didLoadLayout = false
+        works.reset()
+        transitions = []
+        crewRoomInfo = [:]
+        crewBoxes = [:]
+        scans = 0
     }
 
     // MARK: queries the scene draws from
