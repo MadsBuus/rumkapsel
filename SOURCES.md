@@ -72,6 +72,40 @@ Each stage is a green PR with nothing different on screen.
    World does on them stays in World.
 3. **Transcripts and Neighbours** as sources.
 4. **A registry.** Which sources a repository uses is declared (for example board or git counts), and a
-   new source is one file plus one registration. Mission control's monitors (Sentry first) are the proof.
+   new source is one file plus one registration. Each source says what it needs to connect and how to
+   check it is connected.
+5. **Setup and connecting** (below), after mission control's room. Mission control's monitors (Sentry
+   first) are the proof that a new source is one file.
 
 Done when `World` reads no source except through `hear`, and `GitHub.swift` holds only shared plumbing.
+
+## Connecting
+
+A new user should get from install to a working station without a terminal.
+
+**A Sources tab in Settings**, one row per registered source: a light, who it is connected as, and a
+Connect or Fix button.
+
+| Source | Needs | Connect |
+|---|---|---|
+| Sessions | nothing: the app is not sandboxed and reads `~/.claude/projects` | found; more folders can be added |
+| Git | git | found |
+| GitHub | a token that reads repositories, the organisation and projects | see below |
+| Board | GitHub, with project read | pick the project and its columns |
+| Sentry | an auth token, an organisation and projects | paste the token, pick from lists |
+| AWS | the user's own AWS login (`~/.aws` profiles or `aws sso login`) | pick a profile and alarms; the app never holds AWS keys |
+
+**GitHub**, first that answers:
+
+1. The GitHub CLI, if it is signed in: nothing to do, as today.
+2. **Sign in with GitHub**: the device flow of an OAuth app registered on Mads' own account (not
+   Tattoodo's). The app shows a code and opens github.com/login/device. Only the client ID ships in the
+   app, and the token is kept in the Keychain.
+3. A pasted token, for GitHub Enterprise or fine-grained tokens.
+
+For 2 and 3 to work without the CLI, the reads that still run `gh` (the open lists, single pull
+requests, the owner, the board) move onto the HTTP client as their sources do.
+
+**First run** is a checklist on the setup card: sessions found, GitHub connected, these repositories and
+how each ships, a board (optional), monitors (optional). Each step is a button, and the station builds as
+they are ticked.
