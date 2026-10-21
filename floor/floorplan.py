@@ -172,9 +172,11 @@ def plan(theme, seed, want=100):
     near = lambda c: (abs(c[0]) + abs(c[1]), c)
     door = lambda cs: any((x+a, y+b) in hall for x, y in cs for a, b in ((1,0),(-1,0),(0,1),(0,-1)))
 
-    # Mission control has a door: if no corridor came by it, the shortest one is laid from its far side.
-    if not door(control):
-        frm = {(x+a, y+b) for x, y in control for a, b in ((1,0),(-1,0),(0,1),(0,-1))} - taken
+    # Mission control's door is on its south side, towards the camera, so its north wall stays whole for the
+    # screens: if no corridor passes there, the shortest one is laid from it.
+    south = max(y for _, y in control)
+    if not any((x, south + 1) in hall for x, _ in control):
+        frm = {(x, south + 1) for x, _ in control} - taken
         frm = {p for p in frm if inside(p, hull)}
         prev, q = {p: None for p in frm}, deque(sorted(frm, key=near))
         end = None

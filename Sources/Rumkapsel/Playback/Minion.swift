@@ -77,7 +77,7 @@ final class Minion: Body {
     static let seatedTorso = 0.62
     static let couchSeat = 0.18
     static let bedSeat = 0.18
-    var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
+    var seatHeight: Double { seatedOnBowl || atConsole ? Minion.seat : Minion.couchSeat }
 
     func currentPose(at clock: Double) -> Pose {
         let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))

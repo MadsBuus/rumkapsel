@@ -522,6 +522,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "1", "2", "3", "4": following = nil; focus(onIndex: Int(key)! - 1)
             case "r": following = nil; resetView()
             case "f": toggleWalk()
+            case "m": following = nil; toggleMission()
             case "\u{1b}":
                 following = nil
                 enqueue { self.walkEscape() }
@@ -850,6 +851,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func doing(_ m: Minion) -> String? {
         switch m.current?.kind {
         case .exercise: return "gym"
+        case .watch: return "mission"
         case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
         case .chore: return "roam"
         case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"

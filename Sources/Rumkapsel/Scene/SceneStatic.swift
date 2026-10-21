@@ -336,6 +336,10 @@ extension StationController {
                 for n in f.fixtures { n.name = "gym:" + roomKey(station, room); staticRoot.addChildNode(n) }
                 kitchens[station.name] = f.kitchen
             }
+            if let mc = station.missionControl, let room = station.rooms["kind:mission"] {
+                let f = Looks.current.furnishMission(mc, in: station)
+                for n in f.props + f.fixtures { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
+            }
             if station.hasHangar {
                 let hc = station.hangarCenter
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()

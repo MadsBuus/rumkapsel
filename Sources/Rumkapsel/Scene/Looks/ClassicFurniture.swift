@@ -331,6 +331,60 @@ extension Classic {
         return f
     }
 
+    static func mission(_ mc: MissionControl, in station: Station) -> Furnishing {
+        var f = Furnishing()
+        let p = MissionRoom.Palette.of(.ops)
+        let o = station.offset
+        func at(_ n: SCNNode, _ spot: SIMD2<Double>, _ y: Double = 0, yaw: Double = 0) -> SCNNode {
+            n.position = v3(o.x + spot.x, y, o.y + spot.y)
+            n.eulerAngles.y = CGFloat(yaw)
+            return n
+        }
+        let repos = MissionRoom.repos
+        for (i, c) in mc.consoles.enumerated() {
+            f.props.append(at(MissionRoom.opsConsole(p, color: repos[i % repos.count].color), c.at, yaw: c.yaw))
+        }
+        for s in mc.seats {
+            let chair = SCNNode()
+            let dark = lit(NSColor(rgb: (0.16, 0.17, 0.2)))
+            chair.addChildNode(MissionRoom.box(0.24, 0.03, 0.24, dark, at: v3(0, Minion.seat - 0.015, 0.03), chamfer: 0.01))
+            chair.addChildNode(MissionRoom.box(0.03, Minion.seat - 0.03, 0.03, lit(NSColor(rgb: (0.3, 0.31, 0.35))), at: v3(0, (Minion.seat - 0.03) / 2, 0.03)))
+            chair.addChildNode(MissionRoom.box(0.24, 0.22, 0.03, dark, at: v3(0, Minion.seat + 0.13, 0.17), chamfer: 0.01))
+            f.props.append(at(chair, s.at, yaw: s.facing + .pi))
+        }
+        let table = SCNNode(geometry: faceted(SCNCylinder(radius: MissionControl.tableRadius, height: 0.22), 32))
+        table.geometry!.firstMaterial = lit(p.console)
+        let rim = SCNNode(geometry: faceted(SCNTube(innerRadius: MissionControl.tableRadius - 0.04, outerRadius: MissionControl.tableRadius + 0.03, height: 0.03), 32))
+        rim.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.95, 1.0)))
+        rim.position = v3(0, 0.125, 0)
+        table.addChildNode(rim)
+        let glass = SCNNode(geometry: faceted(SCNCylinder(radius: MissionControl.tableRadius - 0.04, height: 0.006), 32))
+        glass.geometry!.firstMaterial = lit(NSColor(rgb: (0.05, 0.12, 0.16)))
+        glass.position = v3(0, 0.126, 0)
+        table.addChildNode(glass)
+        f.props.append(at(table, mc.table, 0.11))
+        let map = MissionRoom.hologram()
+        map.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 60)))
+        f.fixtures.append(at(map, mc.table, 0.24 + MissionControl.holoLift))
+        for k in 0..<12 {
+            let a = Double(k) / 12 * .pi * 2
+            let ray = SCNNode(geometry: SCNCylinder(radius: 0.003, height: MissionControl.holoLift + 0.1))
+            ray.geometry!.firstMaterial = MissionRoom.holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.35)
+            f.fixtures.append(at(ray, mc.table + SIMD2(sin(a), cos(a)) * (MissionControl.tableRadius - 0.04), 0.24 + (MissionControl.holoLift + 0.1) / 2))
+        }
+        let b = mc.boards
+        f.fixtures.append(at(MissionRoom.screen(1.6, 0.4, Screens.annunciator(repos), at: SCNVector3Zero, bezel: 0.025), SIMD2(b.annunciator, mc.north + 0.05), 0.36))
+        for (k, x) in b.flaps.enumerated() {
+            let shown = k == 0 ? Array(repos.prefix(3)) : Array(repos.suffix(2))
+            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(shown, launches: k == 0), at: SCNVector3Zero, bezel: 0.02), SIMD2(x, mc.north + 0.05), 0.44))
+        }
+        let clock = SCNNode(geometry: SCNPlane(width: 0.13, height: 0.13))
+        let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(); m.emission.contents = Screens.nixieClock(); m.lightingModel = .constant
+        clock.geometry!.firstMaterial = m
+        f.fixtures.append(at(clock, SIMD2(b.clock, mc.north + 0.06), 0.64))
+        return f
+    }
+
     static func bed(level: Int, floorTop: Double) -> SCNNode {
         if level == 0 {
             let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))

@@ -44,7 +44,14 @@ class Body {
     var seatedOnBowl = false
     var seatOffset = SIMD2<Double>(0, 0)
 
-    var seated: Bool { seatedOnBowl || onCouch }
+    var seated: Bool { seatedOnBowl || onCouch || atConsole }
+
+    var watchSpot: Int? { if case .watch(let s, _, _) = current?.kind { return s }; return nil }
+
+    var atConsole: Bool {
+        guard let s = watchSpot, s < MissionControl.seatCount, phaseKind == .act, path.isEmpty, fetchSpot == nil else { return false }
+        return true
+    }
 
     var onCouch: Bool {
         !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil
@@ -172,6 +179,8 @@ class Body {
         case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
         case .exercise(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind.doing
         case .galley(let fare, _, _) where phaseKind == .act && path.isEmpty: return fare.doing
+        case .watch(let s, _, _) where phaseKind == .act && path.isEmpty:
+            return s < MissionControl.seatCount ? "watching the boards in \(Words.current.theMission)" : "studying the holo table"
         case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
         default: return c.words
         }

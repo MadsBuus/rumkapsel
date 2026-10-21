@@ -44,6 +44,7 @@ struct Command {
         case bath(kind: Bath, back: Place, seconds: Double)
         case exercise(kind: Workout, back: Place, seconds: Double)
         case galley(fare: Fare, back: Place, seconds: Double)
+        case watch(spot: Int, back: Place, seconds: Double)
         case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
         case pack(office: String)
@@ -124,7 +125,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .exercise, .galley, .pack, .stow: return [.walk, .act]
+        case .bath, .exercise, .galley, .watch, .pack, .stow: return [.walk, .act]
         default: return [.walk, .settle]
         }
     }
@@ -229,13 +230,18 @@ struct Command {
         Command(kind: .galley(fare: fare, back: back, seconds: seconds), words: "off to \(Words.current.theGalley) for \(fare.words), back to \(back.words) after")
     }
 
+    static func watch(spot: Int, seated: Bool, back: Place, seconds: Double) -> Command {
+        Command(kind: .watch(spot: spot, back: back, seconds: seconds),
+                words: "off to \(Words.current.theMission) to \(seated ? "sit at a console" : "watch the holo table"), back to \(back.words) after")
+    }
+
     static func chore(spot: Cell, seconds: Double) -> Command {
         Command(kind: .chore(spot: spot, seconds: seconds), words: Words.current.lookRound)
     }
 
     var visitSeconds: Double? {
         switch kind {
-        case .bath(_, _, let s), .exercise(_, _, let s), .galley(_, _, let s), .chore(_, let s): return s
+        case .bath(_, _, let s), .exercise(_, _, let s), .galley(_, _, let s), .watch(_, _, let s), .chore(_, let s): return s
         default: return nil
         }
     }
@@ -291,6 +297,7 @@ extension Place {
             case "kind:bath": return Words.current.theBath
             case "kind:gym": return Words.current.theGym
             case "kind:galley": return Words.current.theGalley
+            case "kind:mission": return Words.current.theMission
             case "kind:hangar": return Words.current.theBay
             case "kind:deck": return Words.current.theDeck
             case "kind:pad": return Words.current.thePad

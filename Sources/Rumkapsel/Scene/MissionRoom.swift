@@ -54,7 +54,7 @@ enum MissionRoom {
         }
     }
 
-    private static func apolloConsole(_ p: Palette) -> SCNNode {
+    static func apolloConsole(_ p: Palette) -> SCNNode {
         let n = SCNNode()
         n.addChildNode(box(0.86, 0.2, 0.26, lit(p.console), at: v3(0, 0.1, 0), chamfer: 0.01))
         let slope = box(0.86, 0.012, 0.16, lit(p.console.blended(withFraction: 0.2, of: .white)!), at: v3(0, 0.215, 0.05))
@@ -243,14 +243,14 @@ enum MissionRoom {
         }
     }
 
-    private static func opsConsole(_ p: Palette, color: NSColor) -> SCNNode {
+    static func opsConsole(_ p: Palette, color: NSColor) -> SCNNode {
         let n = apolloConsole(p)
         let strip = box(0.82, 0.012, 0.04, flat(color), at: v3(0, 0.386, -0.07))
         n.addChildNode(strip)
         return n
     }
 
-    private static func hologram() -> SCNNode {
+    static func hologram() -> SCNNode {
         let n = SCNNode()
         let cyan = NSColor(rgb: (0.4, 0.9, 1.0))
         let station = SCNNode(geometry: faceted(SCNCylinder(radius: 0.06, height: 0.03), 6))
@@ -283,7 +283,7 @@ enum MissionRoom {
         return n
     }
 
-    private static func holo(_ color: NSColor, _ alpha: Double) -> SCNMaterial {
+    static func holo(_ color: NSColor, _ alpha: Double) -> SCNMaterial {
         let m = SCNMaterial()
         m.diffuse.contents = color
         m.emission.contents = color
@@ -338,7 +338,7 @@ enum MissionRoom {
         return n
     }
 
-    private static func screen(_ w: Double, _ h: Double, _ image: NSImage, at: SCNVector3, bezel: Double = 0.02) -> SCNNode {
+    static func screen(_ w: Double, _ h: Double, _ image: NSImage, at: SCNVector3, bezel: Double = 0.02) -> SCNNode {
         let frame = box(w + bezel * 2, h + bezel * 2, 0.02, lit(NSColor(rgb: (0.1, 0.11, 0.13))), at: at)
         let face = SCNNode(geometry: SCNPlane(width: w, height: h))
         let m = SCNMaterial()
@@ -351,7 +351,7 @@ enum MissionRoom {
         return frame
     }
 
-    private static func box(_ w: Double, _ h: Double, _ d: Double, _ m: SCNMaterial, at: SCNVector3, chamfer: Double = 0) -> SCNNode {
+    static func box(_ w: Double, _ h: Double, _ d: Double, _ m: SCNMaterial, at: SCNVector3, chamfer: Double = 0) -> SCNNode {
         let n = SCNNode(geometry: SCNBox(width: w, height: h, length: d, chamferRadius: chamfer))
         n.geometry!.firstMaterial = m
         n.position = at

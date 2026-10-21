@@ -439,7 +439,9 @@ final class Station {
     func doorCell(of key: String) -> Cell? {
         if let d = doorCache[key] { return d }
         guard let r = rooms[key] ?? lingering[key] else { return nil }
-        let candidates = r.cells.filter { $0.neighbours.contains(where: entrance(of: key)) }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        let south = key == "kind:mission"
+        let candidates = r.cells.filter { $0.neighbours.contains(where: entrance(of: key)) }
+            .sorted { south ? ($0.y, abs($0.x - r.cells[r.cells.count / 2].x)) > ($1.y, abs($1.x - r.cells[r.cells.count / 2].x)) : ($0.y, $0.x) < ($1.y, $1.x) }
         let d = candidates.first ?? r.cells.first
         if let d { doorCache[key] = d }
         return d
