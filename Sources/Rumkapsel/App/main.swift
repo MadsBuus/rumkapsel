@@ -172,7 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         }
 
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.controller.refreshGitHub()
+            self?.controller.lookAgain()
         }
         let musicOn = UserDefaults.standard.object(forKey: "music") as? Bool ?? false
         controller.drone.isEnabled = musicOn && snapshotPath == nil

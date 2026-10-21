@@ -1251,6 +1251,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     }
     var seenPeople: [String: SeenPerson] { world.seenPeople }
 
+    func lookAgain() {
+        enqueue { [self] in
+            github.trace("in front: every detector asks now")
+            github.watch.ring(repoRoot: nil)
+            for station in fleet.stations.values {
+                for room in station.rooms.values { if let w = room.worktree { github.git.refreshCommits(worktree: w) } }
+            }
+        }
+    }
+
     func refreshGitHub() {
         guard Date().timeIntervalSince(askedGitHubAt) > 3 else { return }
         askedGitHubAt = Date()
