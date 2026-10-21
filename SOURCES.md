@@ -71,14 +71,16 @@ Each stage is a green PR with nothing different on screen.
    cache, saved copy and detector out of `GitHubResolver` and says its reports, and the deciding that
    World does on them stays in World.
 3. **Events, not passes.** Today any answer that changes anything runs one pass over every source,
-   repository and room, diffs it into events, and rebuilds the markers or the floor; sessions are read
-   on a 5 s timer; neighbours send whole snapshots. The target is the way networked games and video
+   repository and room, diffs it into events, and rebuilds the markers or the floor; every change to a transcript (watched,
+   about 0.15 s) lists every recent transcript and runs the whole session pass; neighbours send whole
+   snapshots. The target is the way networked games and video
    streams work: small, fast **deltas** (the "what just happened" reports, each with an identity so a
    repeat or a late one does nothing) that every station plays, and now and then a **keyframe** (the
    "what is so now" reports) that corrects whatever drifted. In order:
    1. Measure: how often the pass and the session read run and how long they take (`timing` lines in
       `station.log`, once a minute).
-   2. Sessions on file events: the transcript folders watched, each session reported as it changes.
+   2. Sessions as deltas: the watcher already says which transcripts changed; read only those and hear
+      only those sessions, with the full scan as the keyframe.
    3. The busiest GitHub events handled where they land, each taken out of the pass: pull request
       changes, checks and reviews, board moves, yard counts, checkouts. The pass shrinks to the keyframe.
    4. Neighbours relay reports: a keyframe when they join, deltas after.
