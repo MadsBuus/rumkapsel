@@ -192,6 +192,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         return body()
     }
 
+    private func slowRead(_ result: ScanResult, _ spent: Double) {
+        let parts = result.parts.sorted { $0.value > $1.value }.map { String(format: "%@ %.0fms", String($0.key.dropFirst(12)), $0.value * 1000) }
+        let files = result.reads.sorted { $0.seconds > $1.seconds }.prefix(3).map { r -> String in
+            let size = (try? FileManager.default.attributesOfItem(atPath: r.path)[.size] as? Int) ?? 0
+            return String(format: "%@ (%d KB) %.0fms", (r.path as NSString).lastPathComponent, size / 1024, r.seconds * 1000)
+        }
+        StationLog.write("timing", String(format: "slow transcript read %.1fs: ", spent) + parts.joined(separator: ", ")
+            + " · \(result.reads.count) file(s) read" + (files.isEmpty ? "" : ": " + files.joined(separator: ", ")))
+    }
+
     private func tallied(_ name: String, _ spent: Double) {
         var t = tally[name] ?? (0, 0, 0)
         t.count += 1; t.total += spent; t.worst = max(t.worst, spent)
@@ -623,7 +633,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let t0 = CACurrentMediaTime()
             let result = scanner.scan(roomsWithin: StationController.scanWindow)
             let spent = CACurrentMediaTime() - t0
-            self.enqueue { self.tallied("transcripts", spent); self.apply(result) }
+            self.enqueue {
+                self.tallied("transcripts", spent)
+                for (part, seconds) in result.parts { self.tallied(part, seconds) }
+                for r in result.reads { self.tallied("transcripts.file", r.seconds) }
+                if spent > 1 { self.slowRead(result, spent) }
+                self.apply(result)
+            }
         }
     }
 
