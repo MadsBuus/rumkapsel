@@ -6,8 +6,9 @@ and are not started unasked.
 
 ## Next
 
-1. **Sources** (`SOURCES.md`): Releases and Git out of the resolver, then Transcripts and Neighbours, then
-   a registry, so a new source is one file and one registration.
+1. **Sources** (`SOURCES.md`): events, not passes (small deltas played as they land, the big pass shrunk
+   to an occasional keyframe, sessions on file events, neighbours relaying reports), then a registry, so a
+   new source is one file and one registration.
 2. **Mission control, the room.** A control room of about 5×3 with consoles facing a wall of screens,
    proposed by the pad with windows onto the launch slots; the flight screens become its wall. Its first
    screens show what the station already knows: lead time, crates waiting, deploys, failing checks.
