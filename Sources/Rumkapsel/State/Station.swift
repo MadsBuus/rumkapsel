@@ -100,6 +100,7 @@ enum Place: Hashable {
     static let bath = Place.room("kind:bath")
     static let gym = Place.room("kind:gym")
     static let galley = Place.room("kind:galley")
+    static let mission = Place.room("kind:mission")
     static let hangar = Place.room("kind:hangar")
     static let pad = Place.room("kind:pad")
 
@@ -393,8 +394,10 @@ final class Station {
             "kind:bath":     ("bath",     "bath",     Colors.idleLight,   Station.rect(2, 2)),
             "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
             "kind:galley":   ("galley",   "galley",   Colors.idleLight,   Station.rect(1, 1)),
+            "kind:mission":  ("mission",  "mission control", Colors.idleDim, Station.rect(5, 3)),
         ]
         guard let it = named[key] else { return false }
+        if key == "kind:mission", !hasPad || floor.quarters["mission"] == nil { return false }
         if let into = Station.opensInto[key] {
             guard let cells = floor.quarters[it.plan], let host = rooms[into],
                   cells.allSatisfy({ occupied[$0] == nil && !isReserved($0) && !isCorridor($0) }),
@@ -945,7 +948,7 @@ final class Fleet {
     }
 
     func station(_ name: String) -> Station {
-        station(name, fixed: [.quarters, .lounge, .bath, .gym, .galley])
+        station(name, fixed: [.quarters, .lounge, .bath, .gym, .galley, .mission])
     }
 
     @discardableResult
@@ -1013,6 +1016,7 @@ final class Fleet {
             station.ensureFixedRoom(.gym)
             station.clusterQuarters()
             station.ensureFixedRoom(.galley)
+            station.ensureFixedRoom(.mission)
             station.removeRoom(key: "kind:airlock")
             stations[name] = station
         }

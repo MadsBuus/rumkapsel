@@ -34,6 +34,41 @@ FAT = {i for i, f in enumerate(FAMILY) if f != 0}      # everything but the I
 # The quarters keep the sizes the station already gives them, so nothing downstream has to change.
 QUARTERS = [("lounge", 3, 3), ("quarters", 2, 4), ("bath", 2, 2), ("gym", 3, 2)]
 
+MISSION = (5, 3)
+# Which way each theme's camera looks across the plaza: Classic from +x+y, Kenney turned round.
+FACING = {"classic": -1, "kenney": 1}
+
+def galley(theme, lounge, hall, taken, hull):
+    """The galley is one tile off the lounge, opening into it, taken as soon as the lounge is placed so
+    nothing packed round the lounge after it can close it off. Opening into the middle of a lounge wall
+    keeps it clear of the couches and the door. Hallway beside it would be a wall with no door, so the
+    fewer the better; then out from behind the monolith as the theme's camera looks, then nearest the plaza."""
+    lounge = set(lounge)
+    xs, ys = [x for x, _ in lounge], [y for _, y in lounge]
+    mid = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    doors = [c for c in lounge if any((c[0]+a, c[1]+b) in hall for a, b in ((1,0),(-1,0),(0,1),(0,-1)))]
+    door = min(doors, key=lambda c: (c[1], c[0])) if doors else None
+    best = None
+    for o in lounge:
+        for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+            c = (o[0]+a, o[1]+b)
+            if c in taken or c in lounge or not inside(c, hull): continue
+            side = (o[0] == mid[0]) != (o[1] == mid[1])
+            toward = FACING[theme]
+            behind = c[0] * toward >= 0 and c[1] * toward >= 0 and abs(c[0]) + abs(c[1]) <= 4
+            open_to = sum((c[0]+x, c[1]+y) in hall for x, y in ((1,0),(-1,0),(0,1),(0,-1)))
+            score = (open_to, behind, not side, o == door, abs(c[0]) + abs(c[1]), c)
+            if best is None or score < best[0]: best = (score, c)
+    return best and best[1]
+
+def mission(fixed):
+    """Mission control stands against the pad, its short window wall on the pad's three rows nearest the
+    yard, so the launch slots are what it looks out on."""
+    pad = fixed["pad"]
+    ys = sorted({y for _, y in pad})[-MISSION[1]:]
+    x0 = max(x for x, _ in pad) + 1
+    return [(x0 + i, y) for i in range(MISSION[0]) for y in ys]
+
 def load(theme):
     d = json.load(open(os.path.join(HERE, f'{theme}.json')))
     fixed = {k: [tuple(c) for c in v] for k, v in d.items() if k != "monolith"}
@@ -95,7 +130,7 @@ def gen(theme, seed, want=100):
     # The plaza and the two fixed arms are hallway from the start; nothing else is, yet.
     hall = set(fixed["plaza"]) | set(fixed["west"]) | set(fixed["south"])
     hall.discard(mono)
-    blocked = reserved - hall
+    blocked = (reserved - hall) | set(mission(fixed))
 
     bearings = [b + rnd.uniform(-12, 12) for b in range(0, 360, 60)]
     for b in bearings:
@@ -130,16 +165,33 @@ def gen(theme, seed, want=100):
 
 def plan(theme, seed, want=100):
     rnd, fixed, mono, reserved, blocked, hall, hull = gen(theme, seed, want)
-    taken = set(reserved) | hall
-    slots, quarters = [], {}
+    control = mission(fixed)
+    taken = set(reserved) | hall | set(control)
+    slots, quarters = [], {"mission": control}
     used = {f: 0 for f in range(len(TETRO))}
     near = lambda c: (abs(c[0]) + abs(c[1]), c)
     door = lambda cs: any((x+a, y+b) in hall for x, y in cs for a, b in ((1,0),(-1,0),(0,1),(0,-1)))
 
+    # Mission control has a door: if no corridor came by it, the shortest one is laid from its far side.
+    if not door(control):
+        frm = {(x+a, y+b) for x, y in control for a, b in ((1,0),(-1,0),(0,1),(0,-1))} - taken
+        frm = {p for p in frm if inside(p, hull)}
+        prev, q = {p: None for p in frm}, deque(sorted(frm, key=near))
+        end = None
+        while q:
+            c = q.popleft()
+            if any((c[0]+a, c[1]+b) in hall for a, b in ((1,0),(-1,0),(0,1),(0,-1))): end = c; break
+            for a, b in ((1,0),(-1,0),(0,1),(0,-1)):
+                n = (c[0]+a, c[1]+b)
+                if n in prev or n in taken or not inside(n, hull) or math.hypot(*n) > SPAN: continue
+                prev[n] = c; q.append(n)
+        assert end, f"{theme} {seed}: no way to mission control"
+        while end is not None: hall.add(end); taken.add(end); end = prev[end]
+
     # The quarters go first and nearest: they are lit before any office, so they cannot be left to
     # whatever floor is spare once a hundred offices have taken theirs.
     for name, w, h in QUARTERS:
-        best = None
+        best, found = None, []
         for c in sorted(hall, key=near):
             for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
                 for ox in range(-w+1, 1):
@@ -149,13 +201,21 @@ def plan(theme, seed, want=100):
                         if any(p in taken for p in cs) or not door(cs): continue
                         if any(not inside(p, hull) for p in cs): continue
                         # Kept together: each one beside what is already placed, once there is any.
-                        pull = min((abs(p[0]-q[0]) + abs(p[1]-q[1]) for p in cs
-                                    for q in [q for v in quarters.values() for q in v]), default=0)
-                        score = (near(c)[0] + 3 * pull, sorted(cs))
+                        living = [q for k, v in quarters.items() if k != "mission" for q in v]
+                        pull = min((abs(p[0]-q[0]) + abs(p[1]-q[1]) for p in cs for q in living), default=0)
+                        mid = (sum(x for x, _ in cs) / len(cs), sum(y for _, y in cs) / len(cs))
+                        score = (math.hypot(*mid) + 4 * pull, sorted(cs))
+                        found.append((score, cs))
                         if best is None or score < best[0]: best = (score, cs)
-            if best is not None and best[0][0] <= near(c)[0] + 1: break
+            if best is not None and near(c)[0] > 9: break
+        if name == "lounge":
+            for score, cs in sorted(found):
+                g = galley(theme, cs, hall, taken | set(cs), hull)
+                if g: best = (score, cs); break
         assert best, f"{theme} {seed}: nowhere for the {name}"
         quarters[name] = best[1]; taken.update(best[1])
+        if name == "lounge":
+            quarters["galley"] = [galley(theme, best[1], hall, taken, hull)]; taken.update(quarters["galley"])
 
     def attach(around, only=None):
         pool = range(len(SHAPES)) if only is None else sorted(only)
