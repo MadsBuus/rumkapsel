@@ -107,6 +107,10 @@ enum DeployTests {
             let listed = "name: 'Ship'\non:\n  push:\n    branches:\n      - main\njobs:\n  go:\n    steps:\n      - run: npx vercel --prod\n"
             expect(Deployments.deploys(onPushTo: "main", workflow: listed), "a list, a deploy tool")
             expect(Deployments.name(ofWorkflow: listed) == "Ship", "quotes taken off")
+            let second = "name: CI Workflow\non:\n    push:\n        branches:\n            - staging\n            - production\njobs:\n  build:\n    steps:\n      - uses: aws-actions/amazon-ecs-deploy-task-definition@v1\n"
+            expect(Deployments.deploys(onPushTo: "production", workflow: second), "a branch further down the list")
+            expect(Deployments.deploys(onPushTo: "staging", workflow: second), "the first branch of the list")
+            expect(!Deployments.deploys(onPushTo: "prod", workflow: second), "not a branch whose name only starts the same")
             let ci = "name: CI\non:\n  push:\n    branches: [main]\njobs:\n  test:\n    steps:\n      - run: npm test  # before deploy\n"
             expect(!Deployments.deploys(onPushTo: "main", workflow: ci), "tests are not a deploy")
             let pr = "name: Preview\non:\n  pull_request:\n    branches: [main]\njobs:\n  d:\n    steps:\n      - run: vercel\n"

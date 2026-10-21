@@ -62,12 +62,14 @@ enum Deployments {
     }
 
     static let deployWords = ["environment:", "serverless deploy", "sls deploy", "flyctl", "vercel", "railway", "heroku", "kubectl",
-                              "helm upgrade", "docker push", "gcloud", "cdk deploy", "netlify deploy", "wrangler deploy", "firebase deploy", "fly deploy"]
+                              "helm upgrade", "docker push", "amazon-ecs-deploy", "gcloud", "cdk deploy", "netlify deploy", "wrangler deploy", "firebase deploy", "fly deploy"]
 
     static func deploys(onPushTo branch: String, workflow text: String) -> Bool {
         let t = text.lowercased()
         let b = NSRegularExpression.escapedPattern(for: branch.lowercased())
-        let onPush = t.contains("push:") && t.range(of: "branches:\\s*\\[?[^\\]\\n]*\\b\(b)\\b", options: .regularExpression) != nil
+        let inline = "branches:\\s*\\[[^\\]]*\\b\(b)\\b"
+        let block = "branches:[ \\t]*(?:\\n[ \\t]*-[^\\n]*)*?\\n[ \\t]*-[ \\t]*['\"]?\(b)['\"]?[ \\t]*(?:#[^\\n]*)?(?:\\n|$)"
+        let onPush = t.contains("push:") && t.range(of: inline + "|" + block, options: .regularExpression) != nil
         return onPush && deployWords.contains { t.contains($0) }
     }
 
