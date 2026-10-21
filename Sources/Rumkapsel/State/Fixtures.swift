@@ -54,6 +54,7 @@ struct MissionControl {
     var boards: (annunciator: Double, flaps: [Double], clock: Double) {
         (Double(x0) + 2, [Double(x0) + 0.4, Double(x0) + 3.6], Double(x0) + 2)
     }
+    static let boardBottom = 0.46, boardTop = 1.06
 }
 
 extension Station {

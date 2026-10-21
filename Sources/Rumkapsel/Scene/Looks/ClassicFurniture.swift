@@ -373,15 +373,17 @@ extension Classic {
             f.fixtures.append(at(ray, mc.table + SIMD2(sin(a), cos(a)) * (MissionControl.tableRadius - 0.04), 0.24 + (MissionControl.holoLift + 0.1) / 2))
         }
         let b = mc.boards
-        f.fixtures.append(at(MissionRoom.screen(1.6, 0.4, Screens.annunciator(repos), at: SCNVector3Zero, bezel: 0.025), SIMD2(b.annunciator, mc.north + 0.05), 0.36))
+        let low = MissionControl.boardBottom, high = MissionControl.boardTop
+        f.fixtures.append(at(MissionRoom.box(4.7, high - low + 0.08, 0.04, lit(p.dark), at: SCNVector3Zero), SIMD2(Double(mc.x0) + 2, mc.north + 0.02), (low + high) / 2))
+        f.fixtures.append(at(MissionRoom.screen(1.6, 0.42, Screens.annunciator(repos), at: SCNVector3Zero, bezel: 0.025), SIMD2(b.annunciator, mc.north + 0.06), low + 0.24))
         for (k, x) in b.flaps.enumerated() {
             let shown = k == 0 ? Array(repos.prefix(3)) : Array(repos.suffix(2))
-            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(shown, launches: k == 0), at: SCNVector3Zero, bezel: 0.02), SIMD2(x, mc.north + 0.05), 0.44))
+            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(shown, launches: k == 0), at: SCNVector3Zero, bezel: 0.02), SIMD2(x, mc.north + 0.06), low + 0.26))
         }
         let clock = SCNNode(geometry: SCNPlane(width: 0.13, height: 0.13))
         let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(); m.emission.contents = Screens.nixieClock(); m.lightingModel = .constant
         clock.geometry!.firstMaterial = m
-        f.fixtures.append(at(clock, SIMD2(b.clock, mc.north + 0.06), 0.64))
+        f.fixtures.append(at(clock, SIMD2(b.clock, mc.north + 0.07), high - 0.08))
         return f
     }
 
