@@ -131,6 +131,10 @@ final class WorkBook {
 
     var onTransition: ((Record, Transition) -> Void)?
 
+    func reset() {
+        records = [:]; byBranch = [:]; byFolder = [:]; byIssue = [:]; byPull = [:]; byCrate = [:]
+    }
+
     func find(repo: String, branch: String) -> Record? { byBranch["\(repo)|\(branch)"].flatMap { records[$0] } }
     func find(repo: String, folder: String) -> Record? { byFolder["\(repo)|\(folder)"].flatMap { records[$0] } }
     func find(repo: String, issue: Int) -> Record? { byIssue["\(repo)#\(issue)"].flatMap { records[$0] } }
