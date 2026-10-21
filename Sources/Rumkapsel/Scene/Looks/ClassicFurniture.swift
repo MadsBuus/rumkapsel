@@ -347,9 +347,10 @@ extension Classic {
         for s in mc.seats {
             let chair = SCNNode()
             let dark = lit(NSColor(rgb: (0.16, 0.17, 0.2)))
-            chair.addChildNode(MissionRoom.box(0.24, 0.03, 0.24, dark, at: v3(0, Minion.seat - 0.015, 0.03), chamfer: 0.01))
-            chair.addChildNode(MissionRoom.box(0.03, Minion.seat - 0.03, 0.03, lit(NSColor(rgb: (0.3, 0.31, 0.35))), at: v3(0, (Minion.seat - 0.03) / 2, 0.03)))
-            chair.addChildNode(MissionRoom.box(0.24, 0.22, 0.03, dark, at: v3(0, Minion.seat + 0.13, 0.17), chamfer: 0.01))
+            let under = Minion.seatReach / 2 + 0.03, depth = Minion.seatReach + 0.07
+            chair.addChildNode(MissionRoom.box(0.24, 0.03, depth, dark, at: v3(0, Minion.seat - 0.015, under), chamfer: 0.01))
+            chair.addChildNode(MissionRoom.box(0.03, Minion.seat - 0.03, 0.03, lit(NSColor(rgb: (0.3, 0.31, 0.35))), at: v3(0, (Minion.seat - 0.03) / 2, under)))
+            chair.addChildNode(MissionRoom.box(0.24, 0.24, 0.03, dark, at: v3(0, Minion.seat + 0.14, under + depth / 2 + 0.015), chamfer: 0.01))
             f.props.append(at(chair, s.at, yaw: s.facing + .pi))
         }
         let table = SCNNode(geometry: faceted(SCNCylinder(radius: MissionControl.tableRadius, height: 0.22), 32))
