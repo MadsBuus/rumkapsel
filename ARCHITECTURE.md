@@ -69,6 +69,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Report.swift` | `Report`, what a source says, and `World.hear`, the one door it comes in by |
 | `Detectors.swift` | `Pace`; `Detector`: one change detector's cadence by pace, heat, `X-Poll-Interval`, ring and failure backoff; `RateGate`: GitHub's rate headers; `FollowUps`: the read 15 s after a change |
 | `GitHubHTTP.swift` | conditional REST reads (ETag) with the `gh` token, behind the rate gate |
+| `Git.swift` | `GitSource`: each checkout's commits ahead, changed files, branch and whether it is pushed, read again when the repository's `.git` changes; the yard counted from git history between trunk, staging and production |
 | `GitWatch.swift` | FSEvents on a repository's `.git`: a commit, a worktree's checkout, remote refs or tags moving; which worktree belongs where |
 | `GitHubDiag.swift`, `GitHubMeter.swift` | `--github-diag` and its counters |
 | `Pipelines.swift` | `Pipeline` and `Ships`: a repository's way to production, detected, from `.github/rumkapsel.json`, or answered in Settings |

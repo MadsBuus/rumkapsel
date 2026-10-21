@@ -351,8 +351,8 @@ extension StationController {
         if let branch = room.branch, let root = room.repoRoot {
             parts.append("⎇ " + branch)
             if let pr = github.pulls.pull(branch: branch, repoRoot: root) { parts.append(pr.summary); parts.append(pr.title) }
-            if let w = room.worktree, let n = github.commitsAhead(worktree: w) { parts.append("\(n) commits") }
-            if let w = room.worktree, github.dirtyFiles(worktree: w) > 0 { parts.append("\(github.dirtyFiles(worktree: w)) files uncommitted") }
+            if let w = room.worktree, let n = github.git.commitsAhead(worktree: w) { parts.append("\(n) commits") }
+            if let w = room.worktree, github.git.dirtyFiles(worktree: w) > 0 { parts.append("\(github.git.dirtyFiles(worktree: w)) files uncommitted") }
         }
         let here = minions.values.filter { $0.station == station.name && $0.place == .room(room.key) && $0.state != .leaving }
         let workspaces = Set(here.map { URL(fileURLWithPath: $0.cwd).lastPathComponent }).sorted()

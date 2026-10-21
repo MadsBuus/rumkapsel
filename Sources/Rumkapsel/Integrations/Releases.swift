@@ -289,7 +289,7 @@ final class ReleaseSource: Intake {
             let began = Date()
             let (pipe, pipelineChanged) = github.readPipeline(repoRoot: repoRoot)
             let (found, foundHotfixes) = read(pipe, repoRoot: repoRoot, github: github)
-            let cargoChanged = github.countCargo(repoRoot: repoRoot, pipe: pipe, releases: found, began: began)
+            let cargoChanged = github.git.count(repoRoot: repoRoot, pipe: pipe, releases: found, began: began)
             lock.lock()
             var heat = false
             if let (before, at) = hotfixes[repoRoot] {

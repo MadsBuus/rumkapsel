@@ -1234,7 +1234,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for station in fleet.stations.values {
                 for room in station.rooms.values {
                     if let b = room.branch, let r = room.repoRoot { github.pulls.refresh(branch: b, repoRoot: r) }
-                    if let w = room.worktree { github.refreshCommits(worktree: w) }
+                    if let w = room.worktree { github.git.refreshCommits(worktree: w) }
                 }
             }
             github.intervalMinutes = ConfigStore.shared.current.githubMinutes
