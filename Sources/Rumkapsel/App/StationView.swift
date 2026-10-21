@@ -211,7 +211,7 @@ extension StationController {
             if let b = r.branch { github.pulls.refresh(branch: b, repoRoot: root) }
             if let w = r.worktree { github.refreshCommits(worktree: w) }
         }
-        github.refreshReleases(repoRoot: root)
+        github.releases.refresh(repoRoot: root)
         logEvent("asking github about \(m.home.repo)…")
         m.node.runAction(.sequence([.moveBy(x: 0, y: 0.25, z: 0, duration: 0.12), .moveBy(x: 0, y: -0.25, z: 0, duration: 0.12)]))
     }

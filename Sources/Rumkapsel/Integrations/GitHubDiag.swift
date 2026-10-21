@@ -27,7 +27,7 @@ enum GitHubDiag {
             if let p = cfg.project { github.board.refresh(owner: p.owner, number: p.number) }
             github.watch(Dictionary(uniqueKeysWithValues: roots.map { ($0, true) }), board: cfg.project.map { ($0.owner, $0.number) })
             for root in roots {
-                github.refreshReleases(repoRoot: root)
+                github.releases.refresh(repoRoot: root)
                 let p = github.pipeline(repoRoot: root)
                 say("\(root): \(p.trunk) · ships on \(p.ship) · \(p.source): \(p.why)"
                     + (github.cargo(repoRoot: root).map { " · storage \($0.storageNumbers) deck \($0.deckNumbers)" } ?? ""))

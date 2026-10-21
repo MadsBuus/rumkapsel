@@ -116,8 +116,6 @@ final class GitHubResolver {
     struct ProjectKnowledge: Codable { var owner: String; var number: Int; var items: [ProjectItem]; var at: Date }
     func projectKnowledge(owner: String, number: Int) -> ProjectKnowledge? { board.knowledge(owner: owner, number: number) }
 
-    private var releases: [String: ([ReleasePR], Date)] = [:]
-    private var hotfixes: [String: ([ReleasePR], Date)] = [:]
     struct Cargo: Equatable {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
@@ -323,31 +321,9 @@ final class GitHubResolver {
         saveBoard()
     }
 
-    private var pendingLaunches: [(repoRoot: String, pr: ReleasePR)] = []
-    private var pendingHotfixes: [(repoRoot: String, pr: ReleasePR)] = []
     private let http = GitHubHTTP(token: GitHubHTTP.ghToken)
     private var askedWho = false
     private var me: String? = ConfigStore.shared.current.viewerLogin
-
-    func openReleases(repoRoot: String) -> [ReleasePR]? {
-        lock.lock(); defer { lock.unlock() }
-        return releases[repoRoot]?.0.filter { $0.state == "OPEN" }
-    }
-
-    func releases(repoRoot: String) -> [ReleasePR]? {
-        lock.lock(); defer { lock.unlock() }
-        return releases[repoRoot]?.0
-    }
-
-    func hotfixes(repoRoot: String) -> [ReleasePR]? {
-        lock.lock(); defer { lock.unlock() }
-        return hotfixes[repoRoot]?.0
-    }
-
-    func takeHotfixLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
-        lock.lock(); defer { lock.unlock() }
-        let out = pendingHotfixes; pendingHotfixes = []; return out
-    }
 
     static func tags(repoRoot: String, run: ([String], String) -> Data?) -> [(name: String, at: Date)] {
         _ = run(["git", "fetch", "-q", "--tags", "origin"], repoRoot)
@@ -399,13 +375,6 @@ final class GitHubResolver {
         return String(ref.dropFirst(7))
     }
 
-    func hasPendingLaunch(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pendingLaunches.contains { $0.repoRoot == repoRoot } }
-
-    func takeLaunches() -> [(repoRoot: String, pr: ReleasePR)] {
-        lock.lock(); defer { lock.unlock() }
-        let out = pendingLaunches; pendingLaunches = []; return out
-    }
-
     private var rerun = Set<String>()
 
     private func staleLocked(_ flight: String) { if inFlight.contains(flight) { rerun.insert(flight) } }
@@ -416,19 +385,11 @@ final class GitHubResolver {
         return rerun.remove(flight) != nil
     }
 
-    func refetchReleases(_ repoRoot: String) {
-        lock.lock()
-        if let r = releases[repoRoot] { releases[repoRoot] = (r.0, .distantPast) }
-        staleLocked("r:" + repoRoot)
-        lock.unlock()
-        refreshReleases(repoRoot: repoRoot)
-    }
-
     func myLogin() -> String? { lock.lock(); defer { lock.unlock() }; return me }
 
     func isBusy(repoRoot: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix("c:" + repoRoot) } || pulls.isBusy(repoRoot: repoRoot)
+        return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix("c:" + repoRoot) } || pulls.isBusy(repoRoot: repoRoot) || releases.isBusy(repoRoot: repoRoot)
     }
     func askWho() {
         lock.lock(); let who = !askedWho; askedWho = true; lock.unlock()
@@ -452,6 +413,7 @@ final class GitHubResolver {
         watch.add { [weak d] in d?.checks() ?? [] }
         return d
     }()
+    private(set) lazy var releases = ReleaseSource(github: self)
     private(set) lazy var pulls: PullSource = {
         let p = PullSource(github: self)
         watch.add { [weak p] in p?.checks() ?? [] }
@@ -532,10 +494,9 @@ final class GitHubResolver {
 
     func invalidate(repoRoot: String) {
         lock.lock(); defer { lock.unlock() }
-        let old = Date.distantPast
         ringLocked(repoRoot: repoRoot)
-        if let r = releases[repoRoot] { releases[repoRoot] = (r.0, old) }
         pulls.invalidate(repoRoot: repoRoot)
+        releases.invalidate(repoRoot: repoRoot)
     }
 
     func invalidate() {
@@ -544,199 +505,146 @@ final class GitHubResolver {
         ringLocked(repoRoot: nil)
         pulls.invalidate(repoRoot: nil)
         commits = commits.mapValues { ($0.0, old) }
-        releases = releases.mapValues { ($0.0, old) }
+        releases.invalidate(repoRoot: nil)
     }
 
-    func refreshReleases(repoRoot: String) {
-        if frozen { return }
-        lock.lock()
-        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < interval { lock.unlock(); return }
-        if inFlight.contains("r:" + repoRoot) { lock.unlock(); return }
-        inFlight.insert("r:" + repoRoot)
-        lock.unlock()
-        trace("ask releases \(repoRoot)")
-        queue.async { [self] in
-            let countBegan = Date()
-            var found: [ReleasePR] = []
-            let remote = Discovery.githubRemote(repoRoot) || nameWithOwner(repoRoot: repoRoot) != nil
-            if remote { http.askToken() }
-            var remoteBranches = Set<String>()
-            if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
-                for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
-            }
-            remoteBranches.remove("HEAD")
-            lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; if !remote { branchesOnGitHub[repoRoot] = nil }; lock.unlock()
-            var settled: Pipeline?
-            if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.remote == remote {
-                settled = cached
-            } else if !remote {
-                var local = Set<String>()
-                if let out = run(["git", "branch", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
-                    for line in text.split(separator: "\n") { local.insert(line.trimmingCharacters(in: .whitespaces)) }
-                }
-                settled = PipelineDetection.detect(branches: local, merges: [], file: nil, remote: false)
-                lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock()
-            } else {
-                var merges: [PipelineDetection.Merge] = []
-                var answered = false
-                if let out = run(["gh", "pr", "list", "--state", "merged", "--limit", "100", "--json", "baseRefName,headRefName"], cwd: repoRoot),
-                   let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                    answered = true
-                    merges = arr.compactMap { o in
-                        guard let b = o["baseRefName"] as? String, let h = o["headRefName"] as? String else { return nil }
-                        return PipelineDetection.Merge(base: b, head: h)
-                    }
-                }
-                let asked = runReporting(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
-                let file = asked.data.flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
-                let fileFailed = asked.data == nil && !asked.err.contains("404")
-                let named = defaultBranch(repoRoot)
-                let probe = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered)
-                var deploys = false, tagged = false
-                if file?.ship == nil, probe.production.isEmpty || probe.source == "branches" {
-                    deploys = workflowsDeploy(onPushTo: probe.trunk, repoRoot: repoRoot)
-                    tagged = !deploys && PipelineDetection.tagged(GitHubResolver.tags(repoRoot: repoRoot, run: run), now: Date())
-                }
-                let read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered,
-                                                    deploysOnPush: deploys, tagged: tagged)
-                if let out = run(["git", "ls-remote", "--heads", "origin"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
-                    let heads = Set(text.split(separator: "\n").compactMap { $0.split(separator: "\t").last.map(String.init) }
-                        .filter { $0.hasPrefix("refs/heads/") }.map { String($0.dropFirst(11)) })
-                    lock.lock(); branchesOnGitHub[repoRoot] = heads; lock.unlock()
-                }
-                let failed = !answered || fileFailed
-                settled = PipelineDetection.settle(cached: cached, read: read, failed: failed)
-                if !failed { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
-            }
-            let detected = settled ?? .unread
-            let pipe = detected.overridden(by: Pipeline.override(forRoot: repoRoot))
-            let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
-            var foundHotfixes: [ReleasePR] = []
-            let bases = pipe.remote ? [stagingBranch, productionBranch].filter { !$0.isEmpty } : []
-            func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
-            for base in bases {
-                guard let out = run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
-                                     "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
-                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
-                for o in arr {
-                    let head = o["headRefName"] as? String ?? ""
-                    let hotfix = base == productionBranch && !isReleaseHead(head)
-                    guard isReleaseHead(head) || hotfix else { continue }
-                    let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
-                    var pr = ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
-                                       head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
-                                       mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
-                                       production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch)
-                    pr.hotfix = hotfix
-                    if hotfix { foundHotfixes.append(pr) } else { found.append(pr) }
-                }
-            }
-            if pipe.shipsOnTag, let newest = GitHubResolver.tags(repoRoot: repoRoot, run: run).first {
-                lock.lock(); let owner = owners[repoRoot]; lock.unlock()
-                let url = owner.map { "https://github.com/\($0)/releases/tag/\(newest.name)" } ?? ""
-                found.append(ReleasePR(number: 0, title: newest.name, base: trunk, head: newest.name, state: "MERGED",
-                                       url: url, labels: [], mergedAt: newest.at, production: true, staging: false, tag: true))
-            }
-            let iso = ISO8601DateFormatter()
-            let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
-            let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
-            var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
-            let hasPipeline = (!bases.isEmpty && (lastStaging != nil || lastProduction != nil)) || pipe.shipsOnTag
-            let floor = Date().addingTimeInterval(-30 * 24 * 3600)
-            func prNumbers(_ range: String) -> [Int]? {
-                guard let out = run(["git", "log", "--format=%s", "--no-merges", "--max-count=300", range], cwd: repoRoot),
-                      let text = String(data: out, encoding: .utf8) else { return nil }
-                var found: [Int] = []
-                for line in text.split(separator: "\n") {
-                    if let m = line.firstMatch(of: #/\(#(\d+)\)\s*$/#), let n = Int(m.1) { found.append(n) }
-                }
-                if let out = run(["git", "log", "--format=%s", "--merges", "--max-count=300", range], cwd: repoRoot), let t = String(data: out, encoding: .utf8) {
-                    for line in t.split(separator: "\n") {
-                        if let m = line.firstMatch(of: #/Merge pull request #(\d+)/#), let n = Int(m.1) { found.append(n) }
-                    }
-                }
-                return Array(Set(found)).sorted(by: >)
-            }
-            var exact = false
-            if hasPipeline, !stagingBranch.isEmpty, !productionBranch.isEmpty {
-                _ = run(["git", "fetch", "-q", "origin", trunk, stagingBranch, productionBranch], cwd: repoRoot)
-                if let deck = prNumbers("origin/\(productionBranch)..origin/\(stagingBranch)"),
-                   let storage = prNumbers("origin/\(stagingBranch)..origin/\(trunk)") {
-                    let releaseNumbers = Set(found.map(\.number))
-                    newCargo.deckNumbers = deck.filter { !releaseNumbers.contains($0) }
-                    newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
-                    newCargo.deck = newCargo.deckNumbers.count
-                    newCargo.storage = newCargo.storageNumbers.count
-                    exact = true
-                }
-            }
-            if hasPipeline, !exact, pipe.shipsOnTag, let tag = found.first(where: \.tag)?.head {
-                _ = run(["git", "fetch", "-q", "origin", trunk], cwd: repoRoot)
-                if let storage = prNumbers("\(tag)..origin/\(trunk)") {
-                    newCargo.storageNumbers = storage
-                    newCargo.storage = storage.count
-                    exact = true
-                }
-            }
-            if hasPipeline, !exact, stagingBranch.isEmpty, !productionBranch.isEmpty {
-                _ = run(["git", "fetch", "-q", "origin", trunk, productionBranch], cwd: repoRoot)
-                if let storage = prNumbers("origin/\(productionBranch)..origin/\(trunk)") {
-                    let releaseNumbers = Set(found.map(\.number))
-                    newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
-                    newCargo.storage = newCargo.storageNumbers.count
-                    exact = true
-                }
-            }
-            var merged: [Int: String] = [:]
-            if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", trunk, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
-               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                for o in arr {
-                    guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
-                    if let login = (o["author"] as? [String: Any])?["login"] as? String { merged[n] = login }
-                    if m < floor { continue }
-                    if let lp = lastProduction, m <= lp { continue }
-                    if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
-                    else { newCargo.deck += 1; newCargo.deckNumbers.append(n) }
-                }
-            }
-            lock.lock()
-            if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
-                for (n, login) in merged { note(repo: repo, number: n, author: login) }
-            }
-            let previous = releases[repoRoot]?.0 ?? []
-            for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
-                pendingLaunches.append((repoRoot, pr))
-                tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
-            }
-            if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
-                pendingLaunches.append((repoRoot, tag))
-            }
-            if let (before, at) = hotfixes[repoRoot] {
-                for pr in foundHotfixes where pr.state == "MERGED" {
-                    let was = before.first { $0.number == pr.number }
-                    guard was?.state == "OPEN" || (was == nil && (pr.mergedAt ?? .distantPast) > at) else { continue }
-                    pendingHotfixes.append((repoRoot, pr))
-                    tuneLocked(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) }
-                }
-            }
-            let hotfixesChanged = hotfixes[repoRoot]?.0 != foundHotfixes
-            hotfixes[repoRoot] = (foundHotfixes, Date())
-            let pipelineChanged = settled.map { pipelines[repoRoot] != $0 } ?? (pipelines[repoRoot] != nil)
-            let changed = previous != found || hotfixesChanged || cargo[repoRoot] != newCargo || pipelineChanged
-            pipelines[repoRoot] = settled
-            newCargo.exact = exact
-            newCargo.at = countBegan
-            cargo[repoRoot] = newCargo
-            releases[repoRoot] = (found, Date())
-            inFlight.remove("r:" + repoRoot)
-            let again = rerun.remove("r:" + repoRoot) != nil
-            lock.unlock()
-            if again { refetchReleases(repoRoot) }
-            if pipelineChanged {
-                trace("pipeline \(repoRoot): \(pipe.trunk) → \(pipe.staging.isEmpty ? "-" : pipe.staging) → \(pipe.production.isEmpty ? "-" : pipe.production) · \(pipe.source): \(pipe.why)")
-            }
-            if changed { DispatchQueue.main.async { self.onUpdate?() } }
+    func readPipeline(repoRoot: String) -> (pipe: Pipeline, changed: Bool) {
+        let remote = Discovery.githubRemote(repoRoot) || nameWithOwner(repoRoot: repoRoot) != nil
+        if remote { http.askToken() }
+        var remoteBranches = Set<String>()
+        if let out = run(["git", "branch", "-r", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+            for line in text.split(separator: "\n") { remoteBranches.insert(line.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "origin/", with: "")) }
         }
+        remoteBranches.remove("HEAD")
+        lock.lock(); let cached = pipelines[repoRoot]; let checked = pipelineCheckedAt[repoRoot]; if !remote { branchesOnGitHub[repoRoot] = nil }; lock.unlock()
+        var settled: Pipeline?
+        if let cached, let checked, Date().timeIntervalSince(checked) < 3600, cached.remote == remote {
+            settled = cached
+        } else if !remote {
+            var local = Set<String>()
+            if let out = run(["git", "branch", "--format=%(refname:short)"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+                for line in text.split(separator: "\n") { local.insert(line.trimmingCharacters(in: .whitespaces)) }
+            }
+            settled = PipelineDetection.detect(branches: local, merges: [], file: nil, remote: false)
+            lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock()
+        } else {
+            var merges: [PipelineDetection.Merge] = []
+            var answered = false
+            if let out = run(["gh", "pr", "list", "--state", "merged", "--limit", "100", "--json", "baseRefName,headRefName"], cwd: repoRoot),
+               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+                answered = true
+                merges = arr.compactMap { o in
+                    guard let b = o["baseRefName"] as? String, let h = o["headRefName"] as? String else { return nil }
+                    return PipelineDetection.Merge(base: b, head: h)
+                }
+            }
+            let asked = runReporting(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
+            let file = asked.data.flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
+            let fileFailed = asked.data == nil && !asked.err.contains("404")
+            let named = defaultBranch(repoRoot)
+            let probe = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered)
+            var deploys = false, tagged = false
+            if file?.ship == nil, probe.production.isEmpty || probe.source == "branches" {
+                deploys = workflowsDeploy(onPushTo: probe.trunk, repoRoot: repoRoot)
+                tagged = !deploys && PipelineDetection.tagged(GitHubResolver.tags(repoRoot: repoRoot, run: run), now: Date())
+            }
+            let read = PipelineDetection.detect(branches: remoteBranches, merges: merges, file: file, defaultBranch: named, history: answered,
+                                                deploysOnPush: deploys, tagged: tagged)
+            if let out = run(["git", "ls-remote", "--heads", "origin"], cwd: repoRoot), let text = String(data: out, encoding: .utf8) {
+                let heads = Set(text.split(separator: "\n").compactMap { $0.split(separator: "\t").last.map(String.init) }
+                    .filter { $0.hasPrefix("refs/heads/") }.map { String($0.dropFirst(11)) })
+                lock.lock(); branchesOnGitHub[repoRoot] = heads; lock.unlock()
+            }
+            let failed = !answered || fileFailed
+            settled = PipelineDetection.settle(cached: cached, read: read, failed: failed)
+            if !failed { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
+        }
+        let pipe = (settled ?? .unread).overridden(by: Pipeline.override(forRoot: repoRoot))
+        lock.lock()
+        let changed = settled.map { pipelines[repoRoot] != $0 } ?? (pipelines[repoRoot] != nil)
+        pipelines[repoRoot] = settled
+        lock.unlock()
+        if changed {
+            trace("pipeline \(repoRoot): \(pipe.trunk) → \(pipe.staging.isEmpty ? "-" : pipe.staging) → \(pipe.production.isEmpty ? "-" : pipe.production) · \(pipe.source): \(pipe.why)")
+        }
+        return (pipe, changed)
+    }
+
+    func countCargo(repoRoot: String, pipe: Pipeline, releases found: [ReleasePR], began: Date) -> Bool {
+        let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
+        let bases = pipe.remote ? [stagingBranch, productionBranch].filter { !$0.isEmpty } : []
+        let iso = ISO8601DateFormatter()
+        let lastStaging = found.filter { $0.base == stagingBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+        let lastProduction = found.filter { $0.base == productionBranch && $0.state == "MERGED" }.compactMap(\.mergedAt).max()
+        var newCargo = Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
+        let hasPipeline = (!bases.isEmpty && (lastStaging != nil || lastProduction != nil)) || pipe.shipsOnTag
+        let floor = Date().addingTimeInterval(-30 * 24 * 3600)
+        func prNumbers(_ range: String) -> [Int]? {
+            guard let out = run(["git", "log", "--format=%s", "--no-merges", "--max-count=300", range], cwd: repoRoot),
+                  let text = String(data: out, encoding: .utf8) else { return nil }
+            var found: [Int] = []
+            for line in text.split(separator: "\n") {
+                if let m = line.firstMatch(of: #/\(#(\d+)\)\s*$/#), let n = Int(m.1) { found.append(n) }
+            }
+            if let out = run(["git", "log", "--format=%s", "--merges", "--max-count=300", range], cwd: repoRoot), let t = String(data: out, encoding: .utf8) {
+                for line in t.split(separator: "\n") {
+                    if let m = line.firstMatch(of: #/Merge pull request #(\d+)/#), let n = Int(m.1) { found.append(n) }
+                }
+            }
+            return Array(Set(found)).sorted(by: >)
+        }
+        var exact = false
+        if hasPipeline, !stagingBranch.isEmpty, !productionBranch.isEmpty {
+            _ = run(["git", "fetch", "-q", "origin", trunk, stagingBranch, productionBranch], cwd: repoRoot)
+            if let deck = prNumbers("origin/\(productionBranch)..origin/\(stagingBranch)"),
+               let storage = prNumbers("origin/\(stagingBranch)..origin/\(trunk)") {
+                let releaseNumbers = Set(found.map(\.number))
+                newCargo.deckNumbers = deck.filter { !releaseNumbers.contains($0) }
+                newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
+                newCargo.deck = newCargo.deckNumbers.count
+                newCargo.storage = newCargo.storageNumbers.count
+                exact = true
+            }
+        }
+        if hasPipeline, !exact, pipe.shipsOnTag, let tag = found.first(where: \.tag)?.head {
+            _ = run(["git", "fetch", "-q", "origin", trunk], cwd: repoRoot)
+            if let storage = prNumbers("\(tag)..origin/\(trunk)") {
+                newCargo.storageNumbers = storage
+                newCargo.storage = storage.count
+                exact = true
+            }
+        }
+        if hasPipeline, !exact, stagingBranch.isEmpty, !productionBranch.isEmpty {
+            _ = run(["git", "fetch", "-q", "origin", trunk, productionBranch], cwd: repoRoot)
+            if let storage = prNumbers("origin/\(productionBranch)..origin/\(trunk)") {
+                let releaseNumbers = Set(found.map(\.number))
+                newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
+                newCargo.storage = newCargo.storageNumbers.count
+                exact = true
+            }
+        }
+        var merged: [Int: String] = [:]
+        if hasPipeline, !exact, let out = run(["gh", "pr", "list", "--base", trunk, "--state", "merged", "--limit", "80", "--json", "number,mergedAt,author"], cwd: repoRoot),
+           let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
+            for o in arr {
+                guard let m = (o["mergedAt"] as? String).flatMap(iso.date(from:)), let n = o["number"] as? Int else { continue }
+                if let login = (o["author"] as? [String: Any])?["login"] as? String { merged[n] = login }
+                if m < floor { continue }
+                if let lp = lastProduction, m <= lp { continue }
+                if stagingBranch.isEmpty || lastStaging == nil || m > lastStaging! { newCargo.storage += 1; newCargo.storageNumbers.append(n) }
+                else { newCargo.deck += 1; newCargo.deckNumbers.append(n) }
+            }
+        }
+        lock.lock()
+        if let repo = owners[repoRoot].map({ String($0.split(separator: "/").last ?? "") }) {
+            for (n, login) in merged { note(repo: repo, number: n, author: login) }
+        }
+        let changed = cargo[repoRoot] != newCargo
+        newCargo.exact = exact
+        newCargo.at = began
+        cargo[repoRoot] = newCargo
+        lock.unlock()
+        return changed
     }
 
     private let queue = DispatchQueue(label: "rumkapsel.github", qos: .utility, attributes: .concurrent)
@@ -852,11 +760,12 @@ extension GitHubResolver {
     func simulationReset() {
         guard frozen else { return }
         lock.lock()
-        releases = [:]; cargo = [:]; commits = [:]; pipelines = [:]
+        cargo = [:]; commits = [:]; pipelines = [:]
         pushed = [:]; dirty = [:]; owners = [:]
-        pendingLaunches = []; me = nil
+        me = nil
         lock.unlock()
         pulls.reset()
+        releases.reset()
         board.reset()
     }
 
@@ -907,19 +816,13 @@ extension GitHubResolver {
 
     func inject(releases rs: [ReleasePR], for repoRoot: String, merged: [ReleasePR] = []) {
         guard frozen else { return }
-        lock.lock()
-        releases[repoRoot] = (rs, Date())
-        for pr in merged { pendingLaunches.append((repoRoot, pr)) }
-        lock.unlock()
+        releases.inject(releases: rs, for: repoRoot, merged: merged)
         notify()
     }
 
     func inject(hotfixes hs: [ReleasePR], for repoRoot: String, merged: [ReleasePR] = []) {
         guard frozen else { return }
-        lock.lock()
-        hotfixes[repoRoot] = (hs, Date())
-        for pr in merged { pendingHotfixes.append((repoRoot, pr)) }
-        lock.unlock()
+        releases.inject(hotfixes: hs, for: repoRoot, merged: merged)
         notify()
     }
 

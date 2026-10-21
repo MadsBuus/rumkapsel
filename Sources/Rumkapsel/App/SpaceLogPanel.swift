@@ -6,7 +6,7 @@ extension StationController {
 
     func spaceLogFacts() -> SpaceLog.Facts {
         let repos = world.repoRoots.sorted { $0.value.repo < $1.value.repo }.map { root, info in
-            SpaceLog.Repo(name: info.repo, feed: github.pulls.feed(repoRoot: root) ?? [], releases: (github.releases(repoRoot: root) ?? []) + (github.hotfixes(repoRoot: root) ?? []))
+            SpaceLog.Repo(name: info.repo, feed: github.pulls.feed(repoRoot: root) ?? [], releases: (github.releases.all(repoRoot: root) ?? []) + (github.releases.hotfixes(repoRoot: root) ?? []))
         }
         let config = ConfigStore.shared.current
         var titles: [String: [Int: String]] = [:]
