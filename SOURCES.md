@@ -70,14 +70,26 @@ Each stage is a green PR with nothing different on screen.
 2. **The resolver split**, one source per PR: Board, Pull requests, Releases and Git, all done. Each takes its reads,
    cache, saved copy and detector out of `GitHubResolver` and says its reports, and the deciding that
    World does on them stays in World.
-3. **Transcripts and Neighbours** as sources.
+3. **Events, not passes.** Today any answer that changes anything runs one pass over every source,
+   repository and room, diffs it into events, and rebuilds the markers or the floor; sessions are read
+   on a 5 s timer; neighbours send whole snapshots. The target is the way networked games and video
+   streams work: small, fast **deltas** (the "what just happened" reports, each with an identity so a
+   repeat or a late one does nothing) that every station plays, and now and then a **keyframe** (the
+   "what is so now" reports) that corrects whatever drifted. In order:
+   1. Measure: how often the pass and the session read run and how long they take (`timing` lines in
+      `station.log`, once a minute).
+   2. Sessions on file events: the transcript folders watched, each session reported as it changes.
+   3. The busiest GitHub events handled where they land, each taken out of the pass: pull request
+      changes, checks and reviews, board moves, yard counts, checkouts. The pass shrinks to the keyframe.
+   4. Neighbours relay reports: a keyframe when they join, deltas after.
 4. **A registry.** Which sources a repository uses is declared (for example board or git counts), and a
    new source is one file plus one registration. Each source says what it needs to connect and how to
    check it is connected.
 5. **Setup and connecting** (below), after mission control's room. Mission control's monitors (Sentry
    first) are the proof that a new source is one file.
 
-Done when `World` reads no source except through `hear`, and `GitHub.swift` holds only shared plumbing.
+Done when the station reacts to reports as they land, the pass has shrunk to the occasional keyframe, and a
+new source is one file plus one registration.
 
 ## Connecting
 

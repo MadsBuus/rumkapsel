@@ -150,6 +150,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         pendingLock.lock(); let work = pending; pending.removeAll(); pendingLock.unlock()
         timed("handoff") { for w in work { w() } }
         let now = CACurrentMediaTime()
+        writeTally(now)
         guard Trace.frames else {
             if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
             return
@@ -182,10 +183,32 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var tileCacheLook: Theme = Looks.theme
 
     @discardableResult func timed<T>(_ name: String, _ body: () -> T) -> T {
-        guard Trace.frames else { return body() }
         let t0 = CACurrentMediaTime()
-        defer { phases.append((name, CACurrentMediaTime() - t0)) }
+        defer {
+            let spent = CACurrentMediaTime() - t0
+            tallied(name, spent)
+            if Trace.frames { phases.append((name, spent)) }
+        }
         return body()
+    }
+
+    private func tallied(_ name: String, _ spent: Double) {
+        var t = tally[name] ?? (0, 0, 0)
+        t.count += 1; t.total += spent; t.worst = max(t.worst, spent)
+        tally[name] = t
+    }
+
+    private var tally: [String: (count: Int, total: Double, worst: Double)] = [:]
+    private var tallySince = CACurrentMediaTime()
+
+    private func writeTally(_ now: TimeInterval) {
+        guard now - tallySince >= 60 else { return }
+        tallySince = now
+        let line = tally.filter { $0.value.worst > 0.001 }.sorted { $0.value.total > $1.value.total }
+            .map { String(format: "%@ %d× avg %.1fms max %.0fms", $0.key, $0.value.count, $0.value.total / Double($0.value.count) * 1000, $0.value.worst * 1000) }
+            .joined(separator: " · ")
+        tally = [:]
+        if sim == nil, !line.isEmpty { StationLog.write("timing", line) }
     }
 
     let view: StationView
@@ -597,8 +620,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         pendingLock.unlock()
         scanQueue.async { [scanner] in
             self.pendingLock.lock(); self.scanQueued = false; self.pendingLock.unlock()
+            let t0 = CACurrentMediaTime()
             let result = scanner.scan(roomsWithin: StationController.scanWindow)
-            self.enqueue { self.apply(result) }
+            let spent = CACurrentMediaTime() - t0
+            self.enqueue { self.tallied("transcripts", spent); self.apply(result) }
         }
     }
 
