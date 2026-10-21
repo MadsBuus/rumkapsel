@@ -179,14 +179,14 @@ final class World {
 
     func localState(_ room: Room) -> (local: Bool, commits: Int) {
         guard room.key.hasPrefix("task:"), let w = room.worktree else { return (false, 0) }
-        var pushed = github.branchPushed(worktree: w) ?? true
+        var pushed = github.git.branchPushed(worktree: w) ?? true
         if let b = room.branch, let r = room.repoRoot, github.pulls.pull(branch: b, repoRoot: r) != nil { pushed = true }
-        return (!pushed, github.commitsAhead(worktree: w) ?? 0)
+        return (!pushed, github.git.commitsAhead(worktree: w) ?? 0)
     }
 
     func cubes(_ room: Room) -> Int? {
         guard room.key.hasPrefix("task:"), let w = room.worktree else { return 0 }
-        return github.commitsAhead(worktree: w).map { min(16, Int(pow(Double($0), 0.7).rounded(.up))) }
+        return github.git.commitsAhead(worktree: w).map { min(16, Int(pow(Double($0), 0.7).rounded(.up))) }
     }
 
     func checksFailing(_ room: Room) -> Bool {
@@ -359,8 +359,8 @@ final class World {
                 let stationName = Fleet.stationName(for: s.cwd, owner: s.owner, repo: s.repo)
                 let station = fleet.station(stationName)
                 if let branch = s.branch, now.timeIntervalSince(s.lastModified) > 600 {
-                    github.refreshCommits(worktree: s.cwd)
-                    if let current = github.currentBranch(worktree: s.cwd), current != branch { continue }
+                    github.git.refreshCommits(worktree: s.cwd)
+                    if let current = github.git.currentBranch(worktree: s.cwd), current != branch { continue }
                 }
                 let home = homeFor(deciders[s.cwd] ?? s, station: stationName)
                 sessionRooms.insert("\(stationName)|\(home.key)")
@@ -394,7 +394,7 @@ final class World {
                     room.worktree = s.cwd
                     if home.key.hasPrefix("task:") { room.branch = s.branch; room.repoRoot = s.repoRoot }
                     if let b = room.branch, let r = room.repoRoot { github.pulls.refresh(branch: b, repoRoot: r) }
-                    if let w = room.worktree { github.refreshCommits(worktree: w) }
+                    if let w = room.worktree { github.git.refreshCommits(worktree: w) }
                 }
             }
             for station in fleet.stations.values {
@@ -425,8 +425,8 @@ final class World {
                     let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
                     var gone = room.worktree.map { !Workspaces.isOpen($0) } ?? false
                     if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
-                        github.refreshCommits(worktree: w)
-                        if let current = github.currentBranch(worktree: w), current != branch { gone = true }
+                        github.git.refreshCommits(worktree: w)
+                        if let current = github.git.currentBranch(worktree: w), current != branch { gone = true }
                     }
                     let closed = state == "CLOSED" && !merged
                     if closed, closedAt[key] == nil {

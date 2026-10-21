@@ -77,7 +77,7 @@ extension Simulation {
             return OfficeMarks(count: min(16, max(1, boxes.count)), pull: pr, package: number != nil || closed ? package(st, room) : nil)
         }
         let local = world.localState(room)
-        let dirty = room.worktree.map { world.github.dirtyFiles(worktree: $0) } ?? 0
+        let dirty = room.worktree.map { world.github.git.dirtyFiles(worktree: $0) } ?? 0
         guard local.commits > 0 || dirty > 0, !crateLeft(st, room) else { return nil }
         let pr = room.repoRoot.flatMap { world.github.pulls.pull(branch: branch, repoRoot: $0) }
         return OfficeMarks(count: world.cubes(room) ?? 0, ghosts: min(8, Int(pow(Double(dirty), 0.6).rounded(.up))), pull: pr, package: pr != nil ? package(st, room) : nil)
