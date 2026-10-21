@@ -587,8 +587,11 @@ final class Simulation<B: Body> {
     }
 
     @discardableResult
-    func takeTurnInMission(_ m: B, station: Station) -> Bool {
-        guard let ref = freeAnchors(m, station: station, in: "kind:mission").randomElement() else { return false }
+    func takeTurnInMission(_ m: B, station: Station, seated: Bool? = nil) -> Bool {
+        let free = freeAnchors(m, station: station, in: "kind:mission").filter { ref in
+            seated.map { ($0 && station.place(ref)?.use != .stand) || (!$0 && station.place(ref)?.use == .stand) } ?? true
+        }
+        guard let ref = free.randomElement() else { return false }
         return use(m, ref, station: station, seconds: Double.random(in: 180...420))
     }
 
