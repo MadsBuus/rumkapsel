@@ -104,7 +104,9 @@ final class TranscriptScanner {
                     result.reads.append((path, spent))
                     cache[path] = (mtime, parsed)
                 }
-                guard let seen = parsed.cwd else { continue }
+                let isSub = url.deletingLastPathComponent() != project
+                let launchedIn = launchFolder(of: isSub ? project.appendingPathComponent(url.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent + ".jsonl") : url)
+                guard let seen = launchedIn.flatMap({ repoInfo(for: checkout(of: $0)).root != nil ? $0 : nil }) ?? parsed.cwd else { continue }
                 var t = clock()
                 let cwd = checkout(of: seen)
                 let repo = repoInfo(for: cwd)
@@ -113,7 +115,6 @@ final class TranscriptScanner {
                 t = clock()
                 let isOpen = Workspaces.isOpen(cwd)
                 open += clock() - t
-                let isSub = url.deletingLastPathComponent() != project
                 result.sessions.append(SessionInfo(
                     id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, owner: owner, lastModified: mtime, activity: parsed.activity, area: parsed.area,
                     title: parsed.title, branch: parsed.branch, toolCount: parsed.toolCount, isSubagent: isSub,
@@ -126,6 +127,20 @@ final class TranscriptScanner {
         result.parts = ["transcripts.list": max(0, total - parse - place - open), "transcripts.parse": parse,
                         "transcripts.place": place, "transcripts.workspaces": open]
         return result
+    }
+
+    private var launchCache: [String: String] = [:]
+    private func launchFolder(of url: URL) -> String? {
+        if let hit = launchCache[url.path] { return hit }
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? fh.close() }
+        guard let head = try? fh.read(upToCount: 256 * 1024) else { return nil }
+        for line in head.split(separator: UInt8(ascii: "\n")) {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], let cwd = obj["cwd"] as? String else { continue }
+            launchCache[url.path] = cwd
+            return cwd
+        }
+        return nil
     }
 
     private var checkoutCache: [String: String] = [:]
