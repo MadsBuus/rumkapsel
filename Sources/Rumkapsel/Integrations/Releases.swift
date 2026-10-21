@@ -215,7 +215,7 @@ extension World {
                 works.report(r, .shipped, by: .board, at: now)
             }
         }
-        guard c.exact || c.source == .board, feed.swept.insert(repo).inserted else { return }
+        guard c.exact || c.source == .board, feed.swept.insert(repo + "|" + c.source.rawValue).inserted else { return }
         let held = works.records(repo: repo).compactMap { r -> Int? in
             let inYard = r.stage.map { $0 >= .stored && $0 < .shipped } ?? false
             return inYard || r.pulls.keys.contains(where: listed.contains) ? r.number : nil

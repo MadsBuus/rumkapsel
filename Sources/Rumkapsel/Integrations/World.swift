@@ -165,6 +165,7 @@ final class World {
         crewBoxes = [:]
         scans = 0
         afresh = true
+        feed.swept = []
     }
 
     private var afresh = false
