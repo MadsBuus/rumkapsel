@@ -217,7 +217,7 @@ extension StationController {
     }
 
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
-        let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { !world.isNeighbours(st, $0) } }
+        let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { world.isOurs(st, $0) } }
         let repos = Set(ours.compactMap(\.repo)).filter { !$0.isEmpty }
             .sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
         let showTitles = ConfigStore.shared.current.showTitles
