@@ -164,7 +164,10 @@ final class World {
         crewRoomInfo = [:]
         crewBoxes = [:]
         scans = 0
+        afresh = true
     }
+
+    private var afresh = false
 
     // MARK: queries the scene draws from
 
@@ -517,6 +520,7 @@ final class World {
             var events = run("gh.releases") { self.applyReleases() }
             events += run("gh.board") { self.applyBoardMoves() }
             events += run("gh.crew") { self.rebuildCrew(now: now) }
+            if didLoadLayout { afresh = false }
             events += stationEvents()
             return events
         }
@@ -630,12 +634,12 @@ final class World {
             let name = home.name
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.rooms[key] == nil {
-                guard placed < World.placementsPerPass else { placementsLeft = true; continue }
+                guard afresh || placed < World.placementsPerPass else { placementsLeft = true; continue }
                 placed += 1
             }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                events.append(opened(station, key, repo: repo, via: isReady(repo) ? .shuttle(for: "crew:" + pr.author) : .appear))
+                events.append(opened(station, key, repo: repo, via: isReady(repo) && !afresh ? .shuttle(for: "crew:" + pr.author) : .appear))
             }
             crewRoomInfo[sk + key] = CrewRoomInfo(state: "OPEN", last: pr.createdAt)
             let pushes = feed.filter { $0.repo == repo && $0.e.kind == "push" && $0.e.branch == pr.branch && $0.e.at > pr.createdAt }.map { Int($0.e.detail) ?? 1 }.reduce(0, +)
@@ -648,13 +652,13 @@ final class World {
             let name = "#\(it.number) " + String(it.title.prefix(22))
             if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
             if station.rooms[key] == nil {
-                guard placed < World.placementsPerPass else { placementsLeft = true; continue }
+                guard afresh || placed < World.placementsPerPass else { placementsLeft = true; continue }
                 placed += 1
             }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                events.append(opened(station, key, repo: repo, via: isReady(repo) ? .shuttle(for: "crew:" + login) : .appear))
-                if isReady(repo) {
+                events.append(opened(station, key, repo: repo, via: isReady(repo) && !afresh ? .shuttle(for: "crew:" + login) : .appear))
+                if isReady(repo) && !afresh {
                     report(office: key, repo: repo, .inbound, by: .board, at: now)
                     events.append(.issueStarted(repo: repo, number: it.number, author: login, roomKey: key))
                 }
@@ -739,6 +743,7 @@ final class World {
     // MARK: peers
 
     var peerName = ""
+    private var unplaceable: [String: [Cell]] = [:]
 
     func applyPeer(_ snap: PeerSnapshot, now: Date) -> [WorldEvent] {
         batch {
@@ -776,7 +781,7 @@ final class World {
                 if let r = station.rooms[o.key] {
                     r.lastActive = max(r.lastActive, o.lastActive, now)
                     if r.worktree == nil, crewRoomInfo[key] == nil, r.name != o.name { r.name = o.name; changed = true }
-                    if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName { disputed.append((o.key, o.cells)) }
+                    if r.cells != o.cells, !o.cells.isEmpty, snap.name < peerName, unplaceable[key] != o.cells { disputed.append((o.key, o.cells)) }
                     continue
                 }
                 let color = fleet.color(forRepo: o.repo)
@@ -790,10 +795,12 @@ final class World {
                     events.append(opened(station, o.key, repo: o.repo, via: .fade))
                 }
             }
-            if station.replaceRooms(disputed) {
+            let moved = station.replaceRooms(disputed)
+            for d in disputed where !moved.contains(d.key) { unplaceable[sk + d.key] = d.cells }
+            if !moved.isEmpty {
                 touch(station)
                 changed = true
-                events.append(.log("\(disputed.count) office\(disputed.count == 1 ? " stands" : "s stand") where \(snap.name) put \(disputed.count == 1 ? "it" : "them")"))
+                events.append(.log("\(moved.count) office\(moved.count == 1 ? " stands" : "s stand") where \(snap.name) put \(moved.count == 1 ? "it" : "them")"))
             }
             for key in mine where !live.contains(key) {
                 peerOffices[key]?[snap.name] = nil

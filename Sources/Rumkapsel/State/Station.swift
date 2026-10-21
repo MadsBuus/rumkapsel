@@ -544,16 +544,16 @@ final class Station {
     }
 
     @discardableResult
-    func replaceRooms(_ theirs: [(key: String, cells: [Cell])]) -> Bool {
+    func replaceRooms(_ theirs: [(key: String, cells: [Cell])]) -> [String] {
         let disputed = theirs.filter { t in rooms[t.key].map { r in r.cells != t.cells } == true }
-        guard !disputed.isEmpty else { return false }
+        guard !disputed.isEmpty else { return [] }
         var kept: [(Room, [Cell])] = []
         for (key, cells) in disputed { if let r = rooms[key] { kept.append((r, cells)); removeRoom(key: key) } }
         for (r, cells) in kept.sorted(by: { $0.0.key < $1.0.key }) {
             ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, openedAt: r.openedAt, preferredCells: cells)
             if let n = rooms[r.key] { n.branch = r.branch; n.repoRoot = r.repoRoot; n.worktree = r.worktree }
         }
-        return true
+        return disputed.filter { t in rooms[t.key]?.cells == t.cells }.map(\.key)
     }
 
     func relayOffices() {
