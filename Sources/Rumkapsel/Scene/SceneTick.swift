@@ -344,7 +344,7 @@ extension StationController {
                 default: break
                 }
             }
-            let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter) && m.path.isEmpty && m.fetchSpot == nil
+            let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter || m.watchSpot != nil) && m.path.isEmpty && m.fetchSpot == nil
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
                 : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
