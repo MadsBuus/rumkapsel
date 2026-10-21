@@ -374,7 +374,19 @@ extension Classic {
         }
         let b = mc.boards
         let low = MissionControl.boardBottom, high = MissionControl.boardTop
-        f.fixtures.append(at(MissionRoom.box(4.7, high - low + 0.08, 0.04, lit(p.dark), at: SCNVector3Zero), SIMD2(Double(mc.x0) + 2, mc.north + 0.02), (low + high) / 2))
+        let panel = MissionRoom.box(4.7, high - low + 0.08, 0.04, lit(p.dark), at: SCNVector3Zero)
+        panel.geometry!.materials = [lit(p.dark), Bulkhead.steel, Bulkhead.steel, Bulkhead.steel, Bulkhead.steel, Bulkhead.steel]
+        f.fixtures.append(at(panel, SIMD2(Double(mc.x0) + 2, mc.north + 0.02), (low + high) / 2))
+        let wall = Walker.wallHeight, sill = 0.14, beam = 0.08, depth = 3.0
+        let frame = Bulkhead.steel
+        f.fixtures.append(at(MissionRoom.box(0.07, sill, depth, frame, at: SCNVector3Zero), SIMD2(mc.west, Double(mc.y0) + 1), sill / 2))
+        f.fixtures.append(at(MissionRoom.box(0.07, beam, depth, frame, at: SCNVector3Zero), SIMD2(mc.west, Double(mc.y0) + 1), wall - beam / 2))
+        for k in 0...3 {
+            f.fixtures.append(at(MissionRoom.box(0.07, wall, 0.06, frame, at: SCNVector3Zero), SIMD2(mc.west, mc.north + Double(k)), wall / 2))
+        }
+        let pane = MissionRoom.box(0.01, wall - sill - beam, depth, flat(NSColor(rgb: (0.55, 0.75, 0.95))), at: SCNVector3Zero)
+        pane.geometry!.firstMaterial!.transparency = 0.18
+        f.fixtures.append(at(pane, SIMD2(mc.west, Double(mc.y0) + 1), sill + (wall - sill - beam) / 2))
         f.fixtures.append(at(MissionRoom.screen(1.6, 0.42, Screens.annunciator(repos), at: SCNVector3Zero, bezel: 0.025), SIMD2(b.annunciator, mc.north + 0.06), low + 0.24))
         for (k, x) in b.flaps.enumerated() {
             let shown = k == 0 ? Array(repos.prefix(3)) : Array(repos.suffix(2))

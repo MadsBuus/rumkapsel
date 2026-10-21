@@ -475,8 +475,10 @@ extension StationController {
             let outside = Set(st.hall.padCells)
             let gate = Set(st.hall.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
             let mouthRow = st.hangarCells.map(\.y).max()
+            let mission = Set(st.rooms["kind:mission"]?.cells ?? [])
             func unwalled(_ c: Cell, _ n: Cell) -> Bool {
                 gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))
+                    || (mission.contains(c) && outside.contains(n)) || (outside.contains(c) && mission.contains(n))
             }
             let styles = Bulkhead.styles(of: st)
             let root = SCNNode()
