@@ -648,6 +648,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         var homes: [String: World.MinionHome] = [:]
         for m in minions.values { homes[m.id] = World.MinionHome(station: m.station, key: m.home.key, idle: !m.onJob) }
         let events = timed("scan") { world.applyScan(result, now: now, minionHomes: homes) }
+        if replayAfterScan { replayAfterScan = false; enqueue { [weak self] in self?.onGitHubUpdate(); self?.refreshGitHub() } }
         let firstRun = events.contains { if case .worldLoaded = $0 { return true }; return false }
         let ordered = Set(events.compactMap { e -> String? in
             if case .office(_, .opened(_, _, .shuttle(let who?)), _) = e { return who }
@@ -1251,9 +1252,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             github.intervalMinutes = cfg.githubMinutes
             layoutDirty = true
             rebuildStatic()
+            replayAfterScan = true
             rescan()
         }
     }
+
+    private var replayAfterScan = false
 
     var knownRepos: [String] { world.knownRepos }
     var repoDetails: [String: RepoDetail] {
