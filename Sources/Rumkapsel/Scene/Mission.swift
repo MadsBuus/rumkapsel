@@ -215,7 +215,7 @@ extension StationController {
 
     func latestRelease(_ repo: String) -> String? {
         guard let root = world.repoRoots.first(where: { $0.value.repo == repo })?.key,
-              let pr = github.releases(repoRoot: root)?.filter({ $0.isProduction && $0.state == "MERGED" }).max(by: { ($0.mergedAt ?? .distantPast) < ($1.mergedAt ?? .distantPast) })
+              let pr = github.releases.all(repoRoot: root)?.filter({ $0.isProduction && $0.state == "MERGED" }).max(by: { ($0.mergedAt ?? .distantPast) < ($1.mergedAt ?? .distantPast) })
         else { return nil }
         return pr.tag ? pr.title : "#\(pr.number)"
     }

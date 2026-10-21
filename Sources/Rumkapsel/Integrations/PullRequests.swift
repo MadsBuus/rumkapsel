@@ -350,7 +350,7 @@ final class PullSource: Intake {
         }
         for p in due.pulls { refetch(pull: p.number, branch: p.branch, repoRoot: repoRoot) }
         if heavy, due.team { refetchOpenPRs(repoRoot) }
-        if heavy, due.releasing { github.refetchReleases(repoRoot) }
+        if heavy, due.releasing { github.releases.refetch(repoRoot) }
         guard later else { return }
         queue.asyncAfter(deadline: .now() + FollowUps.after) { [self] in
             lock.lock(); let d = followUps.take(repoRoot); lock.unlock()

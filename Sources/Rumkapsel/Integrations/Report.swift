@@ -4,6 +4,8 @@ enum Report {
     case deploy(repoRoot: String, production: Bool, change: Deployments.Change, usual: TimeInterval)
     case cardMoved(ProjectItem, from: String?)
     case pullChanged(branch: String, PullRequest)
+    case released(repoRoot: String, ReleasePR)
+    case hotfixMerged(repoRoot: String, ReleasePR)
 }
 
 extension World {
@@ -31,6 +33,10 @@ extension World {
                 for room in rooms { if let repo = room.repo { self.report(pullState: pr.state, record: works.find(repo: repo, pull: pr.number), at: now) } }
                 events.append(.log("\(Work(repo: "", branch: branch).label): \(pr.summary)"))
                 events.append(.chime(pr.number))
+            case .released(let root, let pr):
+                events += released(pr, repoRoot: root)
+            case .hotfixMerged(let root, let pr):
+                events += hotfixMerged(pr, repoRoot: root)
             }
         }
         return events

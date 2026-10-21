@@ -1239,7 +1239,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             }
             github.intervalMinutes = ConfigStore.shared.current.githubMinutes
         for (root, info) in world.repoRoots {
-            github.refreshReleases(repoRoot: root)
+            github.releases.refresh(repoRoot: root)
             if info.station == "work" { github.pulls.refreshOpenPRs(repoRoot: root) }
         }
             logEvent("asking github…")

@@ -468,7 +468,7 @@ final class World {
             if let p = cfg.project { github.board.refresh(owner: p.owner, number: p.number) }
             github.watch(repoRoots.mapValues { $0.station == "work" }, board: cfg.project.map { ($0.owner, $0.number) })
             for (root, info) in repoRoots {
-                github.refreshReleases(repoRoot: root)
+                github.releases.refresh(repoRoot: root)
                 if info.station == "work" { github.pulls.refreshOpenPRs(repoRoot: root) }
             }
             events += hear(github.deployments.reports())

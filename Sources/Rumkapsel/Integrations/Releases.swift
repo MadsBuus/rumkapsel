@@ -21,7 +21,7 @@ extension World {
     }
 
     private func padRelease(root: String) -> ReleasePR? {
-        guard let open = github.openReleases(repoRoot: root) else { return nil }
+        guard let open = github.releases.open(repoRoot: root) else { return nil }
         let hasProduction = open.contains(where: \.isProduction)
         return open.first { $0.isProduction || (!hasProduction && !github.pipeline(repoRoot: root).hasStaging) }
     }
@@ -50,19 +50,32 @@ extension World {
         "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release"
     }
 
+    func hotfixMerged(_ pr: ReleasePR, repoRoot: String) -> [WorldEvent] {
+        guard let info = repoRoots[repoRoot], let station = fleet.stations[info.station], station.hasPad else { return [] }
+        let record = hotfixRecord(repo: info.repo, pr: pr)
+        learn(.launched(repo: info.repo, hotfix: pr.number, crates: [record.number ?? pr.number], label: label(repo: info.repo, hotfix: pr)), repo: info.repo)
+        works.report(record, .shipped, by: .git, at: pr.mergedAt ?? now)
+        return [.chime(pr.number)] + flyAtMerge(repoRoot: repoRoot, station: info.station, repo: info.repo, pr: pr)
+    }
+
+    func released(_ pr: ReleasePR, repoRoot: String) -> [WorldEvent] {
+        guard let info = repoRoots[repoRoot], let station = fleet.stations[info.station] else { return [] }
+        var events: [WorldEvent] = [.chime(pr.number)]
+        guard pr.isProduction else { return events }
+        learn(.launched(repo: info.repo, label: label(repo: info.repo, release: pr)), repo: info.repo)
+        events += flyAtMerge(repoRoot: repoRoot, station: info.station, repo: info.repo, pr: pr)
+        for r in waiting(repo: info.repo, station: station.name) {
+            works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
+            if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
+        }
+        releases.announced = releases.announced.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
+        return events
+    }
+
     private func applyHotfixes() -> [WorldEvent] {
         var events: [WorldEvent] = []
-        for launch in github.takeHotfixLaunches() {
-            guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station], station.hasPad else { continue }
-            let pr = launch.pr
-            let record = hotfixRecord(repo: info.repo, pr: pr)
-            learn(.launched(repo: info.repo, hotfix: pr.number, crates: [record.number ?? pr.number], label: label(repo: info.repo, hotfix: pr)), repo: info.repo)
-            works.report(record, .shipped, by: .git, at: pr.mergedAt ?? now)
-            events.append(.chime(pr.number))
-            events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
-        }
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
-            guard let station = fleet.stations[info.station], station.hasPad, let all = github.hotfixes(repoRoot: root) else { continue }
+            guard let station = fleet.stations[info.station], station.hasPad, let all = github.releases.hotfixes(repoRoot: root) else { continue }
             let quiet = releases.seen.insert("hotfix|" + root).inserted || settling
             var open: [Int: String] = [:]
             for pr in all where pr.state == "OPEN" {
@@ -79,7 +92,7 @@ extension World {
 
     func rocketKey(station: String, repo: String, release: String) -> String {
         guard release.hasPrefix("#"), let n = Int(release.dropFirst()), let root = root(station: station, repo: repo),
-              github.hotfixes(repoRoot: root)?.contains(where: { $0.number == n }) == true else { return station + "|" + repo }
+              github.releases.hotfixes(repoRoot: root)?.contains(where: { $0.number == n }) == true else { return station + "|" + repo }
         return RocketKey.of(station: station, repo: repo, hotfix: n)
     }
 
@@ -104,7 +117,7 @@ extension World {
 
     func waitingURL(repo: String) -> String {
         guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key, let owner = github.nameWithOwner(repoRoot: root) else { return "" }
-        return github.pipeline(repoRoot: root).waitingURL(owner: owner, tag: github.releases(repoRoot: root)?.first(where: \.tag)?.head)
+        return github.pipeline(repoRoot: root).waitingURL(owner: owner, tag: github.releases.all(repoRoot: root)?.first(where: \.tag)?.head)
     }
 
     func launchShipped(_ r: WorkBook.Record, _ t: Transition) {
@@ -114,22 +127,12 @@ extension World {
     }
 
     func applyReleases() -> [WorldEvent] {
-        var events = applyHotfixes()
-        for launch in github.takeLaunches() {
-            guard let info = repoRoots[launch.repoRoot], let station = fleet.stations[info.station] else { continue }
-            let pr = launch.pr
-            events.append(.chime(pr.number))
-            guard pr.isProduction else { continue }
-            learn(.launched(repo: info.repo, label: label(repo: info.repo, release: pr)), repo: info.repo)
-            events += flyAtMerge(repoRoot: launch.repoRoot, station: info.station, repo: info.repo, pr: pr)
-            for r in waiting(repo: info.repo, station: station.name) {
-                works.report(r, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now)
-                if let n = r.number { report(crate: n, repo: info.repo, .shipped, by: pr.tag ? .git : .pulls, at: pr.mergedAt ?? now) }
-            }
-            releases.announced = releases.announced.filter { !$0.hasPrefix("\(info.station)|\(info.repo)|") }
-        }
+        let said = github.releases.reports()
+        var events = hear(said.filter { if case .hotfixMerged = $0 { return true }; return false })
+        events += applyHotfixes()
+        events += hear(said.filter { if case .released = $0 { return true }; return false })
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
-            guard let station = fleet.stations[info.station], station.hasPad, github.openReleases(repoRoot: root) != nil else { continue }
+            guard let station = fleet.stations[info.station], station.hasPad, github.releases.open(repoRoot: root) != nil else { continue }
             let quiet = releases.seen.insert(root).inserted || settling
             let key = info.station + "|" + info.repo
             guard let pr = padRelease(root: root) else {
@@ -155,7 +158,7 @@ extension World {
     private func applyStaging() -> [WorldEvent] {
         var events: [WorldEvent] = []
         for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) {
-            guard fleet.stations[info.station] != nil, let all = github.releases(repoRoot: root) else { continue }
+            guard fleet.stations[info.station] != nil, let all = github.releases.all(repoRoot: root) else { continue }
             let key = info.station + "|" + info.repo
             let staging = all.filter(\.isStaging)
             let open = staging.first { $0.state == "OPEN" }
@@ -221,4 +224,147 @@ extension World {
     }
 
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
+}
+
+final class ReleaseSource: Intake {
+    let name = "releases"
+    private weak var github: GitHubResolver?
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "rumkapsel.releases", qos: .utility, attributes: .concurrent)
+    private var releases: [String: ([ReleasePR], Date)] = [:]
+    private var hotfixes: [String: ([ReleasePR], Date)] = [:]
+    private var launches: [Report] = []
+    private var reading = Set<String>()
+    private var rerun = Set<String>()
+
+    init(github: GitHubResolver) { self.github = github }
+
+    func checks() -> [Watch.Check] { [] }
+
+    func reports() -> [Report] {
+        lock.lock(); defer { lock.unlock() }
+        let out = launches; launches = []; return out
+    }
+
+    func open(repoRoot: String) -> [ReleasePR]? {
+        lock.lock(); defer { lock.unlock() }
+        return releases[repoRoot]?.0.filter { $0.state == "OPEN" }
+    }
+
+    func all(repoRoot: String) -> [ReleasePR]? {
+        lock.lock(); defer { lock.unlock() }
+        return releases[repoRoot]?.0
+    }
+
+    func hotfixes(repoRoot: String) -> [ReleasePR]? {
+        lock.lock(); defer { lock.unlock() }
+        return hotfixes[repoRoot]?.0
+    }
+
+    func isBusy(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return reading.contains(repoRoot) }
+
+    func invalidate(repoRoot: String?) {
+        lock.lock(); defer { lock.unlock() }
+        for k in releases.keys where repoRoot.map({ $0 == k }) ?? true { releases[k] = (releases[k]!.0, .distantPast) }
+    }
+
+    func refetch(_ repoRoot: String) {
+        lock.lock()
+        if let r = releases[repoRoot] { releases[repoRoot] = (r.0, .distantPast) }
+        if reading.contains(repoRoot) { rerun.insert(repoRoot) }
+        lock.unlock()
+        refresh(repoRoot: repoRoot)
+    }
+
+    func refresh(repoRoot: String) {
+        guard let github, !github.frozen else { return }
+        lock.lock()
+        if let (_, at) = releases[repoRoot], Date().timeIntervalSince(at) < github.baseInterval { lock.unlock(); return }
+        if reading.contains(repoRoot) { lock.unlock(); return }
+        reading.insert(repoRoot)
+        lock.unlock()
+        github.trace("ask releases \(repoRoot)")
+        queue.async { [self] in
+            guard let github = self.github else { lock.lock(); reading.remove(repoRoot); lock.unlock(); return }
+            let began = Date()
+            let (pipe, pipelineChanged) = github.readPipeline(repoRoot: repoRoot)
+            let (found, foundHotfixes) = read(pipe, repoRoot: repoRoot, github: github)
+            let cargoChanged = github.countCargo(repoRoot: repoRoot, pipe: pipe, releases: found, began: began)
+            lock.lock()
+            var heat = false
+            if let (before, at) = hotfixes[repoRoot] {
+                for pr in foundHotfixes where pr.state == "MERGED" {
+                    let was = before.first { $0.number == pr.number }
+                    guard was?.state == "OPEN" || (was == nil && (pr.mergedAt ?? .distantPast) > at) else { continue }
+                    launches.append(.hotfixMerged(repoRoot: repoRoot, pr))
+                    heat = true
+                }
+            }
+            let previous = releases[repoRoot]?.0 ?? []
+            for pr in found where pr.state == "MERGED" && previous.contains(where: { $0.number == pr.number && $0.state == "OPEN" }) {
+                launches.append(.released(repoRoot: repoRoot, pr))
+                heat = true
+            }
+            if let tag = found.first(where: \.tag), !previous.isEmpty, !previous.contains(where: { $0.tag && $0.head == tag.head }) {
+                launches.append(.released(repoRoot: repoRoot, tag))
+            }
+            let changed = previous != found || hotfixes[repoRoot]?.0 != foundHotfixes
+            hotfixes[repoRoot] = (foundHotfixes, Date())
+            releases[repoRoot] = (found, Date())
+            reading.remove(repoRoot)
+            let again = rerun.remove(repoRoot) != nil
+            lock.unlock()
+            if heat { github.watch.tune(repoRoot + "#watch:runs") { $0.heat(for: Deployments.findWithin, Date()) } }
+            if again { refetch(repoRoot) }
+            if changed || cargoChanged || pipelineChanged { DispatchQueue.main.async { github.onUpdate?() } }
+        }
+    }
+
+    private func read(_ pipe: Pipeline, repoRoot: String, github: GitHubResolver) -> (releases: [ReleasePR], hotfixes: [ReleasePR]) {
+        let trunk = pipe.trunk, stagingBranch = pipe.staging, productionBranch = pipe.production
+        var found: [ReleasePR] = []
+        var foundHotfixes: [ReleasePR] = []
+        let bases = pipe.remote ? [stagingBranch, productionBranch].filter { !$0.isEmpty } : []
+        func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
+        for base in bases {
+            guard let out = github.run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
+                                 "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
+                  let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }
+            for o in arr {
+                let head = o["headRefName"] as? String ?? ""
+                let hotfix = base == productionBranch && !isReleaseHead(head)
+                guard isReleaseHead(head) || hotfix else { continue }
+                let labels = (o["labels"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+                var pr = ReleasePR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", base: base,
+                                   head: head, state: o["state"] as? String ?? "", url: o["url"] as? String ?? "", labels: labels,
+                                   mergedAt: (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:)),
+                                   production: base == productionBranch, staging: !stagingBranch.isEmpty && base == stagingBranch)
+                pr.hotfix = hotfix
+                if hotfix { foundHotfixes.append(pr) } else { found.append(pr) }
+            }
+        }
+        if pipe.shipsOnTag, let newest = GitHubResolver.tags(repoRoot: repoRoot, run: github.run).first {
+            let owner = github.nameWithOwner(repoRoot: repoRoot)
+            let url = owner.map { "https://github.com/\($0)/releases/tag/\(newest.name)" } ?? ""
+            found.append(ReleasePR(number: 0, title: newest.name, base: trunk, head: newest.name, state: "MERGED",
+                                   url: url, labels: [], mergedAt: newest.at, production: true, staging: false, tag: true))
+        }
+        return (found, foundHotfixes)
+    }
+
+    func reset() { lock.lock(); releases = [:]; hotfixes = [:]; launches = []; lock.unlock() }
+
+    func inject(releases rs: [ReleasePR], for repoRoot: String, merged: [ReleasePR]) {
+        lock.lock()
+        releases[repoRoot] = (rs, Date())
+        for pr in merged { launches.append(.released(repoRoot: repoRoot, pr)) }
+        lock.unlock()
+    }
+
+    func inject(hotfixes hs: [ReleasePR], for repoRoot: String, merged: [ReleasePR]) {
+        lock.lock()
+        hotfixes[repoRoot] = (hs, Date())
+        for pr in merged { launches.append(.hotfixMerged(repoRoot: repoRoot, pr)) }
+        lock.unlock()
+    }
 }
