@@ -446,8 +446,10 @@ extension StationController {
         timed("markers") { rebuildMarkers() }
 
         lastRebuildAt = CACurrentMediaTime()
+        let held = userTookView && focused == nil ? (center: targetFocus + userPan, scale: fitScale(half: targetHalf) / userZoom) : nil
         (targetFocus, targetHalf) = frame(for: shownStations)
         if let f = focused { focusNow(on: f) }
+        if let held { userPan = held.center - targetFocus; userZoom = min(6, max(0.4, fitScale(half: targetHalf) / held.scale)) }
         fleet.save()
     }
 

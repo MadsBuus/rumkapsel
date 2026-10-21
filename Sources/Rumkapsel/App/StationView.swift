@@ -340,6 +340,8 @@ extension StationController {
         d.set(userYaw, forKey: "view.yaw"); d.set(userPitch, forKey: "view.pitch"); d.set(userZoom, forKey: "view.zoom")
         d.set(userPan.x, forKey: "view.panx"); d.set(userPan.y, forKey: "view.pany")
         d.set(focused ?? "", forKey: "view.focus")
+        let at = targetFocus + userPan
+        d.set(at.x, forKey: "view.x"); d.set(at.y, forKey: "view.z"); d.set(fitScale(half: targetHalf) / userZoom, forKey: "view.scale")
     }
 
     func restoreView() {
@@ -354,10 +356,16 @@ extension StationController {
         if !f.isEmpty, fleet.stations[f] != nil {
             focusNow(on: f)
         } else {
-            userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
+            if d.double(forKey: "view.scale") > 0 {
+                userPan = SIMD2(d.double(forKey: "view.x"), d.double(forKey: "view.z")) - targetFocus
+                userZoom = min(6, max(0.4, fitScale(half: targetHalf) / d.double(forKey: "view.scale")))
+            } else {
+                userZoom = d.double(forKey: "view.zoom"); userPan = SIMD2(d.double(forKey: "view.panx"), d.double(forKey: "view.pany"))
+            }
             let b = fleet.worldBounds
             let p = targetFocus + userPan
             if p.x < b.min.x - 4 || p.x > b.max.x + 4 || p.y < b.min.y - 4 || p.y > b.max.y + 4 { userPan = .zero }
+            userTookView = true
         }
         cameraNode.camera!.orthographicScale = fitScale(half: targetHalf) / userZoom
         rig.position.x = targetFocus.x + userPan.x; rig.position.z = targetFocus.y + userPan.y
