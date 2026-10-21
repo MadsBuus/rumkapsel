@@ -233,6 +233,10 @@ final class World {
         let key = roomKey(station, room)
         return room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key]?.isEmpty == false
     }
+    func isOurs(_ station: Station, _ room: Room) -> Bool {
+        room.worktree != nil || crewRoomInfo[roomKey(station, room)] != nil
+            || !isNeighbours(station, room) && repoRoots.values.contains { $0.repo == room.repo }
+    }
     func isLocalLive(_ station: Station, _ room: Room) -> Bool {
         let key = roomKey(station, room)
         return room.worktree == nil && !room.key.hasPrefix("kind:") && crewRoomInfo[key] == nil && !pushedByPeer.contains(key) && peerLive(key)
@@ -434,7 +438,10 @@ final class World {
                     status(station, room)
                     let unclaimed = room.worktree == nil && crewRoomInfo[key] == nil && peerOffices[key] == nil && isReady(room.repo)
                         && (cfg.project == nil || github.board.liveItems != nil)
+                    let unread = scans > World.officeGraceScans && room.repo != nil && room.worktree == nil && crewRoomInfo[key] == nil
+                        && peerOffices[key] == nil && !repoRoots.values.contains { $0.repo == room.repo }
                     let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
+                        || unread && now.timeIntervalSince(max(held[key] ?? .distantPast, room.lastActive)) > World.holdWindow
                     let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
                     let lan = peerOffices[key] != nil
                     let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, mine: mine, lan: lan) }
