@@ -48,6 +48,8 @@ struct SessionInfo {
 
 struct ScanResult {
     var sessions: [SessionInfo] = []
+    var parts: [String: Double] = [:]
+    var reads: [(path: String, seconds: Double)] = []
 }
 
 final class TranscriptScanner {
@@ -73,6 +75,10 @@ final class TranscriptScanner {
     func scan(roomsWithin: TimeInterval) -> ScanResult {
         var result = ScanResult()
         let now = Date()
+        let began = ProcessInfo.processInfo.systemUptime
+        var parse = 0.0, place = 0.0, open = 0.0
+        func clock() -> Double { ProcessInfo.processInfo.systemUptime }
+
         let fm = FileManager.default
         guard let projects = try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil) else { return result }
 
@@ -91,21 +97,34 @@ final class TranscriptScanner {
                 if let hit = cache[path], hit.mtime == mtime {
                     parsed = hit.parsed
                 } else {
+                    let t = clock()
                     parsed = parseTail(url: url)
+                    let spent = clock() - t
+                    parse += spent
+                    result.reads.append((path, spent))
                     cache[path] = (mtime, parsed)
                 }
                 guard let seen = parsed.cwd else { continue }
+                var t = clock()
                 let cwd = checkout(of: seen)
                 let repo = repoInfo(for: cwd)
+                let owner = repo.root.flatMap(remoteOwner(for:))
+                place += clock() - t
+                t = clock()
+                let isOpen = Workspaces.isOpen(cwd)
+                open += clock() - t
                 let isSub = url.deletingLastPathComponent() != project
                 result.sessions.append(SessionInfo(
-                    id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, owner: repo.root.flatMap(remoteOwner(for:)), lastModified: mtime, activity: parsed.activity, area: parsed.area,
+                    id: path, cwd: cwd, repo: repo.name, repoRoot: repo.root, owner: owner, lastModified: mtime, activity: parsed.activity, area: parsed.area,
                     title: parsed.title, branch: parsed.branch, toolCount: parsed.toolCount, isSubagent: isSub,
-                    cwdExists: Workspaces.isOpen(cwd), promptCount: parsed.promptCount, queuedCount: max(0, parsed.queued), eventMarkers: parsed.markers))
+                    cwdExists: isOpen, promptCount: parsed.promptCount, queuedCount: max(0, parsed.queued), eventMarkers: parsed.markers))
             }
         }
         let current = Dictionary(grouping: result.sessions, by: \.cwd).compactMapValues { $0.max { $0.lastModified < $1.lastModified }?.branch }
         for i in result.sessions.indices { if let b = current[result.sessions[i].cwd] { result.sessions[i].branch = b } }
+        let total = clock() - began
+        result.parts = ["transcripts.list": max(0, total - parse - place - open), "transcripts.parse": parse,
+                        "transcripts.place": place, "transcripts.workspaces": open]
         return result
     }
 
