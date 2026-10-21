@@ -6,13 +6,15 @@ and are not started unasked.
 
 ## Next
 
-1. **One `Source` protocol** for intake: local git, GitHub, the board and deployments as sources that all
-   report the same way, so new ones plug in.
+1. **Sources** (`SOURCES.md`): Releases and Git out of the resolver, then Transcripts and Neighbours, then
+   a registry, so a new source is one file and one registration.
 2. **Mission control, the room.** A control room of about 5×3 with consoles facing a wall of screens,
    proposed by the pad with windows onto the launch slots; the flight screens become its wall. Its first
    screens show what the station already knows: lead time, crates waiting, deploys, failing checks.
    Needs the floor plans baked once more. The bay goes to five berths, like the pad.
-3. **Mission control, the inputs.** Monitors as sources: Sentry first, then AWS; alarms in the room.
+3. **Setup and connecting, with mission control's inputs** (`SOURCES.md`, Connecting): a Sources tab in
+   Settings built from the registry, a first-run checklist on the setup card, GitHub sign-in without a
+   terminal, then Sentry and AWS as the first monitors, their alarms in the room.
 
 Later: the last scene glue into playback (office floor labels from the model's cells, neighbours' minions
 driven by playback); a give-up never drops a crate in the yard's lanes, so lane crates can be obstacles;
