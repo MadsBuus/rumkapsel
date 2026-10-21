@@ -7,7 +7,7 @@ and are not started unasked.
 ## Next
 
 1. **Sources** (`SOURCES.md`): events, not passes (small deltas played as they land, the big pass shrunk
-   to an occasional keyframe, sessions on file events, neighbours relaying reports), then a registry, so a
+   to an occasional keyframe, sessions as deltas, neighbours relaying reports), then a registry, so a
    new source is one file and one registration.
 2. **Mission control, the room.** A control room of about 5×3 with consoles facing a wall of screens,
    proposed by the pad with windows onto the launch slots; the flight screens become its wall. Its first
