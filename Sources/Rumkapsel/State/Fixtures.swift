@@ -17,52 +17,7 @@ struct Galley {
     var counter: [SIMD2<Double>] { [-Galley.counterWidth, 0, Galley.counterWidth].map { middle + back * (0.5 - Galley.counterDepth / 2) + across * $0 } }
 }
 
-struct MissionControl {
-    let x0: Int, y0: Int
-
-    struct Spot { let at: SIMD2<Double>; let facing: Double; let seated: Bool }
-    struct Console { let at: SIMD2<Double>; let yaw: Double }
-
-    static let consoleDepth = 0.3, consoleWidth = 0.86, tableRadius = 0.5, holoLift = 0.3, seatCount = 3, chairDepth = 0.275
-
-    var west: Double { Double(x0) - 0.5 }
-    var north: Double { Double(y0) - 0.5 }
-    var table: SIMD2<Double> { SIMD2(Double(x0) + 2, Double(y0) + 1) }
-
-    var consoles: [Console] {
-        [Console(at: SIMD2(Double(x0) + 0.95, north + 0.35), yaw: 0),
-         Console(at: SIMD2(Double(x0) + 3.05, north + 0.35), yaw: 0),
-         Console(at: SIMD2(Double(x0) + 4.5 - 0.22, Double(y0) + 1.2), yaw: -.pi / 2)]
-    }
-
-    var seats: [Spot] {
-        consoles.map { c in
-            let back = SIMD2(sin(c.yaw), cos(c.yaw))
-            return Spot(at: c.at + back * 0.33, facing: atan2(-back.x, -back.y), seated: true)
-        }
-    }
-
-    var stands: [Spot] {
-        [0.0, 0.85, -0.85].map { a in
-            let out = SIMD2(sin(a), cos(a))
-            return Spot(at: table + out * (MissionControl.tableRadius + Hands.arm + 0.04), facing: atan2(-out.x, -out.y), seated: false)
-        }
-    }
-
-    var spots: [Spot] { seats + stands }
-
-    var boards: (annunciator: Double, flaps: [Double], clock: Double) {
-        (Double(x0) + 2, [Double(x0) + 0.4, Double(x0) + 3.6], Double(x0) + 2)
-    }
-    static let boardBottom = 0.46, boardTop = 1.06
-}
-
 extension Station {
-    var missionControl: MissionControl? {
-        guard let room = rooms["kind:mission"], room.cells.count == 15 else { return nil }
-        return MissionControl(x0: room.cells.map(\.x).min()!, y0: room.cells.map(\.y).min()!)
-    }
-
     var galley: Galley? {
         guard let room = rooms["kind:galley"], let cell = room.cells.first, let out = doorOutside(of: room.key) else { return nil }
         return Galley(cell: cell, back: SIMD2(Double(cell.x - out.x), Double(cell.y - out.y)))

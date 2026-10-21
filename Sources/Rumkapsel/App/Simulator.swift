@@ -1459,11 +1459,11 @@ extension StationController {
                 free(m)
                 if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
             case .mission:
-                let could = minions.values.filter { !$0.isSubagent && !$0.isCrew && !$0.onJob && !$0.hasLoad && $0.watchSpot == nil }
+                let could = minions.values.filter { !$0.isSubagent && !$0.isCrew && !$0.onJob && !$0.hasLoad && $0.using == nil }
                 let m = could.first(where: { !$0.busy && $0.place == .lounge }) ?? could.first(where: { !$0.busy }) ?? could.first
                 guard let m, let station = fleet.stations[m.station] else { handle(.log("nobody free for mission control")); return }
                 free(m)
-                if !watchMission(m, station: station) { handle(.log("no free place in mission control")) }
+                if !takeTurnInMission(m, station: station) { handle(.log("no free place in mission control")) }
             case .galley(let fare):
                 let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad && $0.fare == nil }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })

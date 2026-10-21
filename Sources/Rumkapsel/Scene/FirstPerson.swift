@@ -89,9 +89,9 @@ extension StationController {
     func toggleMission() {
         enqueue { [self] in
             if let w = walker { stepOut(w); return }
-            guard let st = fleet.stations.values.sorted(by: { $0.name < $1.name }).first(where: { $0.missionControl != nil }),
-                  let mc = st.missionControl else { return }
-            stepIn(at: st.offset + SIMD2(mc.table.x, Double(mc.y0) + 2.1), yaw: 0)
+            guard let st = fleet.stations.values.sorted(by: { $0.name < $1.name }).first(where: { !$0.fixtures(in: "kind:mission").isEmpty }),
+                  let origin = st.roomOrigin("kind:mission") else { return }
+            stepIn(at: st.offset + origin + SIMD2(2.5, 2.6), yaw: 0)
         }
     }
 

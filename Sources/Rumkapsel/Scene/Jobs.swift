@@ -56,7 +56,7 @@ extension StationController {
     @discardableResult func visitBath(_ m: Minion, station: Station) -> Bool { simulation.visitBath(m, station: station) }
     @discardableResult func visitGalley(_ m: Minion, station: Station, fare: Command.Fare) -> Bool { simulation.visitGalley(m, station: station, fare: fare) }
     @discardableResult func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool { simulation.takeTurnInGym(m, station: station, gym: gym) }
-    @discardableResult func watchMission(_ m: Minion, station: Station) -> Bool { simulation.watchMission(m, station: station) }
+    @discardableResult func takeTurnInMission(_ m: Minion, station: Station) -> Bool { simulation.takeTurnInMission(m, station: station) }
     @discardableResult func startRoam(_ m: Minion, station: Station) -> Bool { simulation.startRoam(m, station: station) }
     func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) { simulation.react(m, activity, place: place, minutes: minutes, words: words) }
     func crewRested(_ m: Minion) { simulation.crewRested(m) }
