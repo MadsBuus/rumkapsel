@@ -1,3 +1,3 @@
-## What's new in 0.70
+## What's new in 0.71
 
-- A session working across linked workspaces stays in its own office, so offices no longer flip and minions no longer work in empty space
+- Changing a setting, such as sharing your station, no longer empties the yard, the crew's offices and the pad
