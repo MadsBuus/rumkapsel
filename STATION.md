@@ -80,6 +80,9 @@ nothing moves for it.
 **Mission control** stands by the pad, its far wall a window onto it. Three consoles face the boards
 raised on a steel gantry along the north wall, and a holo table in the middle shows the station's little
 system turning above it at eye height. There is room to walk in round the table; **M** walks you in.
+The boards are an annunciator with a row of lamps per repository (deploy, checks, waiting, release,
+errors, alarm), two old monitors with live feeds of the pad and the bay, and a screen for errors and
+alarms that shows no signal until a source feeds it. The feeds refresh often only when you are close.
 
 ## Air and weight
 
@@ -208,8 +211,14 @@ moves through it one way: in from the hallway at the back, out through the field
   production release opens, the iris opens under the standing tip, the tip goes down onto the kick
   stage, its legs fold, and the deck raises the stack flush with the pad. When the release closes
   unmerged the same runs backwards. Classic draws the lift; the other looks dock at once.
-- **The ring** under a rocket flashes amber while its tip is welded, pulses red while what it would
-  ship is untested, and shows its repository's colour otherwise.
+- **The ring** under a rocket is always its repository's colour. While the tip is welded it is the
+  staging build's clock: a bright strip fills round the hex towards the time that deploy usually takes,
+  and blinks once it is over, faster when it is half as long again late; the rocket's hover and the pad
+  feed in mission control say how long is left. While what it would ship is untested it breathes.
+- **The nose lamp** blinks amber while the tip is welded. When staging is live and the last panel is on,
+  the ring flashes, steam rings out, the lamp turns green, a short chime rises, the log says how long it
+  took against the usual, and the tester and anyone at the holo table hop. A failed build thuds, smokes,
+  and its lamp stays red.
 - **It vents** thin jets of boil-off only when docked and go: everything it ships tested, waiting only
   for the merge. A bare tip never vents.
 - **The launch.** At the merge, the release's crates are aboard at once in what is known, and the log
