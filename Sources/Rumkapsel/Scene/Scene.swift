@@ -271,6 +271,13 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     var chairs: [String: [FixtureRef: SCNNode]] = [:]
+    var missionScreens: [String: MissionScreens] = [:]
+    var boardsCheckedAt = 0.0, feedsRolledAt = 0.0
+    lazy var feedRenderer: SCNRenderer = {
+        let r = SCNRenderer(device: view.device, options: nil)
+        r.scene = view.scene
+        return r
+    }()
     var kitchens: [String: Kitchen] = [:]
     private var lastBusy: [String: Double] = [:]
     var stationAnchors: [String: SCNNode] = [:]

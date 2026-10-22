@@ -108,38 +108,69 @@ enum Screens {
         }
     }
 
-    static func annunciator(_ repos: [(name: String, color: NSColor)]) -> NSImage {
+    static func lampColor(_ l: MissionBoards.Lamp) -> NSColor {
+        switch l {
+        case .dark: return NSColor(rgb: (0.16, 0.17, 0.19))
+        case .green: return NSColor(rgb: (0.3, 0.85, 0.45))
+        case .amber: return NSColor(rgb: (1, 0.72, 0.2))
+        case .red: return NSColor(rgb: (1, 0.25, 0.22))
+        }
+    }
+
+    static func annunciator(_ rows: [MissionBoards.Row]) -> NSImage {
         draw(1024, 300) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
-            let rows = max(5, repos.count), rowH = h / CGFloat(rows)
-            for r in 0..<rows {
-                let y = h - rowH * CGFloat(r + 1)
-                if r < repos.count {
-                    let repo = repos[r]
-                    c.setFillColor(repo.color.cgColor); c.fill(CGRect(x: 8, y: y + 6, width: 210, height: rowH - 12))
-                    NSAttributedString(string: repo.name, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 22, weight: .heavy), .foregroundColor: NSColor.black])
-                        .draw(at: NSPoint(x: 16, y: y + (rowH - 26) / 2))
+            let head: CGFloat = 34
+            for (k, name) in MissionBoards.lamps.enumerated() {
+                let s = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .semibold), .foregroundColor: NSColor(rgb: (0.7, 0.72, 0.75))])
+                s.draw(at: NSPoint(x: 240 + CGFloat(k) * 128 + (116 - s.size().width) / 2, y: h - head + 6))
+            }
+            let count = max(5, rows.count), rowH = (h - head) / CGFloat(count)
+            for r in 0..<count {
+                let y = h - head - rowH * CGFloat(r + 1)
+                if r < rows.count {
+                    let row = rows[r]
+                    c.setFillColor(NSColor(row.color).cgColor); c.fill(CGRect(x: 8, y: y + 4, width: 210, height: rowH - 8))
+                    var size: CGFloat = min(24, rowH - 12)
+                    var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
+                    while name.size().width > 196 && size > 10 {
+                        size -= 1
+                        name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
+                    }
+                    name.draw(at: NSPoint(x: 16, y: y + (rowH - name.size().height) / 2))
                 }
-                for k in 0..<6 {
-                    c.setFillColor(NSColor(rgb: (0.16, 0.17, 0.19)).cgColor)
-                    c.fill(CGRect(x: 240 + CGFloat(k) * 128, y: y + 8, width: 116, height: rowH - 16))
+                for k in 0..<MissionBoards.lamps.count {
+                    let lamp = r < rows.count ? rows[r].lamps[k] : .dark
+                    c.setFillColor(lampColor(lamp).cgColor)
+                    c.fill(CGRect(x: 240 + CGFloat(k) * 128, y: y + 4, width: 116, height: rowH - 8))
                 }
             }
         }
     }
 
-    static func flapBoard(_ title: String) -> NSImage {
-        draw(768, 230) { c, w, h in
-            c.setFillColor(NSColor(rgb: (0.05, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
-            NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 28, weight: .bold), .foregroundColor: NSColor(rgb: (1, 0.85, 0.35))])
-                .draw(at: NSPoint(x: 14, y: h - 40))
-            for row in 0..<3 {
-                let y = h - 84 - CGFloat(row) * 48
-                for k in 0..<22 {
-                    c.setFillColor(NSColor(rgb: (0.13, 0.13, 0.15)).cgColor)
-                    c.fill(CGRect(x: 34 + CGFloat(k) * 33, y: y, width: 30, height: 34))
-                }
-            }
+    static func crt(_ frame: NSImage, caption: String) -> NSImage {
+        draw(320, 200) { c, w, h in
+            frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .copy, fraction: 1)
+            c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.22).cgColor)
+            c.setBlendMode(.color); c.fill(CGRect(x: 0, y: 0, width: w, height: h)); c.setBlendMode(.normal)
+            c.setFillColor(NSColor.black.withAlphaComponent(0.28).cgColor)
+            for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }
+            let glow = CGGradient(colorsSpace: nil, colors: [NSColor.clear.cgColor, NSColor.black.withAlphaComponent(0.55).cgColor] as CFArray, locations: [0.55, 1])!
+            c.drawRadialGradient(glow, startCenter: CGPoint(x: w / 2, y: h / 2), startRadius: 0, endCenter: CGPoint(x: w / 2, y: h / 2), endRadius: w * 0.62, options: [])
+            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
+                .draw(at: NSPoint(x: 12, y: h - 26))
+        }
+    }
+
+    static func noSignal(_ caption: String) -> NSImage {
+        draw(480, 300) { c, w, h in
+            c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            c.setFillColor(NSColor.black.withAlphaComponent(0.4).cgColor)
+            for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }
+            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 20, weight: .bold), .foregroundColor: NSColor(rgb: (0.5, 0.62, 0.62))])
+                .draw(at: NSPoint(x: 18, y: h - 38))
+            let s = NSAttributedString(string: "No signal", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 34, weight: .bold), .foregroundColor: NSColor(rgb: (0.4, 0.5, 0.5))])
+            s.draw(at: NSPoint(x: (w - s.size().width) / 2, y: (h - s.size().height) / 2 - 10))
         }
     }
 

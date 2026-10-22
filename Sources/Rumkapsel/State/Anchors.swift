@@ -108,9 +108,9 @@ enum RoomLayout {
     static func of(_ key: String) -> [Placed] {
         switch key {
         case "kind:mission":
-            return [Placed(kind: .console, at: SIMD2(1.45, 0.35), yaw: 0),
-                    Placed(kind: .console, at: SIMD2(3.55, 0.35), yaw: 0),
-                    Placed(kind: .console, at: SIMD2(4.78, 1.25), yaw: -.pi / 2),
+            return [Placed(kind: .console, at: SIMD2(0.95, 0.35), yaw: 0),
+                    Placed(kind: .console, at: SIMD2(4.05, 0.35), yaw: 0),
+                    Placed(kind: .console, at: SIMD2(4.78, 1.6), yaw: -.pi / 2),
                     Placed(kind: .holoTable, at: SIMD2(2.5, 1.5), yaw: 0)]
         default:
             return []

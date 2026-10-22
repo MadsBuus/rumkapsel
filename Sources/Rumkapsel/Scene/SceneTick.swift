@@ -173,6 +173,14 @@ extension StationController {
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for station in fleet.stations.values { tendKitchen(station); swivelChairs(station, dt: dt) }
+        if clock - boardsCheckedAt >= 1 || clock < boardsCheckedAt {
+            boardsCheckedAt = clock
+            for station in fleet.stations.values { tendMissionBoards(station) }
+        }
+        if clock - feedsRolledAt >= 0.33 || clock < feedsRolledAt {
+            feedsRolledAt = clock
+            rollFeeds()
+        }
         for cue in simulation.drainCues() { play(cue) }
         if layoutDirty { flushScene() }
     }
