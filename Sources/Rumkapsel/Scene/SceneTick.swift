@@ -172,9 +172,21 @@ extension StationController {
             m.mirror(station: station, clock: clock, dt: dt, outfit: kit(m), hover: m.isSubagent ? Probe.hover(clock: clock, phase: m.bobPhase) : 0)
             if how == .posed { pose(m, station: station, dt: dt) }
         }
-        for station in fleet.stations.values { tendKitchen(station) }
+        for station in fleet.stations.values { tendKitchen(station); swivelChairs(station, dt: dt) }
         for cue in simulation.drainCues() { play(cue) }
         if layoutDirty { flushScene() }
+    }
+
+    func swivelChairs(_ station: Station, dt: Double) {
+        for (ref, chair) in chairs[station.name] ?? [:] {
+            guard let place = station.place(ref) else { continue }
+            if let user = minions.values.first(where: { $0.station == station.name && $0.using == ref && $0.inPlace }) {
+                chair.eulerAngles.y = CGFloat(place.sitting(clock - user.actStartedAt, of: user.actFor).chair)
+            } else {
+                let now = Double(chair.eulerAngles.y), rest = place.facing + .pi
+                chair.eulerAngles.y = CGFloat(now + atan2(sin(rest - now), cos(rest - now)) * min(1, dt * 4))
+            }
+        }
     }
 
     func tendKitchen(_ station: Station) {
@@ -345,6 +357,7 @@ extension StationController {
                 }
             }
             let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
+            if m.sittingOn != nil, m.using != nil { m.smoothFacing = m.facing }
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
                 : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)

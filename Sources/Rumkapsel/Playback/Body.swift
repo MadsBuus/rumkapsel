@@ -47,8 +47,8 @@ class Body {
     var seated: Bool { seatedOnBowl || onCouch || sittingOn != nil }
 
     var using: FixtureRef? { if case .use(let ref, _, _, _) = current?.kind { return ref }; return nil }
-    var settledOn: (ref: FixtureRef, height: Double?)?
-    var inPlace: Bool { settledOn.map { $0.ref == using } ?? false }
+    var settledOn: (order: Int, height: Double?)?
+    var inPlace: Bool { using != nil && settledOn?.order == current?.id }
     var sittingOn: Double? { inPlace ? settledOn?.height : nil }
 
     var onCouch: Bool {

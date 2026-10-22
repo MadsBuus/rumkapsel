@@ -44,6 +44,9 @@ enum Seat {
     static let height = 0.2, knees = 0.2, reach = 0.176
     static let width = 0.24, depth = reach + 0.07, back = 0.03
     static var size: SIMD2<Double> { SIMD2(width, depth + back) }
+    static var middle: Double { (depth + back) / 2 - 0.005 }
+    static var footprint: Double { max(size.x, size.y) / 2 * 0.8 }
+    static let sitDown = 0.5, swivel = 0.9
 }
 
 struct PlacedFixture: Equatable {
@@ -60,6 +63,26 @@ struct PlacedFixture: Equatable {
         let outward: SIMD2<Double>
         let facing: Double
         let use: Anchor.Use
+        var chair: SIMD2<Double> { at + outward * Seat.middle }
+        var stand: SIMD2<Double> { chair + outward * (Seat.footprint + 1 / Double(Station.fine)) }
+
+        struct Sitting { let pos: SIMD2<Double>; let facing: Double; let chair: Double; let down: Bool }
+
+        func sitting(_ t: Double, of total: Double) -> Sitting {
+            let k = max(0, min(t, total - t))
+            let out = facing + .pi
+            if k < Seat.swivel {
+                return Sitting(pos: stand, facing: facing, chair: out + .pi * ease(k / Seat.swivel), down: false)
+            }
+            if k < Seat.swivel + Seat.sitDown {
+                let e = ease((k - Seat.swivel) / Seat.sitDown)
+                return Sitting(pos: stand + (chair + outward * Seat.middle - stand) * e, facing: facing + .pi * e, chair: out + .pi, down: t < total / 2)
+            }
+            let f = out - .pi * ease(min(1, (k - Seat.swivel - Seat.sitDown) / Seat.swivel))
+            return Sitting(pos: chair + SIMD2(sin(f), cos(f)) * Seat.middle, facing: f, chair: f + .pi, down: true)
+        }
+
+        private func ease(_ x: Double) -> Double { x * x * (3 - 2 * x) }
     }
 
     func place(_ i: Int) -> Place? {
@@ -87,7 +110,7 @@ enum RoomLayout {
         case "kind:mission":
             return [Placed(kind: .console, at: SIMD2(1.45, 0.35), yaw: 0),
                     Placed(kind: .console, at: SIMD2(3.55, 0.35), yaw: 0),
-                    Placed(kind: .console, at: SIMD2(4.78, 1.7), yaw: -.pi / 2),
+                    Placed(kind: .console, at: SIMD2(4.78, 1.25), yaw: -.pi / 2),
                     Placed(kind: .holoTable, at: SIMD2(2.5, 1.5), yaw: 0)]
         default:
             return []

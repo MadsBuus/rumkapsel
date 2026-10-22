@@ -8,6 +8,7 @@ struct Furnishing {
     var bag: SCNNode?
     var towel: SCNNode?
     var kitchen: Kitchen?
+    var chairs: [FixtureRef: SCNNode] = [:]
 }
 
 struct Kitchen {
@@ -334,18 +335,17 @@ extension Classic {
     static func mission(_ room: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         guard let origin = station.roomOrigin(room.key) else { return f }
-        let p = MissionRoom.Palette.of(.ops)
+        let p = MissionRoom.Palette.ops
         let o = station.offset
         func at(_ n: SCNNode, _ spot: SIMD2<Double>, _ y: Double = 0, yaw: Double = 0) -> SCNNode {
             n.position = v3(o.x + spot.x, y, o.y + spot.y)
             n.eulerAngles.y = CGFloat(yaw)
             return n
         }
-        let repos = MissionRoom.repos
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
             case .console:
-                f.props.append(at(MissionRoom.opsConsole(p, color: repos[i % repos.count].color), fixture.at, yaw: fixture.yaw))
+                f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
             case .holoTable:
                 let r = fixture.kind.size.x / 2
                 let table = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.03, height: 0.22), 32))
@@ -372,20 +372,21 @@ extension Classic {
             }
             for k in fixture.kind.anchors.indices {
                 guard let seat = fixture.place(k), case .sit(let height) = seat.use else { continue }
-                f.props.append(at(chair(height: height), seat.at, yaw: seat.facing + .pi))
+                let chair = at(chair(height: height), seat.chair, yaw: seat.facing + .pi)
+                f.props.append(chair)
+                f.chairs[FixtureRef(room: room.key, fixture: i, anchor: k)] = chair
             }
         }
         let low = 0.46, high = 1.06, wall = Walker.wallHeight, north = origin.y
-        let panel = MissionRoom.box(4.7, high - low + 0.08, 0.04, lit(p.dark), at: SCNVector3Zero)
-        panel.geometry!.materials = [lit(p.dark), Bulkhead.steel, Bulkhead.steel, Bulkhead.steel, Bulkhead.steel, Bulkhead.steel]
-        f.fixtures.append(at(panel, SIMD2(origin.x + 2.5, north + 0.02), (low + high) / 2))
-        f.fixtures.append(at(MissionRoom.screen(1.6, 0.42, Screens.annunciator(repos), at: SCNVector3Zero, bezel: 0.025), SIMD2(origin.x + 2.5, north + 0.06), low + 0.24))
+        let frame = lit(NSColor(rgb: (0.42, 0.45, 0.48)))
+        for x in [0.1, 4.9] { f.fixtures.append(at(MissionRoom.box(0.05, high + 0.04, 0.05, frame, at: SCNVector3Zero), SIMD2(origin.x + x, north + 0.04), (high + 0.04) / 2)) }
+        for y in [high + 0.015, low - 0.04] { f.fixtures.append(at(MissionRoom.box(4.85, 0.035, 0.035, frame, at: SCNVector3Zero), SIMD2(origin.x + 2.5, north + 0.04), y)) }
+        f.fixtures.append(at(MissionRoom.screen(1.6, 0.42, Screens.annunciator([]), at: SCNVector3Zero, bezel: 0.025), SIMD2(origin.x + 2.5, north + 0.06), low + 0.24))
         for (k, x) in [0.9, 4.1].enumerated() {
-            let shown = k == 0 ? Array(repos.prefix(3)) : Array(repos.suffix(2))
-            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(shown, launches: k == 0), at: SCNVector3Zero, bezel: 0.02), SIMD2(origin.x + x, north + 0.06), low + 0.26))
+            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(k == 0 ? "Launches" : "On the pad"), at: SCNVector3Zero, bezel: 0.02), SIMD2(origin.x + x, north + 0.06), low + 0.26))
         }
         let clock = SCNNode(geometry: SCNPlane(width: 0.13, height: 0.13))
-        let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(); m.emission.contents = Screens.nixieClock(); m.lightingModel = .constant
+        let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(nil); m.emission.contents = Screens.nixieClock(nil); m.lightingModel = .constant
         clock.geometry!.firstMaterial = m
         f.fixtures.append(at(clock, SIMD2(origin.x + 2.5, north + 0.07), high - 0.08))
         let sill = 0.14, beam = 0.08, depth = 3.0, west = origin.x
@@ -401,10 +402,10 @@ extension Classic {
     static func chair(height: Double) -> SCNNode {
         let chair = SCNNode()
         let dark = lit(NSColor(rgb: (0.16, 0.17, 0.2)))
-        let under = Seat.depth / 2 - 0.005
+        let under = -Seat.back / 2
         chair.addChildNode(MissionRoom.box(Seat.width, 0.03, Seat.depth, dark, at: v3(0, height - 0.015, under), chamfer: 0.01))
         chair.addChildNode(MissionRoom.box(0.03, height - 0.03, 0.03, lit(NSColor(rgb: (0.3, 0.31, 0.35))), at: v3(0, (height - 0.03) / 2, under)))
-        chair.addChildNode(MissionRoom.box(Seat.width, 0.24, Seat.back, dark, at: v3(0, height + 0.14, under + Seat.depth / 2 + Seat.back / 2), chamfer: 0.01))
+        chair.addChildNode(MissionRoom.box(Seat.width, 0.24, Seat.back, dark, at: v3(0, height + 0.14, Seat.depth / 2), chamfer: 0.01))
         return chair
     }
 

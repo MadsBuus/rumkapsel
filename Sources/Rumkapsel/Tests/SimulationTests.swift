@@ -474,14 +474,21 @@ enum SimulationTests {
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
-        test("a minion sent to a console sits on the seat its anchor says, facing the console, at the seat's height, then goes back") {
+        test("a minion sent to a console turns the chair out, backs into it, swivels with it to the console at the seat's height, then goes back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let ref = station.anchors(in: "kind:mission").first(where: { station.place($0)?.use != .stand }),
-                  let seat = station.place(ref) else { return expect(false, "mission control has a seat") }
+            let seats = station.anchors(in: "kind:mission").filter { station.place($0)?.use != .stand }
+            for s in seats { expect(!station.obstacles.contains(Station.sub(station.place(s)!.stand)), "the spot before chair \(s.fixture) is clear floor") }
+            guard let ref = seats.first, let seat = station.place(ref) else { return expect(false, "mission control has a seat") }
             expect(sim.use(m, ref, station: station, seconds: 20) && m.using == ref && m.place == .room("kind:mission"), "off to the console")
             expect(step(sim, seconds: 60, until: { m.inPlace }), "in place: \(m.words) at \(m.pos)")
+            let before = seat.stand - m.pos
+            expect((before.x * before.x + before.y * before.y).squareRoot() < 0.03 && !m.seated, "standing before the chair: \(m.pos) against \(seat.stand)")
+            expect(abs(atan2(sin(m.facing - seat.facing), cos(m.facing - seat.facing))) < 0.01, "facing it, to turn it out: facing \(m.facing)")
+            _ = step(sim, seconds: Seat.swivel + Seat.sitDown + 0.02)
+            expect(m.seated && abs(atan2(sin(m.facing - seat.facing - .pi), cos(m.facing - seat.facing - .pi))) < 0.05, "sat down with its back to the console: facing \(m.facing)")
+            _ = step(sim, seconds: Seat.swivel + 0.1)
             let off = seat.at - m.pos
             expect((off.x * off.x + off.y * off.y).squareRoot() < 0.03, "on the seat: \(m.pos) against \(seat.at)")
             expect(abs(atan2(sin(m.facing - seat.facing), cos(m.facing - seat.facing))) < 0.01 && m.seated && m.sittingOn == Seat.height,

@@ -4,10 +4,6 @@ import Metal
 
 enum LookDev {
     static func run(out: String, shot: String) -> Never {
-        if shot.hasPrefix("mission") {
-            let parts = shot.split(separator: ":").map(String.init)
-            mission(out: out, style: MissionRoom.Style(rawValue: parts.count > 1 ? parts[1] : "apollo") ?? .apollo, view: parts.count > 2 ? parts[2] : "top")
-        }
         if shot == "crates" { crates(out: out) }
         if shot == "rockets" { rockets(out: out) }
         if shot == "signs" { signs(out: out) }
@@ -47,40 +43,6 @@ enum LookDev {
                 FileHandle.standardError.write("no shot \(shot)\n".data(using: .utf8)!); exit(1)
             }
             eye.simdTransform = mount.simdWorldTransform
-        }
-        scene.rootNode.addChildNode(eye)
-        render(scene, from: eye, to: out)
-    }
-
-    private static func mission(out: String, style: MissionRoom.Style, view: String) -> Never {
-        let scene = SCNScene()
-        scene.background.contents = NSColor(rgb: (0.015, 0.02, 0.035))
-        let room = MissionRoom.build(style)
-        scene.rootNode.addChildNode(room)
-        let around = SCNNode(geometry: SCNPlane(width: 14, height: 10))
-        around.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.33, 0.27)))
-        around.eulerAngles.x = -.pi / 2
-        around.position = v3(MissionRoom.width / 2, -0.03, MissionRoom.depth / 2)
-        scene.rootNode.addChildNode(around)
-        let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 650
-        sun.eulerAngles = v3(-.pi / 2.6, .pi / 5, 0)
-        scene.rootNode.addChildNode(sun)
-        let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light!.type = .ambient; ambient.light!.intensity = 520
-        scene.rootNode.addChildNode(ambient)
-        let eye = SCNNode()
-        let cam = SCNCamera()
-        cam.zNear = 0.01; cam.zFar = 200
-        eye.camera = cam
-        let middle = v3(MissionRoom.width / 2, 0.15, MissionRoom.depth / 2)
-        if view == "eye" {
-            cam.fieldOfView = Walker.fieldOfView
-            eye.position = v3((MissionRoom.aisle + MissionRoom.width) / 2, Walker.eye, MissionRoom.depth - 0.1)
-            eye.look(at: v3(MissionRoom.width * 0.38, 0.3, 0.25), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
-        } else {
-            cam.fieldOfView = 16
-            let yaw = 0.62, pitch = Double.pi / 6, far = 22.0
-            eye.position = v3(Double(middle.x) - sin(yaw) * cos(pitch) * far, Double(middle.y) + sin(pitch) * far, Double(middle.z) + cos(yaw) * cos(pitch) * far)
-            eye.look(at: middle, up: v3(0, 1, 0), localFront: v3(0, 0, -1))
         }
         scene.rootNode.addChildNode(eye)
         render(scene, from: eye, to: out)

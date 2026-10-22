@@ -73,6 +73,14 @@ The **dorm**, **lounge**, **bath** and **gym** stand together off the hallway, a
 with a coffee machine, a food printer and two spare mugs. It takes a tile no office or hallway ever would,
 away from the hallway where the plan allows, and where the monolith does not hide it.
 
+Each of these fixed rooms has its own tiles in the plan and stands on them; an office in the way moves to
+a free slot, and a fixed room is never put anywhere else. If its tiles cannot be had, it waits and
+nothing moves for it.
+
+**Mission control** stands by the pad, its far wall a window onto it. Three consoles face the boards
+raised on a steel gantry along the north wall, and a holo table in the middle shows the station's little
+system turning above it at eye height. There is room to walk in round the table; **M** walks you in.
+
 ## Air and weight
 
 The hull is the line between air and none. Inside there is air and a low gravity, and work is done by
@@ -283,7 +291,12 @@ moves through it one way: in from the hallway at the back, out through the field
 - Fixtures stand along the walls away from the door, one minion to each: a bed, a couch, the bowl, the
   shower, a piece of gym gear. The room's name is cut into the far corner and nothing covers it. The galley
   is too small for a name; its machines say what it is.
-- The middle of a room stays clear to walk through.
+- The middle of a room stays clear to walk through. Mission control alone keeps its holo table there, with
+  a way round it on every side.
+- A fixture says where a body uses it: a seat to sit on or a rim to stand at, in its own measurements, and
+  wherever the fixture stands the body lands exactly there. A console's chair turns out to the minion,
+  takes it, and swivels it in to the console; getting up runs the other way. The holo table takes three,
+  standing an arm's length from its rim.
 - What a body wears, holds or is covered by is worked out again every frame from what is true of it now.
   A prop that belongs to a room is drawn for a body in that room, not for one still on its way there.
 - A visit lasts its whole time. A shower is two to three minutes of water over the shoulders, then a few
@@ -313,13 +326,14 @@ moves through it one way: in from the hallway at the back, out through the field
   the time of day, the work it did and chance decide: rest by night; after hard work now and then the
   bath; now and then a look round; else rest.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
-  the station most often, the galley by day when it is free, a turn in the gym by day, the bath, or staying
-  on the couch with a book. The galley serves a bite from 11 to 14 and 18 to 20, a coffee otherwise; after
+  the station most often, the galley by day when it is free, a turn in the gym by day, the bath, a turn in
+  mission control by day at a free console or the holo table, or staying on the couch with a book. The
+  crew do not take turns in the gym or mission control. The galley serves a bite from 11 to 14 and 18 to 20, a coffee otherwise; after
   desk work a minion now and then goes for one before it rests.
   Leaving the lounge does not reset it. A visit's time starts when the minion arrives. Roamers keep
   apart, except to watch a venting rocket.
 - You may pick a lounger's next thing from its bubble: the gym, bed, a book, the shower, the bowl, a coffee
-  or a bite.
+  or a bite. A busy minion's bubble says it is busy and what at, and offers nothing.
 - A session that is over: lounge by day, dorm by night; when there is nothing left, a shuttle out from
   the bay.
 

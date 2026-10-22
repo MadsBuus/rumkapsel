@@ -1,3 +1,4 @@
+import simd
 import Foundation
 
 extension Simulation {
@@ -8,29 +9,30 @@ extension Simulation {
 
     @discardableResult
     func use(_ m: B, _ ref: FixtureRef, station: Station, seconds: Double) -> Bool {
-        guard let place = station.place(ref), let kind = station.fixtures(in: ref.room)[safe: ref.fixture]?.kind else { return false }
+        guard let place = station.place(ref), let kind = station.fixtures(in: ref.room)[safe: ref.fixture]?.kind,
+              let room = station.rooms[ref.room] else { return false }
         let back = m.place
         guard start(m, .use(ref, kind: kind, back: back, seconds: seconds), announce: true), m.using == ref else { return false }
         m.couch = nil
         m.place = .room(ref.room)
-        let near = place.use == .stand ? place.at + place.outward * Hands.arm : place.at
-        m.path = route(m, to: standCell(station, near: Cell(x: Int(near.x.rounded()), y: Int(near.y.rounded()))))
+        let last = place.use == .stand ? place.at + place.outward * Hands.arm : place.stand
+        m.path = route(m, to: standCell(station, near: last, within: Set(room.cells))) + [last]
         return true
     }
 
     func stepUse(_ m: B, station: Station, dt: Double) -> Bool {
-        guard let ref = m.using, m.path.isEmpty, m.phaseKind == .act, let place = station.place(ref) else { return false }
+        guard let ref = m.using, let order = m.current?.id, m.path.isEmpty, m.phaseKind == .act, let place = station.place(ref) else { return false }
         if !m.inPlace {
-            switch place.use {
-            case .stand:
-                guard atArmsLength(m, of: place.at, from: place.outward, square: true, dt: dt) else { return true }
-                m.settledOn = (ref, nil)
-            case .sit(let height):
-                guard sit(m, at: place.at, facing: place.facing, dt: dt) else { return true }
-                m.settledOn = (ref, height)
-            }
+            if place.use == .stand, !atArmsLength(m, of: place.at, from: place.outward, square: true, dt: dt) { return true }
+            m.settledOn = (order, nil)
             m.actStartedAt = clock
             m.phaseUntil = clock + m.actFor
+        }
+        if case .sit(let height) = place.use {
+            let s = place.sitting(clock - m.actStartedAt, of: m.actFor)
+            m.pos = s.pos
+            m.facing = s.facing
+            m.settledOn = (order, s.down ? height : nil)
         }
         guard clock >= m.phaseUntil else { return false }
         var back = restPlace(m)
@@ -40,12 +42,12 @@ extension Simulation {
         return true
     }
 
-    func sit(_ m: B, at seat: SIMD2<Double>, facing: Double, dt: Double) -> Bool {
-        m.facing = facing
-        let d = seat - m.pos
-        if (d.x * d.x + d.y * d.y).squareRoot() <= 0.02 { m.pos = seat; return true }
-        m.pos += d * min(1, dt * 6)
-        return false
+    func standCell(_ st: Station, near point: SIMD2<Double>, within cells: Set<Cell>) -> Cell {
+        let clear = cells.filter { c in (-1...1).allSatisfy { dx in (-1...1).allSatisfy { dy in !st.obstacles.contains(Cell(x: c.x * Station.fine + dx, y: c.y * Station.fine + dy)) } } }
+        let pool = clear.isEmpty ? cells : clear
+        return pool.min { a, b in
+            (simd_distance(SIMD2(Double(a.x), Double(a.y)), point), a.x, a.y) < (simd_distance(SIMD2(Double(b.x), Double(b.y)), point), b.x, b.y)
+        } ?? Cell(x: Int(point.x.rounded()), y: Int(point.y.rounded()))
     }
 }
 

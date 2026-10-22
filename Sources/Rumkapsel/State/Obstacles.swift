@@ -52,7 +52,7 @@ extension Station {
             let fixtures = self.fixtures(in: key)
             let seats = fixtures.flatMap { f in f.kind.anchors.indices.compactMap { f.place($0) }.filter { $0.use != .stand } }
             place(rooms[key], fixtures.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }
-                + seats.map { Footprint(at: $0.at, radius: max(Seat.size.x, Seat.size.y) / 2 * 0.8) })
+                + seats.map { Footprint(at: $0.chair, radius: Seat.footprint) })
         }
         place(rooms["kind:quarters"], beds.map { Footprint(at: $0.pos, radius: $0.level > 0 ? 0.296 : kingdom ? 0.2066 : 0.288) })
         for room in offices {

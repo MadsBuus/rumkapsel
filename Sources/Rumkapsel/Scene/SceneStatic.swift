@@ -336,9 +336,11 @@ extension StationController {
                 for n in f.fixtures { n.name = "gym:" + roomKey(station, room); staticRoot.addChildNode(n) }
                 kitchens[station.name] = f.kitchen
             }
+            chairs[station.name] = nil
             if let room = station.rooms["kind:mission"], !station.fixtures(in: room.key).isEmpty {
                 let f = Looks.current.furnishMission(room, in: station)
                 for n in f.props + f.fixtures { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
+                chairs[station.name] = f.chairs
             }
             if station.hasHangar {
                 let hc = station.hangarCenter
