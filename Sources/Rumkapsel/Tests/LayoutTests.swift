@@ -193,13 +193,36 @@ enum LayoutTests {
             defer { OfficePlacement.pinned = .rings }
             let after = Station(name: "work")
             after.restore(saved, relayout: true)
-            for place in [Place.quarters, .lounge, .bath, .gym, .galley] { after.ensureFixedRoom(place) }
+            after.settleFixedRooms()
             expect(Set(after.rooms.keys) == Set(before.rooms.keys), "the same rooms stand: \(after.rooms.count) against \(before.rooms.count)")
             expect(whole(after), "the hallway is one piece and every office has its door on it")
             expect(neighbourly(after) >= 0.8, "the offices stand by repository: \(Int(neighbourly(after) * 100))%")
             let kept = Station(name: "work")
             kept.restore(saved)
             expect(order.allSatisfy { kept.rooms[$0]?.cells == before.rooms[$0]?.cells }, "and without a relayout every office keeps its cells")
+        }
+
+        test("on load every fixed room goes back onto its plan; offices in the way move to slots, none is thrown off the floor") {
+            let before = fresh()
+            for i in 0..<24 { place("task:repo\(i % 4)#\(400 + i)", on: before) }
+            var saved = before.saved
+            let plan = { (key: String) in before.floor.quarters[Station.fixedNamed[key]!.plan]! }
+            let far = (before.floor.allHall.map(\.x).max() ?? 0) + 6
+            let office = saved.rooms.keys.filter { !$0.hasPrefix("kind:") }.sorted()[0]
+            saved.rooms["kind:galley"]?.cells = [plan("kind:quarters").last!]
+            saved.rooms["kind:quarters"]?.cells = [Cell(x: far, y: -20), Cell(x: far + 1, y: -20)]
+            saved.rooms["kind:bath"]?.cells = [Cell(x: far + 4, y: -20)]
+            saved.rooms[office]?.cells = plan("kind:bath")
+            let after = Station(name: "work")
+            after.restore(saved)
+            after.settleFixedRooms()
+            for key in Station.fixedNamed.keys.sorted() {
+                expect(Set(after.rooms[key]?.cells ?? []) == Set(plan(key)), "\(key) stands on its plan: \(cells(after.rooms[key]?.cells ?? []))")
+            }
+            expect(Set(after.rooms.keys) == Set(before.rooms.keys), "the same rooms stand: \(after.rooms.count) against \(before.rooms.count)")
+            let slots = Set(after.floor.slots.map { Set($0.cells) })
+            expect(after.rooms.values.filter { !$0.key.hasPrefix("kind:") }.allSatisfy { slots.contains(Set($0.cells)) }, "every office stands in a slot of the plan")
+            expect(whole(after), "the hallway is one piece and every office has its door on it")
         }
 
         test("Classic's pad stands right beyond the hall's field, the whole width of it") {

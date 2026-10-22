@@ -373,58 +373,61 @@ final class Station {
         }
     }
 
-    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, openedAt: Date? = nil, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil) -> Bool {
+    func ensureRoom(key: String, name: String, repo: String?, color: RGB, lastActive: Date, openedAt: Date? = nil, shape: [Cell]? = nil, preferredCells: [Cell]? = nil, near: [Cell]? = nil, anywhere: Bool = true) -> Bool {
         if let r = rooms[key] {
             r.lastActive = max(r.lastActive, lastActive)
             return false
         }
-        let cells = preferredCells.flatMap { adopt($0, dig: Station.opensInto[key] == nil) ? $0 : nil } ?? takeSlot(repo: repo)
+        let adopted = preferredCells.flatMap { adopt($0, dig: Station.opensInto[key] == nil) ? $0 : nil }
+        guard adopted != nil || anywhere else { return false }
+        let cells = adopted ?? takeSlot(repo: repo)
         rooms[key] = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive, openedAt: openedAt)
         for c in cells { occupied[c] = key }
         forgetFloorPlan()
         return true
     }
 
+    static let fixedNamed: [String: (plan: String, name: String, color: RGB, shape: [Cell])] = [
+        "kind:lounge":   ("lounge",   "lounge",   Colors.idle,        Station.rect(3, 3)),
+        "kind:quarters": ("quarters", "sleeping", Colors.idleDim,     Station.rect(2, 4)),
+        "kind:bath":     ("bath",     "bath",     Colors.idleLight,   Station.rect(2, 2)),
+        "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
+        "kind:galley":   ("galley",   "galley",   Colors.idleLight,   Station.rect(1, 1)),
+        "kind:mission":  ("mission",  "mission control", Colors.idleDim, Station.rect(5, 3)),
+    ]
+
     @discardableResult
     func ensureFixedRoom(_ place: Place) -> Bool {
-        guard case .room(let key) = place else { return false }
-        let named: [String: (plan: String, name: String, color: RGB, shape: [Cell])] = [
-            "kind:lounge":   ("lounge",   "lounge",   Colors.idle,        Station.rect(3, 3)),
-            "kind:quarters": ("quarters", "sleeping", Colors.idleDim,     Station.rect(2, 4)),
-            "kind:bath":     ("bath",     "bath",     Colors.idleLight,   Station.rect(2, 2)),
-            "kind:gym":      ("gym",      "gym",      Colors.idle,        Station.rect(3, 2)),
-            "kind:galley":   ("galley",   "galley",   Colors.idleLight,   Station.rect(1, 1)),
-            "kind:mission":  ("mission",  "mission control", Colors.idleDim, Station.rect(5, 3)),
-        ]
-        guard let it = named[key] else { return false }
-        if key == "kind:mission", !hasPad || floor.quarters["mission"] == nil { return false }
+        guard case .room(let key) = place, let it = Station.fixedNamed[key], rooms[key] == nil, let cells = floor.quarters[it.plan] else { return false }
+        if key == "kind:mission", !hasPad { return false }
         if let into = Station.opensInto[key] {
-            guard let cells = floor.quarters[it.plan], let host = rooms[into],
+            guard let host = rooms[into],
                   cells.allSatisfy({ occupied[$0] == nil && !isReserved($0) && !isCorridor($0) }),
                   cells.contains(where: { $0.neighbours.contains(where: host.cells.contains) }) else { return false }
         }
-        return ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture, openedAt: .distantPast,
-                          shape: it.shape, preferredCells: floor.quarters[it.plan])
+        let inWay = Set(cells.compactMap { occupied[$0] }).compactMap { rooms[$0] }
+        guard !inWay.contains(where: { $0.key.hasPrefix("kind:") }) else { return false }
+        for r in inWay { removeRoom(key: r.key) }
+        ensureRoom(key: key, name: it.name, repo: nil, color: it.color, lastActive: .distantFuture, openedAt: .distantPast,
+                   shape: it.shape, preferredCells: cells, anywhere: false)
+        let stands = rooms[key] != nil
+        for r in inWay.sorted(by: { ($0.openedAt, $0.key) < ($1.openedAt, $1.key) }) {
+            ensureRoom(key: r.key, name: r.name, repo: r.repo, color: r.color, lastActive: r.lastActive, openedAt: r.openedAt,
+                       preferredCells: stands ? nil : r.cells)
+            if let n = rooms[r.key] { n.branch = r.branch; n.repoRoot = r.repoRoot; n.worktree = r.worktree }
+        }
+        return stands
     }
 
-    func touching(_ a: String, _ b: String) -> Bool {
-        guard let ra = rooms[a], let rb = rooms[b] else { return false }
-        let set = Set(rb.cells)
-        return ra.cells.contains { $0.neighbours.contains(where: set.contains) }
-    }
+    static let fixedRooms: [Place] = [.quarters, .lounge, .bath, .gym, .mission, .galley]
 
-    func clusterQuarters() {
-        guard rooms["kind:lounge"] != nil else { return }
-        if !touching("kind:quarters", "kind:lounge") || !(touching("kind:bath", "kind:lounge") || touching("kind:bath", "kind:quarters")) {
-            removeRoom(key: "kind:quarters"); removeRoom(key: "kind:bath")
-            ensureFixedRoom(.quarters); ensureFixedRoom(.bath)
+    func settleFixedRooms(_ fixed: [Place] = Station.fixedRooms) {
+        for case .room(let key) in fixed {
+            guard let r = rooms[key], let plan = Station.fixedNamed[key].flatMap({ floor.quarters[$0.plan] }), Set(r.cells) != Set(plan) else { continue }
+            removeRoom(key: key)
         }
-        if rooms["kind:gym"] != nil, !["kind:lounge", "kind:quarters", "kind:bath"].contains(where: { touching("kind:gym", $0) }) {
-            removeRoom(key: "kind:gym"); ensureFixedRoom(.gym)
-        }
-        if rooms["kind:galley"] != nil, !touching("kind:galley", "kind:lounge") {
-            removeRoom(key: "kind:galley"); ensureFixedRoom(.galley)
-        }
+        let inner = fixed.filter { if case .room(let k) = $0 { return Station.opensInto[k] != nil }; return false }
+        for place in fixed.filter({ !inner.contains($0) }) + inner { ensureFixedRoom(place) }
     }
 
     static let opensInto = ["kind:galley": "kind:lounge"]
@@ -441,7 +444,7 @@ final class Station {
         guard let r = rooms[key] ?? lingering[key] else { return nil }
         let south = key == "kind:mission"
         let candidates = r.cells.filter { $0.neighbours.contains(where: entrance(of: key)) }
-            .sorted { south ? ($0.y, abs($0.x - r.cells[r.cells.count / 2].x)) > ($1.y, abs($1.x - r.cells[r.cells.count / 2].x)) : ($0.y, $0.x) < ($1.y, $1.x) }
+            .sorted { south ? ($0.y, -abs($0.x - r.cells[r.cells.count / 2].x)) > ($1.y, -abs($1.x - r.cells[r.cells.count / 2].x)) : ($0.y, $0.x) < ($1.y, $1.x) }
         let d = candidates.first ?? r.cells.first
         if let d { doorCache[key] = d }
         return d
@@ -950,15 +953,14 @@ final class Fleet {
     }
 
     func station(_ name: String) -> Station {
-        station(name, fixed: [.quarters, .lounge, .bath, .gym, .galley, .mission])
+        station(name, fixed: Station.fixedRooms)
     }
 
     @discardableResult
     func station(_ name: String, fixed: [Place]) -> Station {
         if let s = stations[name] { return s }
         let s = Station(name: name)
-        let inner = fixed.filter { if case .room(let k) = $0 { return Station.opensInto[k] != nil }; return false }
-        for place in fixed.filter({ !inner.contains($0) }) + inner { s.ensureFixedRoom(place) }
+        s.settleFixedRooms(fixed)
         stations[name] = s
         return s
     }
@@ -1012,14 +1014,8 @@ final class Fleet {
         for (name, s) in saved.stations where name != "crew" && name != "private" {
             let station = Station(name: name)
             station.restore(s, relayout: alone || (s.placement ?? OfficePlacement.rings.rawValue) != OfficePlacement.current.rawValue)
-            station.ensureFixedRoom(.quarters)
-            station.ensureFixedRoom(.lounge)
-            station.ensureFixedRoom(.bath)
-            station.ensureFixedRoom(.gym)
-            station.clusterQuarters()
-            station.ensureFixedRoom(.galley)
-            station.ensureFixedRoom(.mission)
             station.removeRoom(key: "kind:airlock")
+            station.settleFixedRooms()
             stations[name] = station
         }
         recolorRooms()
