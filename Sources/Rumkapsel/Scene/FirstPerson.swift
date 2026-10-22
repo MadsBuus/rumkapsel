@@ -86,7 +86,16 @@ extension StationController {
         }
     }
 
-    func stepIn(at point: SIMD2<Double>? = nil) {
+    func toggleMission() {
+        enqueue { [self] in
+            if let w = walker { stepOut(w); return }
+            guard let st = fleet.stations.values.sorted(by: { $0.name < $1.name }).first(where: { !$0.fixtures(in: "kind:mission").isEmpty }),
+                  let origin = st.roomOrigin("kind:mission") else { return }
+            stepIn(at: st.offset + origin + SIMD2(2.5, 2.6), yaw: 0)
+        }
+    }
+
+    func stepIn(at point: SIMD2<Double>? = nil, yaw: Double? = nil) {
         guard walker == nil, let station = cameraNode.camera else { return }
         let focus = SIMD2(Double(rig.position.x), Double(rig.position.z))
         let viewYaw = Double(rig.eulerAngles.y)
@@ -96,7 +105,7 @@ extension StationController {
            let cell = st.nearestFloor(to: point - st.offset) {
             let q = point - st.offset, middle = SIMD2(Double(cell.x), Double(cell.y))
             let onIt = Cell(x: Int(q.x.rounded()), y: Int(q.y.rounded())) == cell && fits(q, from: middle, in: st)
-            start = (st, (onIt ? q : middle) + st.offset, viewYaw)
+            start = (st, (onIt ? q : middle) + st.offset, yaw ?? viewYaw)
         } else if let m = followed, let st = fleet.stations[m.station] {
             start = (st, SIMD2(Double(m.node.position.x), Double(m.node.position.z)), m.smoothFacing + .pi)
         } else {
@@ -466,8 +475,10 @@ extension StationController {
             let outside = Set(st.hall.padCells)
             let gate = Set(st.hall.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
             let mouthRow = st.hangarCells.map(\.y).max()
+            let mission = Set(st.rooms["kind:mission"]?.cells ?? [])
             func unwalled(_ c: Cell, _ n: Cell) -> Bool {
                 gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))
+                    || (mission.contains(c) && outside.contains(n)) || (outside.contains(c) && mission.contains(n))
             }
             let styles = Bulkhead.styles(of: st)
             let root = SCNNode()

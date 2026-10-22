@@ -9,7 +9,7 @@ enum IdleTests {
         test("what the empty board leaves a body to: the night, the work it did, and chance") {
             expect(IdleAfter.after(.yard, roll: 0, night: true, bath: true) == .rest, "by night, rest, whatever it did")
             expect(IdleAfter.after(.release, roll: 0.05, night: false, bath: true) == .bath(shower: true), "after hard work, the lowest rolls a shower")
-            expect(IdleAfter.after(.yard, roll: 0.2, night: false, bath: true) == .bath(shower: false), "then the bowl")
+            expect(IdleAfter.after(.yard, roll: 0.15, night: false, bath: true) == .bath(shower: false), "then the bowl")
             expect(IdleAfter.after(.yard, roll: 0.5, night: false, bath: true) == .rest, "and mostly rest")
             expect(IdleAfter.after(.yard, roll: 0.05, night: false, bath: false) == .rest, "no bath on the station: rest")
             expect(IdleAfter.after(.message, roll: 0.1, night: false, bath: true) == .roam, "after a message, now and then a look round")
@@ -51,13 +51,16 @@ enum IdleTests {
             expect(IdleClock.span.contains(c.dueAt), "a random span lands in it: \(c.dueAt)")
         }
 
-        test("one thing by weight: a look round most often, then the gym, the bath, and now and then a book") {
-            func pick(_ roll: Double) -> IdlePick { IdlePick.pick(roll: roll, night: false, crew: false, gymFree: true, bath: true, shower: true) }
+        test("one thing by weight: a look round most often, then the gym, the bath, a turn in mission control, and now and then a book") {
+            func pick(_ roll: Double, mission: Bool = true) -> IdlePick { IdlePick.pick(roll: roll, night: false, crew: false, gymFree: true, bath: true, shower: true, mission: mission) }
             expect(pick(0) == .roam && pick(0.39) == .roam, "under 0.40: a look round")
             expect(pick(0.40) == .gym && pick(0.64) == .gym, "to 0.65: the gym")
-            expect(pick(0.65) == .bath(shower: true) && pick(0.84) == .bath(shower: true), "to 0.85: the bath")
+            expect(pick(0.65) == .bath(shower: true) && pick(0.74) == .bath(shower: true), "to 0.75: the bath")
+            expect(pick(0.75) == .mission && pick(0.84) == .mission, "to 0.85: mission control")
+            expect(pick(0.8, mission: false) == .read, "no mission control: a book")
+            expect(IdlePick.pick(roll: 0.8, night: false, crew: true, gymFree: true, bath: true, shower: true, mission: true) == .read, "never the crew: a book")
             expect(pick(0.85) == .read && pick(0.999) == .read, "the rest: a book")
-            let weights = [IdlePick.roamBelow, IdlePick.gymBelow - IdlePick.roamBelow, IdlePick.bathBelow - IdlePick.gymBelow, 1 - IdlePick.bathBelow]
+            let weights = [IdlePick.roamBelow, IdlePick.gymBelow - IdlePick.roamBelow, IdlePick.bathBelow - IdlePick.gymBelow, IdlePick.missionBelow - IdlePick.bathBelow, 1 - IdlePick.missionBelow]
             expect(weights.max()! < 0.8, "no one thing takes over: \(weights)")
         }
 

@@ -270,6 +270,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private var localSignature = ""
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
+    var chairs: [String: [FixtureRef: SCNNode]] = [:]
     var kitchens: [String: Kitchen] = [:]
     private var lastBusy: [String: Double] = [:]
     var stationAnchors: [String: SCNNode] = [:]
@@ -522,6 +523,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             case "1", "2", "3", "4": following = nil; focus(onIndex: Int(key)! - 1)
             case "r": following = nil; resetView()
             case "f": toggleWalk()
+            case "m": following = nil; toggleMission()
             case "\u{1b}":
                 following = nil
                 enqueue { self.walkEscape() }
@@ -850,6 +852,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func doing(_ m: Minion) -> String? {
         switch m.current?.kind {
         case .exercise: return "gym"
+        case .use: return "mission"
         case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
         case .chore: return "roam"
         case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"
@@ -903,31 +906,37 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func drive(_ b: Minion, by m: PeerSnapshot.Minion, station: Station) {
         b.busy = m.busy && !m.asleep
         b.activity = m.asleep ? .sleeping : (m.waiting == true ? .waiting : .coding(""))
+        var visiting: Bool { b.bathing || b.exercising || b.choring || b.using != nil }
         func go(_ want: Place) {
-            if b.bathing || b.exercising || b.choring { simulation.finish(b, to: want); return }
+            if visiting { simulation.finish(b, to: want); return }
             if b.place != want || b.path.isEmpty && b.state == .arriving { send(b, to: want) }
         }
         switch m.asleep ? nil : m.doing {
         case "gym":
             if !b.exercising {
-                if b.bathing || b.choring { simulation.finish(b, to: .gym) }
+                if visiting { simulation.finish(b, to: .gym) }
                 if !(station.rooms["kind:gym"].map { takeTurnInGym(b, station: station, gym: $0) } ?? false) { go(.lounge) }
             }
         case "bath", "shower":
             if !b.bathing {
-                if b.exercising || b.choring { simulation.finish(b, to: .bath) }
+                if visiting { simulation.finish(b, to: .bath) }
                 b.showering = m.doing == "shower"
                 if !visitBath(b, station: station) { go(.lounge) }
             }
         case "roam":
             if !b.choring {
-                if b.bathing || b.exercising { simulation.finish(b, to: .lounge) }
+                if visiting { simulation.finish(b, to: .lounge) }
                 if !startRoam(b, station: station) { go(.lounge) }
             }
         case "coffee", "bite":
             if b.fare == nil {
-                if b.bathing || b.exercising || b.choring { simulation.finish(b, to: .lounge) }
+                if visiting { simulation.finish(b, to: .lounge) }
                 if !visitGalley(b, station: station, fare: m.doing == "coffee" ? .coffee : .bite) { go(.lounge) }
+            }
+        case "mission":
+            if b.using == nil {
+                if visiting { simulation.finish(b, to: .lounge) }
+                if !takeTurnInMission(b, station: station) { go(.lounge) }
             }
         case "lounge":
             go(.lounge)

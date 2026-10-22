@@ -77,7 +77,7 @@ final class Minion: Body {
     static let seatedTorso = 0.62
     static let couchSeat = 0.18
     static let bedSeat = 0.18
-    var seatHeight: Double { seatedOnBowl ? Minion.seat : Minion.couchSeat }
+    var seatHeight: Double { sittingOn ?? (seatedOnBowl ? Minion.seat : Minion.couchSeat) }
 
     func currentPose(at clock: Double) -> Pose {
         let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
@@ -335,7 +335,7 @@ final class Minion: Body {
         setPose(currentPose(at: clock))
         wear(outfit, clock: clock, dt: dt)
         let resting = path.isEmpty && state == .settled
-        let hop = isJumping(at: clock) && resting && place != .lounge && !bathing && fare == nil ? Routines.hop(clock: clock, phase: bobPhase) : 0
+        let hop = isJumping(at: clock) && resting && place != .lounge && using == nil && !bathing && fare == nil ? Routines.hop(clock: clock, phase: bobPhase) : 0
         drawnLean += (lean - drawnLean) * min(1, dt * 8)
         node.position = v3(station.offset.x + pos.x + drawnLean.x, hover + hop, station.offset.y + pos.y + drawnLean.y)
         shadow.position.y = CGFloat(0.003 - hop - hover)

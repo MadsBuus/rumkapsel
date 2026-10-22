@@ -61,6 +61,7 @@ says the one-time setup.
 | N | the Neighbours panel |
 | G | ask GitHub again |
 | F | walk the station, down in the hallway at a minion's eye height; F or Esc goes back up |
+| M | walk into mission control, facing its boards; M or Esc goes back up |
 | Esc | let go of a minion, step out of the walk, close the panels |
 | hover a minion | it stops and its bubble says what it is doing; a lounger's bubble lets you pick its next thing |
 | click a minion | follow it, its order written along the bottom; Esc, a pan or a click elsewhere lets go |

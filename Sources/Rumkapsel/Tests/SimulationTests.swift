@@ -474,6 +474,53 @@ enum SimulationTests {
             expect(step(sim, seconds: 60, until: { m.load == .crate(crate) }), "lifted: \(m.words), phase \(m.phaseKind) at \(m.cell.x),\(m.cell.y)")
             expect(!gaveUp, "never gave up")
         }
+        test("a minion sent to a console turns the chair out, backs into it, swivels with it to the console at the seat's height, then goes back") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            let seats = station.anchors(in: "kind:mission").filter { station.place($0)?.use != .stand }
+            for s in seats { expect(!station.obstacles.contains(Station.sub(station.place(s)!.stand)), "the spot before chair \(s.fixture) is clear floor") }
+            guard let ref = seats.first, let seat = station.place(ref) else { return expect(false, "mission control has a seat") }
+            expect(sim.use(m, ref, station: station, seconds: 20) && m.using == ref && m.place == .room("kind:mission"), "off to the console")
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "in place: \(m.words) at \(m.pos)")
+            let before = seat.stand - m.pos
+            expect((before.x * before.x + before.y * before.y).squareRoot() < 0.03 && !m.seated, "standing before the chair: \(m.pos) against \(seat.stand)")
+            expect(abs(atan2(sin(m.facing - seat.facing), cos(m.facing - seat.facing))) < 0.01, "facing it, to turn it out: facing \(m.facing)")
+            _ = step(sim, seconds: Seat.swivel + Seat.sitDown + 0.02)
+            expect(m.seated && abs(atan2(sin(m.facing - seat.facing - .pi), cos(m.facing - seat.facing - .pi))) < 0.05, "sat down with its back to the console: facing \(m.facing)")
+            _ = step(sim, seconds: Seat.swivel + 0.1)
+            let off = seat.at - m.pos
+            expect((off.x * off.x + off.y * off.y).squareRoot() < 0.03, "on the seat: \(m.pos) against \(seat.at)")
+            expect(abs(atan2(sin(m.facing - seat.facing), cos(m.facing - seat.facing))) < 0.01 && m.seated && m.sittingOn == Seat.height,
+                   "facing the console, seated at the seat's height: facing \(m.facing), seated \(m.seated)")
+            expect(step(sim, seconds: 40, until: { m.using == nil }) && m.place == .lounge && m.sittingOn == nil && !m.inPlace, "the turn ends back on the couch: \(m.place.words)")
+        }
+        test("a minion at the holo table stands an arm's length from its rim, facing it; one body to an anchor") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let ref = station.anchors(in: "kind:mission").first(where: { station.place($0)?.use == .stand }),
+                  let stand = station.place(ref) else { return expect(false, "the holo table has a place to stand") }
+            expect(sim.use(m, ref, station: station, seconds: 20), "off to the table")
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "in place: \(m.words)")
+            let reach = stand.at - m.pos
+            let dist = (reach.x * reach.x + reach.y * reach.y).squareRoot()
+            expect(abs(dist - Hands.arm) < 0.03 && !m.seated, "an arm's length from the rim, standing: \(dist)")
+            let toward = atan2(reach.x, reach.y)
+            expect(abs(atan2(sin(m.facing - toward), cos(m.facing - toward))) < 0.05, "facing the table")
+            let other = sim.bodies.values.first { $0.id != m.id && $0.station == m.station }
+            if let other { expect(!sim.freeAnchors(other, station: station, in: "kind:mission").contains(ref), "nobody else is offered that place") }
+        }
+        test("a job that cuts in on the way to a fixture takes the body clean: not using it, not in place, not seated, place given back") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let ref = station.anchors(in: "kind:mission").first(where: { station.place($0)?.use != .stand }) else { return expect(false, "a seat") }
+            expect(sim.use(m, ref, station: station, seconds: 200), "off to the console")
+            _ = step(sim, seconds: 1)
+            sim.start(m, .deliverOffice(order: 9003, name: "an office"))
+            expect(m.using == nil && !m.inPlace && !m.seated && m.sittingOn == nil && m.place == .lounge, "clean: place \(m.place.words), seated \(m.seated)")
+        }
         test("a job that cuts in on the way to a visit takes the body clean: no spot, no fixture, no seat, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

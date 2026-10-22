@@ -206,6 +206,8 @@ final class Simulation<B: Body> {
         switch old.kind {
         case .bath(_, let back, _), .exercise(_, let back, _), .galley(_, let back, _):
             if m.place == .bath || m.place == .gym || m.place == .galley { m.place = back }
+        case .use(let ref, _, let back, _):
+            if m.place == .room(ref.room) { m.place = back }
         default: break
         }
     }
@@ -517,7 +519,7 @@ final class Simulation<B: Body> {
         let gymFree = station.rooms["kind:gym"] != nil && freeGymFixture(m) != nil
         let pick = IdlePick.pick(roll: Double.random(in: 0..<1), night: isNight(station), crew: m.isCrew,
                                  gymFree: gymFree, bath: station.rooms["kind:bath"] != nil, shower: Bool.random(),
-                                 galley: galleyFare(m, station: station))
+                                 galley: galleyFare(m, station: station), mission: !isNight(station) && !freeAnchors(m, station: station, in: "kind:mission").isEmpty)
         switch pick {
         case .roam:
             startRoam(m, station: station)
@@ -530,6 +532,9 @@ final class Simulation<B: Body> {
             startRoam(m, station: station)
         case .galley(let fare):
             if visitGalley(m, station: station, fare: fare) { return }
+            startRoam(m, station: station)
+        case .mission:
+            if takeTurnInMission(m, station: station) { return }
             startRoam(m, station: station)
         case .read:
             break
@@ -579,6 +584,15 @@ final class Simulation<B: Body> {
     func visitDone(_ m: B, _ kind: String) {
         guard hooks != nil else { return }
         visitLog.append((kind: kind, lasted: m.actStartedAt > 0 ? clock - m.actStartedAt : 0, planned: m.actFor))
+    }
+
+    @discardableResult
+    func takeTurnInMission(_ m: B, station: Station, seated: Bool? = nil) -> Bool {
+        let free = freeAnchors(m, station: station, in: "kind:mission").filter { ref in
+            seated.map { ($0 && station.place(ref)?.use != .stand) || (!$0 && station.place(ref)?.use == .stand) } ?? true
+        }
+        guard let ref = free.randomElement() else { return false }
+        return use(m, ref, station: station, seconds: Double.random(in: 180...420))
     }
 
     @discardableResult
@@ -674,7 +688,7 @@ final class Simulation<B: Body> {
         }
         if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
             switch c.kind {
-            case .goTo, .bath, .exercise, .galley, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
+            case .goTo, .bath, .exercise, .galley, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
                 if case .work = c.kind { ownOrders[c.id] = nil }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
@@ -779,6 +793,7 @@ final class Simulation<B: Body> {
                     finish(m, to: back)
                 }
             }
+            if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }
             if m.place == .galley, let fare = m.fare, let galley = station.galley {
                 if settled, m.phaseKind == .act {
                     if !m.atCounter {
@@ -805,7 +820,7 @@ final class Simulation<B: Body> {
             if m.isSubagent, settled { makeRoom(m, station: station); tripOn(m, station: station) }
             if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                 if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
-            } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !m.isJumping(at: clock) {
+            } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.using == nil, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !m.isJumping(at: clock) {
                 let door: Cell? = { if case .room(let k) = m.place { return station.doorCell(of: k) }; return nil }()
                 var choices = station.cells(of: m.place).filter { $0 != m.cell && $0 != door && !station.thresholds.contains($0) }
                 if m.isSubagent { choices = unclaimed(choices, by: m) }
