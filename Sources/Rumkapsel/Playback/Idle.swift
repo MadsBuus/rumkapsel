@@ -23,7 +23,7 @@ enum IdleAfter: Equatable {
     case roam
     case galley(Command.Fare)
 
-    static let bathBelow = 0.35, showerBelow = 0.12, roamBelow = 0.3, galleyBelow = 0.45
+    static let bathBelow = 0.2, showerBelow = 0.08, roamBelow = 0.3, galleyBelow = 0.45
 
     static func after(_ rank: Rank?, roll: Double, night: Bool, bath: Bool, galley: Command.Fare? = nil) -> IdleAfter {
         if night { return .rest }
@@ -48,15 +48,13 @@ enum IdlePick: Equatable {
     case galley(Command.Fare)
     case mission
 
-    static let missionFrom = 0.1, galleyFrom = 0.25, roamBelow = 0.40, gymBelow = 0.65, bathBelow = 0.85
+    static let galleyFrom = 0.25, roamBelow = 0.40, gymBelow = 0.65, bathBelow = 0.75, missionBelow = 0.85
 
     static func pick(roll: Double, night: Bool, crew: Bool, gymFree: Bool, bath: Bool, shower: Bool, galley: Command.Fare? = nil, mission: Bool = false) -> IdlePick {
-        if roll < roamBelow {
-            if roll >= galleyFrom { return !night ? galley.map { .galley($0) } ?? .roam : .roam }
-            return roll >= missionFrom && !night && mission ? .mission : .roam
-        }
+        if roll < roamBelow { return roll >= galleyFrom && !night ? galley.map { .galley($0) } ?? .roam : .roam }
         if roll < gymBelow { return !night && !crew && gymFree ? .gym : .roam }
         if roll < bathBelow { return bath ? .bath(shower: shower) : .roam }
+        if roll < missionBelow { return !night && !crew && mission ? .mission : .read }
         return .read
     }
 }

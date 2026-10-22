@@ -185,9 +185,9 @@ extension StationController {
         guard p.z > 0, p.z < 1 else { hide(); return }
         let iw = Self.iconSize.width, ih = Self.iconSize.height, gap = Self.iconGap
         let rowWidth = iw * CGFloat(bubbleIcons.count) + gap * CGFloat(bubbleIcons.count - 1)
-        bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) + ih + 8)
-        bubbleLabel.isHidden = false
         let allowed = canOrder(m)
+        bubbleLabel.position = CGPoint(x: CGFloat(p.x), y: CGFloat(p.y) + (allowed ? ih + 8 : 0))
+        bubbleLabel.isHidden = false
         bubbleLock.lock(); let cursor = bubbleCursor; bubbleLock.unlock()
         var rects: [CGRect] = []
         var picking: LoungeOrder?
@@ -198,22 +198,22 @@ extension StationController {
             rects.append(r)
             let under = allowed && cursor.map { r.contains($0) } == true
             icon.color = under ? LoungeOrder.allCases[i].color.lighter(0.35) : LoungeOrder.allCases[i].color
-            icon.alpha = allowed ? 1 : 0.3
-            icon.isHidden = false
+            icon.isHidden = !allowed
             if under { picking = LoungeOrder.allCases[i] }
         }
         let whose = m.isCrew ? m.title.map { $0 + " · " } ?? "" : ""
-        bubbleLabel.text = picking?.words ?? whose + m.words
+        bubbleLabel.text = picking?.words ?? whose + (!allowed && (m.busy || m.onJob || m.hasLoad) ? "busy · " : "") + m.words
         bubbleName.text = m.callsign
         bubbleName.position = CGPoint(x: CGFloat(p.x), y: bubbleLabel.frame.maxY + 3)
         bubbleName.isHidden = false
-        let f = bubbleLabel.frame.union(bubbleName.frame).union(CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih)).insetBy(dx: -8, dy: -5)
+        let row = allowed ? CGRect(x: CGFloat(p.x) - rowWidth / 2, y: CGFloat(p.y), width: rowWidth, height: ih) : bubbleLabel.frame
+        let f = bubbleLabel.frame.union(bubbleName.frame).union(row).insetBy(dx: -8, dy: -5)
         bubblePlate.position = CGPoint(x: f.midX, y: f.midY)
         bubblePlate.size = f.size
         bubblePlate.isHidden = false
         let feet = view.projectPoint(m.node.position)
         let column = CGRect(x: CGFloat(p.x) - 28, y: min(CGFloat(feet.y), f.minY) - 6, width: 56, height: max(0, f.minY - CGFloat(feet.y)) + 6)
-        bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), rects); bubbleLock.unlock()
+        bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), allowed ? rects : []); bubbleLock.unlock()
     }
 
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
