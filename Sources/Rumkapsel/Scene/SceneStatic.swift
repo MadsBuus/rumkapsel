@@ -337,10 +337,18 @@ extension StationController {
                 kitchens[station.name] = f.kitchen
             }
             chairs[station.name] = nil
+            missionScreens[station.name] = nil
             if let room = station.rooms["kind:mission"], !station.fixtures(in: room.key).isEmpty {
                 let f = Looks.current.furnishMission(room, in: station)
                 for n in f.props + f.fixtures { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
                 chairs[station.name] = f.chairs
+                if let faces = f.faces {
+                    let cameras = feedCameras(station)
+                    for c in cameras { c.camera.name = "room:" + roomKey(station, room); staticRoot.addChildNode(c.camera) }
+                    missionScreens[station.name] = MissionScreens(annunciator: faces.annunciator, clock: faces.clock,
+                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
+                                                                  wall: faces.wall)
+                }
             }
             if station.hasHangar {
                 let hc = station.hangarCenter

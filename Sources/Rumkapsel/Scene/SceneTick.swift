@@ -173,6 +173,14 @@ extension StationController {
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for station in fleet.stations.values { tendKitchen(station); swivelChairs(station, dt: dt) }
+        if clock - boardsCheckedAt >= 0.25 || clock < boardsCheckedAt {
+            boardsCheckedAt = clock
+            timed("boards") { for station in fleet.stations.values { tendMissionBoards(station) } }
+        }
+        if clock - feedsRolledAt >= 0.33 || clock < feedsRolledAt {
+            feedsRolledAt = clock
+            timed("feeds.pick") { rollFeeds() }
+        }
         for cue in simulation.drainCues() { play(cue) }
         if layoutDirty { flushScene() }
     }
@@ -259,7 +267,7 @@ extension StationController {
         }
     }
 
-    private func play(_ cue: Cue) {
+    func play(_ cue: Cue) {
         switch cue {
         case .flush(_, let bowl, let front): flush(at: bowl, front: front)
         case .fidget(let id): minions[id]?.fidget()

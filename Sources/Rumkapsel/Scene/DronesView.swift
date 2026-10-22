@@ -135,7 +135,9 @@ extension StationController {
                         v.lamp = l
                         return l
                     }()
-                    let on = Double.random(in: 0...1) < 0.7
+                    let parts = RocketKey.parts(key)
+                    let late = (fleet.stations[parts.station]?.facts.staging[parts.repo]?.progress(at: now) ?? 0) > StagingFact.late
+                    let on = Double.random(in: 0...1) < (late ? 0.2 : 0.7)
                     lamp.position = seam
                     lamp.light?.intensity = on ? CGFloat(Double.random(in: 300...1200)) : 0
                     lamp.opacity = on ? 1 : 0

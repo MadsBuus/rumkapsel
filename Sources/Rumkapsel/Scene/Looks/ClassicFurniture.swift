@@ -9,7 +9,10 @@ struct Furnishing {
     var towel: SCNNode?
     var kitchen: Kitchen?
     var chairs: [FixtureRef: SCNNode] = [:]
+    var faces: MissionFaces?
 }
+
+struct MissionFaces { let annunciator: SCNMaterial; let clock: SCNMaterial; let feeds: [SCNMaterial]; let wall: SIMD3<Double> }
 
 struct Kitchen {
     var lamp: SCNNode
@@ -381,14 +384,20 @@ extension Classic {
         let frame = lit(NSColor(rgb: (0.42, 0.45, 0.48)))
         for x in [0.1, 4.9] { f.fixtures.append(at(MissionRoom.box(0.05, high + 0.04, 0.05, frame, at: SCNVector3Zero), SIMD2(origin.x + x, north + 0.04), (high + 0.04) / 2)) }
         for y in [high + 0.015, low - 0.04] { f.fixtures.append(at(MissionRoom.box(4.85, 0.035, 0.035, frame, at: SCNVector3Zero), SIMD2(origin.x + 2.5, north + 0.04), y)) }
-        f.fixtures.append(at(MissionRoom.screen(1.6, 0.42, Screens.annunciator([]), at: SCNVector3Zero, bezel: 0.025), SIMD2(origin.x + 2.5, north + 0.06), low + 0.24))
-        for (k, x) in [0.9, 4.1].enumerated() {
-            f.fixtures.append(at(MissionRoom.screen(1.0, 0.3, Screens.flapBoard(k == 0 ? "Launches" : "On the pad"), at: SCNVector3Zero, bezel: 0.02), SIMD2(origin.x + x, north + 0.06), low + 0.26))
+        func face(_ n: SCNNode) -> SCNMaterial { n.childNodes.first!.geometry!.firstMaterial! }
+        let annunciator = MissionRoom.screen(1.6, 0.42, Screens.annunciator([]), at: SCNVector3Zero, bezel: 0.025)
+        f.fixtures.append(at(annunciator, SIMD2(origin.x + 1.0, north + 0.06), low + 0.24))
+        let feeds = [2.3, 3.1].map { x -> SCNNode in
+            let crt = MissionRoom.screen(0.68, 0.42, Screens.noSignal(""), at: SCNVector3Zero, bezel: 0.04)
+            f.fixtures.append(at(crt, SIMD2(origin.x + x, north + 0.06), low + 0.24))
+            return crt
         }
+        f.fixtures.append(at(MissionRoom.screen(1.1, 0.42, Screens.noSignal("Errors and alarms"), at: SCNVector3Zero, bezel: 0.03), SIMD2(origin.x + 4.2, north + 0.06), low + 0.24))
         let clock = SCNNode(geometry: SCNPlane(width: 0.13, height: 0.13))
         let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(nil); m.emission.contents = Screens.nixieClock(nil); m.lightingModel = .constant
         clock.geometry!.firstMaterial = m
-        f.fixtures.append(at(clock, SIMD2(origin.x + 2.5, north + 0.07), high - 0.08))
+        f.fixtures.append(at(clock, SIMD2(origin.x + 2.7, north + 0.07), high - 0.08))
+        f.faces = MissionFaces(annunciator: face(annunciator), clock: m, feeds: feeds.map(face), wall: SIMD3(o.x + origin.x + 2.5, low + 0.24, o.y + north))
         let sill = 0.14, beam = 0.08, depth = 3.0, west = origin.x
         f.fixtures.append(at(MissionRoom.box(0.07, sill, depth, Bulkhead.steel, at: SCNVector3Zero), SIMD2(west, north + depth / 2), sill / 2))
         f.fixtures.append(at(MissionRoom.box(0.07, beam, depth, Bulkhead.steel, at: SCNVector3Zero), SIMD2(west, north + depth / 2), wall - beam / 2))

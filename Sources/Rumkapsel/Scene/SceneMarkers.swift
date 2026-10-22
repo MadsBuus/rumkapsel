@@ -186,6 +186,7 @@ extension StationController {
         if padHexRoot.parent == nil { propRoot.addChildNode(padHexRoot) }
         padHexRoot.childNodes.forEach { $0.removeFromParentNode() }
         padRings = [:]
+        padStrips = [:]
         var drawn: [String] = []
         for station in fleet.stations.values where station.hasPad {
             let rockets = simulation.shownRockets(station)
@@ -198,10 +199,39 @@ extension StationController {
                 pad.position = v3(station.offset.x + at.x, 0.009, station.offset.y + at.y)
                 pad.name = "pad:" + station.name
                 padHexRoot.addChildNode(pad)
-                if let key = held[i] { padRings[key] = pad }
+                if let key = held[i] {
+                    padRings[key] = pad
+                    let strip = SCNNode()
+                    strip.position = v3(station.offset.x + at.x, 0.016, station.offset.y + at.y)
+                    strip.isHidden = true
+                    padHexRoot.addChildNode(strip)
+                    padStrips[key] = (strip, -1)
+                }
             }
         }
         padsDrawn = drawn.sorted().joined(separator: ",")
+    }
+
+    static func hexStrip(fraction: Double, inner: Double, outer: Double) -> SCNGeometry {
+        let corners = (0...6).map { k -> SIMD2<Double> in
+            let a = (-90 + 60 * Double(k)) * .pi / 180
+            return SIMD2(cos(a), sin(a))
+        }
+        let f = max(0, min(1, fraction)) * 6
+        var along = (0...Int(f)).map { corners[$0] }
+        if f < 6, f > Double(Int(f)) { along.append(corners[Int(f)] + (corners[Int(f) + 1] - corners[Int(f)]) * (f - Double(Int(f)))) }
+        var verts: [SCNVector3] = [], index: [Int32] = []
+        for p in along {
+            verts.append(SCNVector3(p.x * inner, 0, p.y * inner))
+            verts.append(SCNVector3(p.x * outer, 0, p.y * outer))
+        }
+        for i in 0..<max(0, along.count - 1) {
+            let a = Int32(i * 2)
+            index += [a, a + 1, a + 3, a, a + 3, a + 2]
+        }
+        let normals = Array(repeating: SCNVector3(0, 1, 0), count: verts.count)
+        return SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals)],
+                           elements: [SCNGeometryElement(indices: index, primitiveType: .triangles)])
     }
 
     func hatchBlink(station name: String) {

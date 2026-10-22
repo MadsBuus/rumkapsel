@@ -434,7 +434,10 @@ extension StationController {
                 infoLabel.text = parts.joined(separator: "   ")
             }
         } else if h.hasPrefix("rocket:") {
-            infoLabel.text = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+            let label = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
+            let repo = label.components(separatedBy: " · ").first ?? ""
+            let left = fleet.stations.values.lazy.compactMap { $0.facts.staging[repo]?.timeLeft(at: self.now) }.first
+            infoLabel.text = left.map { label + " · staging build " + $0 } ?? label
         } else if h.hasPrefix("decon:"), h.split(separator: "|").count == 3, let n = Int(h.split(separator: "|")[2]), n > 0 {
             let repo = String(h.split(separator: "|")[1])
             infoLabel.text = "\(repo) · \(Words.current.unidentified) · PR #\(n) · merge clears it into \(Words.current.inStorage), closing ejects it · click for its story"
