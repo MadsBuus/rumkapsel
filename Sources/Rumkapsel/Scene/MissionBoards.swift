@@ -13,12 +13,14 @@ struct MissionBoards: Equatable {
 }
 
 struct MissionScreens {
-    struct Feed { let name: String; let camera: SCNNode; let material: SCNMaterial }
+    struct Feed { let name: String; let camera: SCNNode; let material: SCNMaterial; var caption: String; let home: SCNMatrix4 }
     let annunciator: SCNMaterial
     let clock: SCNMaterial
     var feeds: [Feed]
     let wall: SIMD3<Double>
     var shown: MissionBoards?
+    static let near = 0.4, nearEvery = 0.5, farEvery = 30.0
+    static let queue = DispatchQueue(label: "rumkapsel.feeds", qos: .utility)
 }
 
 extension StationController {
@@ -27,7 +29,14 @@ extension StationController {
         let repos = Set(world.repoRoots.values.filter { $0.station == station.name }.map(\.repo))
             .sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
         b.rows = repos.prefix(MissionBoards.rows).map { repo in
-            let deploy = deployLamp(station, repo)
+            var deploy = deployLamp(station, repo)
+            if let p = station.facts.staging[repo]?.progress(at: now), deploy == .amber {
+                let rate = p > StagingFact.late ? 3.0 : 1.0
+                if (clock * rate).truncatingRemainder(dividingBy: 1) >= 0.5 { deploy = .dark }
+            }
+            if let beat = stagingBeat(station: station.name, repo: repo), beat.live, clock - beat.at < 3 {
+                deploy = (clock * 3).truncatingRemainder(dividingBy: 1) < 0.5 ? .green : .dark
+            }
             let offices = station.rooms.values.filter { $0.repo == repo && !$0.key.hasPrefix("kind:") }
             let checks: MissionBoards.Lamp = offices.contains(where: world.checksFailing) ? .red : offices.isEmpty ? .dark : .green
             let rows = station.facts.crates.values.filter { $0.id.repo == repo && ($0.zone == .testing || $0.zone == .cleared) }
@@ -71,6 +80,7 @@ extension StationController {
             n.camera = SCNCamera()
             n.camera!.fieldOfView = 50
             n.camera!.zNear = 0.1
+            n.camera!.zFar = 9
             n.position = v3(from.x + o.x, from.y, from.z + o.y)
             n.look(at: v3(at.x + o.x, at.y, at.z + o.y))
             return n
@@ -88,19 +98,43 @@ extension StationController {
     }
 
     func rollFeeds() {
-        let lit = missionScreens.values.filter { s in
+        var near = false
+        let seen = missionScreens.filter { _, s in
             let p = view.projectPoint(v3(s.wall.x, s.wall.y, s.wall.z))
-            return p.z > 0 && p.z < 1 && p.x >= 0 && p.y >= 0 && Double(p.x) <= viewSize.width && Double(p.y) <= viewSize.height
-        }.flatMap(\.feeds)
-        guard !lit.isEmpty else { return }
-        let at = clock
-        DispatchQueue.main.async { [self] in
-            let r = feedRenderer
+            guard p.z > 0, p.z < 1, p.x >= 0, p.y >= 0, Double(p.x) <= viewSize.width, Double(p.y) <= viewSize.height else { return false }
+            let l = view.projectPoint(v3(s.wall.x - 2.4, s.wall.y, s.wall.z)), r = view.projectPoint(v3(s.wall.x + 2.4, s.wall.y, s.wall.z))
+            if walker != nil || abs(Double(r.x - l.x)) > MissionScreens.near * viewSize.width { near = true }
+            return true
+        }
+        let every = near ? MissionScreens.nearEvery : MissionScreens.farEvery
+        guard !seen.isEmpty, !feedsBusy, clock - feedsFarAt >= every || clock < feedsFarAt else { return }
+        feedsFarAt = clock
+        feedsBusy = true
+        let lit = seen.flatMap { name, s in s.feeds.map { f -> MissionScreens.Feed in
+            var f = f
+            if f.name == "The pad", let hold = feedHolds[name], clock < hold.until {
+                f.camera.position = v3(hold.at.x + 1.3, hold.at.y + 1.1, hold.at.z + 1.6)
+                f.camera.look(at: v3(hold.at.x, hold.at.y + 0.7, hold.at.z))
+            } else {
+                f.camera.transform = f.home
+            }
+            if f.name == "The pad", let st = fleet.stations[name],
+               let (repo, left) = st.facts.staging.lazy.compactMap({ k, v in v.timeLeft(at: self.now).map { (k, $0) } }).first {
+                f.caption = "Staging \(repo) · \(left)"
+            }
+            return f
+        } }
+        let at = clock, size = near ? CGSize(width: 320, height: 200) : CGSize(width: 160, height: 100)
+        let r = feedRenderer
+        MissionScreens.queue.async { [self] in
+            let t0 = CACurrentMediaTime()
             for feed in lit {
                 r.pointOfView = feed.camera
-                let frame = r.snapshot(atTime: at, with: CGSize(width: 320, height: 200), antialiasingMode: .none)
-                show(Screens.crt(frame, caption: feed.name), on: feed.material)
+                let frame = r.snapshot(atTime: at, with: size, antialiasingMode: .none)
+                show(Screens.crt(frame, caption: feed.caption), on: feed.material)
             }
+            let spent = CACurrentMediaTime() - t0
+            enqueue { [weak self] in self?.tallied(near ? "feeds.near" : "feeds.far", spent); self?.feedsBusy = false }
         }
     }
 

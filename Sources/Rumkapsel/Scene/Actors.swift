@@ -184,7 +184,7 @@ extension StationController {
                 }
                 weld(st, key, r, v)
                 paintHull(r, v)
-                signal(key, r, v)
+                signal(st, key, r, v)
                 placeKick(r, v)
                 vent(r, v)
                 place(st, key, r, v)
@@ -297,19 +297,37 @@ extension StationController {
         }
     }
 
-    private func signal(_ key: String, _ r: ShownRocket, _ v: RocketView) {
+    private func signal(_ st: Station, _ key: String, _ r: ShownRocket, _ v: RocketView) {
         guard let ring = padRings[key] else { return }
-        let color = NSColor(fleet.color(forRepo: r.repo))
-        if r.welding {
-            let flash = pow(max(0, cos((clock / 0.9).truncatingRemainder(dividingBy: 1) * 2 * .pi)), 4)
-            ring.geometry?.firstMaterial?.diffuse.contents = Props.amberLampOff.blended(withFraction: CGFloat(0.3 + 0.7 * flash), of: Props.amberLamp)
-            ring.opacity = 0.95
+        let progress = r.welding ? st.facts.staging[r.repo]?.progress(at: now) : nil
+        stagingWhole(st, r, v)
+        noseLamp(st, r, v, progress: progress)
+        let beat = r.kind == .release ? stagingBeat(station: st.name, repo: r.repo) : nil
+        let flash = beat.map { $0.live ? max(0, 1 - (clock - $0.at) / StagingBeat.flash) : 0 } ?? 0
+        let color = NSColor(fleet.color(forRepo: r.repo)).blended(withFraction: CGFloat(flash), of: .white) ?? NSColor(fleet.color(forRepo: r.repo))
+        ring.geometry?.firstMaterial?.diffuse.contents = color
+        if var strip = padStrips[key] {
+            strip.node.isHidden = progress == nil
+            if let p = progress {
+                let shown = min(1, (p * 200).rounded() / 200)
+                if strip.shown != shown {
+                    strip.node.geometry = StationController.hexStrip(fraction: shown, inner: Hall.padRadius - 0.075, outer: Hall.padRadius + 0.012)
+                    let m = flat(color); m.isDoubleSided = true
+                    strip.node.geometry?.firstMaterial = m
+                    strip.shown = shown
+                    padStrips[key] = strip
+                }
+                let beat = p < 1 ? 0.0 : pow(max(0, cos((clock * (p > StagingFact.late ? 3 : 1.2)).truncatingRemainder(dividingBy: 1) * 2 * .pi)), 2)
+                strip.node.opacity = CGFloat(1 - 0.6 * beat)
+            }
+        }
+        if progress != nil {
+            ring.opacity = 0.3
+        } else if flash > 0 {
+            ring.opacity = CGFloat(0.75 + 0.25 * flash)
         } else if r.held {
-            let k = 0.5 + 0.5 * sin(clock * 2.2)
-            ring.geometry?.firstMaterial?.diffuse.contents = Props.failRed.blended(withFraction: CGFloat(0.3 * (1 - k)), of: .black)
-            ring.opacity = CGFloat(0.55 + 0.4 * k)
+            ring.opacity = CGFloat(0.5 + 0.25 * sin(clock * 1.3))
         } else {
-            ring.geometry?.firstMaterial?.diffuse.contents = color
             ring.opacity = 0.75
         }
     }

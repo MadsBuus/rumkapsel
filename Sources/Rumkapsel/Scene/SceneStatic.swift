@@ -346,7 +346,7 @@ extension StationController {
                     let cameras = feedCameras(station)
                     for c in cameras { c.camera.name = "room:" + roomKey(station, room); staticRoot.addChildNode(c.camera) }
                     missionScreens[station.name] = MissionScreens(annunciator: faces.annunciator, clock: faces.clock,
-                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1) },
+                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
                                                                   wall: faces.wall)
                 }
             }

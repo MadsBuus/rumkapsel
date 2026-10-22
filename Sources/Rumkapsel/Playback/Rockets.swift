@@ -113,6 +113,22 @@ extension StagingFact {
         case .unheard, .failed: return nil
         }
     }
+
+    func progress(at now: Date) -> Double? {
+        guard merged, case .running(let since, let usual) = deploy else { return nil }
+        return max(0, now.timeIntervalSince(since)) / max(20, usual)
+    }
+
+    static let late = 1.5
+
+    func timeLeft(at now: Date) -> String? {
+        guard let p = progress(at: now), case .running(_, let usual) = deploy else { return nil }
+        let minutes = { (s: Double) in max(1, Int((s / 60).rounded(.up))) }
+        if p >= StagingFact.late { return "running late, usually \(minutes(usual)) min" }
+        if p >= 1 { return "any moment now" }
+        let left = usual * (1 - p)
+        return left < 60 ? "under a minute left" : "about \(minutes(left)) min left"
+    }
 }
 
 extension Simulation {

@@ -202,7 +202,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             + " · \(result.reads.count) file(s) read" + (files.isEmpty ? "" : ": " + files.joined(separator: ", ")))
     }
 
-    private func tallied(_ name: String, _ spent: Double) {
+    func tallied(_ name: String, _ spent: Double) {
         var t = tally[name] ?? (0, 0, 0)
         t.count += 1; t.total += spent; t.worst = max(t.worst, spent)
         tally[name] = t
@@ -272,7 +272,11 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     var chairs: [String: [FixtureRef: SCNNode]] = [:]
     var missionScreens: [String: MissionScreens] = [:]
-    var boardsCheckedAt = 0.0, feedsRolledAt = 0.0
+    var boardsCheckedAt = 0.0, feedsRolledAt = 0.0, feedsFarAt = 0.0, feedsBusy = false
+    var stagingRuns: [String: (started: Double, usual: Double)] = [:]
+    var stagingBeats: [String: StagingBeat] = [:]
+    var stagingDue: [String: String] = [:]
+    var feedHolds: [String: (at: SIMD3<Double>, until: Double)] = [:]
     lazy var feedRenderer: SCNRenderer = {
         let r = SCNRenderer(device: view.device, options: nil)
         r.scene = view.scene
@@ -301,6 +305,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var padFields: [String: HangarField] = [:]
     var vortexViews: [String: VortexView] = [:]
     var padRings: [String: SCNNode] = [:]
+    var padStrips: [String: (node: SCNNode, shown: Double)] = [:]
     var padsDrawn = ""
     var droneViews: [String: DroneView] = [:]
     var puffs: [Puff] = []
@@ -1093,8 +1098,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             beginMission(station: stationName, repo: repo, expected: expected, release: release, elapsed: elapsed)
         case .deployEnded(_, let repo, true, let outcome):
             endMission(repo: repo, outcome: outcome)
-        case .deployStarted(_, _, false, _, _, _), .deployEnded(_, _, false, _):
-            break
+        case .deployStarted(let stationName, let repo, false, let expected, _, let elapsed):
+            stagingStarted(station: stationName, repo: repo, expected: expected, elapsed: elapsed)
+        case .deployEnded(let stationName, let repo, false, let outcome):
+            stagingEnded(station: stationName, repo: repo, outcome: outcome)
         case .pullRequestClosed(let repo, let author, _):
             if let m = minions["crew:" + author], !m.onJob {
                 react(m, .shipping, place: .core, minutes: 4, words: "\(world.crewName(author)) shipping \(repo)")
