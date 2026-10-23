@@ -217,13 +217,13 @@ final class PullSource: Intake {
         queue.async { [self] in
             defer { if landed(key) { refetch(pull: number, branch: "", repoRoot: repoRoot) } }
             guard let github = self.github,
-                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergedAt,closingIssuesReferences"], cwd: repoRoot),
+                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,closingIssuesReferences"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
             var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
                                  state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
                                  isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
             pr.closes = PullSource.closes(o)
-            pr.mergedAt = (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))
+            pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
             lock.lock(); byNumber[key] = (pr, Date()); lock.unlock()
             github.note(task: pr, repoRoot: repoRoot)
             github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
@@ -259,12 +259,12 @@ final class PullSource: Intake {
                                      isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
                 pr.checks = checks
                 pr.closes = PullSource.closes(o)
-                pr.mergedAt = (o["mergedAt"] as? String).flatMap(ISO8601DateFormatter().date(from:))
+                pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
                 github.note(task: pr, repoRoot: repoRoot)
                 github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
                 return pr
             }
-            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergedAt,statusCheckRollup,closingIssuesReferences"
+            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,statusCheckRollup,closingIssuesReferences"
             var answered = false
             if let out = github.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
@@ -445,6 +445,14 @@ final class PullSource: Intake {
 
     private static func closes(_ o: [String: Any]) -> [Int] {
         ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
+    }
+
+    static func shipped(_ o: [String: Any], repoRoot: String, github: GitHubResolver) -> Bool {
+        guard o["state"] as? String == "MERGED", let oid = (o["mergeCommit"] as? [String: Any])?["oid"] as? String else { return false }
+        let p = github.pipeline(repoRoot: repoRoot)
+        guard !p.shipsOnMerge else { return false }
+        if !p.production.isEmpty, github.run(["git", "merge-base", "--is-ancestor", oid, "origin/" + p.production], cwd: repoRoot) != nil { return true }
+        return p.shipsOnTag && github.run(["git", "tag", "--contains", oid], cwd: repoRoot).map { !$0.isEmpty } == true
     }
 
     private func gate(_ key: String, base: TimeInterval) -> TimeInterval {
