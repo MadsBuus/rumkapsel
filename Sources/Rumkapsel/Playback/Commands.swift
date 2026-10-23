@@ -41,7 +41,6 @@ struct Command {
         case carry(crate: CrateRef, from: Spot, to: Zone)
         case deliverOffice(order: Int)
         case goTo(place: Place)
-        case bath(kind: Bath, back: Place, seconds: Double)
         case use(FixtureRef, kind: FixtureKind, back: Place, seconds: Double)
         case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
@@ -54,7 +53,6 @@ struct Command {
         case react(activity: Activity, place: Place, for: TimeInterval)
     }
 
-    enum Bath { case shower, quick }
 
     enum Fare: CaseIterable {
         case coffee, bite
@@ -103,7 +101,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .use, .pack, .stow: return [.walk, .act]
+        case .use, .pack, .stow: return [.walk, .act]
         default: return [.walk, .settle]
         }
     }
@@ -195,11 +193,6 @@ struct Command {
         Command(kind: .deliverOffice(order: order), words: "fetching \(name) from \(Words.current.theBay)")
     }
 
-    static func bath(_ kind: Bath, back: Place, seconds: Double) -> Command {
-        Command(kind: .bath(kind: kind, back: back, seconds: seconds),
-                words: "off to \(Words.current.theBath), back to \(back.words) after")
-    }
-
     static func use(_ ref: FixtureRef, kind: FixtureKind, back: Place, seconds: Double) -> Command {
         Command(kind: .use(ref, kind: kind, back: back, seconds: seconds),
                 words: "off to \(Place.room(ref.room).words) to \(kind.going), back to \(back.words) after")
@@ -211,7 +204,7 @@ struct Command {
 
     var visitSeconds: Double? {
         switch kind {
-        case .bath(_, _, let s), .use(_, _, _, let s), .chore(_, let s): return s
+        case .use(_, _, _, let s), .chore(_, let s): return s
         default: return nil
         }
     }

@@ -41,10 +41,8 @@ class Body {
         }
     }
     var hammerUp = false
-    var seatedOnBowl = false
-    var seatOffset = SIMD2<Double>(0, 0)
 
-    var seated: Bool { seatedOnBowl || onCouch || sittingOn != nil }
+    var seated: Bool { onCouch || sittingOn != nil }
 
     var using: FixtureRef? { if case .use(let ref, _, _, _) = current?.kind { return ref }; return nil }
     var settledOn: (order: Int, height: Double?)?
@@ -57,7 +55,6 @@ class Body {
     var couchSince: Double?
     var couchSeated = false
 
-    var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     var drying = false
     var nextFidgetAt = 0.0
     static let seatReach = Seat.reach
@@ -71,7 +68,6 @@ class Body {
     var stallSince = 0.0
     var stallMark = ""
     var waitingOn: String?
-    var fixture: Int?
     var shortStretches = 0
 
     var promptCount = 0
@@ -149,7 +145,7 @@ class Body {
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
-    var bathing: Bool { if case .bath = current?.kind { return true }; return false }
+    var bathing: Bool { using?.room == "kind:bath" }
     var exercising: Bool { workout != nil }
     var choring: Bool { if case .chore = current?.kind { return true }; return false }
     var workout: FixtureKind? { if case .use(let ref, let kind, _, _) = current?.kind, ref.room == "kind:gym" { return kind }; return nil }
@@ -175,7 +171,6 @@ class Body {
         switch c.kind {
         case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
         case .use(_, let kind, _, _) where inPlace: return kind.doing
-        case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
         default: return c.words
         }
     }

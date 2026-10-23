@@ -207,6 +207,8 @@ enum Playbook {
                       camera: .follow(who, 4), tail: 22, rooms: ["kind:quarters"], crowd: false),
         PlaybookEntry("life", "Bath", "minion showers and dries off", [("Bath", 2)], camera: .follow(who, 4), tail: 28,
                       rooms: ["kind:bath"], crowd: false, settle: 7),
+        PlaybookEntry("life", "Bath: the bowl", "minion turns round, sits on the bowl, gets up and it flushes", [("Bath: the bowl", 2)], camera: .follow(who, 4), tail: 28,
+                      rooms: ["kind:bath"], crowd: false, settle: 7),
         PlaybookEntry("life", "Workout", "minion uses the gym", [("Workout", 2)], camera: .follow(who, 4), tail: 28,
                       rooms: ["kind:gym"], crowd: false, settle: 7),
         PlaybookEntry("life", "Coffee", "minion makes a coffee in the galley and takes it back to the couch", [("Coffee", 2)],

@@ -310,7 +310,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
 
             let side = p.x + 0.17, off = p.x + 1.3
             let onEdge = p.y + 0.1, along = p.y
-            let sat = Minion.Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
+            let sat = Minion.Pose.seated(height: Minion.bedSeat)
             let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0
             let walkIn = 1.5, turns = walkIn + 0.5, sitDown = turns + 0.5, lieBack = sitDown + 0.8
             let wakes = lieBack + 2.6, sitsUp = wakes + 0.8, stands = sitsUp + 0.5
@@ -364,15 +364,15 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
                            seat: Minion.couchSeat, width: 0.8, back: 0.22)
             let b = sitter(at: SIMD2(p.x + 0.5, p.y), .white, seat: Minion.seat, width: 0.3, back: 0.3)
             a.setTool(.tablet)
-            a.setPose(.seated(height: Minion.couchSeat, at: SIMD2(0, 0)))
-            b.setPose(.seated(height: Minion.seat, at: SIMD2(0, 0)))
+            a.setPose(.seated(height: Minion.couchSeat))
+            b.setPose(.seated(height: Minion.seat))
             var phase = 0
             updaters.append { c, _ in
                 let k = Int(c / 3) % 2
                 if k != phase {
                     phase = k
-                    a.setPose(k == 0 ? .seated(height: Minion.couchSeat, at: SIMD2(0, 0)) : .standing)
-                    b.setPose(k == 0 ? .seated(height: Minion.seat, at: SIMD2(0, 0)) : .standing)
+                    a.setPose(k == 0 ? .seated(height: Minion.couchSeat) : .standing)
+                    b.setPose(k == 0 ? .seated(height: Minion.seat) : .standing)
                 }
             }
         }

@@ -43,9 +43,10 @@ extension Station {
             place(lounge, rest + seats)
         }
         if let bath = rooms["kind:bath"] {
-            place(bath, [Footprint(at: bowlSpot(bath: bath) - o, radius: kingdom ? 0.0634 : 0.148), Footprint(at: showerArm(bath: bath) - o, radius: 0.1),
-                         Footprint(at: showerPole(bath: bath) - o, radius: 0.034), Footprint(at: towelRail(bath: bath) - o, radius: 0.096)]
-                + (kingdom ? [Footprint(at: showerNozzle(bath: bath) - o, radius: 0.208)] : []))
+            place(bath, fixtures(in: bath.key).flatMap { f -> [Footprint] in
+                let own = Footprint(at: f.at, radius: kingdom && f.kind == .bowl ? 0.0634 : max(f.kind.size.x, f.kind.size.y) / 2 * 0.8)
+                return [own] + (kingdom && f.kind == .shower ? [Footprint(at: f.point(SIMD2(0, Hands.arm)), radius: 0.208)] : [])
+            })
         }
         for key in ["kind:mission", "kind:galley"] {
             let fixtures = self.fixtures(in: key)

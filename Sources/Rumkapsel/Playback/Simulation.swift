@@ -15,7 +15,7 @@ struct Cargo {
 }
 
 enum Cue {
-    case flush(station: String, bowl: SIMD2<Double>, front: Double)
+    case flush(station: String, bowl: PlacedFixture)
     case fidget(String)
     case towel(String, station: String, taken: Bool)
     case hop(String)
@@ -199,13 +199,9 @@ final class Simulation<B: Body> {
 
     func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
-        m.seatedOnBowl = false
         m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
-        m.fixture = nil
         switch old.kind {
-        case .bath(_, let back, _):
-            if m.place == .bath { m.place = back }
         case .use(let ref, _, let back, _):
             if m.place == .room(ref.room) { m.place = back }
         default: break
@@ -224,6 +220,7 @@ final class Simulation<B: Body> {
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
+        if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         if takeNext(m) { return }
         if let place { send(m, to: place) } else { idle(m, after: last) }
     }
@@ -501,24 +498,44 @@ final class Simulation<B: Body> {
 
     @discardableResult
     func visitBath(_ m: B, station: Station) -> Bool {
-        guard let bath = station.rooms["kind:bath"] else { return false }
-        let taken = Set(bodies.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
-        let want = m.showering ? 1 : 0
-        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { return false }
-        m.showering = fixture == 1
+        let fixtures = station.fixtures(in: "kind:bath"), free = freeAnchors(m, station: station, in: "kind:bath")
+        let order: [FixtureKind] = m.showering ? [.shower, .bowl] : [.bowl, .shower]
+        guard let ref = order.lazy.compactMap({ kind in free.first { fixtures[$0.fixture].kind == kind } }).first else { return false }
+        m.showering = fixtures[ref.fixture].kind == .shower
         m.bathDue = 0
-        let back = m.place
-        send(m, to: .bath)
-        guard start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60)) else { return false }
-        m.fixture = fixture
-        let f = station.bathFixtures(bath: bath)
-        let cell = m.showering ? f.shower : f.toilet
-        m.path = route(m, to: cell)
-        let nozzle = station.showerNozzle(bath: bath)
-        m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
-                                  : SIMD2(Double(cell.x) + 0.02 * f.toiletCorner.x, Double(cell.y) - 0.1 * f.toiletCorner.y)
-        m.facing = m.showering ? atan2(f.showerCorner.x, -f.showerCorner.y) : atan2(f.toiletCorner.x, f.toiletCorner.y)
-        return true
+        return use(m, ref, station: station, seconds: m.showering ? Double.random(in: 120...180) : 60)
+    }
+
+    func stepBath(_ m: B, station: Station, dt: Double) -> Bool {
+        guard let ref = m.using, m.inPlace, m.path.isEmpty else { return false }
+        let fixtures = station.fixtures(in: ref.room)
+        guard let fixture = fixtures[safe: ref.fixture], let place = fixture.place(ref.anchor) else { return false }
+        switch fixture.kind {
+        case .bowl:
+            guard m.sittingOn != nil else { return false }
+            if !place.sitting(clock - m.actStartedAt, of: m.actFor).down {
+                cue(.flush(station: station.name, bowl: fixture))
+            } else if clock >= m.nextFidgetAt {
+                if m.nextFidgetAt > m.actStartedAt { cue(.fidget(m.id)) }
+                m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
+            }
+            return false
+        case .shower:
+            guard clock >= m.phaseUntil else { return false }
+            if !m.drying {
+                if let rail = fixtures.first(where: { $0.kind == .towelRail })?.place(0),
+                   !atArmsLength(m, of: rail.at, from: rail.outward, square: true, dt: dt) { return true }
+                m.drying = true
+                m.phaseUntil = clock + 4
+                cue(.towel(m.id, station: station.name, taken: true))
+                return true
+            }
+            m.drying = false
+            cue(.towel(m.id, station: station.name, taken: false))
+            return false
+        default:
+            return false
+        }
     }
 
     func pickIdle(_ m: B, station: Station) {
@@ -701,7 +718,7 @@ final class Simulation<B: Body> {
         }
         if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
             switch c.kind {
-            case .goTo, .bath, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
+            case .goTo, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
                 if case .work = c.kind { ownOrders[c.id] = nil }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
@@ -747,53 +764,8 @@ final class Simulation<B: Body> {
                 if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); return .spent }
             }
             if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
-            if m.place == .bath {
-                if settled, let spot = m.fetchSpot {
-                    let d = spot - m.pos
-                    if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
-                    m.fetchSpot = nil
-                    if let bath = station.rooms["kind:bath"] {
-                        let f = station.bathFixtures(bath: bath)
-                        let corner = m.showering ? f.showerCorner : f.toiletCorner
-                        m.facing = m.drying ? atan2(f.showerCorner.x, 0) : atan2(corner.x, corner.y)
-                    }
-                }
-                if settled, !m.showering, let bath = station.rooms["kind:bath"] {
-                    let standAt = m.phaseUntil - 0.7
-                    let bowl = station.bowlSpot(bath: bath)
-                    let f = station.bathFixtures(bath: bath)
-                    if !m.seatedOnBowl, clock < standAt, m.phaseUntil > 0 {
-                        let to = bowl - station.offset - m.pos
-                        m.facing = atan2(0, -f.toiletCorner.y)
-                        let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
-                        m.seatedOnBowl = true
-                        m.seatOffset = SIMD2(across, ahead - 0.02 + B.seatReach)
-                        m.nextFidgetAt = clock + Double.random(in: 1.5...3)
-                    } else if m.seatedOnBowl, clock >= standAt {
-                        m.seatedOnBowl = false
-                        cue(.flush(station: station.name, bowl: bowl, front: f.toiletCorner.y))
-                    } else if m.seatedOnBowl, clock >= m.nextFidgetAt {
-                        m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
-                        cue(.fidget(m.id))
-                    }
-                }
-                if clock >= m.phaseUntil && settled {
-                    if m.showering, !m.drying, let bath = station.rooms["kind:bath"] {
-                        m.drying = true
-                        m.phaseUntil = clock + 4
-                        m.fetchSpot = station.towelStand(bath: bath) - station.offset
-                        cue(.towel(m.id, station: station.name, taken: true))
-                    } else {
-                        if m.drying { m.drying = false; cue(.towel(m.id, station: station.name, taken: false)) }
-                        m.seatedOnBowl = false
-                        m.fixture = nil
-                        var back = restPlace(m)
-                        if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
-                        visitDone(m, "bath")
-                        finish(m, to: back)
-                    }
-                }
-            } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
+            if m.bathing, stepBath(m, station: station, dt: dt) { return .spent }
+            if m.place != .bath, m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                 if !visitBath(m, station: station) { return .spent }
             }
             if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }

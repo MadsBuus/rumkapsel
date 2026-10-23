@@ -26,7 +26,6 @@ final class Minion: Body {
     var smoothFacing = 0.0
     var drawnLean = SIMD2<Double>(0, 0)
     private var posed: Pose = .standing
-    private var posedSeat = SIMD2<Double>(0, 0)
     private let legs = SCNNode()
     private let visor: SCNNode
     private let figure: SCNNode?
@@ -70,17 +69,17 @@ final class Minion: Body {
         staticNode?.isHidden = !staticSeen
     }
     private var staticSpot: SCNVector3 {
-        guard case .seated(let h, _) = posed else { return v3(0, bodyHeight * 0.3, 0) }
-        return v3(posedSeat.x, h + bodyDepth * 0.4, posedSeat.y + bodyDepth * 0.9)
+        guard case .seated(let h) = posed else { return v3(0, bodyHeight * 0.3, 0) }
+        return v3(0, h + bodyDepth * 0.4, bodyDepth * 0.9)
     }
-    static let seat = 0.2
+    static let seat = Seat.height
     static let seatedTorso = 0.62
     static let couchSeat = Seat.couch
     static let bedSeat = 0.18
-    var seatHeight: Double { sittingOn ?? (seatedOnBowl ? Minion.seat : Minion.couchSeat) }
+    var seatHeight: Double { sittingOn ?? Minion.couchSeat }
 
     func currentPose(at clock: Double) -> Pose {
-        let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
+        let onEdge = Pose.seated(height: Minion.bedSeat)
         if onBench { return .flat(height: Minion.seat) }
         if beddingUntil > clock {
             return beddingUntil - clock > Minion.riseSit ? onEdge : .flat(height: Minion.bedSeat)
@@ -89,7 +88,7 @@ final class Minion: Body {
         if risingUntil > clock {
             return risingUntil - clock > Minion.riseSit ? onEdge : .standing
         }
-        if seated { return .seated(height: seatHeight, at: seatSpot) }
+        if seated { return .seated(height: seatHeight) }
         return .standing
     }
 
@@ -327,7 +326,7 @@ final class Minion: Body {
 
     enum Pose: Equatable {
         case standing
-        case seated(height: Double, at: SIMD2<Double>)
+        case seated(height: Double)
         case flat(height: Double)
     }
 
@@ -392,21 +391,19 @@ final class Minion: Body {
         body.removeAllActions()
 
         let torso = bodyHeight * Minion.seatedTorso
-        let seat: SIMD2<Double>, boxHeight: Double, pitch: Double, at: SCNVector3
+        let boxHeight: Double, pitch: Double, at: SCNVector3
         switch p {
         case .standing:
-            seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = 0
+            boxHeight = bodyHeight; pitch = 0
             at = v3(0, bodyHeight / 2, 0)
-        case .seated(let height, let offset):
-            seat = offset; boxHeight = torso; pitch = -0.1
-            let back = offset.y - Minion.seatReach
-            at = v3(offset.x, height + torso / 2, back)
-            legs.position = v3(offset.x, height, back)
+        case .seated(let height):
+            boxHeight = torso; pitch = -0.1
+            at = v3(0, height + torso / 2, -Minion.seatReach)
+            legs.position = v3(0, height, -Minion.seatReach)
         case .flat(let height):
-            seat = SIMD2(0, 0); boxHeight = bodyHeight; pitch = -.pi / 2
+            boxHeight = bodyHeight; pitch = -.pi / 2
             at = v3(0, height + bodyDepth / 2, 0)
         }
-        posedSeat = seat
         let sitting = boxHeight == torso
 
         let t = Minion.poseSeconds(from: was, to: p)
@@ -427,7 +424,6 @@ final class Minion: Body {
         }
         SCNTransaction.commit()
         staticNode?.runAction(.move(to: staticSpot, duration: t))
-        shadow.runAction(.move(to: v3(0.03 + seat.x, 0.003, 0.02 + seat.y), duration: t))
     }
 
     private static func poseSeconds(from: Pose, to: Pose) -> Double {
