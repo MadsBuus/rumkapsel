@@ -838,6 +838,8 @@ final class SimulatorModel: ObservableObject {
                 button("Everyone asleep", "All sessions quiet"),
                 button("Bath", "To the bath"),
                 button("Chore", "A chore"), button("Workout", "A turn in the gym"),
+                button("Workout: the treadmill", shown: false), button("Workout: the bench", shown: false),
+                button("Workout: the bag", shown: false), button("Workout: the mat", shown: false),
                 button("Coffee", "A coffee from the galley"), button("A bite", "A bite from the galley"),
                 button("Mission control", "A turn in mission control"), button("Mission control: a console", "A seat at a console"),
                 button("Mission control: the holo table", "A place at the holo table"),
@@ -1255,7 +1257,11 @@ final class SimulatorModel: ObservableObject {
         case "Bath": station.simulate(.bath)
         case "Chore": station.simulate(.chore)
         case "Meet in the hall": station.simulate(.meet)
-        case "Workout": station.simulate(.workout)
+        case "Workout": station.simulate(.workout(nil))
+        case "Workout: the treadmill": station.simulate(.workout(.treadmill))
+        case "Workout: the bench": station.simulate(.workout(.bench))
+        case "Workout: the bag": station.simulate(.workout(.bag))
+        case "Workout: the mat": station.simulate(.workout(.mat))
         case "Mission control": station.simulate(.mission(seated: nil))
         case "Mission control: a console": station.simulate(.mission(seated: true))
         case "Mission control: the holo table": station.simulate(.mission(seated: false))
@@ -1395,7 +1401,7 @@ final class SimHooks {
     var lastReal = 0.0
 }
 
-enum SimNudge { case bath, breather(Place), chore, galley(Command.Fare), handFree, lounge, meet, mission(seated: Bool?), night(Bool?), turnIn, wedge, workout }
+enum SimNudge { case bath, breather(Place), chore, galley(Command.Fare), handFree, lounge, meet, mission(seated: Bool?), night(Bool?), turnIn, wedge, workout(FixtureKind?) }
 
 extension StationController {
     func stepSimulated(seconds: Double) {
@@ -1458,20 +1464,19 @@ extension StationController {
                 free(m)
                 m.showering = true
                 if !visitBath(m, station: station) { handle(.log("both fixtures in the bath are taken")) }
-            case .workout:
+            case .workout(let kind):
                 let could = minions.values.filter { !$0.isSubagent && !$0.onJob && !$0.bathing && !$0.exercising && !$0.hasLoad }
                 let m = could.first(where: { !$0.isCrew && !$0.busy && $0.place == .lounge })
                     ?? could.first(where: { !$0.isCrew && !$0.busy })
                     ?? could.first(where: { !$0.isCrew && $0.activity == .waiting })
                     ?? could.first(where: { $0.isCrew && !$0.busy })
                     ?? could.first
-                guard let m, let station = fleet.stations[m.station], let gym = station.rooms["kind:gym"] else {
+                guard let m, let station = fleet.stations[m.station], station.rooms["kind:gym"] != nil else {
                     handle(.log(could.isEmpty ? "nobody free for the gym" : "no gym on the station")); return
                 }
                 m.bathDue = 0
-                m.nextWorkoutAt = 0
                 free(m)
-                if !takeTurnInGym(m, station: station, gym: gym) { handle(.log("every fixture in the gym is taken")) }
+                if !takeTurnInGym(m, station: station, on: kind) { handle(.log("every fixture in the gym is taken")) }
             case .mission(let seated):
                 let could = minions.values.filter { !$0.isSubagent && !$0.isCrew && !$0.onJob && !$0.hasLoad && $0.using == nil }
                 let m = could.first(where: { !$0.busy && $0.place == .lounge }) ?? could.first(where: { !$0.busy }) ?? could.first

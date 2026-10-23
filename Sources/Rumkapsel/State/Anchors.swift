@@ -1,7 +1,7 @@
 import Foundation
 
 struct Anchor: Equatable {
-    enum Use: Equatable { case sit(height: Double), stand }
+    enum Use: Equatable { case sit(height: Double), stand, spot }
     enum Faces: Equatable { case fixture, away }
     let at: SIMD2<Double>
     let use: Use
@@ -10,6 +10,7 @@ struct Anchor: Equatable {
 
 enum FixtureKind: String {
     case console, holoTable, couch, counter, coffeeMachine, foodPrinter
+    case treadmill, bench, bag, mat
 
     var size: SIMD2<Double> {
         switch self {
@@ -19,6 +20,10 @@ enum FixtureKind: String {
         case .counter: return SIMD2(0.32, 0.26)
         case .coffeeMachine: return SIMD2(0.17, 0.22)
         case .foodPrinter: return SIMD2(0.22, 0.22)
+        case .treadmill: return SIMD2(0.42, 0.72)
+        case .bench: return SIMD2(0.28, 0.7)
+        case .bag: return SIMD2(0.2, 0.2)
+        case .mat: return SIMD2(0.7, 0.7)
         }
     }
 
@@ -36,6 +41,14 @@ enum FixtureKind: String {
             return []
         case .coffeeMachine, .foodPrinter:
             return [Anchor(at: SIMD2(0, 0), use: .stand)]
+        case .treadmill:
+            return [Anchor(at: SIMD2(0, -0.05), use: .spot)]
+        case .bench:
+            return [Anchor(at: SIMD2(0, -0.18), use: .sit(height: Seat.height))]
+        case .bag:
+            return [Anchor(at: SIMD2(0, 0.28), use: .spot)]
+        case .mat:
+            return [Anchor(at: SIMD2(-0.05, -0.05), use: .spot)]
         }
     }
 
@@ -47,6 +60,10 @@ enum FixtureKind: String {
         case .counter: return "leaning on the counter"
         case .coffeeMachine: return "waiting on \(Words.current.coffee)"
         case .foodPrinter: return "waiting on \(Words.current.bite)"
+        case .treadmill: return "running on the treadmill"
+        case .bench: return "pressing on the bench"
+        case .bag: return "boxing the bag"
+        case .mat: return "doing jumping jacks on the mat"
         }
     }
 
@@ -58,6 +75,10 @@ enum FixtureKind: String {
         case .counter: return "lean on the counter"
         case .coffeeMachine: return "get \(Words.current.coffee)"
         case .foodPrinter: return "get \(Words.current.bite)"
+        case .treadmill: return "go for a run on the treadmill"
+        case .bench: return "do a few presses on the bench"
+        case .bag: return "go a round on the bag"
+        case .mat: return "do jumping jacks on the mat"
         }
     }
 }
@@ -167,8 +188,24 @@ extension Station {
             let yaw = atan2(-galley.back.x, -galley.back.y), across = SIMD2(-galley.back.y, galley.back.x)
             return RoomLayout.of(key).map { PlacedFixture(kind: $0.kind, at: galley.middle + across * $0.at.x - galley.back * $0.at.y, yaw: yaw + $0.yaw) }
         }
+        if key == "kind:gym", let gym = rooms[key] { return gymFixtures(gym) }
         if key == "kind:mission", !hasPad { return [] }
         return RoomLayout.of(key).map { PlacedFixture(kind: $0.kind, at: origin + $0.at, yaw: $0.yaw) }
+    }
+
+    private func gymFixtures(_ gym: Room) -> [PlacedFixture] {
+        let door = doorCell(of: gym.key)
+        let maxY = gym.cells.map(\.y).max()!
+        let sign = Cell(x: gym.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
+        var tiles = gym.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        while tiles.count < 4, let more = gym.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
+        let mid = SIMD2(Double(gym.cells.map(\.x).reduce(0, +)), Double(gym.cells.map(\.y).reduce(0, +))) / Double(gym.cells.count)
+        return zip([FixtureKind.treadmill, .bench, .bag, .mat], tiles).map { kind, tile in
+            let at = SIMD2(Double(tile.x), Double(tile.y))
+            guard kind == .bag else { return PlacedFixture(kind: kind, at: at, yaw: 0) }
+            let inward = SIMD2(at.x >= mid.x ? -1.0 : 1, at.y >= mid.y ? -1.0 : 1)
+            return PlacedFixture(kind: kind, at: at, yaw: atan2(inward.x, inward.y))
+        }
     }
 
     func place(_ ref: FixtureRef) -> PlacedFixture.Place? {

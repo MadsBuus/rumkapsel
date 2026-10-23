@@ -302,7 +302,7 @@ moves through it one way: in from the hallway at the back, out through the field
   is too small for a name; its machines say what it is.
 - The middle of a room stays clear to walk through. Mission control alone keeps its holo table there, with
   a way round it on every side.
-- A fixture says where a body uses it: a seat to sit on or a rim to stand at, in its own measurements, and
+- A fixture says where a body uses it: a seat to sit on, a rim to stand at or a spot to stand on, in its own measurements, and
   wherever the fixture stands the body lands exactly there. A console's chair turns out to the minion,
   takes it, and swivels it in to the console; getting up runs the other way. The holo table takes three,
   standing an arm's length from its rim.
@@ -312,7 +312,8 @@ moves through it one way: in from the hallway at the back, out through the field
   seconds at the rail with the towel. A pee is a sit: turn round, down onto the bowl, a shuffle on the
   seat now and then, up as the time runs out, and the bowl flushes behind.
 - The gym has four fixtures, a treadmill, a bench with a barbell, a bag and a mat, one minion to each, a
-  turn lasting its whole time.
+  turn lasting its whole time. The treadmill, the bag and the mat each have a spot to stand on; the bench is
+  a seat the minion backs onto and lies down along, the bar over its chest.
 - The galley takes one minion at a time, standing at the counter an arm's length from its machine. A coffee
   is twenty-odd seconds: a mug under the spout, the pour, the steam. Then the mug goes along in the hand, back
   to the couch or the desk, steaming, sipped now and then, for a few minutes; a carry, the bath or the gym

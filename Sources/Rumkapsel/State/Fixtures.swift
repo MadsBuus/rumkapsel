@@ -92,33 +92,4 @@ extension Station {
         let f = bathFixtures(bath: bath)
         return SIMD2(offset.x + Double(f.shower.x) + 0.16 * f.showerCorner.x, offset.y + Double(f.shower.y) - 0.3 * f.showerCorner.y)
     }
-
-    func gymSpots(gym: Room) -> [SIMD2<Double>] {
-        let door = doorCell(of: gym.key)
-        let maxY = gym.cells.map(\.y).max()!
-        let sign = Cell(x: gym.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
-        var tiles = gym.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
-        while tiles.count < 4, let more = gym.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
-        return tiles.prefix(4).map { SIMD2(offset.x + Double($0.x), offset.y + Double($0.y)) }
-    }
-
-    func gymOutward(gym: Room, at spot: SIMD2<Double>) -> SIMD2<Double> {
-        let cx = offset.x + Double(gym.cells.map(\.x).reduce(0, +)) / Double(gym.cells.count)
-        let cy = offset.y + Double(gym.cells.map(\.y).reduce(0, +)) / Double(gym.cells.count)
-        return SIMD2(spot.x >= cx ? 1 : -1, spot.y >= cy ? 1 : -1)
-    }
-
-    func gymStand(gym: Room, _ kind: Command.Workout) -> (cell: Cell, spot: SIMD2<Double>, facing: Double) {
-        let world = gymSpots(gym: gym)[kind.rawValue]
-        let local = SIMD2(world.x - offset.x, world.y - offset.y)
-        let cell = Cell(x: Int(local.x.rounded()), y: Int(local.y.rounded()))
-        switch kind {
-        case .treadmill: return (cell, local + SIMD2(0, -0.05), 0)
-        case .bench: return (cell, local + SIMD2(0, -0.18), 0)
-        case .bag:
-            let out = gymOutward(gym: gym, at: world)
-            return (cell, local - out * 0.2, atan2(out.x, out.y))
-        case .mat: return (cell, local, .pi / 4)
-        }
-    }
 }

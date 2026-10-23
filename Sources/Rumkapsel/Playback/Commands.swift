@@ -42,7 +42,6 @@ struct Command {
         case deliverOffice(order: Int)
         case goTo(place: Place)
         case bath(kind: Bath, back: Place, seconds: Double)
-        case exercise(kind: Workout, back: Place, seconds: Double)
         case use(FixtureRef, kind: FixtureKind, back: Place, seconds: Double)
         case chore(spot: Cell, seconds: Double)
         case qa(deck: String)
@@ -56,26 +55,6 @@ struct Command {
     }
 
     enum Bath { case shower, quick }
-
-    enum Workout: Int, CaseIterable {
-        case treadmill, bench, bag, mat
-        var words: String {
-            switch self {
-            case .treadmill: return "a run on the treadmill"
-            case .bench: return "a few presses on the bench"
-            case .bag: return "a round on the bag"
-            case .mat: return "jumping jacks on the mat"
-            }
-        }
-        var doing: String {
-            switch self {
-            case .treadmill: return "running on the treadmill"
-            case .bench: return "pressing on the bench"
-            case .bag: return "boxing the bag"
-            case .mat: return "doing jumping jacks on the mat"
-            }
-        }
-    }
 
     enum Fare: CaseIterable {
         case coffee, bite
@@ -124,7 +103,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .exercise, .use, .pack, .stow: return [.walk, .act]
+        case .bath, .use, .pack, .stow: return [.walk, .act]
         default: return [.walk, .settle]
         }
     }
@@ -221,10 +200,6 @@ struct Command {
                 words: "off to \(Words.current.theBath), back to \(back.words) after")
     }
 
-    static func exercise(_ kind: Workout, back: Place, seconds: Double) -> Command {
-        Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to \(Words.current.theGym) for \(kind.words), back to \(back.words) after")
-    }
-
     static func use(_ ref: FixtureRef, kind: FixtureKind, back: Place, seconds: Double) -> Command {
         Command(kind: .use(ref, kind: kind, back: back, seconds: seconds),
                 words: "off to \(Place.room(ref.room).words) to \(kind.going), back to \(back.words) after")
@@ -236,7 +211,7 @@ struct Command {
 
     var visitSeconds: Double? {
         switch kind {
-        case .bath(_, _, let s), .exercise(_, _, let s), .use(_, _, _, let s), .chore(_, let s): return s
+        case .bath(_, _, let s), .use(_, _, _, let s), .chore(_, let s): return s
         default: return nil
         }
     }

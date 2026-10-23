@@ -94,7 +94,7 @@ extension Simulation {
         case .work: return .desk
         case .react: return .crew
         case .leave: return .leaving
-        case .goTo, .sleep, .bath, .exercise, .use, .chore, .flight: return .idle
+        case .goTo, .sleep, .bath, .use, .chore, .flight: return .idle
         }
     }
 
@@ -102,7 +102,7 @@ extension Simulation {
         switch c.kind {
         case .carry: return cargo[c.id] != nil && m.phaseKind.interruptible
         case .qa, .work, .react: return true
-        case .bath, .exercise, .use, .chore, .goTo, .sleep: return true
+        case .bath, .use, .chore, .goTo, .sleep: return true
         case .deliverOffice: return !m.hasLoad
         default: return false
         }

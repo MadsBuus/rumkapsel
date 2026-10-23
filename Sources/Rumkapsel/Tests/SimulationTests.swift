@@ -101,11 +101,10 @@ enum SimulationTests {
             sim.hooks = SimHooks()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
-            expect(sim.takeTurnInGym(m, station: station, gym: gym), "a fixture was free")
+            expect(sim.takeTurnInGym(m, station: station), "a fixture was free")
             let kind = m.workout
-            expect(kind != nil && m.place == .gym && m.exercising, "off to the gym for \(kind.map(\.words) ?? "nothing")")
-            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            expect(kind != nil && m.place == .gym && m.exercising, "off to the gym to \(kind.map(\.going) ?? "nothing")")
+            _ = step(sim, seconds: 30, until: { m.inPlace })
             let planned = m.actFor
             expect(planned >= 240 && planned <= 480, "four to eight minutes: \(planned)")
             if kind == .bench {
@@ -114,7 +113,7 @@ enum SimulationTests {
             }
             _ = step(sim, seconds: planned + 5, until: { !m.exercising })
             expect(!m.exercising && !m.onBench && m.place == .lounge, "the turn over, back to the lounge; on the bench: \(m.onBench)")
-            expect(sim.visitLog.first.map { $0.kind == "gym" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+            expect(sim.visitLog.first.map { $0.kind == "kind:gym" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
         }
 
         test("a coffee: in through the lounge, made at arm's length facing the counter, then back to the couch with a mug") {
@@ -545,6 +544,28 @@ enum SimulationTests {
             let other = sim.bodies.values.first { $0.id != m.id && $0.station == m.station }
             if let other { expect(!sim.freeAnchors(other, station: station, in: "kind:mission").contains(ref), "nobody else is offered that place") }
         }
+        test("a body sent to each piece of gym gear lands on its anchor, faces the way the anchor says, and nobody else is offered that piece") {
+            let (sim, station, m) = fixture()
+            let other = body("b", sim: sim, station: station)
+            let gear = station.fixtures(in: "kind:gym")
+            expect(gear.map(\.kind) == [.treadmill, .bench, .bag, .mat], "four pieces: \(gear.map(\.kind))")
+            for ref in station.anchors(in: "kind:gym") {
+                guard let place = station.place(ref) else { return expect(false, "a place at \(ref)") }
+                let kind = gear[ref.fixture].kind
+                sim.send(m, to: .lounge)
+                _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+                expect(sim.use(m, ref, station: station, seconds: 20) && m.workout == kind, "off to the \(kind)")
+                expect(step(sim, seconds: 60, until: { m.inPlace }), "in place on the \(kind): \(m.words) at \(m.pos)")
+                _ = step(sim, seconds: Seat.sitDown + 0.1)
+                let off = place.at - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.01, "on the \(kind)'s anchor: \(m.pos) against \(place.at)")
+                expect(abs(atan2(sin(m.facing - place.facing), cos(m.facing - place.facing))) < 0.01, "facing the way the \(kind) says: \(m.facing) against \(place.facing)")
+                expect(kind == .bench ? m.onBench && m.lying : !m.seated, "\(kind == .bench ? "flat on the bench" : "on its feet"): seated \(m.seated)")
+                expect(!sim.freeAnchors(other, station: station, in: "kind:gym").contains(ref), "nobody else is offered the \(kind)")
+                expect(!sim.takeTurnInGym(other, station: station, on: kind), "nor sent to it")
+                expect(step(sim, seconds: 40, until: { m.using == nil }) && !m.onBench, "the turn on the \(kind) ends")
+            }
+        }
         test("a job that cuts in on the way to a fixture takes the body clean: not using it, not in place, not seated, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
@@ -559,11 +580,10 @@ enum SimulationTests {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
-            expect(sim.takeTurnInGym(m, station: station, gym: gym) && m.fetchSpot != nil && m.place == .gym, "off to the gym, a fixture spot in mind")
+            expect(sim.takeTurnInGym(m, station: station) && m.using != nil && m.place == .gym, "off to the gym, a piece of gear in mind")
             _ = step(sim, seconds: 1)
             sim.start(m, .deliverOffice(order: 9001, name: "an office"))
-            expect(!m.exercising && m.fetchSpot == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words), spot \(String(describing: m.fetchSpot))")
+            expect(!m.exercising && m.using == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words)")
             sim.finish(m)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = false

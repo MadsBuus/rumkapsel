@@ -170,7 +170,7 @@ enum Scenarios {
             .carry(to: .waiting),
             .log("pull request closed, not merged"),
             .officeGone("work|task:api#5140", reason: "pull request closed"),
-            .command("exercise", by: "kim") { if case .exercise = $0 { return true }; return false },
+            .command("a turn in the gym", by: "kim") { if case .use(let ref, _, _, _) = $0 { return ref.room == "kind:gym" }; return false },
             .command("back at work", by: "kim") { if case .work = $0 { return true }; return false },
         ], forbids: [
             .carry(5140, to: .waiting),

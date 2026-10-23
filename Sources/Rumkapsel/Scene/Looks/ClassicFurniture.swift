@@ -199,66 +199,75 @@ extension Classic {
 
     static func gym(_ gym: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        let spots = station.gymSpots(gym: gym)
+        let o = station.offset
         let dark = lit(NSColor(rgb: (0.22, 0.23, 0.28)))
         let steel = lit(NSColor(rgb: (0.66, 0.68, 0.74)))
-        let tread = SCNNode(geometry: SCNBox(width: 0.42, height: 0.06, length: 0.72, chamferRadius: 0.01))
-        tread.geometry!.firstMaterial = dark
-        tread.position = v3(spots[0].x, 0.03, spots[0].y)
-        let rail = SCNNode(geometry: SCNBox(width: 0.42, height: 0.04, length: 0.04, chamferRadius: 0))
-        rail.geometry!.firstMaterial = steel
-        rail.position = v3(0, 0.42, 0.34)
-        let post = SCNNode(geometry: SCNBox(width: 0.04, height: 0.4, length: 0.04, chamferRadius: 0))
-        post.geometry!.firstMaterial = steel
-        post.position = v3(0, 0.2, 0.34)
-        tread.addChildNode(rail); tread.addChildNode(post)
-        f.fixtures.append(tread)
-        let bench = SCNNode(geometry: SCNBox(width: 0.28, height: 0.2, length: 0.7, chamferRadius: 0.01))
-        bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
-        bench.position = v3(spots[1].x, 0.1, spots[1].y)
-        f.fixtures.append(bench)
-        for side in [-1.0, 1.0] {
-            let up = SCNNode(geometry: SCNBox(width: 0.04, height: 0.6, length: 0.04, chamferRadius: 0))
-            up.geometry!.firstMaterial = steel
-            up.position = v3(spots[1].x + side * 0.36, 0.3, spots[1].y - 0.18)
-            f.fixtures.append(up)
+        func at(_ n: SCNNode, _ fixture: PlacedFixture, _ p: SIMD2<Double>, _ y: Double, turned: Bool = true) -> SCNNode {
+            let w = fixture.point(p)
+            n.position = v3(o.x + w.x, y, o.y + w.y)
+            if turned { n.eulerAngles.y = CGFloat(fixture.yaw) }
+            return n
         }
-        let bar = SCNNode(geometry: SCNBox(width: 0.9, height: 0.035, length: 0.035, chamferRadius: 0))
-        bar.geometry!.firstMaterial = steel
-        bar.position = v3(spots[1].x, 0.62, spots[1].y - 0.18)
-        for side in [-1.0, 1.0] {
-            let disc = SCNNode(geometry: SCNBox(width: 0.05, height: 0.2, length: 0.2, chamferRadius: 0.01))
-            disc.geometry!.firstMaterial = dark
-            disc.position = v3(side * 0.4, 0, 0)
-            bar.addChildNode(disc)
+        for fixture in station.fixtures(in: gym.key) {
+            let size = fixture.kind.size
+            switch fixture.kind {
+            case .treadmill:
+                let tread = SCNNode(geometry: SCNBox(width: size.x, height: 0.06, length: size.y, chamferRadius: 0.01))
+                tread.geometry!.firstMaterial = dark
+                let rail = SCNNode(geometry: SCNBox(width: size.x, height: 0.04, length: 0.04, chamferRadius: 0))
+                rail.geometry!.firstMaterial = steel
+                rail.position = v3(0, 0.42, size.y / 2 - 0.02)
+                let post = SCNNode(geometry: SCNBox(width: 0.04, height: 0.4, length: 0.04, chamferRadius: 0))
+                post.geometry!.firstMaterial = steel
+                post.position = v3(0, 0.2, size.y / 2 - 0.02)
+                tread.addChildNode(rail); tread.addChildNode(post)
+                f.fixtures.append(at(tread, fixture, .zero, 0.03))
+            case .bench:
+                let bench = SCNNode(geometry: SCNBox(width: size.x, height: Seat.height, length: size.y, chamferRadius: 0.01))
+                bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
+                f.fixtures.append(at(bench, fixture, .zero, Seat.height / 2))
+                let chest = fixture.kind.anchors[0].at
+                for side in [-1.0, 1.0] {
+                    let up = SCNNode(geometry: SCNBox(width: 0.04, height: 0.6, length: 0.04, chamferRadius: 0))
+                    up.geometry!.firstMaterial = steel
+                    f.fixtures.append(at(up, fixture, chest + SIMD2(side * 0.36, 0), 0.3))
+                }
+                let bar = SCNNode(geometry: SCNBox(width: 0.9, height: 0.035, length: 0.035, chamferRadius: 0))
+                bar.geometry!.firstMaterial = steel
+                for side in [-1.0, 1.0] {
+                    let disc = SCNNode(geometry: SCNBox(width: 0.05, height: 0.2, length: 0.2, chamferRadius: 0.01))
+                    disc.geometry!.firstMaterial = dark
+                    disc.position = v3(side * 0.4, 0, 0)
+                    bar.addChildNode(disc)
+                }
+                f.fixtures.append(at(bar, fixture, chest, 0.62))
+                f.bar = bar
+            case .bag:
+                let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
+                bagPost.geometry!.firstMaterial = steel
+                let bagArm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.34, chamferRadius: 0))
+                bagArm.geometry!.firstMaterial = steel
+                bagArm.position = v3(0, 0.53, 0.21)
+                bagPost.addChildNode(bagArm)
+                f.fixtures.append(at(bagPost, fixture, SIMD2(0, -0.42), 0.55))
+                let bag = SCNNode()
+                let sack = SCNNode(geometry: SCNBox(width: size.x, height: 0.42, length: size.y, chamferRadius: 0.02))
+                sack.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.28, 0.26)))
+                sack.position = v3(0, -0.36, 0)
+                let chain = SCNNode(geometry: SCNBox(width: 0.02, height: 0.16, length: 0.02, chamferRadius: 0))
+                chain.geometry!.firstMaterial = steel
+                chain.position = v3(0, -0.08, 0)
+                bag.addChildNode(sack); bag.addChildNode(chain)
+                f.fixtures.append(at(bag, fixture, .zero, 1.08, turned: false))
+                f.bag = bag
+            case .mat:
+                let mat = SCNNode(geometry: SCNBox(width: size.x, height: 0.012, length: size.y, chamferRadius: 0))
+                mat.geometry!.firstMaterial = flat(NSColor(Colors.furnitureLight))
+                f.fixtures.append(at(mat, fixture, .zero, 0.006))
+            default:
+                break
+            }
         }
-        f.fixtures.append(bar)
-        f.bar = bar
-        let out = station.gymOutward(gym: gym, at: spots[2])
-        let bagPost = SCNNode(geometry: SCNBox(width: 0.06, height: 1.1, length: 0.06, chamferRadius: 0))
-        bagPost.geometry!.firstMaterial = steel
-        bagPost.position = v3(spots[2].x + out.x * 0.3, 0.55, spots[2].y + out.y * 0.3)
-        let bagArm = SCNNode(geometry: SCNBox(width: 0.34, height: 0.04, length: 0.04, chamferRadius: 0))
-        bagArm.geometry!.firstMaterial = steel
-        bagArm.position = v3(-out.x * 0.15, 0.53, -out.y * 0.15)
-        bagArm.eulerAngles.y = atan2(-out.x, -out.y) + .pi / 2
-        bagPost.addChildNode(bagArm)
-        f.fixtures.append(bagPost)
-        let bag = SCNNode()
-        bag.position = v3(spots[2].x, 1.08, spots[2].y)
-        let sack = SCNNode(geometry: SCNBox(width: 0.2, height: 0.42, length: 0.2, chamferRadius: 0.02))
-        sack.geometry!.firstMaterial = lit(NSColor(rgb: (0.72, 0.28, 0.26)))
-        sack.position = v3(0, -0.36, 0)
-        let chain = SCNNode(geometry: SCNBox(width: 0.02, height: 0.16, length: 0.02, chamferRadius: 0))
-        chain.geometry!.firstMaterial = steel
-        chain.position = v3(0, -0.08, 0)
-        bag.addChildNode(sack); bag.addChildNode(chain)
-        f.fixtures.append(bag)
-        f.bag = bag
-        let mat = SCNNode(geometry: SCNBox(width: 0.7, height: 0.012, length: 0.7, chamferRadius: 0))
-        mat.geometry!.firstMaterial = flat(NSColor(Colors.furnitureLight))
-        mat.position = v3(spots[3].x, 0.006, spots[3].y)
-        f.fixtures.append(mat)
         return f
     }
 
@@ -352,6 +361,8 @@ extension Classic {
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
             case .couch:
+                break
+            case .treadmill, .bench, .bag, .mat:
                 break
             case .console:
                 f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
