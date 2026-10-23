@@ -201,7 +201,7 @@ enum Screens {
         return (CGPoint(x: cw * (Double(col) + 0.5), y: h - ch * (Double(line) + 1) + ch * 0.56), radius)
     }
 
-    static let lightStrip = 58.0
+    static let lightStrip = 86.0
 
     static func dial(_ i: Int, of n: Int) -> (hub: SCNVector3, radius: Double) {
         let (pw, ph) = pixels(annunciatorWide, across: 1024)
@@ -218,17 +218,25 @@ enum Screens {
             c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
             let strip = CGFloat(lightStrip)
             c.setFillColor(NSColor(rgb: (0.035, 0.035, 0.04)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: strip))
-            var x: CGFloat = 26
+            var x: CGFloat = 34
             for row in lights {
-                let lit = row.status != .calm
-                c.setFillColor(NSColor(row.color).withAlphaComponent(lit ? 1 : 0.55).cgColor)
-                c.fillEllipse(in: CGRect(x: x - 11, y: strip / 2 - 11, width: 22, height: 22))
-                if lit {
-                    c.setStrokeColor(row.status.color.cgColor); c.setLineWidth(3)
-                    c.strokeEllipse(in: CGRect(x: x - 14, y: strip / 2 - 14, width: 28, height: 28))
+                let o = CGPoint(x: x, y: strip - 34), r: CGFloat = 21
+                c.setFillColor(NSColor(rgb: (0.1, 0.105, 0.11)).cgColor)
+                c.fillEllipse(in: CGRect(x: o.x - r, y: o.y - r, width: r * 2, height: r * 2))
+                c.setStrokeColor(NSColor(row.color).cgColor); c.setLineWidth(3.5)
+                c.strokeEllipse(in: CGRect(x: o.x - r, y: o.y - r, width: r * 2, height: r * 2))
+                let a = row.status.angle
+                c.setStrokeColor(row.status == .calm ? NSColor(rgb: (0.8, 0.78, 0.7)).cgColor : row.status.color.cgColor); c.setLineWidth(2.5)
+                c.move(to: o); c.addLine(to: CGPoint(x: o.x + r * 0.75 * CGFloat(sin(a)), y: o.y + r * 0.75 * CGFloat(cos(a)))); c.strokePath()
+                var size: CGFloat = 13
+                var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor(row.color).withAlphaComponent(0.8)])
+                while name.size().width > 64 && size > 8 {
+                    size -= 1
+                    name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor(row.color).withAlphaComponent(0.8)])
                 }
-                x += 34
-                if x > w - 220 { break }
+                name.draw(at: NSPoint(x: o.x - name.size().width / 2, y: 4))
+                x += 70
+                if x > w - 200 { break }
             }
             let calm = lights.filter { $0.status == .calm }.count, more = lights.count - calm
             let tally = [calm > 0 ? "\(calm) calm" : nil, more > 0 ? "+\(more) waiting" : nil].compactMap { $0 }.joined(separator: " · ")
