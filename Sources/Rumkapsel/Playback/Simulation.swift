@@ -305,7 +305,8 @@ final class Simulation<B: Body> {
         }
         var place = place
         if place == .quarters, m.bed == nil {
-            let used = Set(bodies.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
+            let others = bodies.values.filter { $0.station == m.station && $0.id != m.id }
+            let used = Set(others.compactMap(\.bed) + others.compactMap { $0.bunk?.ref.fixture })
             m.bed = station.fixtures(in: "kind:quarters").indices.first { !used.contains($0) }
             if m.bed == nil { place = .lounge }
         }

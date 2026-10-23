@@ -45,7 +45,7 @@ class Body {
     var seated: Bool { onCouch || sittingOn != nil }
 
     var using: FixtureRef? { if case .use(let ref, _, _, _) = current?.kind { return ref }; return nil }
-    var settledOn: (order: Int, height: Double?)?
+    var settledOn: (order: Int, height: Double?, home: Bool)?
     var inPlace: Bool { using != nil && settledOn?.order == current?.id }
     var sittingOn: Double? { inPlace ? settledOn?.height : nil }
 
@@ -94,7 +94,6 @@ class Body {
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
     var watchCheckAt = 0.0
-    var nextBathAt = 0.0
     var actFor = 0.0
     var actStartedAt = 0.0
     var idle = IdleClock()
@@ -134,7 +133,7 @@ class Body {
         return bunk?.flat ?? false
     }
 
-    var onBench: Bool { workout == .bench && sittingOn != nil }
+    var onBench: Bool { workout == .bench && inPlace && settledOn?.home == true }
 
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isPeer && !isQA
@@ -169,7 +168,7 @@ class Body {
         guard let c = current else { return "nothing in particular" }
         switch c.kind {
         case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
-        case .use(_, let kind, _, _) where inPlace: return kind.doing
+        case .use(_, let kind, _, _) where inPlace: return drying ? FixtureKind.towelRail.doing : kind.doing
         default: return c.words
         }
     }

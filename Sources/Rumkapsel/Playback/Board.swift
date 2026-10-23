@@ -98,6 +98,16 @@ extension Simulation {
         }
     }
 
+    func takesOrders(_ m: B) -> Bool {
+        m.state == .settled && !m.busy && !m.hasLoad && !m.onJob
+            && (m.current.map { m.phaseKind.interruptible || rank(of: $0) == .idle } ?? true)
+    }
+
+    func dropIdleTurn(_ m: B) {
+        guard let c = m.current, !c.isRest, rank(of: c) == .idle else { return }
+        finish(m, to: m.place)
+    }
+
     private func releasable(_ m: B, _ c: Command) -> Bool {
         switch c.kind {
         case .carry: return cargo[c.id] != nil && m.phaseKind.interruptible
