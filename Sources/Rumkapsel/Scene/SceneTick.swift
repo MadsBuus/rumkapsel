@@ -422,7 +422,7 @@ extension StationController {
                 let cx = Double(lounge.cells.map(\.x).reduce(0, +)) / Double(lounge.cells.count)
                 let cy = Double(lounge.cells.map(\.y).reduce(0, +)) / Double(lounge.cells.count)
                 let toTable = SIMD2(cx, cy) - m.pos
-                m.smoothFacing = atan2(toTable.x, toTable.y)
+                m.smoothFacing = m.couch != nil ? m.facing : atan2(toTable.x, toTable.y)
                 tilt = (m.couch != nil ? -0.22 : 0) + sin(t * 2.2) * 0.05
                 roll = sin(t * 1.3) * 0.04
                 if m.couch != nil { tilt = 0.12 + sin(t * 1.6) * 0.04 }

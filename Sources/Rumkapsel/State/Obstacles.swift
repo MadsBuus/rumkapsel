@@ -36,7 +36,7 @@ extension Station {
         let o = offset, kingdom = theme == .kingdom
         if let lounge = rooms["kind:lounge"] {
             let s = loungeSpots(lounge: lounge)
-            let seats = couches.map { Footprint(at: $0, radius: kingdom ? 0.2556 : 0.32) }
+            let seats = fixtures(in: lounge.key).map { Footprint(at: $0.at, radius: kingdom ? 0.2556 : max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }
             let rest = kingdom
                 ? [Footprint(at: s.table - o, radius: 0.2)] + loungeBarrels(lounge: lounge).map { Footprint(at: $0 - o, radius: 0.1603) }
                 : [Footprint(at: s.table - o, radius: 0.36), Footprint(at: s.pot - o, radius: 0.1226), Footprint(at: s.shelf - o, radius: 0.28)]

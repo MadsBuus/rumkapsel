@@ -75,7 +75,7 @@ final class Minion: Body {
     }
     static let seat = 0.2
     static let seatedTorso = 0.62
-    static let couchSeat = 0.18
+    static let couchSeat = Seat.couch
     static let bedSeat = 0.18
     var seatHeight: Double { sittingOn ?? (seatedOnBowl ? Minion.seat : Minion.couchSeat) }
 

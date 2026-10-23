@@ -553,6 +553,23 @@ enum SimulationTests {
             }
         }
 
+        test("a lounger backs onto the seat its couch's anchor says, facing out into the lounge, and stands up there before it walks off") {
+            let (sim, station, m) = fixture()
+            sim.send(m, to: .lounge)
+            expect(step(sim, seconds: 30, until: { m.onCouch }) && m.couch != nil, "on a couch: \(m.words)")
+            guard let c = m.couch, let seat = station.place(FixtureRef(room: "kind:lounge", fixture: c, anchor: 0)) else { return expect(false, "the couch has a seat") }
+            _ = step(sim, seconds: Seat.sitDown + 0.2)
+            let off = seat.at - m.pos
+            expect((off.x * off.x + off.y * off.y).squareRoot() < 0.03, "on the seat: \(m.pos) against \(seat.at)")
+            expect(abs(atan2(sin(m.facing - seat.facing), cos(m.facing - seat.facing))) < 0.01 && m.seated, "facing out, seated: \(m.facing) against \(seat.facing)")
+            let sat = m.pos
+            sim.start(m, .deliverOffice(order: 9100, name: "an office"))
+            expect(m.risingUntil > 0 && !m.seated, "it gets up first")
+            _ = step(sim, seconds: 0.3)
+            let moved = sat - m.pos
+            expect((moved.x * moved.x + moved.y * moved.y).squareRoot() < 0.01, "and stays put while it does: moved \(moved)")
+        }
+
         test("more resting than there are seats: nobody shares a couch or a bed") {
             let (sim, station, first) = fixture()
             let crowd = [first] + (1..<12).map { body("r\($0)", sim: sim, station: station) }

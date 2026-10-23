@@ -301,6 +301,7 @@ final class Simulation<B: Body> {
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
         if case .room(let key) = place, !standing(station, key) { return send(m, to: .lounge) }
+        if place == .lounge, m.place == .lounge, m.couchSeated, m.path.isEmpty { return }
         if place != .quarters {
             rouse(m)
             m.bed = nil; m.napping = false
@@ -344,6 +345,11 @@ final class Simulation<B: Body> {
     func walk(_ m: B, to cell: Cell) { m.path = route(m, to: cell) }
 
     func rouse(_ m: B) {
+        if m.couchSeated {
+            m.couchSeated = false
+            m.couchSince = nil
+            if m.risingUntil == 0 { m.risingUntil = clock + B.riseSit + 0.3 }
+        }
         guard m.lying, m.risingUntil == 0 else { return }
         m.risingUntil = clock + 1.1
         m.beddedDown = false
@@ -878,19 +884,26 @@ final class Simulation<B: Body> {
 
     func stepRest(_ m: B, station: Station, dt: Double) {
         if m.state != .leaving { m.opacity = min(1, m.opacity + dt * 0.9) }
-        if m.path.isEmpty, m.isResting, m.place == .lounge, let c = m.couch, c < station.couches.count {
-            let spot = station.couches[c]
-            var stand = spot
-            if let lounge = station.rooms["kind:lounge"], !lounge.cells.isEmpty {
-                let xs = lounge.cells.map { Double($0.x) }, ys = lounge.cells.map { Double($0.y) }
-                let mid = SIMD2(xs.reduce(0, +) / Double(xs.count), ys.reduce(0, +) / Double(ys.count))
-                let d = mid - spot, far = (d.x * d.x + d.y * d.y).squareRoot()
-                if far > 0.01 {
-                    stand = spot + d / far * B.seatReach
-                    if m.onCouch { m.facing = atan2(d.x, d.y) }
+        let couch = m.couch.flatMap { m.path.isEmpty && m.isResting && m.place == .lounge ? station.place(FixtureRef(room: "kind:lounge", fixture: $0, anchor: 0)) : nil }
+        if let couch {
+            if m.couchSince == nil {
+                let gap = couch.stand - m.pos, far = (gap.x * gap.x + gap.y * gap.y).squareRoot()
+                if far > 0.02 {
+                    m.pos += gap / far * min(far, dt * 1.2)
+                    m.facing = atan2(gap.x, gap.y)
+                } else {
+                    m.couchSince = clock
                 }
             }
-            m.pos += (stand - m.pos) * min(1, dt * 4)
+            if let since = m.couchSince {
+                let s = couch.sitting(clock - since, of: .infinity)
+                m.pos = s.pos
+                m.facing = s.facing
+                m.couchSeated = s.down
+            }
+        } else {
+            m.couchSince = nil
+            m.couchSeated = false
         }
         if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
             let spot = station.beds[b].pos
