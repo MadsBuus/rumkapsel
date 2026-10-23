@@ -1516,7 +1516,7 @@ extension StationController {
                 let half = st.corridorCells.map(\.x).max() ?? 2
                 for (m, from, to) in [(a, -half, half), (b, half, -half)] {
                     m.busy = false; m.activity = .waiting
-                    m.couch = nil; m.bed = nil
+                    m.couch = nil; m.bed = nil; m.bunk = nil
                     m.napping = false
                     m.current = nil
                     send(m, to: .core)

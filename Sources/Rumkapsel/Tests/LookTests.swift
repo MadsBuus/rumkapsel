@@ -121,21 +121,22 @@ enum LookTests {
     private static func furniture(_ st: Station, offices: [Room]) -> Set<Cell> {
         let look = Looks.current
         var out: Set<Cell> = []
-        func place(_ room: Room?, _ nodes: [SCNNode], local: Bool = false) {
+        func place(_ room: Room?, _ nodes: [SCNNode], local: Bool = false, long: Bool = false) {
             guard let room else { return }
             let floor = Set(room.cells)
-            out.formUnion(cells(nodes, offset: local ? .zero : st.offset).filter { floor.contains(Station.cell(ofSub: $0)) })
+            out.formUnion(cells(nodes, offset: local ? .zero : st.offset, long: long).filter { floor.contains(Station.cell(ofSub: $0)) })
         }
         place(st.rooms["kind:lounge"], st.rooms["kind:lounge"].map { look.furnishLounge($0, in: st).props } ?? [])
         place(st.rooms["kind:bath"], st.rooms["kind:bath"].map { look.furnishBath($0, in: st).props } ?? [])
         place(st.rooms["kind:gym"], st.rooms["kind:gym"].map { look.furnishGym($0, in: st).props } ?? [])
         place(st.rooms["kind:galley"], st.rooms["kind:galley"].map { look.furnishGalley($0, in: st).props } ?? [])
         place(st.rooms["kind:mission"], st.rooms["kind:mission"].map { look.furnishMission($0, in: st).props } ?? [])
-        place(st.rooms["kind:quarters"], st.beds.map { b in
-            let n = look.bed(level: b.level)
-            n.position.x += b.pos.x; n.position.z += b.pos.y
+        place(st.rooms["kind:quarters"], st.fixtures(in: "kind:quarters").map { b in
+            let n = look.bed()
+            n.position.x += b.at.x; n.position.z += b.at.y
+            n.eulerAngles.y = CGFloat(b.yaw)
             return n
-        }, local: true)
+        }, local: true, long: true)
         for room in offices {
             let sign = OfficeSign(number: 101, who: "mads", name: room.name)
             place(room, look.dress(office: room, in: st, sign: sign).map { [$0] } ?? [], local: true)
@@ -143,13 +144,18 @@ enum LookTests {
         return out
     }
 
-    private static func cells(_ nodes: [SCNNode], offset: SIMD2<Double>) -> Set<Cell> {
+    private static func cells(_ nodes: [SCNNode], offset: SIMD2<Double>, long: Bool = false) -> Set<Cell> {
         var out: Set<Cell> = []
         for n in nodes where !(n.geometry is SCNPlane) {
             let (lo, hi) = n.boundingBox
             guard Double(hi.y - lo.y) * Double(n.scale.y) > 0.03 else { continue }
+            let at = SIMD2(Double(n.position.x) - offset.x, Double(n.position.z) - offset.y)
+            if long {
+                out.formUnion(Footprint(at: at, size: SIMD2(Double(hi.x - lo.x), Double(hi.z - lo.z)) * Double(n.scale.x), yaw: Double(n.eulerAngles.y)).cells)
+                continue
+            }
             let r = Double(max(hi.x - lo.x, hi.z - lo.z)) / 2 * 0.8 * Double(n.scale.x)
-            out.formUnion(Footprint(at: SIMD2(Double(n.position.x) - offset.x, Double(n.position.z) - offset.y), radius: r).cells)
+            out.formUnion(Footprint(at: at, radius: r).cells)
         }
         return out
     }

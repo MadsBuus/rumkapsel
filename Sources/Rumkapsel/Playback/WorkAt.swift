@@ -19,7 +19,7 @@ extension Simulation {
         switch place.use {
         case .stand: last = place.at + place.outward * Hands.arm
         case .spot: last = place.at
-        case .sit: last = place.stand
+        case .sit, .lie: last = place.stand
         }
         m.path = route(m, to: standCell(station, near: last, within: Set(room.cells))) + [last]
         return true

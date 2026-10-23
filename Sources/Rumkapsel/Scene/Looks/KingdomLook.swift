@@ -745,21 +745,14 @@ struct KingdomLook: Look {
         return f
     }
 
-    func bed(level: Int) -> SCNNode {
-        guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(level: level, floorTop: floorTop) }
+    func bed() -> SCNNode {
+        guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(floorTop: floorTop) }
         roll.scale = SCNVector3(0.85, 0.85, 0.85)
         roll.geometry?.materials.forEach { $0.multiply.contents = NSColor(rgb: (0.95, 0.85, 0.62)) }
-        if level == 0 {
-            let n = SCNNode()
-            roll.position = v3(0, 0.06, 0)
-            n.addChildNode(roll)
-            return n
-        }
-        let bunk = Classic.bed(level: level, floorTop: floorTop)
-        rustic([bunk])
+        let n = SCNNode()
         roll.position = v3(0, 0.06, 0)
-        bunk.addChildNode(roll)
-        return bunk
+        n.addChildNode(roll)
+        return n
     }
 
     // MARK: work in the village

@@ -303,44 +303,32 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
     private func buildBed() {
         add(Activity.sleeping.label) { [self] p in
             ground(p, NSColor(Colors.quarters))
-            let bunk = Looks.current.bed(level: 0)
-            bunk.position = v3(p.x, 0, p.y)
+            let bed = PlacedFixture(kind: .bed, at: p, yaw: 0)
+            let bunk = Looks.current.bed()
+            bunk.position = v3(bed.at.x, 0, bed.at.y)
+            bunk.eulerAngles.y = CGFloat(bed.yaw)
             scene.rootNode.addChildNode(bunk)
             let m = body(at: p)
-
-            let side = p.x + 0.17, off = p.x + 1.3
-            let onEdge = p.y + 0.1, along = p.y
-            let sat = Minion.Pose.seated(height: Minion.bedSeat)
-            let toBed = -Double.pi / 2, offBed = Double.pi / 2, inLine = 0.0
-            let walkIn = 1.5, turns = walkIn + 0.5, sitDown = turns + 0.5, lieBack = sitDown + 0.8
-            let wakes = lieBack + 2.6, sitsUp = wakes + 0.8, stands = sitsUp + 0.5
-            let walksOff = stands + 1.5, loop = walksOff + 0.7
-            func ease(_ a: Double, _ b: Double, _ t: Double) -> Double {
-                let e = min(1, max(0, t)); return a + (b - a) * (e * e * (3 - 2 * e))
-            }
+            guard let place = bed.place(0) else { return }
+            let off = place.stand + place.outward * 1.1
+            let walk = 1.4, inBed = 2 * Seat.lieDown + 2.6, loop = 2 * walk + inBed + 0.7
             updaters.append { c, _ in
                 let t = c.truncatingRemainder(dividingBy: loop)
-                var x = off, z = onEdge, yaw = toBed, pose = Minion.Pose.standing
-                switch t {
-                case ..<walkIn:   x = ease(off, side, t / walkIn)
-                case ..<turns:    x = side; yaw = ease(toBed, offBed, (t - walkIn) / (turns - walkIn))
-                case ..<sitDown:  x = side; yaw = offBed; pose = sat
-                case ..<lieBack:
-                                  let k = (t - sitDown) / (lieBack - sitDown)
-                                  x = ease(side, p.x, k); z = ease(onEdge, along, k)
-                                  yaw = ease(offBed, inLine, k); pose = .flat(height: Minion.bedSeat)
-                case ..<wakes:    x = p.x; z = along; yaw = inLine; pose = .flat(height: Minion.bedSeat)
-                case ..<sitsUp:
-                                  let k = (t - wakes) / (sitsUp - wakes)
-                                  x = ease(p.x, side, k); z = ease(along, onEdge, k)
-                                  yaw = ease(inLine, offBed, k); pose = sat
-                case ..<stands:   x = side; yaw = offBed
-                case ..<walksOff: x = ease(side, off, (t - stands) / (walksOff - stands)); yaw = offBed
-                default:          x = off; yaw = offBed
+                var pos = place.stand, yaw = place.facing, pose = Minion.Pose.standing
+                if t < walk {
+                    pos = off + (place.stand - off) * (t / walk)
+                    yaw = place.facing + .pi
+                } else if t < walk + inBed {
+                    let s = place.lying(t - walk, of: inBed)
+                    pos = s.pos
+                    yaw = s.facing
+                    pose = s.flat ? .flat(height: Seat.bed) : s.sat ? .seated(height: Seat.bed) : .standing
+                } else {
+                    pos = place.stand + (off - place.stand) * min(1, (t - walk - inBed) / walk)
                 }
-                m.node.position = v3(x, 0, z)
+                m.node.position = v3(pos.x, 0, pos.y)
                 m.node.eulerAngles.y = CGFloat(yaw)
-                m.node.opacity = t > walksOff ? 0 : 1
+                m.node.opacity = t > 2 * walk + inBed ? 0 : 1
                 m.setPose(pose)
             }
         }
@@ -589,7 +577,7 @@ final class GalleryController: NSObject, SCNSceneRendererDelegate {
             let keep = Looks.current.monolith()
             keep.position = v3(spots[0].x, 0, spots[0].y)
             scene.rootNode.addChildNode(keep)
-            let bunk = Looks.current.bed(level: 0)
+            let bunk = Looks.current.bed()
             bunk.position = v3(spots[1].x, 0, spots[1].y)
             scene.rootNode.addChildNode(bunk)
         }

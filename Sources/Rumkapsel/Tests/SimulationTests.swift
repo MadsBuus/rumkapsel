@@ -661,27 +661,60 @@ enum SimulationTests {
             expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
         }
 
-        test("a sleeper given something to do stands up where it lies before it walks anywhere") {
+        test("a sleeper given something to do gets up out over its bed's side, onto its feet there, before it walks anywhere") {
             let (sim, station, m) = fixture()
+            sim.refreshObstacles()
             sim.send(m, to: .quarters)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
             m.activity = .sleeping
             m.napping = true
             _ = step(sim, seconds: 6, until: { m.lying })
             expect(m.lying, "asleep in the quarters, flat on its back")
-            let bedSpot = m.pos
+            guard let ref = m.bunk?.ref, let bed = station.place(ref) else { return expect(false, "in its bunk") }
 
             sim.send(m, to: .lounge)
             expect(m.risingUntil > 0, "roused: it is getting to its feet, not walking yet")
-            expect(!m.lying, "and it stands up at once, rather than waiting until it walks")
-            var moved = 0.0
-            _ = step(sim, seconds: 1.0, beat: {
-                moved = max(moved, ((m.pos.x - bedSpot.x) * (m.pos.x - bedSpot.x)
-                                    + (m.pos.y - bedSpot.y) * (m.pos.y - bedSpot.y)).squareRoot())
+            expect(!m.lying, "and it sits up at once, rather than waiting until it walks")
+            let span = bed.stand - bed.flat, reach = (span.x * span.x + span.y * span.y).squareRoot()
+            var strayed = 0.0
+            let rose = step(sim, seconds: Seat.lieDown + 0.5, until: {
+                guard m.bunk != nil else { return true }
+                let d = m.pos - bed.flat, along = (d.x * span.x + d.y * span.y) / reach
+                strayed = max(strayed, abs(d.x * span.y - d.y * span.x) / reach, -along, along - reach)
+                return false
             })
-            expect(moved < 0.05, String(format: "it stays where it lay while it rises: moved %.2f", moved))
+            expect(rose && strayed < 0.01, String(format: "it rises out over its bed's side and nowhere else: strayed %.3f", strayed))
+            let up = bed.stand - m.pos
+            expect((up.x * up.x + up.y * up.y).squareRoot() < 0.05, "on its feet at the bed's side: \(m.pos) against \(bed.stand)")
             _ = step(sim, seconds: 30, until: { m.place == .lounge && m.path.isEmpty })
             expect(m.place == .lounge, "and then walks there")
+        }
+
+        test("sleepers sent to bed walk the aisles to the side their bed's anchor says and lie down along it at its height, one to a bed") {
+            let (sim, station, first) = fixture()
+            sim.refreshObstacles()
+            let beds = station.fixtures(in: "kind:quarters")
+            let frames = Set(beds.flatMap { Footprint(at: $0.at, size: $0.kind.size, yaw: $0.yaw).cells })
+            let crowd = [first] + (1..<beds.count).map { body("s\($0)", sim: sim, station: station) }
+            for m in crowd { m.activity = .sleeping; sim.send(m, to: .quarters) }
+            var over: Set<String> = []
+            let abed = step(sim, seconds: 90, until: {
+                for m in crowd where m.bunk == nil && frames.contains(Station.sub(m.pos)) { over.insert(m.id) }
+                return crowd.allSatisfy(\.lying)
+            })
+            expect(abed, "all in bed: \(crowd.filter { !$0.lying }.map { "\($0.id) at \($0.pos)" })")
+            expect(over.isEmpty, "nobody walked over a bed: \(over.sorted())")
+            _ = step(sim, seconds: Seat.stretch)
+            for m in crowd {
+                guard let b = m.bed, let bunk = m.bunk, bunk.ref == station.bedside(b), let bed = station.place(bunk.ref),
+                      case .lie(let height) = bed.use else { expect(false, "\(m.id) is in the bunk its bed says"); continue }
+                let off = bed.flat - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.01, "\(m.id) lies on its bed: \(m.pos) against \(bed.flat)")
+                expect(abs(atan2(sin(m.facing - beds[b].yaw), cos(m.facing - beds[b].yaw))) < 0.01, "\(m.id) lies along it, head to the pillow: \(m.facing)")
+                expect(bunk.flat && bunk.height == height && height == Seat.bed, "\(m.id) flat at the mattress's height: \(bunk.height)")
+            }
+            let held = crowd.compactMap(\.bed)
+            expect(held.count == crowd.count && Set(held).count == held.count, "one to a bed: \(held.sorted())")
         }
 
         test("night falls: a sleeping body goes to bed and sleeps there; in the morning it goes to the lounge") {
