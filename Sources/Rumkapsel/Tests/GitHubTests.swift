@@ -243,6 +243,42 @@ enum GitHubTests {
             withExtendedLifetime((watch, watch2)) {}
         }
 
+        test("a merged pull request has shipped only when its merge commit is in production, or under a tag where tags ship") {
+            let dir = GitWatch.real(NSTemporaryDirectory()) + "/rk-shipped-\(UUID().uuidString)"
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: dir) }
+            git(["init", "-q", "-b", "develop"], dir)
+            func commit(_ m: String) -> String {
+                git(["commit", "-q", "--allow-empty", "-m", m], dir)
+                return GitHubResolver().run(["git", "rev-parse", "HEAD"], cwd: dir).flatMap { String(data: $0, encoding: .utf8) }?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
+            let released = commit("released (#1)")
+            git(["update-ref", "refs/remotes/origin/production", "HEAD"], dir)
+            let stored = commit("stored (#2)")
+            func merged(_ oid: String, _ state: String = "MERGED") -> [String: Any] { ["state": state, "mergeCommit": ["oid": oid]] }
+            let github = GitHubResolver()
+            github.frozen = true
+            github.inject(pipeline: PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                                             merges: (0..<20).map { .init(base: "develop", head: "gh-\($0)/work") }
+                                                                 + Array(repeating: .init(base: "staging", head: "develop"), count: 3)
+                                                                 + Array(repeating: .init(base: "production", head: "staging"), count: 3),
+                                                             file: nil, defaultBranch: "develop"), for: dir)
+            expect(PullSource.shipped(merged(released), repoRoot: dir, github: github), "its merge commit is in production: shipped")
+            expect(!PullSource.shipped(merged(stored), repoRoot: dir, github: github), "merged after the release: not shipped")
+            expect(!PullSource.shipped(merged(released, "OPEN"), repoRoot: dir, github: github), "not merged: not shipped")
+            expect(!PullSource.shipped(["state": "MERGED"], repoRoot: dir, github: github), "no merge commit known: not shipped")
+            let tags = GitHubResolver()
+            tags.frozen = true
+            tags.inject(pipeline: PipelineDetection.detect(branches: ["main"], merges: [.init(base: "main", head: "claude/older")], file: nil,
+                                                           defaultBranch: "main", tagged: true), for: dir)
+            expect(!PullSource.shipped(merged(stored), repoRoot: dir, github: tags), "tags ship, none yet: not shipped")
+            git(["tag", "v1"], dir)
+            let after = commit("after the tag (#3)")
+            expect(PullSource.shipped(merged(stored), repoRoot: dir, github: tags), "under the tag: shipped")
+            expect(!PullSource.shipped(merged(after), repoRoot: dir, github: tags), "after the tag: not shipped")
+        }
+
         say(failures == 0 ? "github: all passed" : "github: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

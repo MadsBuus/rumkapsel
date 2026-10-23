@@ -37,7 +37,7 @@ extension World {
             case .pullChanged(let branch, let pr):
                 let rooms = fleet.stations.values.flatMap { $0.rooms.values.filter { $0.branch == branch } }
                 for room in rooms { if let repo = room.repo { works.note(repo: repo, branch: branch, issue: pr.closes.first, pull: pr.number, pullState: pr.state) } }
-                for room in rooms { if let repo = room.repo { self.report(pullState: pr.state, record: works.find(repo: repo, pull: pr.number), at: now) } }
+                for room in rooms { if let repo = room.repo { self.report(pullState: pr.state, record: works.find(repo: repo, pull: pr.number), shipped: pr.shipped, at: now) } }
                 events.append(.log("\(Work(repo: "", branch: branch).label): \(pr.summary)"))
                 events.append(.chime(pr.number))
             case .released(let root, let pr):
