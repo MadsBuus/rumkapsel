@@ -51,43 +51,44 @@ enum IdleTests {
             expect(IdleClock.span.contains(c.dueAt), "a random span lands in it: \(c.dueAt)")
         }
 
-        test("one thing by weight: a look round most often, then the gym, the bath, a turn in mission control, and now and then a book") {
+        test("one thing by weight: a look round most often, a turn in mission control nearly as often, then the gym, a book and the bath") {
             func pick(_ roll: Double, mission: Bool = true) -> IdlePick { IdlePick.pick(roll: roll, night: false, crew: false, gymFree: true, bath: true, shower: true, mission: mission) }
-            expect(pick(0) == .roam && pick(0.39) == .roam, "under 0.40: a look round")
-            expect(pick(0.40) == .gym && pick(0.64) == .gym, "to 0.65: the gym")
-            expect(pick(0.65) == .bath(shower: true) && pick(0.74) == .bath(shower: true), "to 0.75: the bath")
-            expect(pick(0.75) == .mission && pick(0.84) == .mission, "to 0.85: mission control")
+            expect(pick(0) == .roam && pick(0.32) == .roam, "under 0.33: a look round")
+            expect(pick(0.33) == .gym && pick(0.49) == .gym, "to 0.50: the gym")
+            expect(pick(0.5) == .bath(shower: true) && pick(0.57) == .bath(shower: true), "to 0.58: the bath")
+            expect(pick(0.58) == .mission && pick(0.84) == .mission, "to 0.85: mission control")
             expect(pick(0.8, mission: false) == .read, "no mission control: a book")
-            expect(IdlePick.pick(roll: 0.8, night: false, crew: true, gymFree: true, bath: true, shower: true, mission: true) == .read, "never the crew: a book")
+            expect(IdlePick.pick(roll: 0.8, night: false, crew: true, gymFree: true, bath: true, shower: true, mission: true) == .mission, "the crew too")
+            expect(IdlePick.pick(roll: 0.8, night: true, crew: false, gymFree: true, bath: true, shower: true, mission: true) == .read, "not by night")
             expect(pick(0.85) == .read && pick(0.999) == .read, "the rest: a book")
             let weights = [IdlePick.roamBelow, IdlePick.gymBelow - IdlePick.roamBelow, IdlePick.bathBelow - IdlePick.gymBelow, IdlePick.missionBelow - IdlePick.bathBelow, 1 - IdlePick.missionBelow]
             expect(weights.max()! < 0.8, "no one thing takes over: \(weights)")
         }
 
         test("the gym only by day, never for the crew, only when a fixture is free; otherwise a look round") {
-            expect(IdlePick.pick(roll: 0.5, night: true, crew: false, gymFree: true, bath: true, shower: false) == .roam, "night")
-            expect(IdlePick.pick(roll: 0.5, night: false, crew: true, gymFree: true, bath: true, shower: false) == .roam, "crew")
-            expect(IdlePick.pick(roll: 0.5, night: false, crew: false, gymFree: false, bath: true, shower: false) == .roam, "every fixture taken")
-            expect(IdlePick.pick(roll: 0.5, night: false, crew: false, gymFree: true, bath: true, shower: false) == .gym, "by day, free")
+            expect(IdlePick.pick(roll: 0.4, night: true, crew: false, gymFree: true, bath: true, shower: false) == .roam, "night")
+            expect(IdlePick.pick(roll: 0.4, night: false, crew: true, gymFree: true, bath: true, shower: false) == .roam, "crew")
+            expect(IdlePick.pick(roll: 0.4, night: false, crew: false, gymFree: false, bath: true, shower: false) == .roam, "every fixture taken")
+            expect(IdlePick.pick(roll: 0.4, night: false, crew: false, gymFree: true, bath: true, shower: false) == .gym, "by day, free")
         }
 
         test("the galley takes a slice of the look round, by day and while nobody else is at it") {
             func pick(_ roll: Double, night: Bool = false, galley: Command.Fare? = .coffee) -> IdlePick {
                 IdlePick.pick(roll: roll, night: night, crew: false, gymFree: true, bath: true, shower: true, galley: galley)
             }
-            expect(pick(0.24) == .roam && pick(0.25) == .galley(.coffee) && pick(0.39) == .galley(.coffee), "0.25 to 0.40: the galley")
+            expect(pick(0.19) == .roam && pick(0.2) == .galley(.coffee) && pick(0.32) == .galley(.coffee), "0.20 to 0.33: the galley")
             expect(pick(0.3, galley: .bite) == .galley(.bite), "a bite, when that is what the hour serves")
             expect(pick(0.3, galley: nil) == .roam, "the galley taken or missing: a look round")
             expect(pick(0.3, night: true) == .roam, "not by night")
-            expect(pick(0.40) == .gym, "the rest as before")
+            expect(pick(0.33) == .gym, "the rest as before")
             expect(IdleAfter.after(.desk, roll: 0.4, night: false, bath: true, galley: .coffee) == .galley(.coffee), "after desk work, now and then a coffee")
             expect(IdleAfter.after(.desk, roll: 0.4, night: false, bath: true) == .rest, "no galley: rest")
             expect(IdleAfter.after(.yard, roll: 0.4, night: false, bath: true, galley: .coffee) == .rest, "hauling is followed by the bath or rest, not a coffee")
         }
 
         test("the bath only where there is one, a shower or the toilet as rolled") {
-            expect(IdlePick.pick(roll: 0.7, night: true, crew: true, gymFree: false, bath: false, shower: true) == .roam, "no bath: a look round")
-            expect(IdlePick.pick(roll: 0.7, night: true, crew: true, gymFree: false, bath: true, shower: false) == .bath(shower: false), "the toilet")
+            expect(IdlePick.pick(roll: 0.55, night: true, crew: true, gymFree: false, bath: false, shower: true) == .roam, "no bath: a look round")
+            expect(IdlePick.pick(roll: 0.55, night: true, crew: true, gymFree: false, bath: true, shower: false) == .bath(shower: false), "the toilet")
         }
 
         test("roamers keep apart, except when there is company to keep, or nowhere else to stand") {

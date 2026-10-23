@@ -147,6 +147,10 @@ extension StationController {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let station = fleet.stations[parts[0]], let room = station.rooms[parts[1]], !room.key.hasPrefix("kind:") else { return }
         let menu = NSMenu()
+        let github = NSMenuItem(title: "Open on GitHub", action: #selector(openOffice(_:)), keyEquivalent: "")
+        github.target = self
+        github.representedObject = name
+        menu.addItem(github)
         if room.worktree == nil {
             let item = NSMenuItem(title: "Kick \(room.name)", action: #selector(kickOffice(_:)), keyEquivalent: "")
             item.target = self
@@ -181,6 +185,11 @@ extension StationController {
             handle([.layoutChanged])
             flushScene()
         }
+    }
+
+    @objc private func openOffice(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        enqueue { [self] in open(named: name) }
     }
 
     @objc private func kickOffice(_ sender: NSMenuItem) {

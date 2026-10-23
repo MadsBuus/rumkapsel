@@ -825,6 +825,7 @@ final class SimulatorModel: ObservableObject {
                 button("Deploy: Fails", "…it fails", inFlight(repo) ? nil : .already("no deploy of \(repo) in flight")),
                 button("Deploy: Cancelled", "…it is cancelled", inFlight(repo) ? nil : .already("no deploy of \(repo) in flight")),
                 button("Deploy: Staging starts", "A staging deploy starts"),
+                button("Errors: A new error", "Sentry: a new error"), button("Errors: A spike", "Sentry: an error spikes"),
                 button("Deploy: Staging goes live", "…staging is live"),
                 button("Deploy: Staging fails", "…the staging deploy fails"),
                 button("Repo: No staging", shown: false),
@@ -1168,6 +1169,15 @@ final class SimulatorModel: ObservableObject {
         case "Deploy: Goes live", "Deploy: Fails", "Deploy: Cancelled":
             let outcome: DeployOutcome = name.hasSuffix("live") ? .live : name.hasSuffix("Fails") ? .failed : .cancelled
             station.handle(.deployEnded(station: deployStation(repo), repo: repo, production: true, outcome: outcome))
+        case "Errors: A new error", "Errors: A spike":
+            let project = repo + "-production"
+            var issues = station.world.errorsByProject[project]?.issues ?? []
+            if issues.isEmpty { _ = station.world.hear([.errors(repo: repo, project: project, issues: [])]) }
+            let n = issues.count + 1
+            issues.insert(SentryIssue(id: "\(n)", title: name.hasSuffix("spike") ? "TypeError: Cannot read properties of undefined (reading 'artist')" : "PaymentError: card declined",
+                                      count: name.hasSuffix("spike") ? 480 : 2, firstSeen: station.now.addingTimeInterval(name.hasSuffix("spike") ? -86400 : -90), lastSeen: station.now,
+                                      hourly: name.hasSuffix("spike") ? Array(repeating: 4, count: 23) + [90] : []), at: 0)
+            for e in station.world.hear([.errors(repo: repo, project: project, issues: issues)]) { station.handle(e) }
         case "Deploy: Staging starts":
             station.world.learn(.staging(repo: repo, .deploy(.running(since: station.now, usual: 40))), repo: repo)
             station.handle(.deployStarted(station: deployStation(repo), repo: repo, production: false, expected: 40, release: ""))
@@ -1309,6 +1319,7 @@ final class SimulatorModel: ObservableObject {
         case .markersChanged: return "markersChanged"
         case .worldLoaded: return "worldLoaded"
         case .log(let t): return "log: \(t)"
+        case .errorsClimbed(let repo, let level, let n): return "errorsClimbed \(repo) \(level.words) \(n) in the last hour"
         case .chime(let s): return "chime \(s)"
         case .deployStarted(_, let repo, let production, let expected, let release, _): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
         case .deployEnded(_, let repo, let production, let outcome): return "deployEnded \(repo) \(production ? "production" : "staging") \(outcome)"

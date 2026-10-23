@@ -23,6 +23,28 @@ enum LookTests {
     ]
 
     static func run() -> Never {
+        do {
+            let t0 = Date()
+            let img = Planets.image("mars", color: NSColor(rgb: (0.9, 0.2, 0.2)))
+            let spent = Date().timeIntervalSince(t0)
+            var ok = false, detail = false
+            if let img, let data = img.dataProvider?.data as Data? {
+                let w = img.width, h = img.height, row = img.bytesPerRow
+                var lums = Set<Int>(), red = 0, n = 0
+                for y in stride(from: h / 4, to: h * 3 / 4, by: max(1, h / 20)) {
+                    for x in stride(from: 0, to: w, by: max(1, w / 20)) {
+                        let i = y * row + x * 4
+                        let r = Int(data[i]), g = Int(data[i + 1]), b = Int(data[i + 2])
+                        if r > g && r > b { red += 1 }
+                        lums.insert((r + g + b) / 12); n += 1
+                    }
+                }
+                ok = red * 10 >= n * 9
+                detail = lums.count > 5
+            }
+            if !(ok && detail) || spent > 3 { failures += 1 }
+            say((ok && detail && spent <= 3 ? "PASS  " : "FAIL  ") + String(format: "a planet's texture is tinted into its repository's colour, keeping its detail, in %.2fs", spent))
+        }
         for theme in Theme.allCases {
             guard let claim = claims[theme] else {
                 failures += 1

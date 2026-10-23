@@ -3,6 +3,9 @@ import Foundation
 final class World {
     let fleet = Fleet()
     let github = GitHubResolver()
+    let sentry = SentrySource()
+    var errorsByProject: [String: (repo: String, issues: [SentryIssue])] = [:]
+    var yardStamps: [String: String] = [:]
     private let demo: Bool
     var simulated = false
 
@@ -12,6 +15,12 @@ final class World {
         self.demo = demo
         log = EventLog(dir: demo ? nil : EventLog.home)
         if demo { fleet.persists = false }
+        github.watch.add { [weak sentry] in sentry?.checks() ?? [] }
+    }
+
+    func errors(repo: String) -> [SentryIssue]? {
+        let mine = errorsByProject.values.filter { $0.repo == repo }
+        return mine.isEmpty ? nil : mine.flatMap(\.issues)
     }
 
     static let holdWindow: TimeInterval = 24 * 3600
@@ -159,6 +168,7 @@ final class World {
         repoRoots = [:]
         readyRepos = []
         didLoadLayout = false
+        yardStamps = [:]
         works.reset()
         transitions = []
         crewRoomInfo = [:]
@@ -484,6 +494,7 @@ final class World {
             events += lostDeploys()
             events += applyBoardMoves()
             events += hear(github.pulls.reports())
+            events += hear(sentry.reports())
             events += stationEvents()
             if changed { events.append(.layoutChanged) }
             return events

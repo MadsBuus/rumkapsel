@@ -13,14 +13,17 @@ run() { RUMKAPSEL_SUPPORT=$(mktemp -d) $BIN "$@" >$OUT/$1 2>&1; echo $? >$OUT/$1
 run --scenarios ${1:-} &
 run --playback-tests &
 run --intake-tests &
-for suite in rule sim idle walk work deploy github pipeline setup layout spacelog look log; do run --$suite-tests; done
+for suite in rule sim idle walk work deploy github pipeline setup sentry layout spacelog look scene log; do run --$suite-tests; done
 wait
 FAILED=0
-for suite in rule intake playback sim idle walk work deploy github pipeline setup layout spacelog look log; do
+for suite in rule intake playback sim idle walk work deploy github pipeline setup sentry layout spacelog look scene log; do
   grep -E "not so|FAIL" $OUT/--$suite-tests
   tail -1 $OUT/--$suite-tests
   [ "$(cat $OUT/--$suite-tests.code 2>/dev/null)" = 0 ] || { FAILED=1; echo "$suite: exit $(cat $OUT/--$suite-tests.code 2>/dev/null || echo none)" }
 done
+if git ls-files -co --exclude-standard -z | xargs -0 grep -lIE 'sntry[su]_[A-Za-z0-9+/=_-]{20,}' 2>/dev/null; then
+  FAILED=1; echo "a Sentry token is in the tree: take it out before committing"
+fi
 grep -E "FAIL|not so|passed in" $OUT/--scenarios
 [ "$(cat $OUT/--scenarios.code 2>/dev/null)" = 0 ] || { FAILED=1; echo "scenarios: exit $(cat $OUT/--scenarios.code 2>/dev/null || echo none)" }
 echo "gate: $((SECONDS - START))s"

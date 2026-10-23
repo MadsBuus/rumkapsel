@@ -433,6 +433,8 @@ extension StationController {
                 if m.isSubagent { parts.append("subagent") }
                 infoLabel.text = parts.joined(separator: "   ")
             }
+        } else if h.hasPrefix("link:") {
+            infoLabel.text = String(h.split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("rocket:") {
             let label = String(h.dropFirst(7).split(separator: "|", maxSplits: 1).last ?? "")
             let repo = label.components(separatedBy: " · ").first ?? ""
@@ -515,8 +517,8 @@ extension StationController {
     }
 
     func open(named raw: String?) {
-        if let raw, raw.hasPrefix("rocket:") {
-            let link = String(raw.dropFirst(7).split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        if let raw, raw.hasPrefix("rocket:") || raw.hasPrefix("link:") {
+            let link = String(raw.drop { $0 != ":" }.dropFirst().split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
             if let u = URL(string: link), u.scheme?.hasPrefix("http") == true { DispatchQueue.main.async { NSWorkspace.shared.open(u) } }
             return
         }

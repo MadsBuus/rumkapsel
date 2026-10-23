@@ -117,18 +117,18 @@ enum Screens {
         }
     }
 
-    static func annunciator(_ rows: [MissionBoards.Row]) -> NSImage {
+    static func annunciator(_ rows: [MissionBoards.Row], blinking: Bool = false) -> NSImage {
         draw(1024, 300) { c, w, h in
-            c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            if !blinking { c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h)) }
             let head: CGFloat = 34
-            for (k, name) in MissionBoards.lamps.enumerated() {
+            for (k, name) in MissionBoards.lamps.enumerated() where !blinking {
                 let s = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .semibold), .foregroundColor: NSColor(rgb: (0.7, 0.72, 0.75))])
                 s.draw(at: NSPoint(x: 240 + CGFloat(k) * 128 + (116 - s.size().width) / 2, y: h - head + 6))
             }
             let count = max(5, rows.count), rowH = (h - head) / CGFloat(count)
             for r in 0..<count {
                 let y = h - head - rowH * CGFloat(r + 1)
-                if r < rows.count {
+                if r < rows.count, !blinking {
                     let row = rows[r]
                     c.setFillColor(NSColor(row.color).cgColor); c.fill(CGRect(x: 8, y: y + 4, width: 210, height: rowH - 8))
                     var size: CGFloat = min(24, rowH - 12)
@@ -140,7 +140,9 @@ enum Screens {
                     name.draw(at: NSPoint(x: 16, y: y + (rowH - name.size().height) / 2))
                 }
                 for k in 0..<MissionBoards.lamps.count {
-                    let lamp = r < rows.count ? rows[r].lamps[k] : .dark
+                    let blinks = r < rows.count && (rows[r].blink.indices.contains(k) ? rows[r].blink[k] : 0) > 0
+                    if blinking != blinks && blinking { continue }
+                    let lamp = r < rows.count && !(blinks && !blinking) ? rows[r].lamps[k] : .dark
                     c.setFillColor(lampColor(lamp).cgColor)
                     c.fill(CGRect(x: 240 + CGFloat(k) * 128, y: y + 4, width: 116, height: rowH - 8))
                 }
@@ -159,6 +161,33 @@ enum Screens {
             c.drawRadialGradient(glow, startCenter: CGPoint(x: w / 2, y: h / 2), startRadius: 0, endCenter: CGPoint(x: w / 2, y: h / 2), endRadius: w * 0.62, options: [])
             NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
                 .draw(at: NSPoint(x: 12, y: h - 26))
+        }
+    }
+
+    static func errors(_ rows: [MissionBoards.ErrorRow]) -> NSImage {
+        draw(480, 300) { c, w, h in
+            c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            NSAttributedString(string: "Errors", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 20, weight: .bold), .foregroundColor: NSColor(rgb: (0.5, 0.62, 0.62))])
+                .draw(at: NSPoint(x: 18, y: h - 38))
+            let rowH = min(110, (h - 56) / CGFloat(max(1, rows.count)))
+            for (k, row) in rows.enumerated() {
+                let y = h - 56 - rowH * CGFloat(k + 1)
+                c.setFillColor(NSColor(row.color).cgColor); c.fill(CGRect(x: 18, y: y + 8, width: 10, height: rowH - 16))
+                let peak = CGFloat(max(1, row.hourly.max() ?? 1))
+                let ink = lampColor(row.level == .spiking ? .red : row.level == .rising ? .amber : .green)
+                for (i, v) in row.hourly.enumerated() {
+                    let bh = max(2, CGFloat(v) / peak * (rowH - 18))
+                    let recent = i >= row.hourly.count - 2
+                    c.setFillColor((recent ? ink : NSColor(rgb: (0.35, 0.45, 0.45))).cgColor)
+                    c.fill(CGRect(x: 40 + CGFloat(i) * 8, y: y + 9, width: 5, height: bh))
+                }
+                let word = NSAttributedString(string: row.level.words, attributes: [.font: NSFont.monospacedSystemFont(ofSize: min(40, rowH * 0.38), weight: .heavy), .foregroundColor: ink])
+                word.draw(at: NSPoint(x: w - 18 - word.size().width, y: y + rowH * 0.42))
+                let rate = NSAttributedString(string: "\(row.lastHour)/h", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 14, weight: .regular), .foregroundColor: NSColor(rgb: (0.55, 0.62, 0.62))])
+                rate.draw(at: NSPoint(x: w - 18 - rate.size().width, y: y + 8))
+            }
+            c.setFillColor(NSColor.black.withAlphaComponent(0.3).cgColor)
+            for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }
         }
     }
 

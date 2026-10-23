@@ -134,7 +134,7 @@ extension StationController {
 
     func tickGlassDoors(dt: Double) {
         let half = 0.5
-        for door in staticRoot.childNodes where (door.name ?? "").hasPrefix("glassdoor:") {
+        for door in statics.tagged("glassdoor") {
             let stationName = String(door.name!.dropFirst("glassdoor:".count))
             guard let st = fleet.stations[stationName], let pane = door.childNode(withName: "pane", recursively: false) else { continue }
             let dx = Double(door.position.x) - st.offset.x, dz = Double(door.position.z) - st.offset.y
@@ -152,7 +152,7 @@ extension StationController {
     func tickHullLamps() {
         let inbound = Set(simulation.flights.filter { $0.phaseKind == .approach || $0.phaseKind == .descend }.map(\.station))
         let on = clock.truncatingRemainder(dividingBy: 1.0) < 0.5
-        for hull in staticRoot.childNodes where (hull.name ?? "").hasPrefix("hull:") {
+        for hull in statics.tagged("hull") {
             let lit = on && inbound.contains(String(hull.name!.dropFirst("hull:".count)))
             for lamp in hull.childNodes where lamp.name == "beacon" {
                 lamp.geometry?.firstMaterial?.diffuse.contents = lit ? Props.hullLamp : Props.hullLampOff
@@ -173,6 +173,8 @@ extension StationController {
             if how == .posed { pose(m, station: station, dt: dt) }
         }
         for station in fleet.stations.values { tendKitchen(station); swivelChairs(station, dt: dt) }
+        if !headless || walker != nil { prepareWalk() }
+        blinkBoards()
         if clock - boardsCheckedAt >= 0.25 || clock < boardsCheckedAt {
             boardsCheckedAt = clock
             timed("boards") { for station in fleet.stations.values { tendMissionBoards(station) } }
@@ -272,7 +274,7 @@ extension StationController {
         case .flush(_, let bowl, let front): flush(at: bowl, front: front)
         case .fidget(let id): minions[id]?.fidget()
         case .towel(_, let station, let taken):
-            staticRoot.childNode(withName: "towel:" + station, recursively: true)?.isHidden = taken
+            statics.node(named: "towel:" + station)?.isHidden = taken
         case .hop(let id):
             minions[id]?.node.runAction(.sequence([.moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: 0.12, z: 0, duration: 0.08), .moveBy(x: 0, y: -0.12, z: 0, duration: 0.08)]))
         case .clearCones(let id): if let m = minions[id] { clearPyramids(m) }

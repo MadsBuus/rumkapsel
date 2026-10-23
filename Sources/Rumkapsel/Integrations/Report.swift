@@ -6,6 +6,7 @@ enum Report {
     case pullChanged(branch: String, PullRequest)
     case released(repoRoot: String, ReleasePR)
     case hotfixMerged(repoRoot: String, ReleasePR)
+    case errors(repo: String, project: String, issues: [SentryIssue])
 }
 
 extension World {
@@ -25,6 +26,12 @@ extension World {
                     events.append(.deployEnded(station: info.station, repo: info.repo, production: production, outcome: outcome))
                     if !production { learn(.staging(repo: info.repo, .deploy(outcome == .live ? .live : .failed)), repo: info.repo) }
                 }
+            case .errors(let repo, let project, let issues):
+                let first = errorsByProject[project] == nil
+                let was = errors(repo: repo).map { Sentry.trend($0, at: now).level } ?? .calm
+                errorsByProject[project] = (repo, issues)
+                guard !first, let now = errors(repo: repo).map({ Sentry.trend($0, at: self.now) }), now.level > was else { continue }
+                events.append(.errorsClimbed(repo: repo, now.level, lastHour: now.lastHour))
             case .cardMoved(let item, let from):
                 events.append(.boardMoved(item: item, from: from, to: ConfigStore.shared.current.statuses.stage(of: item.status)))
             case .pullChanged(let branch, let pr):

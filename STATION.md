@@ -335,9 +335,9 @@ moves through it one way: in from the hallway at the back, out through the field
   the time of day, the work it did and chance decide: rest by night; after hard work now and then the
   bath; now and then a look round; else rest.
 - A lounger has one idle clock, two to five minutes. When it runs out one thing is picked: a look round
-  the station most often, the galley by day when it is free, a turn in the gym by day, the bath, a turn in
-  mission control by day at a free console or the holo table, or staying on the couch with a book. The
-  crew do not take turns in the gym or mission control. The galley serves a bite from 11 to 14 and 18 to 20, a coffee otherwise; after
+  the station most often, a turn in mission control by day at a free console or the holo table nearly as
+  often, the galley by day when it is free, a turn in the gym by day, a book on the couch, or the bath. The
+  crew take turns in mission control too, but not in the gym. The galley serves a bite from 11 to 14 and 18 to 20, a coffee otherwise; after
   desk work a minion now and then goes for one before it rests.
   Leaving the lounge does not reset it. A visit's time starts when the minion arrives. Roamers keep
   apart, except to watch a venting rocket.

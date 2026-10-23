@@ -1,6 +1,15 @@
 import Foundation
 import simd
 
+extension Array where Element == ReleasePR {
+    var currentStaging: ReleasePR? {
+        if let open = first(where: { $0.isStaging && $0.state == "OPEN" }) { return open }
+        let shipped = filter { $0.isProduction && $0.state == "MERGED" }.compactMap(\.mergedAt).max() ?? .distantPast
+        return filter { $0.isStaging && $0.state == "MERGED" && ($0.mergedAt ?? .distantPast) > shipped }
+            .max { ($0.mergedAt ?? .distantPast) < ($1.mergedAt ?? .distantPast) }
+    }
+}
+
 final class ReleaseBook {
     var announced: Set<String> = []
     var seen: Set<String> = []
@@ -46,8 +55,10 @@ extension World {
         pr.tag ? "rocket:\(pr.url)|\(repo) · \(pr.title) tagged on \(pr.base)" : "rocket:\(pr.url)|\(repo) · \(pr.head) → \(pr.base) · #\(pr.number) \(pr.title)"
     }
 
-    private func label(repo: String, waiting n: Int) -> String {
-        "rocket:\(waitingURL(repo: repo))|\(repo) · \(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release"
+    private func label(repo: String, waiting n: Int, staging: ReleasePR?) -> String {
+        let crates = "\(n) \(n == 1 ? Words.current.crate : Words.current.crates) waiting for a release"
+        guard let staging else { return "rocket:\(waitingURL(repo: repo))|\(repo) · " + crates }
+        return "rocket:\(staging.url)|\(repo) · staging release #\(staging.number) \(staging.title) · " + crates
     }
 
     func hotfixMerged(_ pr: ReleasePR, repoRoot: String) -> [WorldEvent] {
@@ -136,7 +147,8 @@ extension World {
             let quiet = releases.seen.insert(root).inserted || settling
             let key = info.station + "|" + info.repo
             guard let pr = padRelease(root: root) else {
-                learn(.release(repo: info.repo, production: nil, label: label(repo: info.repo, waiting: waiting(repo: info.repo, station: station.name).count), quiet: quiet), repo: info.repo)
+                learn(.release(repo: info.repo, production: nil, label: label(repo: info.repo, waiting: waiting(repo: info.repo, station: station.name).count,
+                                                                               staging: github.releases.all(repoRoot: root)?.currentStaging), quiet: quiet), repo: info.repo)
                 continue
             }
             let mark = "\(key)|\(pr.number)|\(pr.untested)"
@@ -187,7 +199,10 @@ extension World {
         batch {
             for station in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station.hasPad {
                 for (root, info) in repoRoots.sorted(by: { $0.key < $1.key }) where info.station == station.name {
-                    if let c = github.cargo(repoRoot: root) { reconcile(repo: info.repo, root: root, cargo: c) }
+                    let stamp = "\(github.board.fetchedAt?.timeIntervalSince1970 ?? 0)|\(String(describing: github.git.counted(repoRoot: root)))|"
+                        + "\(String(describing: ConfigStore.shared.current.project))|\(String(describing: github.pipeline(repoRoot: root)))"
+                    guard yardStamps[root] != stamp else { continue }
+                    if let c = github.cargo(repoRoot: root) { reconcile(repo: info.repo, root: root, cargo: c); yardStamps[root] = stamp }
                 }
             }
             return stationEvents()

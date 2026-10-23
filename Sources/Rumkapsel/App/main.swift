@@ -83,9 +83,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--github-tests") { GitHubTests.run() }
         if args.contains("--pipeline-tests") { PipelineTests.run() }
         if args.contains("--setup-tests") { SetupTests.run() }
+        if args.contains("--sentry-tests") { SentryTests.run() }
         if args.contains("--layout-tests") { LayoutTests.run() }
         if args.contains("--spacelog-tests") { SpaceLogTests.run() }
         if args.contains("--look-tests") { LookTests.run() }
+        if args.contains("--scene-tests") { SceneTests.run() }
         if args.contains("--dump-colors") { ColorDump.run() }
         if args.contains("--bake-plating") { Plating.bake(FlightCraft.Materials.families) }
         if args.contains("--bake-walls") { Bulkhead.bake() }

@@ -153,6 +153,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         writeTally(now)
         guard Trace.frames else {
             if sim != nil { advanceSimulated(to: now) } else { tick(now: now) }
+            noteWalkIn(now)
             return
         }
         let gap = now - lastFrameAt
@@ -166,6 +167,16 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             FileHandle.standardError.write(String(format: "frame gap %.0fms work %.0fms tiles %d  %@\n",
                                                   gap * 1000, spent * 1000, tilesBuilt, worst).data(using: .utf8)!)
         }
+    }
+
+    private func noteWalkIn(_ now: TimeInterval) {
+        guard let asked = walkAskedAt, walker != nil else { return }
+        walkFramesSeen += 1
+        guard walkFramesSeen >= 3 else { return }
+        walkAskedAt = nil
+        walkFramesSeen = 0
+        let spent = tally.filter { $0.key.hasPrefix("walk.") }.map { String(format: "%@ %.0fms", $0.key, $0.value.worst * 1000) }.joined(separator: ", ")
+        StationLog.write("timing", String(format: "walked in: 3rd frame after %.0fms (%@)", (now - asked) * 1000, spent))
     }
 
     enum Trace {
@@ -236,7 +247,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         get { simulation.bodies }
         set { simulation.bodies = newValue }
     }
-    let staticRoot = SCNNode()
+    var statics: StaticScene!
+    var groundBuilt = "", labelsBuilt = "", berthsBuilt = ""
     let labelRoot = SCNNode()
     let minionRoot = SCNNode()
     let propRoot = SCNNode()
@@ -273,6 +285,12 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var chairs: [String: [FixtureRef: SCNNode]] = [:]
     var missionScreens: [String: MissionScreens] = [:]
     var boardsCheckedAt = 0.0, feedsRolledAt = 0.0, feedsFarAt = 0.0, feedsBusy = false
+    var walkAskedAt: Double?
+    var walkPieces: WalkPieces?
+    var walkPiecesFor: Int?
+    var walkSignatureAt = -1.0
+    var walkSignatureKnown: Int?
+    var walkFramesSeen = 0
     var stagingRuns: [String: (started: Double, usual: Double)] = [:]
     var stagingBeats: [String: StagingBeat] = [:]
     var stagingDue: [String: String] = [:]
@@ -447,7 +465,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             let n = node?.name ?? ""
             self?.enqueue {
                 if n.hasPrefix("minion:") { self?.poke(minionId: String(n.dropFirst(7))) }
-                else if ["room:", "box:", "rocket:"].contains(where: n.hasPrefix) { self?.open(named: n) }
+                else if ["box:", "rocket:"].contains(where: n.hasPrefix) { self?.open(named: n) }
                 else if let (_, id) = StationController.crate(named: n) { self?.openCrate(id) }
                 else if let floor, self?.walker == nil { self?.stepIn(at: floor) }
             }
@@ -469,7 +487,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 }
                 return
             }
-            guard n.hasPrefix("rocket:") else { return }
+            guard n.hasPrefix("rocket:") || n.hasPrefix("link:") else { return }
             self?.enqueue { self?.open(named: n) }
         }
         view.onContextMenu = { [weak self] node, event in self?.showContextMenu(for: node?.name, event: event) }
@@ -573,7 +591,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func buildScene() {
         Looks.use(ConfigStore.shared.current.theme)
-        for n in [groundRoot, staticRoot, labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot, peerRoot] { scene.rootNode.addChildNode(n) }
+        scene.rootNode.addChildNode(groundRoot)
+        statics = StaticScene(under: scene.rootNode)
+        for n in [labelRoot, minionRoot, propRoot, markerRoot, debrisRoot, beamRoot, rocketRoot, peerRoot] { scene.rootNode.addChildNode(n) }
 
         let camera = SCNCamera()
         camera.usesOrthographicProjection = true
@@ -1056,6 +1076,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             break
         case .log(let text):
             logEvent(text)
+        case .errorsClimbed(let repo, let level, let lastHour):
+            logEvent("\(repo)'s errors are \(level.words) · " + (lastHour > 0 ? "\(lastHour) in the last hour" : "a new error"))
+            if level == .spiking { drone.thud() }
         case .chime(let seed):
             ringBell(seed: seed)
         case .layoutChanged:
