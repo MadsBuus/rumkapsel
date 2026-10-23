@@ -53,6 +53,14 @@ enum SceneTests {
             expect(angles == angles.sorted() && abs(angles.first! + angles.last!) < 1e-9, "the needle sweeps evenly left to right: \(angles)")
         }
 
+        test("the status board dials the busy repos, most urgent first, six at most; the calm and the rest are pilot lights") {
+            let order: [RepoStatus] = [.calm, .testing, .failing, .calm, .ready, .holding, .flying, .testing, .ready, .calm]
+            let rows = order.enumerated().map { MissionBoards.Row(repo: "r\($0.offset)", color: RGB(r: 1, g: 1, b: 1), status: $0.element) }
+            let (dials, lights) = MissionBoards.split(rows)
+            expect(dials.map(\.repo) == ["r2", "r5", "r1", "r7", "r4", "r8"], "six dials, the most urgent first, ties in board order: \(dials.map(\.repo))")
+            expect(lights.map(\.repo) == ["r0", "r3", "r6", "r9"], "the calm and the overflow are lights, in board order: \(lights.map(\.repo))")
+        }
+
         test("the holo draws a moon's new commit as a blip, and a moon that leaves falls into its planet") {
             let view = HoloView(root: SCNNode())
             let web = HoloSky.Planet(repo: "web", color: RGB(r: 1, g: 0.5, b: 0.4))

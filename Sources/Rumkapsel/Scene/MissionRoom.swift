@@ -201,19 +201,46 @@ enum Screens {
         return (CGPoint(x: cw * (Double(col) + 0.5), y: h - ch * (Double(line) + 1) + ch * 0.56), radius)
     }
 
+    static let lightStrip = 58.0
+
     static func dial(_ i: Int, of n: Int) -> (hub: SCNVector3, radius: Double) {
         let (pw, ph) = pixels(annunciatorWide, across: 1024)
-        let cell = dialCell(i, of: n, w: Double(pw), h: Double(ph))
+        var cell = dialCell(i, of: n, w: Double(pw), h: Double(ph) - lightStrip)
+        cell.centre.y += CGFloat(lightStrip)
         let scale = annunciatorWide / Double(pw)
         return (SCNVector3((Double(cell.centre.x) / Double(pw) - 0.5) * annunciatorWide, (Double(cell.centre.y) / Double(ph) - 0.5) * tall, 0.02), cell.radius * scale)
     }
 
-    static func dials(_ rows: [MissionBoards.Row]) -> NSImage {
+    static func dials(_ all: [MissionBoards.Row]) -> NSImage {
         let (pw, ph) = pixels(annunciatorWide, across: 1024)
+        let (rows, lights) = MissionBoards.split(all)
         return draw(pw, ph) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            let strip = CGFloat(lightStrip)
+            c.setFillColor(NSColor(rgb: (0.035, 0.035, 0.04)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: strip))
+            var x: CGFloat = 26
+            for row in lights {
+                let lit = row.status != .calm
+                c.setFillColor(NSColor(row.color).withAlphaComponent(lit ? 1 : 0.55).cgColor)
+                c.fillEllipse(in: CGRect(x: x - 11, y: strip / 2 - 11, width: 22, height: 22))
+                if lit {
+                    c.setStrokeColor(row.status.color.cgColor); c.setLineWidth(3)
+                    c.strokeEllipse(in: CGRect(x: x - 14, y: strip / 2 - 14, width: 28, height: 28))
+                }
+                x += 34
+                if x > w - 220 { break }
+            }
+            let calm = lights.filter { $0.status == .calm }.count, more = lights.count - calm
+            let tally = [calm > 0 ? "\(calm) calm" : nil, more > 0 ? "+\(more) waiting" : nil].compactMap { $0 }.joined(separator: " · ")
+            let t = NSAttributedString(string: tally, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 24, weight: .bold), .foregroundColor: NSColor(rgb: (0.55, 0.7, 0.62))])
+            t.draw(at: NSPoint(x: w - 18 - t.size().width, y: (strip - t.size().height) / 2))
+            if rows.isEmpty {
+                let s = NSAttributedString(string: "All calm", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 56, weight: .heavy), .foregroundColor: RepoStatus.calm.color])
+                s.draw(at: NSPoint(x: (w - s.size().width) / 2, y: strip + (h - strip - s.size().height) / 2))
+            }
             for (i, row) in rows.enumerated() {
-                let (o, r) = dialCell(i, of: rows.count, w: Double(w), h: Double(h))
+                var (o, r) = dialCell(i, of: rows.count, w: Double(w), h: Double(h) - Double(strip))
+                o.y += strip
                 let rr = CGFloat(r)
                 func at(_ a: Double, _ d: CGFloat) -> CGPoint { CGPoint(x: o.x + d * CGFloat(sin(a)), y: o.y + d * CGFloat(cos(a))) }
                 c.setFillColor(NSColor(rgb: (0.1, 0.105, 0.11)).cgColor)

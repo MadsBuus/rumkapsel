@@ -541,6 +541,7 @@ enum SimulationTests {
         }
         test("a launch on the pad draws a resting minion to a console to watch it, for longer than a turn") {
             let (sim, station, m) = fixture()
+            sim.hooks = SimHooks()
             sim.setNight(false)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
@@ -557,6 +558,7 @@ enum SimulationTests {
         }
         test("a minion on an idle turn takes an order: off the console and straight to the bath") {
             let (sim, station, m) = fixture()
+            sim.hooks = SimHooks()
             sim.setNight(false)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
@@ -571,6 +573,7 @@ enum SimulationTests {
         }
         test("the bench: the body backs onto it upright and lies down only once it is on it") {
             let (sim, station, m) = fixture()
+            sim.hooks = SimHooks()
             sim.setNight(false)
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })

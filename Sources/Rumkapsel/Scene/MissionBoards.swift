@@ -44,7 +44,14 @@ struct MissionBoards: Equatable {
     enum Lamp: Equatable { case dark, green, amber, red }
     struct Row: Equatable { let repo: String; let color: RGB; let status: RepoStatus; var quiver = false }
 
-    static let rows = 8
+    static let dials = 6
+
+    static func split(_ rows: [Row]) -> (dials: [Row], lights: [Row]) {
+        let active = rows.enumerated().filter { $0.element.status != .calm }
+            .sorted { ($0.element.status.rawValue, -$0.offset) > ($1.element.status.rawValue, -$1.offset) }.map(\.element)
+        let dialed = Array(active.prefix(dials))
+        return (dialed, rows.filter { r in !dialed.contains { $0.repo == r.repo } })
+    }
 
     struct ErrorRow: Equatable { let repo: String; let color: RGB; let hourly: [Int]; let level: Sentry.Level; let lastHour: Int }
 
@@ -78,7 +85,7 @@ extension StationController {
         var b = MissionBoards()
         let repos = Set(world.repoRoots.values.filter { $0.station == station.name }.map(\.repo))
             .sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
-        b.rows = repos.prefix(MissionBoards.rows).map { repo in
+        b.rows = repos.map { repo in
             var deploy = deployLamp(station, repo), deployBlink = 0.0
             if let p = station.facts.staging[repo]?.progress(at: now), deploy == .amber { deployBlink = p > StagingFact.late ? 3 : 1 }
             if let beat = stagingBeat(station: station.name, repo: repo), beat.live, clock - beat.at < 3 { deploy = .green; deployBlink = 3 }
@@ -136,17 +143,21 @@ extension StationController {
         guard now != screens.shown else { return }
         if screens.shown?.rows != now.rows {
             show(Screens.dials(now.rows), on: screens.annunciator)
-            if screens.shown?.rows.map(\.repo) != now.rows.map(\.repo) {
-                screens.needles.values.forEach { $0.node.removeFromParentNode() }
+            let dialed = MissionBoards.split(now.rows).dials
+            if screens.shown.map({ MissionBoards.split($0.rows).dials.map(\.repo) }) != dialed.map(\.repo) {
+                let was = screens.needles
+                was.values.forEach { $0.node.removeFromParentNode() }
                 screens.needles = [:]
-                for (i, row) in now.rows.enumerated() {
-                    let n = MissionRoom.needle(Screens.dial(i, of: now.rows.count).radius)
-                    n.position = Screens.dial(i, of: now.rows.count).hub
-                    screens.board.addChildNode(n)
-                    screens.needles[row.repo] = .init(n, at: RepoStatus.calm.angle)
+                for (i, row) in dialed.enumerated() {
+                    let at = Screens.dial(i, of: dialed.count)
+                    let needle = MissionScreens.Needle(MissionRoom.needle(at.radius), at: was[row.repo]?.angle ?? RepoStatus.calm.angle)
+                    needle.node.position = at.hub
+                    needle.node.eulerAngles.z = CGFloat(-needle.angle)
+                    screens.board.addChildNode(needle.node)
+                    screens.needles[row.repo] = needle
                 }
             }
-            for row in now.rows { screens.needles[row.repo]?.target = row.status.angle; screens.needles[row.repo]?.quiver = row.quiver }
+            for row in dialed { screens.needles[row.repo]?.target = row.status.angle; screens.needles[row.repo]?.quiver = row.quiver }
         }
         if screens.shown?.clock != now.clock { show(Screens.nixieClock(now.clock), on: screens.clock) }
         if screens.shown == nil || screens.shown?.errors != now.errors {
