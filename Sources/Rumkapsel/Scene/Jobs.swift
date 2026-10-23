@@ -8,9 +8,10 @@ extension StationController {
         let st = fleet.stations[station]
         let start: Cell
         let parent = s.isSubagent ? minions.values.first { $0.station == station && !$0.isSubagent && $0.home.key == home.key } : nil
+        let office = st.flatMap { simulation.standing($0, home.key) ? $0.rooms[home.key]?.cells : nil } ?? []
         if let parent { start = parent.cell }
-        else if s.isSubagent { start = st?.rooms[home.key]?.cells.first ?? st?.coreCenter ?? Cell(x: 0, y: 0) }
-        else if let cells = st?.rooms[home.key]?.cells, !cells.isEmpty { start = cells[minions.count % cells.count] }
+        else if s.isSubagent { start = office.first ?? st?.coreCenter ?? Cell(x: 0, y: 0) }
+        else if !office.isEmpty { start = office[minions.count % office.count] }
         else { start = st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0) }
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         if let parent { m.pos = parent.pos }

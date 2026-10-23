@@ -300,7 +300,7 @@ final class Simulation<B: Body> {
     func send(_ m: B, to place: Place) {
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if case .room(let key) = place, !standing(station, key) { return send(m, to: .lounge) }
+        if case .room(let key) = place, !standing(station, key) { return send(m, to: m.isSubagent ? probePlace(m) : .lounge) }
         if place == .lounge, m.place == .lounge, m.couchSeated, m.path.isEmpty { return }
         if place != .quarters {
             rouse(m)

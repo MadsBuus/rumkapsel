@@ -220,6 +220,62 @@ enum PlaybackTests {
             }
         }
 
+        test("a probe can't be in an office before it stands: it waits at the monolith, then moves in once the office unfolds") {
+            let (sim, station, a) = fixture()
+            sim.bodies = [:]
+            sim.play()
+            station.ensureRoom(key: "task:web#7", name: "#7", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            office(station, sim, .opened("task:web#7", repo: "web", via: .shuttle(for: nil)))
+            guard let room = station.rooms["task:web#7"] else { return expect(false, "the office is on the station") }
+            let home = Home(key: room.key, name: room.name, repo: "web", issue: nil)
+            let probe = Body(id: "probe", station: "work", home: home, cwd: "", toolCount: 0, isSubagent: true, start: station.coreCenter)
+            probe.state = .settled; probe.activity = .exploring; probe.busy = true
+            sim.bodies[probe.id] = probe
+            sim.send(probe, to: sim.restPlace(probe))
+            expect(probe.place == .core, "not yet on the floor plan's playback, so not there: \(probe.place)")
+            sim.play()
+            sim.send(probe, to: sim.restPlace(probe))
+            expect(sim.shown["work"]?.offices["task:web#7"].map { phase($0.phase) } == "ordered", "the office is still on its way")
+            expect(probe.place == .core, "the probe keeps out of it: \(probe.place)")
+            _ = step(sim, seconds: 20)
+            expect(!room.cells.contains(probe.cell), "and never floats over its empty floor")
+            sim.bodies[a.id] = a
+            expect(step(sim, seconds: 180, until: { sim.shown["work"]?.offices["task:web#7"]?.phase == .built }), "delivered and built")
+            expect(step(sim, seconds: 40, until: { probe.place == .room(room.key) && probe.path.isEmpty && room.cells.contains(probe.cell) }),
+                   "then it moves in: \(probe.place)")
+        }
+
+        test("an office renamed: the old one goes, the new one appears elsewhere, and its probe follows it there") {
+            let (sim, station, _) = fixture()
+            sim.play()
+            station.ensureRoom(key: "folder:anchors", name: "anchors", repo: "web", color: RGB(r: 0.4, g: 0.8, b: 0.3), lastActive: Date())
+            office(station, sim, .opened("folder:anchors", repo: "web", via: .appear))
+            sim.play()
+            guard let old = station.rooms["folder:anchors"] else { return expect(false, "the first office") }
+            let probe = Body(id: "probe", station: "work", home: Home(key: old.key, name: old.name, repo: "web", issue: nil), cwd: "", toolCount: 0,
+                             isSubagent: true, start: old.cells[0])
+            probe.state = .settled; probe.activity = .exploring; probe.busy = true
+            sim.bodies[probe.id] = probe
+            sim.send(probe, to: sim.restPlace(probe))
+            expect(step(sim, seconds: 30, until: { probe.place == .room(old.key) && probe.path.isEmpty }), "settled in the first office")
+            station.removeRoom(key: old.key)
+            office(station, sim, .gone(old.key))
+            station.ensureRoom(key: "task:web#9100", name: "#9100 anchors galley", repo: "web", color: RGB(r: 0.4, g: 0.8, b: 0.3), lastActive: Date())
+            office(station, sim, .opened("task:web#9100", repo: "web", via: .appear))
+            guard let new = station.rooms["task:web#9100"] else { return expect(false, "the renamed office") }
+            probe.home = Home(key: new.key, name: new.name, repo: "web", issue: 9100)
+            sim.play()
+            sim.resettle(station)
+            let floor = Set(station.rooms.values.flatMap(\.cells)).union(station.walkable)
+            var adrift = false
+            let moved = step(sim, seconds: 40, until: {
+                if !floor.contains(probe.cell) { adrift = true }
+                return probe.place == .room(new.key) && probe.path.isEmpty && new.cells.contains(probe.cell)
+            })
+            expect(moved, "in the new office: \(probe.place), at \(probe.cell)")
+            expect(!adrift, "never over empty space on the way")
+        }
+
         test("an office that ends with its crate inside: the crate is carried out to storage first, then the office folds") {
             let (sim, station, m) = fixture()
             station.ensureRoom(key: "task:web#5", name: "#5", repo: "web", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())

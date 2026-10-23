@@ -176,13 +176,17 @@ extension StationController {
         let r = feedRenderer
         MissionScreens.queue.async { [self] in
             let t0 = CACurrentMediaTime()
-            for feed in lit {
+            let frames = lit.map { feed -> NSImage in
                 r.pointOfView = feed.camera
-                let frame = r.snapshot(atTime: at, with: size, antialiasingMode: .none)
-                show(Screens.crt(frame, caption: feed.caption), on: feed.material)
+                return r.snapshot(atTime: at, with: size, antialiasingMode: .none)
             }
             let spent = CACurrentMediaTime() - t0
-            enqueue { [weak self] in self?.tallied(near ? "feeds.near" : "feeds.far", spent); self?.feedsBusy = false }
+            enqueue { [weak self] in
+                guard let self else { return }
+                for (feed, frame) in zip(lit, frames) { show(Screens.crt(frame, caption: feed.caption), on: feed.material) }
+                tallied(near ? "feeds.near" : "feeds.far", spent)
+                feedsBusy = false
+            }
         }
     }
 
