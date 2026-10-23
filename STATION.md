@@ -324,8 +324,9 @@ moves through it one way: in from the hallway at the back, out through the field
   drinks it up first. A bite is printed in ten seconds: the printer's window glows while a bowl of noodles
   grows inside, then slides out. The minion takes it to a couch and eats it there, a spoonful at a time,
   crumbs and all. The bowl is printed too, and eaten last.
-- Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting, the idle
-  drift to the window to watch.
+- Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting or flies, the
+  loungers take the consoles in mission control for the length of the launch, the pad screen shows the
+  launch cam, and those roaming drift to the window to watch.
 
 ## A minion's day
 
