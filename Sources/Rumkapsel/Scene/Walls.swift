@@ -116,18 +116,11 @@ enum Bulkhead {
     }
 
     static let steel: SCNMaterial = {
-        let maps = Plating.maps(seed: 21)
         let m = SCNMaterial()
         m.lightingModel = .physicallyBased
-        m.diffuse.contents = maps.color
-        m.normal.contents = maps.normal
-        m.roughness.contents = maps.roughness
-        m.metalness.contents = NSColor(white: 0.15, alpha: 1)
-        m.multiply.contents = NSColor(white: 0.85, alpha: 1)
-        for p in [m.diffuse, m.normal, m.roughness] { p.wrapS = .repeat; p.wrapT = .repeat; p.mipFilter = .linear }
-        m.diffuse.contentsTransform = SCNMatrix4MakeScale(3, 3, 1)
-        m.normal.contentsTransform = SCNMatrix4MakeScale(3, 3, 1)
-        m.roughness.contentsTransform = SCNMatrix4MakeScale(3, 3, 1)
+        m.diffuse.contents = NSColor(rgb: (0.46, 0.49, 0.53))
+        m.metalness.contents = NSColor(white: 0.55, alpha: 1)
+        m.roughness.contents = NSColor(white: 0.38, alpha: 1)
         return m
     }()
 

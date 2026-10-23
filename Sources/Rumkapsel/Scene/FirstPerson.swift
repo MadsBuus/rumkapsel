@@ -120,8 +120,16 @@ extension StationController {
         walker = w
         for n in [w.sky, w.dome, w.walls] { scene.rootNode.addChildNode(n) }
         hud.addChild(w.title); hud.addChild(w.subtitle)
-        buildWalls(w)
-        buildDome(w)
+        walkAskedAt = CACurrentMediaTime()
+        let signature = walkSignature()
+        if let p = walkPieces, p.signature == signature, p.skins == Bulkhead.generation {
+            wear(p, on: w)
+        } else {
+            let floors = fleet.stations.values.map(WalkFloor.init), tints = drawnFloor(), skins = Bulkhead.generation
+            let p = timed("walk.build") { WalkPieces.queue.sync { WalkPieces.build(floors, tints: tints, signature: signature, skins: skins) } }
+            walkPieces = p
+            wear(p, on: w)
+        }
         w.camera.categoryBitMask = station.categoryBitMask
         w.stationCamera = station
         cameraNode.camera = w.camera
@@ -223,9 +231,7 @@ extension StationController {
             if w.riding == nil { fly(w, dt: dt); stride(w, dt: dt, move: move, turn: turn) }
         }
         ease(w, toward: wantedView(w), dt: dt)
-        let floor = timed("walk floor") { floorSignature(w) }
-        if w.builtFor != floor { w.builtFor = floor; w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) }; timed("dome") { buildDome(w) } }
-        else if w.skins != Bulkhead.generation { w.skins = Bulkhead.generation; timed("walls") { buildWalls(w) } }
+        if let p = walkPieces, p.signature != w.builtFor || p.skins != w.skins, p.signature == walkSignature() { wear(p, on: w) }
         poseWalkCamera(w)
         Signs.roll(w.arrows, at: clock)
         showPlace(w)
@@ -452,117 +458,8 @@ extension StationController {
 
     // MARK: the walls and the dome
 
-    private func buildWalls(_ w: Walker) {
-        w.walls.childNodes.forEach { $0.removeFromParentNode() }
-        w.arrows = []
-        let tints = drawnFloor()
-        var glows: [String: SCNMaterial] = [:]
-        func glow(_ c: NSColor?) -> SCNMaterial {
-            let base = c ?? Palette.text
-            let key = WallPanel.key(base)
-            if let m = glows[key] { return m }
-            let m = flat(base.blended(withFraction: 0.55, of: .white) ?? base)
-            glows[key] = m
-            return m
-        }
-        let rim = flat(NSColor(rgb: (0.42, 0.44, 0.5)))
-        let plain = lit(NSColor(rgb: (0.74, 0.75, 0.79)))
-        let t = 0.07
-        let railPost = SCNBox(width: t + 0.02, height: Walker.railHeight + 0.02, length: t + 0.02, chamferRadius: 0)
-        railPost.firstMaterial = Bulkhead.steel
-        for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
-            let walk = st.walkable
-            let outside = Set(st.hall.padCells)
-            let gate = Set(st.hall.padWall.map { [$0.hall.x, $0.hall.y, $0.out.x, $0.out.y] })
-            let mouthRow = st.hangarCells.map(\.y).max()
-            let mission = Set(st.rooms["kind:mission"]?.cells ?? [])
-            func unwalled(_ c: Cell, _ n: Cell) -> Bool {
-                gate.contains([c.x, c.y, n.x, n.y]) || (n.y == (mouthRow ?? .min) + 1 && c.y == mouthRow && st.hangarCells.contains(c))
-                    || (mission.contains(c) && outside.contains(n)) || (outside.contains(c) && mission.contains(n))
-            }
-            let styles = Bulkhead.styles(of: st)
-            let root = SCNNode()
-            var corners: [Cell: [Bool]] = [:], railCorners: [Cell: [Bool]] = [:]
-            func tint(_ c: Cell) -> NSColor? { tints[Cell(x: Int((st.offset.x + Double(c.x)).rounded()), y: Int((st.offset.y + Double(c.y)).rounded()))] }
-            var stretches: [(c: Cell, dx: Int, dy: Int)] = []
-            for c in walk.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
-                for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-                    let n = Cell(x: c.x + dx, y: c.y + dy)
-                    let floored = walk.contains(n)
-                    if floored && (dx < 0 || dy < 0 || st.canStep(from: c, to: n)) { continue }
-                    if n == st.plan.monolith || unwalled(c, n) { continue }
-                    stretches.append((c, dx, dy))
-                }
-            }
-            for (c, dx, dy) in stretches {
-                do {
-                    let n = Cell(x: c.x + dx, y: c.y + dy)
-                    let floored = walk.contains(n)
-                    let low = outside.contains(c) && (!floored || outside.contains(n))
-                    let h = low ? Walker.railHeight : Walker.wallHeight
-                    let across = dx != 0
-                    let box = SCNBox(width: across ? t : 1, height: h, length: across ? 1 : t, chamferRadius: 0)
-                    func side(_ x: Int, _ y: Int) -> Int { x > 0 ? 1 : x < 0 ? 3 : y > 0 ? 0 : 2 }
-                    var faces = Array(repeating: low ? plain : Bulkhead.steel, count: 6)
-                    if !low {
-                        faces[side(-dx, -dy)] = Bulkhead.material(Bulkhead.pick(c, dx, dy, st.name), style: styles[c] ?? .hallway)
-                        faces[side(dx, dy)] = Bulkhead.material(Bulkhead.pick(n, -dx, -dy, st.name), style: styles[n] ?? .hallway)
-                    }
-                    faces[4] = low ? rim : Bulkhead.steel
-                    box.materials = faces
-                    let wall = SCNNode(geometry: box)
-                    let mid = st.offset + SIMD2(Double(c.x) + Double(dx) * 0.5, Double(c.y) + Double(dy) * 0.5)
-                    wall.position = v3(mid.x, h / 2, mid.y)
-                    root.addChildNode(wall)
-                    let (px, py) = (dy, dx)
-                    let ends = [Cell(x: 2 * c.x + dx + px, y: 2 * c.y + dy + py), Cell(x: 2 * c.x + dx - px, y: 2 * c.y + dy - py)]
-                    guard !low else { for e in ends { railCorners[e, default: []].append(across) }; continue }
-                    let cap = Bulkhead.cap(length: 1, thickness: t, across: across)
-                    cap.position = v3(wall.position.x, 0, wall.position.z)
-                    root.addChildNode(cap)
-                    for e in ends { corners[e, default: []].append(across) }
-                    for (cell, sign) in [(c, -1.0)] + (floored ? [(n, 1.0)] : []) {
-                        let strip = SCNBox(width: across ? 0.012 : 1, height: 0.022, length: across ? 1 : 0.012, chamferRadius: 0)
-                        strip.firstMaterial = glow(tint(cell))
-                        let s = SCNNode(geometry: strip)
-                        let off = (t / 2 + 0.006) * sign
-                        s.position = v3(mid.x + (across ? off * Double(dx) : 0), 0.05, mid.y + (across ? 0 : off * Double(dy)))
-                        root.addChildNode(s)
-                    }
-                }
-            }
-            for (k, ends) in corners where !(ends.count == 2 && ends[0] == ends[1]) {
-                let p = Bulkhead.pilaster(seed: abs(k.x &* 31 &+ k.y &* 17))
-                p.position = v3(st.offset.x + Double(k.x) / 2, 0, st.offset.y + Double(k.y) / 2)
-                root.addChildNode(p)
-            }
-            for (k, ends) in railCorners where !(ends.count == 2 && ends[0] == ends[1]) && corners[k] == nil {
-                let p = SCNNode(geometry: railPost)
-                p.position = v3(st.offset.x + Double(k.x) / 2, (Walker.railHeight + 0.02) / 2, st.offset.y + Double(k.y) / 2)
-                root.addChildNode(p)
-            }
-            let flatWalls = root.flattenedClone()
-            flatWalls.categoryBitMask = Pick.scenery
-            w.walls.addChildNode(flatWalls)
-            for sign in Signs.plan(st) { w.walls.addChildNode(signNode(sign, in: st, thickness: t, arrows: &w.arrows)) }
-        }
-    }
-
-    private func signNode(_ sign: Signs.Sign, in st: Station, thickness t: Double, arrows: inout [Signs.Arrow]) -> SCNNode {
-        let (n, rolling) = Signs.panel(sign)
-        arrows += rolling
-        let p = SIMD2(Double(sign.wall.x), Double(sign.wall.y))
-        let at = st.offset + SIMD2(Double(sign.cell.x), Double(sign.cell.y)) + p * (0.5 - t / 2 - 0.004)
-        n.position = v3(at.x, 0.47, at.y)
-        n.eulerAngles.y = CGFloat(atan2(-p.x, -p.y))
-        n.categoryBitMask = Pick.scenery
-        return n
-    }
-
-    private func floorSignature(_ w: Walker) -> Int {
-        guard w.readAt != lastRebuildAt else { return w.builtFor }
-        w.readAt = lastRebuildAt
-        w.fragments = staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }
+    func walkSignature() -> Int {
+        if walkSignatureAt == lastRebuildAt, let known = walkSignatureKnown { return known }
         var h = Hasher()
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) {
             h.combine(st.name); h.combine(st.offset.x); h.combine(st.offset.y)
@@ -572,87 +469,40 @@ extension StationController {
                 if let room = st.room(at: c) { h.combine(room.key); h.combine(room.repo) }
             }
         }
-        return h.finalize()
+        walkSignatureAt = lastRebuildAt
+        walkSignatureKnown = h.finalize()
+        return walkSignatureKnown!
     }
 
-    private func buildDome(_ w: Walker) {
+    private func wear(_ p: WalkPieces, on w: Walker) {
+        w.walls.childNodes.forEach { $0.removeFromParentNode() }
         w.dome.childNodes.forEach { $0.removeFromParentNode() }
-        w.hulls = [:]
-        w.fragments = staticRoot.childNodes.filter { $0.name?.hasPrefix("hull:") == true }
-        let step = 0.25
-        for st in fleet.stations.values {
-            let hull = StationHull(st)
-            w.hulls[st.name] = hull
-            let bare = SCNNode()
-            for c in hull.inside where !st.walkable.contains(c) && c != st.plan.monolith {
-                let tile = SCNNode(geometry: WallPanel.bareDeck)
-                tile.eulerAngles.x = -.pi / 2
-                tile.position = v3(st.offset.x + Double(c.x), -0.002, st.offset.y + Double(c.y))
-                bare.addChildNode(tile)
-            }
-            let flatDeck = bare.flattenedClone()
-            flatDeck.categoryBitMask = Pick.scenery
-            w.dome.addChildNode(flatDeck)
-            var glass = (v: [SCNVector3](), uv: [CGPoint](), i: [Int32]())
-            let n = Int((1 / step).rounded())
-            var heights: [SIMD2<Int>: Double] = [:]
-            func height(_ k: SIMD2<Int>) -> Double {
-                if let h = heights[k] { return h }
-                let h = StationHull.height(atDistance: hull.reach(SIMD2(Double(k.x), Double(k.y)) * step - 0.5).distance)
-                heights[k] = h
-                return h
-            }
-            for c in hull.inside {
-                let door = hull.nearDoor(c)
-                for i in 0..<n {
-                    for j in 0..<n {
-                        let gx = c.x * n + i, gy = c.y * n + j
-                        let x0 = Double(c.x) - 0.5 + Double(i) * step, y0 = Double(c.y) - 0.5 + Double(j) * step
-                        let corners = [SIMD2(x0, y0), SIMD2(x0 + step, y0), SIMD2(x0 + step, y0 + step), SIMD2(x0, y0 + step)]
-                        let hs = [SIMD2(gx, gy), SIMD2(gx + 1, gy), SIMD2(gx + 1, gy + 1), SIMD2(gx, gy + 1)].map(height)
-                        if door {
-                            let near = hull.reach(SIMD2(x0 + step / 2, y0 + step / 2))
-                            if near.door, near.distance < step, hs.max()! < StationHull.doorTop * 1.4 { continue }
-                        }
-                        let world = zip(corners, hs).map { v3(st.offset.x + $0.0.x, $0.1, st.offset.y + $0.0.y) }
-                        let base = Int32(glass.v.count)
-                        glass.v += world
-                        glass.uv += corners.map { CGPoint(x: $0.x + 0.5, y: $0.y + 0.5) }
-                        glass.i += [base, base + 1, base + 2, base, base + 2, base + 3]
-                    }
-                }
-            }
-            let foot = SCNNode()
-            for f in hull.feet where !f.door {
-                let mid = (f.a + f.b) / 2, along = f.b - f.a
-                let across = abs(along.x) < abs(along.y)
-                var inward = across ? SIMD2(1.0, 0) : SIMD2(0, 1.0)
-                if !hull.covers(mid + inward * 0.25) { inward = -inward }
-                let sill = SCNBox(width: across ? 0.07 : 1, height: 0.06, length: across ? 1 : 0.07, chamferRadius: 0)
-                sill.firstMaterial = Bulkhead.steel
-                let n = SCNNode(geometry: sill)
-                let at = mid + inward * 0.035
-                n.position = v3(st.offset.x + at.x, 0.03, st.offset.y + at.y)
-                foot.addChildNode(n)
-            }
-            let flatFoot = foot.flattenedClone()
-            flatFoot.categoryBitMask = Pick.scenery
-            w.dome.addChildNode(flatFoot)
-            if !glass.v.isEmpty {
-                let g = SCNGeometry(sources: [SCNGeometrySource(vertices: glass.v), SCNGeometrySource(textureCoordinates: glass.uv)],
-                                    elements: [SCNGeometryElement(indices: glass.i, primitiveType: .triangles)])
-                g.firstMaterial = WallPanel.hullGlass
-                let n = SCNNode(geometry: g)
-                n.categoryBitMask = Pick.scenery
-                n.renderingOrder = 90
-                w.dome.addChildNode(n)
+        w.walls.addChildNode(p.walls)
+        w.dome.addChildNode(p.dome)
+        w.arrows = p.arrows
+        w.hulls = p.hulls
+        w.fragments = statics.tagged("hull")
+        w.builtFor = p.signature
+        w.skins = p.skins
+    }
+
+    func prepareWalk() {
+        guard walkPiecesFor == nil, CACurrentMediaTime() - lastRebuildAt >= 1.5 || walkPieces == nil else { return }
+        let signature = walkSignature(), skins = Bulkhead.generation
+        guard walkPieces?.signature != signature || walkPieces?.skins != skins else { return }
+        walkPiecesFor = signature
+        let floors = fleet.stations.values.map(WalkFloor.init), tints = drawnFloor()
+        WalkPieces.queue.async { [weak self] in
+            let p = WalkPieces.build(floors, tints: tints, signature: signature, skins: skins)
+            self?.view.prepare([p.walls, p.dome]) { _ in
+                self?.enqueue { self?.walkPieces = p; self?.walkPiecesFor = nil }
             }
         }
     }
 
     private func drawnFloor() -> [Cell: NSColor] {
         var out: [Cell: NSColor] = [:]
-        staticRoot.enumerateHierarchy { n, _ in
+        statics.enumerate { n in
             guard let p = n.geometry as? SCNPlane, p.width == 1, p.height == 1, abs(Double(n.eulerAngles.x) + .pi / 2) < 0.01,
                   let c = p.firstMaterial?.diffuse.contents as? NSColor else { return }
             let at = n.worldPosition

@@ -18,6 +18,7 @@ enum WorldEvent {
     case deployStarted(station: String, repo: String, production: Bool, expected: TimeInterval, release: String, elapsed: TimeInterval = 0)
     case deployEnded(station: String, repo: String, production: Bool, outcome: DeployOutcome)
     case log(String)
+    case errorsClimbed(repo: String, Sentry.Level, lastHour: Int)
     case chime(Int)
 
     enum Stage { case development, storage, deck, cleared, shipped, other }

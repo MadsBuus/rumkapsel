@@ -16,6 +16,18 @@ extension StationController {
         return m[c]
     }
 
+    private func around(_ station: Station, _ cells: [Cell]) -> String {
+        let inside = Set(cells)
+        var edge = Set<Cell>()
+        for c in cells { for (dx, dy) in Tile.around { let n = Cell(x: c.x + dx, y: c.y + dy); if !inside.contains(n) { edge.insert(n) } } }
+        return edge.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.map { "\($0.x),\($0.y)=\(owner(station, $0) ?? "")" }.joined(separator: ";")
+    }
+
+    private func touching(_ edges: [String], _ cells: [Cell]) -> [String] {
+        let mine = Set(cells.map { "\($0.x),\($0.y)" })
+        return edges.filter { e in e.split(separator: ":").last.map { $0.split(separator: "|").contains { mine.contains(String($0)) } } ?? false }
+    }
+
     private func joined(_ station: Station, _ a: Cell, _ b: Cell, _ key: String) -> Bool {
         owner(station, b) == key || openEdges.contains("\(station.name):\(a.x),\(a.y)|\(b.x),\(b.y)")
     }
@@ -52,7 +64,7 @@ extension StationController {
     }
 
     @discardableResult
-    private func addGlassDoor(_ station: Station, at p: SIMD2<Double>, facing: SIMD2<Double>) -> (node: SCNNode, lightHeight: Double) {
+    private func addGlassDoor(_ station: Station, at p: SIMD2<Double>, facing: SIMD2<Double>, into bag: StaticScene.Bag) -> (node: SCNNode, lightHeight: Double) {
         let door = SCNNode()
         let drawn = Looks.current.doorFrame(facing: facing)
         door.addChildNode(drawn.node)
@@ -63,12 +75,12 @@ extension StationController {
         door.addChildNode(pane)
         door.position = v3(station.offset.x + p.x, 0, station.offset.y + p.y)
         door.name = "glassdoor:" + station.name
-        staticRoot.addChildNode(door)
+        bag.add(door, as: "glassdoor")
         return (door, drawn.lightHeight)
     }
 
-    private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into parent: SCNNode? = nil) -> SCNNode {
-        let root = parent ?? staticRoot
+    @discardableResult
+    private func addTile(station: Station, cell: Cell, owner key: String, color: NSColor, name: String, into root: NodeSink) -> SCNNode {
         let look = Looks.current
         let floor = floorKind(key)
         tilesBuilt += 1
@@ -92,7 +104,7 @@ extension StationController {
         n.eulerAngles.x = -.pi / 2
         n.position = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
         n.name = name
-        root.addChildNode(n)
+        root.add(n)
         let g = 0.075
         func parted(_ a: Cell, _ b: Cell) -> Bool {
             guard let oa = owner(station, a), let ob = owner(station, b), oa != ob else { return false }
@@ -123,7 +135,7 @@ extension StationController {
                             station.offset.y + Double(cell.y) + off.y + (vertical ? shift : 0))
             b.name = name
             b.opacity = n.opacity
-            root.addChildNode(b)
+            root.add(b)
         }
         var same: UInt8 = 0
         for (k, (dx, dz)) in Tile.around.enumerated() where owner(station, Cell(x: cell.x + dx, y: cell.y + dz)) == key { same |= 1 << k }
@@ -168,9 +180,9 @@ extension StationController {
         }
     }
 
-    private func addSetPiece(_ piece: SetPiece, _ station: Station) {
+    private func addSetPiece(_ piece: SetPiece, _ station: Station, into bag: NodeSink) {
         for (area, nodes) in piece.parts {
-            for n in nodes { n.name = area.rawValue + ":" + station.name; staticRoot.addChildNode(n) }
+            for n in nodes { n.name = area.rawValue + ":" + station.name; bag.add(n) }
         }
     }
 
@@ -208,9 +220,6 @@ extension StationController {
     func rebuildStatic() {
         fleet.arrange()
         owners = [:]
-        staticRoot.childNodes.forEach { $0.removeFromParentNode() }
-        roomTiles = [:]
-        officeParts = [:]
         openEdges = []
         for station in fleet.stations.values {
             for (room, office) in drawnRooms(station) {
@@ -224,10 +233,12 @@ extension StationController {
                 openEdges.insert("\(station.name):\(b.x),\(b.y)|\(a.x),\(a.y)")
             }
         }
-
+        let theme = Looks.theme.rawValue
+        statics.pass {
         for station in fleet.stations.values {
             let anchor = stationAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); stationAnchors[station.name] = n; return n }()
             anchor.position = v3(station.offset.x, 0, station.offset.y)
+            let st = station.name, at = "\(station.offset)|\(theme)"
             let oldDug = knownSpine[station.name] ?? station.dugCount
             knownSpine[station.name] = station.dugCount
             let gone = (knownHall[station.name] ?? []).filter { !station.isCorridor($0) }
@@ -238,16 +249,21 @@ extension StationController {
                 _ = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "", into: tile)
                 tile.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(i))), .fadeOut(duration: 0.5), .removeFromParentNode()]))
             }
-            for c in station.corridorCells + station.coreCells {
-                let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name)
-                let order = station.digOrder(of: c)
-                if order > oldDug {
-                    t.opacity = 0
-                    t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
+            let hallway = station.corridorCells + station.coreCells
+            let edges = openEdges.filter { $0.hasPrefix(st + ":") }.sorted()
+            statics.piece("floor:" + st, key: "\(at)|\(hallway)|\(edges)|\(around(station, hallway))") { bag in
+                for c in hallway {
+                    let t = addTile(station: station, cell: c, owner: "corridor", color: Palette.corridor, name: "station:" + station.name, into: bag)
+                    let order = station.digOrder(of: c)
+                    if order > oldDug {
+                        t.opacity = 0
+                        t.runAction(.sequence([.wait(duration: min(2.4, 0.2 * Double(order - oldDug))), .fadeIn(duration: 0.5)]))
+                    }
                 }
             }
-            if world.settling {
-                for c in station.corridorCells + station.coreCells {
+            statics.piece("settling:" + st, key: "\(at)|\(world.settling)|\(hallway)") { bag in
+                guard world.settling else { return }
+                for c in hallway {
                     let mark = SCNNode(geometry: SCNPlane(width: 0.34, height: 0.34))
                     mark.geometry!.firstMaterial = flat(NSColor(white: 0.75, alpha: 1))
                     mark.geometry!.firstMaterial?.writesToDepthBuffer = false
@@ -258,96 +274,127 @@ extension StationController {
                     let wait = 0.12 * Double(station.digOrder(of: c) % 12)
                     mark.runAction(.sequence([.wait(duration: wait), .repeatForever(.sequence([
                         .fadeOpacity(to: 0.28, duration: 0.5), .fadeOpacity(to: 0, duration: 0.7), .wait(duration: 0.4)]))]))
-                    staticRoot.addChildNode(mark)
+                    bag.add(mark)
                 }
             }
+            let deckInUse = world.deckInUse(station: station.name)
+            let yardCells = station.hall.cells + station.hall.padCells + station.hangarCells + station.hall.deconCells
+            let yard = "\(at)|\(station.hall.cells)|\(station.hall.padCells)|\(station.hangarCells)|\(station.hasPad)|\(station.hasHangar)|\(deckInUse)|\(edges)|\(around(station, yardCells))"
             let input = Looks.current.input(station)
-            if let input { addSetPiece(input, station) } else {
-                for c in station.hangarCells {
-                    addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(rgb: Props.hullPlate), name: "hangar:" + station.name)
+            statics.piece("input:" + st, key: yard) { bag in
+                if let input { addSetPiece(input, station, into: bag) } else {
+                    for c in station.hangarCells {
+                        addTile(station: station, cell: c, owner: "kind:hangar", color: NSColor(rgb: Props.hullPlate), name: "hangar:" + station.name, into: bag)
+                    }
                 }
             }
-            let output = Looks.current.output(station, deckInUse: world.deckInUse(station: station.name))
-            if let output { addSetPiece(output, station) }
-            for door in station.glassDoors {
-                let (node, lightHeight) = addGlassDoor(station, at: door.at, facing: door.facing)
-                guard door.hatch else { continue }
-                let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
-                light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
-                light.position = v3(0, lightHeight, door.facing.y * 0.05)
-                node.addChildNode(light)
-                hatchLights[station.name] = light
+            let output = Looks.current.output(station, deckInUse: deckInUse)
+            statics.piece("output:" + st, key: yard) { bag in
+                if let output { addSetPiece(output, station, into: bag) }
             }
-            if station.hasHangar, input == nil { buildHangar(station) }
-            if output == nil, station.hasPad, Theme.forPlan.kickRises {
-                staticRoot.addChildNode(padSlab(station))
-            } else {
-                for c in station.hall.padCells where output == nil {
-                    addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name)
+            statics.piece("doors:" + st, key: "\(at)|\(station.glassDoors.map { "\($0.at)\($0.facing)\($0.hatch)" })", drop: { [weak self] in self?.hatchLights[st] = nil }) { bag in
+                for door in station.glassDoors {
+                    let (node, lightHeight) = addGlassDoor(station, at: door.at, facing: door.facing, into: bag)
+                    guard door.hatch else { continue }
+                    let light = SCNNode(geometry: SCNBox(width: 0.2, height: 0.06, length: 0.06, chamferRadius: 0))
+                    light.geometry!.firstMaterial = flat(Palette.alienLight.darker(0.35))
+                    light.position = v3(0, lightHeight, door.facing.y * 0.05)
+                    node.addChildNode(light)
+                    hatchLights[station.name] = light
                 }
             }
-            if station.hasPad, output == nil, let east = station.hall.padCells.map(\.x).max(),
-               let y0 = station.hall.padCells.map(\.y).min(), let y1 = station.hall.padCells.map(\.y).max(),
-               let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Station.hullDepth, doorway: 0, doorTop: 0) {
-                hull.eulerAngles.y = -.pi / 2
-                hull.position = v3(station.offset.x + Double(east) + 0.56, 0, station.offset.y + Double(y0 + y1) / 2)
-                hull.name = "hull:" + station.name
-                staticRoot.addChildNode(hull)
+            statics.piece("hangar:" + st, key: yard + "|\(input == nil)", drop: { [weak self] in self?.fields[st] = nil }) { bag in
+                if station.hasHangar, input == nil { buildHangar(station, into: bag) }
             }
-            if output == nil {
-                let lab = world.deckInUse(station: station.name)
-                let storage = Set(station.hall.storageCells), deck = Set(station.hall.deckCells)
-                for c in station.hall.cells {
-                    let color = storage.contains(c) || (!lab && deck.contains(c)) ? Palette.storageFloor : deck.contains(c) ? Palette.labFloor : Palette.walkFloor
-                    addTile(station: station, cell: c, owner: "kind:hall", color: color, name: (deck.contains(c) && lab ? "deck:" : "storage:") + station.name)
+            statics.piece("pad:" + st, key: yard + "|\(output == nil)|\(Theme.forPlan.kickRises)") { bag in
+                if output == nil, station.hasPad, Theme.forPlan.kickRises {
+                    bag.add(padSlab(station))
+                } else {
+                    for c in station.hall.padCells where output == nil {
+                        addTile(station: station, cell: c, owner: "kind:pad", color: Palette.padFloor, name: "pad:" + station.name, into: bag)
+                    }
+                }
+                if station.hasPad, output == nil, let east = station.hall.padCells.map(\.x).max(),
+                   let y0 = station.hall.padCells.map(\.y).min(), let y1 = station.hall.padCells.map(\.y).max(),
+                   let hull = Looks.current.hullWall(width: Double(y1 - y0 + 1), depth: Station.hullDepth, doorway: 0, doorTop: 0) {
+                    hull.eulerAngles.y = -.pi / 2
+                    hull.position = v3(station.offset.x + Double(east) + 0.56, 0, station.offset.y + Double(y0 + y1) / 2)
+                    hull.name = "hull:" + station.name
+                    bag.add(hull, as: "hull")
                 }
             }
-            if station.hasPad {
-                for c in station.hall.deconCells where output == nil {
-                    addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name)
+            statics.piece("hall:" + st, key: yard + "|\(output == nil)|\(station.hall.storageCells)|\(station.hall.deckCells)|\(station.hall.deconCells)") { bag in
+                if output == nil {
+                    let storage = Set(station.hall.storageCells), deck = Set(station.hall.deckCells)
+                    for c in station.hall.cells {
+                        let color = storage.contains(c) || (!deckInUse && deck.contains(c)) ? Palette.storageFloor : deck.contains(c) ? Palette.labFloor : Palette.walkFloor
+                        addTile(station: station, cell: c, owner: "kind:hall", color: color, name: (deck.contains(c) && deckInUse ? "deck:" : "storage:") + station.name, into: bag)
+                    }
+                }
+                if station.hasPad {
+                    for c in station.hall.deconCells where output == nil {
+                        addTile(station: station, cell: c, owner: "kind:decon", color: Palette.deconFloor, name: "decon:" + station.name, into: bag)
+                    }
                 }
             }
-            buildPadWall(station)
-            for prop in Looks.current.dress(station: station) {
-                prop.position.x += station.offset.x; prop.position.z += station.offset.y
-                prop.name = "station:" + station.name
-                staticRoot.addChildNode(prop)
+            statics.piece("padwall:" + st, key: yard + "|\(station.hall.padWall.map { "\($0.hall)\($0.out)" })|\(String(describing: simulation.rack(station)))",
+                          drop: { [weak self] in self?.droneRacks[st] = nil; self?.padFields[st] = nil }) { bag in
+                buildPadWall(station, into: bag)
+            }
+            statics.piece("dress:" + st, key: yard + "|\(station.bounds.min)|\(station.bounds.max)") { bag in
+                for prop in Looks.current.dress(station: station) {
+                    prop.position.x += station.offset.x; prop.position.z += station.offset.y
+                    prop.name = "station:" + station.name
+                    bag.add(prop)
+                }
+            }
+            func roomPiece(_ room: Room, extra: String = "", drop: @escaping () -> Void = {}, _ build: @escaping (StaticScene.Bag) -> Void) {
+                let door = station.doorCell(of: room.key).map { "\($0)" } ?? "-"
+                statics.piece("room:" + roomKey(station, room), key: "\(at)|\(room.cells)|\(door)|\(NSColor(room.color))|" + extra, drop: drop, build)
             }
             if let lounge = station.rooms["kind:lounge"] {
-                for n in Looks.current.furnishLounge(lounge, in: station).props { n.name = "room:" + roomKey(station, lounge); staticRoot.addChildNode(n) }
+                roomPiece(lounge, extra: "\(station.couches)") { bag in
+                    for n in Looks.current.furnishLounge(lounge, in: station).props { n.name = "room:" + self.roomKey(station, lounge); bag.add(n) }
+                }
             }
             if let bath = station.rooms["kind:bath"] {
-                let f = Looks.current.furnishBath(bath, in: station)
-                for n in f.props { n.name = "room:" + roomKey(station, bath); staticRoot.addChildNode(n) }
-                for n in f.fixtures { n.name = "gym:" + roomKey(station, bath); staticRoot.addChildNode(n) }
-                f.towel?.name = "towel:" + station.name
+                roomPiece(bath) { bag in
+                    let f = Looks.current.furnishBath(bath, in: station)
+                    for n in f.props { n.name = "room:" + self.roomKey(station, bath); bag.add(n) }
+                    for n in f.fixtures { n.name = "gym:" + self.roomKey(station, bath); bag.add(n) }
+                    f.towel?.name = "towel:" + station.name
+                }
             }
-            gymProps[station.name] = nil
             if let gym = station.rooms["kind:gym"] {
-                let f = Looks.current.furnishGym(gym, in: station)
-                for n in f.props { n.name = "room:" + roomKey(station, gym); staticRoot.addChildNode(n) }
-                for n in f.fixtures { n.name = "gym:" + roomKey(station, gym); staticRoot.addChildNode(n) }
-                if let bar = f.bar, let bag = f.bag { gymProps[station.name] = (bar, bag) }
+                roomPiece(gym, drop: { [weak self] in self?.gymProps[st] = nil }) { bag in
+                    let f = Looks.current.furnishGym(gym, in: station)
+                    for n in f.props { n.name = "room:" + self.roomKey(station, gym); bag.add(n) }
+                    for n in f.fixtures { n.name = "gym:" + self.roomKey(station, gym); bag.add(n) }
+                    self.gymProps[st] = f.bar.flatMap { bar in f.bag.map { (bar, $0) } }
+                }
             }
-            kitchens[station.name] = nil
             if let galley = station.galley, let room = station.rooms["kind:galley"] {
-                let f = Looks.current.furnishGalley(galley, in: station)
-                for n in f.props { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
-                for n in f.fixtures { n.name = "gym:" + roomKey(station, room); staticRoot.addChildNode(n) }
-                kitchens[station.name] = f.kitchen
+                roomPiece(room, extra: "\(galley.middle)|\(galley.back)", drop: { [weak self] in self?.kitchens[st] = nil }) { bag in
+                    let f = Looks.current.furnishGalley(galley, in: station)
+                    for n in f.props { n.name = "room:" + self.roomKey(station, room); bag.add(n) }
+                    for n in f.fixtures { n.name = "gym:" + self.roomKey(station, room); bag.add(n) }
+                    self.kitchens[st] = f.kitchen
+                }
             }
-            chairs[station.name] = nil
-            missionScreens[station.name] = nil
             if let room = station.rooms["kind:mission"], !station.fixtures(in: room.key).isEmpty {
-                let f = Looks.current.furnishMission(room, in: station)
-                for n in f.props + f.fixtures { n.name = "room:" + roomKey(station, room); staticRoot.addChildNode(n) }
-                chairs[station.name] = f.chairs
-                if let faces = f.faces {
-                    let cameras = feedCameras(station)
-                    for c in cameras { c.camera.name = "room:" + roomKey(station, room); staticRoot.addChildNode(c.camera) }
-                    missionScreens[station.name] = MissionScreens(annunciator: faces.annunciator, clock: faces.clock,
-                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
-                                                                  wall: faces.wall)
+                roomPiece(room, extra: "\(station.hall.padCenter)|\(station.hangarCenter)",
+                          drop: { [weak self] in self?.chairs[st] = nil; self?.missionScreens[st] = nil }) { bag in
+                    let f = Looks.current.furnishMission(room, in: station)
+                    var nodes = f.props + f.fixtures
+                    self.chairs[st] = f.chairs
+                    if let faces = f.faces {
+                        let cameras = self.feedCameras(station)
+                        nodes += cameras.map(\.camera)
+                        self.missionScreens[st] = MissionScreens(annunciator: faces.annunciator, blink: faces.blink, clock: faces.clock, errors: faces.errors, errorsNode: faces.errorsNode,
+                                                                 feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
+                                                                 wall: faces.wall)
+                    }
+                    for n in nodes { n.name = "room:" + self.roomKey(station, room); bag.add(n) }
                 }
             }
             if station.hasHangar {
@@ -355,107 +402,61 @@ extension StationController {
                 let anchor = hangarAnchors[station.name] ?? { let n = SCNNode(); propRoot.addChildNode(n); hangarAnchors[station.name] = n; return n }()
                 anchor.position = v3(station.offset.x + hc.x, 0, station.offset.y + hc.y)
             }
-            for c in station.corridorCells where Looks.current.dotsHallway && (c.x + c.y * 3) % 4 == 0 {
-                let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
-                d.geometry!.firstMaterial = flat(Palette.void)
-                d.eulerAngles.x = -.pi / 2
-                d.position = v3(station.offset.x + Double(c.x), 0.004, station.offset.y + Double(c.y))
-                staticRoot.addChildNode(d)
+            statics.piece("dots:" + st, key: "\(at)|\(station.corridorCells)") { bag in
+                for c in station.corridorCells where Looks.current.dotsHallway && (c.x + c.y * 3) % 4 == 0 {
+                    let d = SCNNode(geometry: SCNPlane(width: 0.12, height: 0.12))
+                    d.geometry!.firstMaterial = flat(Palette.void)
+                    d.eulerAngles.x = -.pi / 2
+                    d.position = v3(station.offset.x + Double(c.x), 0.004, station.offset.y + Double(c.y))
+                    bag.add(d)
+                }
             }
-            let mp = station.monolithPosition
-            let monolith = Looks.current.monolith()
-            monolith.position = v3(station.offset.x + mp.x, 0, station.offset.y + mp.y)
-            monolith.name = "station:" + station.name
-            staticRoot.addChildNode(monolith)
-            for bed in station.beds {
-                let b = Looks.current.bed(level: bed.level)
-                b.position.x = station.offset.x + bed.pos.x
-                b.position.z = station.offset.y + bed.pos.y
-                b.name = "room:\(station.name)|kind:quarters"
-                staticRoot.addChildNode(b)
+            statics.piece("monolith:" + st, key: "\(at)|\(station.monolithPosition)") { bag in
+                let mp = station.monolithPosition
+                let monolith = Looks.current.monolith()
+                monolith.position = v3(station.offset.x + mp.x, 0, station.offset.y + mp.y)
+                monolith.name = "station:" + station.name
+                bag.add(monolith)
+            }
+            statics.piece("beds:" + st, key: "\(at)|\(station.beds.map { "\($0.pos)\($0.level)" })") { bag in
+                for bed in station.beds {
+                    let b = Looks.current.bed(level: bed.level)
+                    b.position.x = station.offset.x + bed.pos.x
+                    b.position.z = station.offset.y + bed.pos.y
+                    b.name = "room:\(station.name)|kind:quarters"
+                    bag.add(b)
+                }
             }
 
             for (room, office) in drawnRooms(station) {
                 let key = roomKey(station, room)
                 let look = office?.look ?? ShownOffice.Look()
-                var tiles: [SCNNode] = []
-                var parts: [(node: SCNNode, base: Double?)] = []
-                let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
                 let light = officeLight(station, room, dark: look.dark)
                 roomLight[key] = light
                 roomPower[key] = light != .dark
-                let failing = look.failing
-                let dusty = look.dusty
-                let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))
-                let base = officeBase(room, remote: look.remote)
-                let full = look.remote ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
-                let provisional = look.provisional
-                let unchecked = look.unchecked
                 let door = office.map { $0.door } ?? station.doorCell(of: room.key)
-                let ordered = room.cells.sorted { (a, b) in
-                    let da = abs(a.x - (door?.x ?? a.x)) + abs(a.y - (door?.y ?? a.y))
-                    let db = abs(b.x - (door?.x ?? b.x)) + abs(b.y - (door?.y ?? b.y))
-                    return da != db ? da < db : (a.y, a.x) < (b.y, b.x)
-                }
-                let tiled = Int((Double(ordered.count) * progress).rounded())
-                let rimmed = Looks.current.rimsOffices && office != nil && !unchecked && !provisional
                 let shown = office.map { $0.label(at: clock) } ?? 1
-                for (i, c) in ordered.enumerated() {
-                    let color = i < tiled || progress == 0 ? officeTone(base, light) : subfloor
-                    let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key)
-                    if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: base) }
-                    if let office { t.opacity = CGFloat(tileBase(look) * office.tile(c, at: clock)) }
-                    tiles.append(t)
-                    if failing || dusty {
-                        let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
-                        overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
-                        overlay.eulerAngles.x = -.pi / 2
-                        overlay.position = v3(t.position.x, Looks.current.floorTop + 0.0005, t.position.z)
-                        overlay.name = "room:" + key
-                        if failing {
-                            overlay.opacity = 0.15
-                            overlay.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.5, duration: 0.7), .fadeOpacity(to: 0.12, duration: 0.9)])))
-                            parts.append((overlay, nil))
-                        } else {
-                            overlay.opacity = CGFloat(0.28 * shown)
-                            parts.append((overlay, 0.28))
-                        }
-                        overlay.isHidden = shown < 1 && failing
-                        staticRoot.addChildNode(overlay)
-                    }
+                let fading = office.map { o in room.cells.map { o.tile($0, at: clock) } } ?? []
+                let drawnKey = "\(at)|\(room.cells)|\(NSColor(room.color))|\(look)|\(light)|\(String(describing: door))|\(office?.up ?? false)|\(shown)|\(fading)|"
+                    + "\(sign(for: room, who: look.who))|\(touching(edges, room.cells))|\(around(station, room.cells))"
+                statics.piece("office:" + key, key: drawnKey, drop: { [weak self] in self?.roomTiles[key] = nil; self?.officeParts[key] = nil }) { bag in
+                    drawOffice(station, room, office, look: look, light: light, door: door, shown: shown, into: bag)
                 }
-                roomTiles[key] = tiles
-                if let office, office.up, let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, who: look.who)) {
-                    prop.position.x += station.offset.x; prop.position.z += station.offset.y
-                    prop.name = "room:" + roomKey(station, room)
-                    prop.opacity = CGFloat((provisional ? 0.38 : 1) * shown)
-                    parts.append((prop, provisional ? 0.38 : 1))
-                    staticRoot.addChildNode(prop)
-                }
-                if provisional || look.live, office?.up == true {
-                    let cellSet = Set(room.cells)
-                    for c in room.cells {
-                        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] where !cellSet.contains(Cell(x: c.x + dx, y: c.y + dy)) {
-                            let edge = SCNNode(geometry: SCNBox(width: dx == 0 ? 1.0 : 0.04, height: 0.01, length: dy == 0 ? 1.0 : 0.04, chamferRadius: 0))
-                            edge.geometry!.firstMaterial = flat(full.lighter(0.25))
-                            edge.position = v3(station.offset.x + Double(c.x) + Double(dx) * 0.48, 0.006, station.offset.y + Double(c.y) + Double(dy) * 0.48)
-                            edge.name = "room:" + key
-                            edge.opacity = CGFloat(shown)
-                            parts.append((edge, 1))
-                            staticRoot.addChildNode(edge)
-                        }
-                    }
-                }
-                if office != nil { officeParts[key] = parts }
             }
         }
-        groundRoot.childNodes.forEach { $0.removeFromParentNode() }
-        if headless {
-        } else {
-            Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot)
         }
-        rebuildLabels()
-        rebuildBerths()
+        let groundKey = "\(theme)|\(headless)|" + fleet.stations.values.sorted { $0.name < $1.name }.map { "\($0.name)\($0.offset)\($0.bounds.min)\($0.bounds.max)" }.joined()
+        if groundKey != groundBuilt {
+            groundBuilt = groundKey
+            groundRoot.childNodes.forEach { $0.removeFromParentNode() }
+            if !headless { Looks.current.ground(under: Array(fleet.stations.values), into: groundRoot) }
+        }
+        let labels = "\(statics.generation)|\(theme)|\(ConfigStore.shared.current.showTitles)|" + fleet.stations.values.sorted { $0.name < $1.name }.map { st in
+            "\(st.name)\(world.deckInUse(station: st.name))" + drawnRooms(st).map { "\($0.room.key)\($0.room.name)\($0.office?.up ?? true)\($0.office?.look.who ?? "")" }.joined()
+        }.joined()
+        if labels != labelsBuilt { labelsBuilt = labels; rebuildLabels() }
+        let berths = "\(theme)|" + fleet.stations.values.sorted { $0.name < $1.name }.map { "\($0.name)\($0.offset)\($0.hasHangar)\($0.hangarCells)" }.joined()
+        if berths != berthsBuilt { berthsBuilt = berths; rebuildBerths() }
         rebuildPadHexes()
         timed("markers") { rebuildMarkers() }
 
@@ -465,6 +466,75 @@ extension StationController {
         if let f = focused { focusNow(on: f) }
         if let held { userPan = held.center - targetFocus; userZoom = min(6, max(0.4, fitScale(half: targetHalf) / held.scale)) }
         fleet.save()
+    }
+
+    private func drawOffice(_ station: Station, _ room: Room, _ office: ShownOffice?, look: ShownOffice.Look, light: OfficeLight, door: Cell?, shown: Double,
+                            into bag: StaticScene.Bag) {
+        let key = roomKey(station, room)
+        var tiles: [SCNNode] = []
+        var parts: [(node: SCNNode, base: Double?)] = []
+        let progress: Double = room.key.hasPrefix("proj:") ? 0 : 1
+        let failing = look.failing
+        let dusty = look.dusty
+        let subfloor = NSColor(rgb: (0.15, 0.16, 0.21))
+        let base = officeBase(room, remote: look.remote)
+        let full = look.remote ? NSColor(room.color).dimmed(0.82) : NSColor(room.color)
+        let provisional = look.provisional
+        let unchecked = look.unchecked
+        let ordered = room.cells.sorted { (a, b) in
+            let da = abs(a.x - (door?.x ?? a.x)) + abs(a.y - (door?.y ?? a.y))
+            let db = abs(b.x - (door?.x ?? b.x)) + abs(b.y - (door?.y ?? b.y))
+            return da != db ? da < db : (a.y, a.x) < (b.y, b.x)
+        }
+        let tiled = Int((Double(ordered.count) * progress).rounded())
+        let rimmed = Looks.current.rimsOffices && office != nil && !unchecked && !provisional
+        for (i, c) in ordered.enumerated() {
+            let color = i < tiled || progress == 0 ? officeTone(base, light) : subfloor
+            let t = addTile(station: station, cell: c, owner: room.key, color: color, name: "room:" + key, into: bag)
+            if rimmed, i < tiled || progress == 0 { rim(t, cell: c, of: room, in: station, color: base) }
+            if let office { t.opacity = CGFloat(tileBase(look) * office.tile(c, at: clock)) }
+            tiles.append(t)
+            if failing || dusty {
+                let overlay = SCNNode(geometry: SCNPlane(width: 1, height: 1))
+                overlay.geometry!.firstMaterial = flat(failing ? NSColor(rgb: (0.95, 0.2, 0.2)) : NSColor(rgb: (0.62, 0.62, 0.68)))
+                overlay.eulerAngles.x = -.pi / 2
+                overlay.position = v3(t.position.x, Looks.current.floorTop + 0.0005, t.position.z)
+                overlay.name = "room:" + key
+                if failing {
+                    overlay.opacity = 0.15
+                    overlay.runAction(.repeatForever(.sequence([.fadeOpacity(to: 0.5, duration: 0.7), .fadeOpacity(to: 0.12, duration: 0.9)])))
+                    parts.append((overlay, nil))
+                } else {
+                    overlay.opacity = CGFloat(0.28 * shown)
+                    parts.append((overlay, 0.28))
+                }
+                overlay.isHidden = shown < 1 && failing
+                bag.add(overlay)
+            }
+        }
+        roomTiles[key] = tiles
+        if let office, office.up, let prop = Looks.current.dress(office: room, in: station, sign: sign(for: room, who: look.who)) {
+            prop.position.x += station.offset.x; prop.position.z += station.offset.y
+            prop.name = "room:" + key
+            prop.opacity = CGFloat((provisional ? 0.38 : 1) * shown)
+            parts.append((prop, provisional ? 0.38 : 1))
+            bag.add(prop)
+        }
+        if provisional || look.live, office?.up == true {
+            let cellSet = Set(room.cells)
+            for c in room.cells {
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] where !cellSet.contains(Cell(x: c.x + dx, y: c.y + dy)) {
+                    let edge = SCNNode(geometry: SCNBox(width: dx == 0 ? 1.0 : 0.04, height: 0.01, length: dy == 0 ? 1.0 : 0.04, chamferRadius: 0))
+                    edge.geometry!.firstMaterial = flat(full.lighter(0.25))
+                    edge.position = v3(station.offset.x + Double(c.x) + Double(dx) * 0.48, 0.006, station.offset.y + Double(c.y) + Double(dy) * 0.48)
+                    edge.name = "room:" + key
+                    edge.opacity = CGFloat(shown)
+                    parts.append((edge, 1))
+                    bag.add(edge)
+                }
+            }
+        }
+        officeParts[key] = office != nil ? parts : nil
     }
 
     private func sign(for room: Room, who: String?) -> OfficeSign {
@@ -504,9 +574,9 @@ extension StationController {
         }
         func corner(of cells: [Cell], width: Double, height: Double, station: Station, clearOf names: Set<String>) -> SIMD2<Double> {
             let o = SIMD2(station.offset.x, station.offset.y)
-            let props: [(lo: SIMD2<Double>, hi: SIMD2<Double>)] = staticRoot.childNodes.filter { names.contains($0.name ?? "") }.map { n in
+            let props: [(lo: SIMD2<Double>, hi: SIMD2<Double>)] = statics.nodes.filter { names.contains($0.name ?? "") }.map { n in
                 let (lo, hi) = n.boundingBox
-                let pts = [lo.x, hi.x].flatMap { x in [lo.z, hi.z].map { z in staticRoot.convertPosition(SCNVector3(x, 0, z), from: n) } }
+                let pts = [lo.x, hi.x].flatMap { x in [lo.z, hi.z].map { z in n.convertPosition(SCNVector3(x, 0, z), to: nil) } }
                 return (SIMD2(Double(pts.map(\.x).min()!), Double(pts.map(\.z).min()!)), SIMD2(Double(pts.map(\.x).max()!), Double(pts.map(\.z).max()!)))
             }
             let x0 = Double(cells.map(\.x).min()!), x1 = Double(cells.map(\.x).max()!)

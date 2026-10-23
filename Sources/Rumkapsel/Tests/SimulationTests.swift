@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 enum SimulationTests {
     private static var failures = 0
@@ -537,6 +538,19 @@ enum SimulationTests {
             _ = step(sim, seconds: 1)
             sim.start(m, .deliverOffice(order: 9002, name: "an office"))
             expect(!m.bathing && m.fixture == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: fixture \(String(describing: m.fixture)), place \(m.place.words)")
+        }
+
+        test("the pad drones stay on their rack when the station shifts in the world") {
+            let (sim, station, _) = fixture()
+            let drones = sim.padDrones(station)
+            expect(!drones.isEmpty, "the station has pad drones")
+            sim.stepDrones(dt: 0.1)
+            station.offset += SIMD2(3, -1)
+            for _ in 0..<50 { sim.stepDrones(dt: 0.1) }
+            for d in drones {
+                let home = sim.berth(station, d.berth)
+                expect(simd_distance(d.pos, home) < 0.05, "drone \(d.berth) at \(d.pos), its berth at \(home)")
+            }
         }
 
         test("more resting than there are seats: nobody shares a couch or a bed") {

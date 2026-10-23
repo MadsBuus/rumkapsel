@@ -79,6 +79,7 @@ final class Simulation<B: Body> {
     var cargo: [Int: Cargo] = [:]
     var vortices: [String: Vortex] = [:]
     var drones: [String: [PadDrone]] = [:]
+    var droneOffsets: [String: SIMD2<Double>] = [:]
     var ownOrders: [Int: OwnOrder] = [:]
     var idleRoll: () -> Double = { Double.random(in: 0..<1) }
     var spareHallway: [String: (cells: [Cell], since: Double)] = [:]

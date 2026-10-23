@@ -22,8 +22,13 @@ final class SettingsModel: ObservableObject {
     @Published var tab = 0
     @Published var selected: String?
     let board = BoardCatalog()
-    private var forwarding: AnyCancellable?
-    init() { forwarding = board.objectWillChange.sink { [weak self] in self?.objectWillChange.send() } }
+    let sentry = SentryCatalog()
+    @Published var sentryToken = ""
+    private var forwarding: [AnyCancellable] = []
+    init() {
+        forwarding = [board.objectWillChange.sink { [weak self] in self?.objectWillChange.send() },
+                      sentry.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }]
+    }
 
     func commit() {
         pending?.cancel()
@@ -49,6 +54,7 @@ struct SettingsView: View {
         get { model.selected }
         nonmutating set { model.selected = newValue }
     }
+    var sentryToken: Binding<String> { $model.sentryToken }
 
     var body: some View {
         TabView(selection: $model.tab) {
@@ -56,6 +62,7 @@ struct SettingsView: View {
             repositories.tabItem { Label("Repositories", systemImage: "shippingbox") }.tag(1)
             github.tabItem { Label("GitHub", systemImage: "arrow.triangle.pull") }.tag(2)
             teammates.tabItem { Label("Teammates", systemImage: "person.2") }.tag(3)
+            monitors.tabItem { Label("Monitors", systemImage: "waveform.path.ecg") }.tag(4)
         }
         .frame(width: 680, height: 560)
     }

@@ -93,44 +93,58 @@ enum Planets {
 
     static func image(_ surface: String, ext: String = "jpg", color: NSColor, keepAlpha: Bool = false) -> CGImage? {
         let key = "\(surface)|\(color)"
-        lock.lock(); defer { lock.unlock() }
-        if let t = tinted[key] { return t }
+        lock.lock(); let known = tinted[key]; lock.unlock()
+        if let known { return known }
         guard let url = root?.appendingPathComponent("\(surface).\(ext)"),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
-        let w = cg.width, h = cg.height
+        let w = min(cg.width, 1024), h = max(1, cg.height * w / max(1, cg.width))
         var px = [UInt8](repeating: 0, count: w * h * 4)
-        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
-        var hist = [Int](repeating: 0, count: 256)
-        var lum = [UInt8](repeating: 0, count: w * h)
-        for i in 0..<(w * h) {
-            let l = (Int(px[i * 4]) * 54 + Int(px[i * 4 + 1]) * 183 + Int(px[i * 4 + 2]) * 19) >> 8
-            lum[i] = UInt8(l); hist[l] += 1
+        let made: CGImage? = px.withUnsafeMutableBytes { buf -> CGImage? in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.interpolationQuality = .medium
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            let p = buf.bindMemory(to: UInt8.self)
+            var hist = [Int](repeating: 0, count: 256)
+            hist.withUnsafeMutableBufferPointer { hist in
+                for i in stride(from: 0, to: w * h * 4, by: 4) {
+                    let l = (Int(p[i]) * 54 + Int(p[i + 1]) * 183 + Int(p[i + 2]) * 19) >> 8
+                    p[i + 3] = keepAlpha ? p[i + 3] : 255
+                    p[i] = UInt8(l)
+                    hist[l] += 1
+                }
+            }
+            func percentile(_ q: Double) -> Int {
+                let target = Int(Double(w * h) * q); var run = 0
+                for (i, c) in hist.enumerated() { run += c; if run >= target { return i } }
+                return 255
+            }
+            let lo = Double(percentile(0.02)), hi = max(lo + 1, Double(percentile(0.98)))
+            func rgb(_ c: NSColor) -> SIMD3<Double> {
+                let d = c.usingColorSpace(.deviceRGB) ?? c
+                return SIMD3(Double(d.redComponent), Double(d.greenComponent), Double(d.blueComponent))
+            }
+            let dark = rgb(color.darker(0.82)), mid = rgb(color.darker(0.15)), light = rgb(color.lighter(0.3))
+            var lut = [UInt8](repeating: 0, count: 256 * 3)
+            for l in 0..<256 {
+                let t = max(0, min(1, (Double(l) - lo) / (hi - lo)))
+                let c = t < 0.5 ? dark + (mid - dark) * (t * 2) : mid + (light - mid) * ((t - 0.5) * 2)
+                lut[l * 3] = UInt8(max(0, min(255, c.x * 255))); lut[l * 3 + 1] = UInt8(max(0, min(255, c.y * 255))); lut[l * 3 + 2] = UInt8(max(0, min(255, c.z * 255)))
+            }
+            lut.withUnsafeBufferPointer { lut in
+                for i in stride(from: 0, to: w * h * 4, by: 4) {
+                    let l = Int(p[i]) * 3, a = Int(p[i + 3])
+                    if a == 255 {
+                        p[i] = lut[l]; p[i + 1] = lut[l + 1]; p[i + 2] = lut[l + 2]
+                    } else {
+                        p[i] = UInt8(Int(lut[l]) * a / 255); p[i + 1] = UInt8(Int(lut[l + 1]) * a / 255); p[i + 2] = UInt8(Int(lut[l + 2]) * a / 255)
+                    }
+                }
+            }
+            return ctx.makeImage()
         }
-        func percentile(_ p: Double) -> Int {
-            let target = Int(Double(w * h) * p); var run = 0
-            for (i, c) in hist.enumerated() { run += c; if run >= target { return i } }
-            return 255
-        }
-        let lo = Double(percentile(0.02)), hi = max(lo + 1, Double(percentile(0.98)))
-        func rgb(_ c: NSColor) -> SIMD3<Double> {
-            let d = c.usingColorSpace(.deviceRGB) ?? c
-            return SIMD3(Double(d.redComponent), Double(d.greenComponent), Double(d.blueComponent))
-        }
-        let dark = rgb(color.darker(0.82)), mid = rgb(color.darker(0.15)), light = rgb(color.lighter(0.3))
-        for i in 0..<(w * h) {
-            let t = max(0, min(1, (Double(lum[i]) - lo) / (hi - lo)))
-            let c = t < 0.5 ? dark + (mid - dark) * (t * 2) : mid + (light - mid) * ((t - 0.5) * 2)
-            let a = keepAlpha ? Double(px[i * 4 + 3]) / 255 : 1
-            px[i * 4] = UInt8(max(0, min(255, c.x * 255 * a)))
-            px[i * 4 + 1] = UInt8(max(0, min(255, c.y * 255 * a)))
-            px[i * 4 + 2] = UInt8(max(0, min(255, c.z * 255 * a)))
-            if !keepAlpha { px[i * 4 + 3] = 255 }
-        }
-        guard let out = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage() else { return nil }
-        tinted[key] = out
+        guard let out = made else { return nil }
+        lock.lock(); tinted[key] = out; lock.unlock()
         return out
     }
 }

@@ -82,6 +82,17 @@ enum PipelineTests {
             expect(merge.waitingURL(owner: "o/bot", tag: nil) == "https://github.com/o/bot", "every merge ships: the repository")
         }
 
+        test("a staging rocket links to its staging release: the open one, else the last merged since production shipped") {
+            func pr(_ n: Int, _ base: String, _ state: String, _ day: Double?) -> ReleasePR {
+                ReleasePR(number: n, title: "Release \(n)", base: base, head: base == "staging" ? "develop" : "staging", state: state,
+                          url: "https://github.com/o/web/pull/\(n)", labels: [], mergedAt: day.map { Date(timeIntervalSince1970: $0 * 86400) })
+            }
+            expect([pr(1, "staging", "MERGED", 1), pr(2, "staging", "OPEN", nil)].currentStaging?.number == 2, "an open staging release first")
+            expect([pr(1, "staging", "MERGED", 1), pr(3, "staging", "MERGED", 3)].currentStaging?.number == 3, "else the newest merged one")
+            expect([pr(3, "staging", "MERGED", 3), pr(4, "production", "MERGED", 4)].currentStaging == nil, "but not one production has already shipped")
+            expect([pr(3, "staging", "MERGED", 3), pr(4, "production", "MERGED", 4), pr(5, "staging", "MERGED", 5)].currentStaging?.number == 5, "the next round's one again")
+        }
+
         test("no releases and a workflow deploying on push: every merge ships, as release-note-bot does") {
             let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, deploysOnPush: true)
             expect(p.shipsOnMerge && p.trunk == "main" && p.source == "workflow", "ships on merge from main, got \(p.ship) from \(p.trunk), \(p.source)")

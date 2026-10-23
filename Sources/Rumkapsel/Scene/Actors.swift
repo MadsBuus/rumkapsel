@@ -22,6 +22,9 @@ final class RocketView {
     var hot: [Int: Double] = [:]
     var stripping: [Int: Double] = [:]
     var lifted = false
+    var kickShown: (dock: Double, tip: Double)?
+    var wholeShown: Bool?
+    var partsFadeUntil = 0.0
     init(node: SCNNode, held: Bool, tall: Bool, cargo: Int, panels: Int) {
         self.node = node; heldShown = held; tallShown = tall; cargoShown = cargo; panelsShown = panels
     }
@@ -172,6 +175,8 @@ extension StationController {
                     let position = v.node.position, opacity = v.node.opacity
                     v.node.removeFromParentNode()
                     v.node = rocketNode(station: st, key, r)
+                    v.kickShown = nil
+                    v.wholeShown = nil
                     v.node.position = position
                     v.node.opacity = opacity
                     v.flying = [:]
@@ -229,6 +234,8 @@ extension StationController {
         } else if r.panels < v.panelsShown {
             Props.shape(v.node, lifter: r.dock >= 1, panels: r.panels)
             v.flying = [:]
+            v.kickShown = nil
+            v.wholeShown = nil
         }
         v.panelsShown = r.panels
         let flight = Hull.flight
@@ -247,6 +254,9 @@ extension StationController {
             if t >= 1 { panel.position = rest; v.flying[i] = nil }
         }
         let whole = r.panels >= RocketGeometry.panels && v.flying.isEmpty
+        guard whole != v.wholeShown || clock < v.partsFadeUntil else { return }
+        if whole, v.wholeShown != true { v.partsFadeUntil = clock + 0.5 }
+        v.wholeShown = whole
         for name in ["nose", "hatch", "name", "rcs"] {
             for c in tip.childNodes where (c.value(forKey: "part") as? String) == name {
                 if whole, c.isHidden { c.isHidden = false; c.setValue(clock, forKey: "on") }
@@ -378,7 +388,9 @@ extension StationController {
     }
 
     private func placeKick(_ r: ShownRocket, _ v: RocketView) {
+        if let shown = v.kickShown, shown.dock == r.dock, shown.tip == r.tipOffset { return }
         guard let tip = Props.part(v.node, "tip"), let stage = Props.part(v.node, "lifter") else { return }
+        v.kickShown = (r.dock, r.tipOffset)
         stage.isHidden = r.dock <= 0
         stage.position = v3(0, RocketGeometry.deck(dock: r.dock), 0)
         tip.position.y = CGFloat(r.tipOffset)

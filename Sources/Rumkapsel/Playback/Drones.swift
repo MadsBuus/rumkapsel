@@ -65,6 +65,11 @@ extension Simulation {
         for station in fleet.stations.values {
             let fleet = padDrones(station)
             guard !fleet.isEmpty else { continue }
+            if let was = droneOffsets[station.name], was != station.offset {
+                let shift = SIMD3(station.offset.x - was.x, 0, station.offset.y - was.y)
+                for d in fleet { d.pos += shift; d.route = d.route.map { $0 + shift } }
+            }
+            droneOffsets[station.name] = station.offset
             assignDrones(station, fleet)
             for d in fleet {
                 fly(d, dt: dt)

@@ -48,13 +48,13 @@ enum IdlePick: Equatable {
     case galley(Command.Fare)
     case mission
 
-    static let galleyFrom = 0.25, roamBelow = 0.40, gymBelow = 0.65, bathBelow = 0.75, missionBelow = 0.85
+    static let galleyFrom = 0.2, roamBelow = 0.33, gymBelow = 0.5, bathBelow = 0.58, missionBelow = 0.85
 
     static func pick(roll: Double, night: Bool, crew: Bool, gymFree: Bool, bath: Bool, shower: Bool, galley: Command.Fare? = nil, mission: Bool = false) -> IdlePick {
         if roll < roamBelow { return roll >= galleyFrom && !night ? galley.map { .galley($0) } ?? .roam : .roam }
         if roll < gymBelow { return !night && !crew && gymFree ? .gym : .roam }
         if roll < bathBelow { return bath ? .bath(shower: shower) : .roam }
-        if roll < missionBelow { return !night && !crew && mission ? .mission : .read }
+        if roll < missionBelow { return !night && mission ? .mission : .read }
         return .read
     }
 }

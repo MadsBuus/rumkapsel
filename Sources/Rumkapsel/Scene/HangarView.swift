@@ -73,7 +73,7 @@ extension Props {
 }
 
 extension StationController {
-    func buildHangar(_ station: Station) {
+    func buildHangar(_ station: Station, into bag: StaticScene.Bag) {
         fields[station.name]?.node.removeFromParentNode()
         fields[station.name] = nil
         guard let x0 = station.hangarCells.map(\.x).min(), let x1 = station.hangarCells.map(\.x).max(),
@@ -84,20 +84,20 @@ extension StationController {
         if let wall = Looks.current.hullWall(width: wide + 0.2, depth: deep, doorway: wide - 0.5, doorTop: Station.fieldTop) {
             wall.position = v3(cx, 0, mouth + 0.04)
             wall.name = "hull:" + station.name
-            staticRoot.addChildNode(wall)
+            bag.add(wall, as: "hull")
         }
         for side in [-1.0, 1.0] {
             guard let wall = Looks.current.hullWall(width: deep, depth: wide / 2, doorway: 0, doorTop: 0) else { continue }
             wall.eulerAngles.y = CGFloat(side * .pi / 2)
             wall.position = v3(cx + side * (wide / 2 + 0.04), 0, cz)
             wall.name = "hull:" + station.name
-            staticRoot.addChildNode(wall)
+            bag.add(wall, as: "hull")
         }
         guard Looks.current.hangarField else { return }
         let built = Props.hangarField(width: wide - 0.5)
         built.node.position = v3(cx, 0, mouth)
         built.node.name = "hangar:" + station.name
-        staticRoot.addChildNode(built.node)
+        bag.add(built.node)
         fields[station.name] = HangarField(node: built.node, sheet: built.sheet, z: mouth, x0: cx - wide / 2, x1: cx + wide / 2)
     }
 

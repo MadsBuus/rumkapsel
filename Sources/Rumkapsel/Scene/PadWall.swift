@@ -2,21 +2,21 @@ import AppKit
 import SceneKit
 
 extension StationController {
-    func buildPadWall(_ station: Station) {
+    func buildPadWall(_ station: Station, into bag: NodeSink) {
         droneRacks[station.name]?.removeFromParentNode()
         droneRacks[station.name] = nil
-        _ = buildPadField(station)
+        _ = buildPadField(station, into: bag)
         if let r = simulation.rack(station) {
             let n = Props.droneRack(count: DroneFlight.count, pitch: DroneFlight.berthPitch)
             n.position = v3(station.offset.x + r.at.x, 0, station.offset.y + r.at.y)
             n.eulerAngles.y = CGFloat(atan2(-r.along.y, r.along.x))
             n.name = "station:" + station.name
-            staticRoot.addChildNode(n)
+            bag.add(n)
             droneRacks[station.name] = n
         }
     }
 
-    func buildPadField(_ station: Station) -> SCNNode? {
+    func buildPadField(_ station: Station, into bag: NodeSink) -> SCNNode? {
         padFields[station.name] = nil
         guard let field = station.hall.padField else { return nil }
         let width = field.to.x - field.from.x
@@ -24,7 +24,7 @@ extension StationController {
         let x = station.offset.x + (field.from.x + field.to.x) / 2, z = station.offset.y + field.from.y
         built.node.position = v3(x, 0, z)
         built.node.name = "station:" + station.name
-        staticRoot.addChildNode(built.node)
+        bag.add(built.node)
         let made = HangarField(node: built.node, sheet: built.sheet, z: z, x0: x - width / 2, x1: x + width / 2)
         let pane = SCNNode(geometry: SCNPlane(width: width, height: Station.fieldTop - 0.08))
         pane.geometry!.firstMaterial = Props.glass(alpha: 0.12)

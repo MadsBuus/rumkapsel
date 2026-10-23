@@ -48,6 +48,9 @@ struct AppConfig: Codable, Equatable {
     var projectStatuses: ProjectStatuses?
     var projectField: String?
     var useProject: Bool?
+    var sentryOrg: String?
+    var sentryRegion: String?
+    var sentryProjects: [String: String]?
     var statusField: String { projectField ?? "Status" }
 
     struct ProjectStatuses: Codable, Equatable {
