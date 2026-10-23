@@ -96,8 +96,9 @@ final class World {
     func report(crate n: Int, repo: String, _ stage: Stage, by source: Source, at: Date) {
         works.report(works.note(repo: repo, crate: n), stage, by: source, at: at)
     }
-    func report(pullState state: String?, record: WorkBook.Record?, at: Date) {
+    func report(pullState state: String?, record: WorkBook.Record?, shipped: Bool = false, at: Date) {
         guard let state, let record else { return }
+        if shipped { return works.report(record, .shipped, by: .git, at: at) }
         works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
     }
     func isMine(office key: String) -> Bool {
@@ -430,7 +431,7 @@ final class World {
                     let key = roomKey(station, room)
                     let pull = pulls.pull(ownOffice: room)
                     let state = pull?.state
-                    if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), at: now) }
+                    if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), shipped: pull.shipped, at: now) }
                     let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
                     var gone = room.worktree.map { !Workspaces.isOpen($0) } ?? false
                     if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
