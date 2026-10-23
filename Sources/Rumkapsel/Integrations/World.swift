@@ -12,6 +12,7 @@ final class World {
         self.demo = demo
         log = EventLog(dir: demo ? nil : EventLog.home)
         if demo { fleet.persists = false }
+        fleet.works = works
     }
 
     static let holdWindow: TimeInterval = 24 * 3600
