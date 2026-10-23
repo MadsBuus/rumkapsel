@@ -1,4 +1,5 @@
 import AppKit
+import SceneKit
 
 enum SceneTests {
     private static var failures = 0
@@ -18,6 +19,36 @@ enum SceneTests {
         test("a rebuild with nothing changed rebuilds nothing") {
             c.rebuildStatic()
             expect(c.statics.rebuilt.isEmpty, "rebuilt anyway: \(c.statics.rebuilt.sorted())")
+        }
+
+        test("the holo's sky: a planet per repo, a moon per open piece of work at its stage, nothing shipped or not started") {
+            func record(_ id: Int, _ repo: String, _ stage: Stage?) -> WorkBook.Record {
+                let r = WorkBook.Record(id: id, repo: repo); r.stage = stage; return r
+            }
+            let records = [record(1, "web", .working), record(2, "web", .qa), record(3, "web", .shipped), record(4, "web", .inbound),
+                           record(5, "api", .cleared), record(6, "api", nil), record(7, "elsewhere", .stored)]
+            let sky = HoloSky.make(repos: [("web", RGB(r: 1, g: 0.5, b: 0.4)), ("api", RGB(r: 0.6, g: 0.9, b: 0.2))], records: records,
+                                   checks: { $0.id == 2 ? .failed : .none }, commits: { $0.id })
+            expect(sky.planets.map(\.repo) == ["web", "api"], "a planet per repo: \(sky.planets.map(\.repo))")
+            expect(sky.moons.map(\.id) == [1, 2, 5], "moons for open work only: \(sky.moons.map(\.id))")
+            expect(sky.moons.first { $0.id == 2 }?.checks == .failed && sky.moons.first { $0.id == 5 }?.commits == 5, "with its checks and commits")
+            expect(HoloSky.orbit(.working) < HoloSky.orbit(.stored) && HoloSky.orbit(.stored) < HoloSky.orbit(.qa) && HoloSky.orbit(.qa) < HoloSky.orbit(.cleared),
+                   "further out the further along")
+        }
+
+        test("the holo draws a moon's new commit as a blip, and a moon that leaves falls into its planet") {
+            let view = HoloView(root: SCNNode())
+            let web = HoloSky.Planet(repo: "web", color: RGB(r: 1, g: 0.5, b: 0.4))
+            view.show(HoloSky(planets: [web], moons: [HoloSky.Moon(id: 1, repo: "web", stage: .working, checks: .none, commits: 2)]), clock: 0)
+            expect(view.blips.isEmpty, "a first look fires nothing")
+            view.show(HoloSky(planets: [web], moons: [HoloSky.Moon(id: 1, repo: "web", stage: .working, checks: .running, commits: 3)]), clock: 1)
+            expect(view.blips.count == 1, "one commit, one blip: \(view.blips.count)")
+            view.step(clock: 1 + HoloView.blip + 0.1, dt: 0.1)
+            expect(view.blips.isEmpty && view.pulses["web"] != nil, "it lands and the planet pulses")
+            view.show(HoloSky(planets: [web], moons: []), clock: 2)
+            expect(view.moons[1]?.falling != nil, "the moon starts to fall")
+            for k in 0..<20 { view.step(clock: 2 + Double(k) * 0.1, dt: 0.1) }
+            expect(view.moons.isEmpty, "and is gone into its planet")
         }
 
         test("a room that changes rebuilds that room, and nothing else") {

@@ -29,7 +29,7 @@ struct MissionScreens {
     var feeds: [Feed]
     let wall: SIMD3<Double>
     var shown: MissionBoards?
-    static let near = 0.4, nearEvery = 0.5, farEvery = 30.0
+    static let near = 0.4, nearEvery = 0.33, farEvery = 10.0
     static let queue = DispatchQueue(label: "rumkapsel.feeds", qos: .utility)
 }
 
@@ -172,13 +172,13 @@ extension StationController {
             }
             return f
         } }
-        let at = clock, size = near ? CGSize(width: 320, height: 200) : CGSize(width: 160, height: 100)
+        let at = clock, size = near ? CGSize(width: 480, height: 300) : CGSize(width: 240, height: 150)
         let r = feedRenderer
         MissionScreens.queue.async { [self] in
             let t0 = CACurrentMediaTime()
             let frames = lit.map { feed -> NSImage in
                 r.pointOfView = feed.camera
-                return r.snapshot(atTime: at, with: size, antialiasingMode: .none)
+                return r.snapshot(atTime: at, with: size, antialiasingMode: near ? .multisampling2X : .none)
             }
             let spent = CACurrentMediaTime() - t0
             enqueue { [weak self] in

@@ -253,6 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let at = num("--walk") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleWalk() }
         }
+        if let at = num("--mission") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleMission() }
+        }
         if let i = args.firstIndex(of: "--simulate"), args.count > i + 1 {
             if !simulatorOnly { openSimulator() }
             let names = args[i + 1].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }

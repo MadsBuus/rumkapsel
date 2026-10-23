@@ -10,6 +10,7 @@ struct Furnishing {
     var kitchen: Kitchen?
     var chairs: [FixtureRef: SCNNode] = [:]
     var faces: MissionFaces?
+    var holo: SCNNode?
 }
 
 struct MissionFaces { let annunciator: SCNMaterial; let blink: SCNNode; let clock: SCNMaterial; let errors: SCNMaterial; let errorsNode: SCNNode; let feeds: [SCNMaterial]; let wall: SIMD3<Double> }
@@ -387,33 +388,28 @@ extension Classic {
             n.eulerAngles.y = CGFloat(yaw)
             return n
         }
+        if let b = station.bridge { f.fixtures.append(at(MissionRoom.bridge(radius: b.radius), b.at, b.deck, yaw: MissionRoom.hexTurn)) }
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
             case .console:
                 f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
             case .holoTable:
                 let r = fixture.kind.size.x / 2
-                let table = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.03, height: 0.22), 32))
+                let table = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.03, height: 0.22)))
                 table.geometry!.firstMaterial = lit(p.console)
-                let rim = SCNNode(geometry: faceted(SCNTube(innerRadius: r - 0.07, outerRadius: r, height: 0.03), 32))
+                let rim = SCNNode(geometry: faceted(SCNTube(innerRadius: r - 0.09, outerRadius: r, height: 0.03)))
                 rim.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.95, 1.0)))
                 rim.position = v3(0, 0.125, 0)
                 table.addChildNode(rim)
-                let glass = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.07, height: 0.006), 32))
-                glass.geometry!.firstMaterial = lit(NSColor(rgb: (0.05, 0.12, 0.16)))
+                let glass = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.09, height: 0.006)))
+                glass.geometry!.firstMaterial = flat(Palette.void)
                 glass.position = v3(0, 0.126, 0)
                 table.addChildNode(glass)
-                f.props.append(at(table, fixture.at, 0.11))
+                f.props.append(at(table, fixture.at, 0.11, yaw: MissionRoom.hexTurn))
                 let lift = 0.06
-                let map = MissionRoom.hologram()
-                map.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 60)))
-                f.fixtures.append(at(map, fixture.at, 0.24 + lift))
-                for k in 0..<12 {
-                    let a = Double(k) / 12 * .pi * 2
-                    let ray = SCNNode(geometry: SCNCylinder(radius: 0.003, height: lift + 0.1))
-                    ray.geometry!.firstMaterial = MissionRoom.holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.35)
-                    f.fixtures.append(at(ray, fixture.at + SIMD2(sin(a), cos(a)) * (r - 0.07), 0.24 + (lift + 0.1) / 2))
-                }
+                let holo = MissionRoom.hologram()
+                f.fixtures.append(at(holo, fixture.at, 0.24 + lift))
+                f.holo = holo
             default:
                 break
             }

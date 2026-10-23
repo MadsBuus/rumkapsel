@@ -33,23 +33,76 @@ enum MissionRoom {
         return n
     }
 
+    static let hexTurn = Double.pi / 6
+
+    static func bridge(radius r: Double) -> SCNNode {
+        let deck = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: 0.035)))
+        deck.geometry!.firstMaterial = lit(Palette.ops.console)
+        deck.position = v3(0, -0.0175, 0)
+        let edge = SCNNode(geometry: faceted(SCNTube(innerRadius: r - 0.025, outerRadius: r + 0.004, height: 0.008)))
+        edge.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.95, 1.0)))
+        edge.position = v3(0, 0.002, 0)
+        let glow = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.7, height: 0.004)))
+        glow.geometry!.firstMaterial = holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.55)
+        glow.position = v3(0, -0.038, 0)
+        let n = SCNNode()
+        for c in [deck, edge, glow] { n.addChildNode(c) }
+        return n
+    }
+
     static func hologram() -> SCNNode {
         let n = SCNNode()
-        let cyan = NSColor(rgb: (0.4, 0.9, 1.0))
-        let station = SCNNode(geometry: faceted(SCNCylinder(radius: 0.06, height: 0.03), 6))
-        station.geometry!.firstMaterial = holo(cyan, 0.9)
-        station.position = v3(0, 0.1, 0)
+        let station = SCNNode(geometry: faceted(SCNCylinder(radius: 0.05, height: 0.025), 6))
+        station.geometry!.firstMaterial = holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.9)
+        station.position = v3(0, HoloView.low / 2, 0)
         n.addChildNode(station)
-        for (r, a, size) in [(0.22, 0.4, 0.035), (0.33, 2.2, 0.05), (0.4, 4.1, 0.03), (0.28, 5.3, 0.025)] {
-            let orbit = SCNNode(geometry: SCNTorus(ringRadius: r, pipeRadius: 0.002))
-            orbit.geometry!.firstMaterial = holo(cyan, 0.45)
-            orbit.position = v3(0, 0.1, 0)
-            n.addChildNode(orbit)
-            let planet = SCNNode(geometry: SCNSphere(radius: size))
-            planet.geometry!.firstMaterial = holo(cyan, 0.7)
-            planet.position = v3(sin(a) * r, 0.1, cos(a) * r)
-            n.addChildNode(planet)
+        n.addChildNode(grain())
+        return n
+    }
+
+    static func grain(count: Int = 900, radius: Double = 0.5, height: Double = 0.36) -> SCNNode {
+        var rng = SystemRandomNumberGenerator()
+        var verts: [SCNVector3] = [], keys: [CGPoint] = []
+        let apothem = radius * cos(.pi / 6)
+        while verts.count < count {
+            let x = Double.random(in: -radius...radius, using: &rng), z = Double.random(in: -radius...radius, using: &rng)
+            let inside = (0..<3).allSatisfy { k in
+                let a = Double(k) * .pi / 3
+                return abs(x * sin(a) + z * cos(a)) <= apothem
+            }
+            guard inside else { continue }
+            verts.append(SCNVector3(x, 0, z))
+            keys.append(CGPoint(x: Double.random(in: 0..<1, using: &rng), y: 1 / Double.random(in: 4...8, using: &rng)))
         }
+        let element = SCNGeometryElement(indices: (0..<Int32(count)).map { $0 }, primitiveType: .point)
+        element.pointSize = 0.004
+        element.minimumPointScreenSpaceRadius = 0.5
+        element.maximumPointScreenSpaceRadius = 16
+        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(textureCoordinates: keys)], elements: [element])
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = NSColor(rgb: (0.55, 0.95, 1.0))
+        m.blendMode = .add
+        m.writesToDepthBuffer = false
+        m.shaderModifiers = [
+            .geometry: """
+                #pragma varyings
+                float fade;
+                #pragma body
+                float2 k = _geometry.texcoords[0];
+                float t = fract(scn_frame.time * k.y + k.x);
+                float a = scn_frame.time * 0.08 + t * 0.6;
+                float3 p = _geometry.position.xyz;
+                _geometry.position.xyz = float3(p.x * cos(a) - p.z * sin(a), t * \(height), p.x * sin(a) + p.z * cos(a));
+                out.fade = sin(t * 3.14159) * (0.6 + 0.4 * sin(scn_frame.time * (1.0 + k.x * 2.0) + k.x * 40.0));
+                """,
+            .fragment: """
+                #pragma body
+                _output.color = float4(_output.color.rgb * in.fade * 0.85, in.fade);
+                """]
+        g.firstMaterial = m
+        let n = SCNNode(geometry: g)
+        n.name = "grain"
         return n
     }
 
@@ -151,16 +204,16 @@ enum Screens {
     }
 
     static func crt(_ frame: NSImage, caption: String) -> NSImage {
-        draw(320, 200) { c, w, h in
+        draw(480, 300) { c, w, h in
             frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .copy, fraction: 1)
-            c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.22).cgColor)
+            c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.07).cgColor)
             c.setBlendMode(.color); c.fill(CGRect(x: 0, y: 0, width: w, height: h)); c.setBlendMode(.normal)
-            c.setFillColor(NSColor.black.withAlphaComponent(0.28).cgColor)
+            c.setFillColor(NSColor.black.withAlphaComponent(0.12).cgColor)
             for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }
-            let glow = CGGradient(colorsSpace: nil, colors: [NSColor.clear.cgColor, NSColor.black.withAlphaComponent(0.55).cgColor] as CFArray, locations: [0.55, 1])!
+            let glow = CGGradient(colorsSpace: nil, colors: [NSColor.clear.cgColor, NSColor.black.withAlphaComponent(0.3).cgColor] as CFArray, locations: [0.7, 1])!
             c.drawRadialGradient(glow, startCenter: CGPoint(x: w / 2, y: h / 2), startRadius: 0, endCenter: CGPoint(x: w / 2, y: h / 2), endRadius: w * 0.62, options: [])
-            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
-                .draw(at: NSPoint(x: 12, y: h - 26))
+            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 21, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
+                .draw(at: NSPoint(x: 16, y: h - 36))
         }
     }
 

@@ -21,6 +21,7 @@ final class Walker {
     static let craneReach = 1.5, craneTilt = -0.8
     static let thrust = 3.4, gravity = 1.6, climbLimit = 1.3, ceiling = 6.0
     static let crown = 0.1
+    static let bridgePitch = -0.2
 
     var station: String
     var pos: SIMD2<Double>
@@ -89,13 +90,13 @@ extension StationController {
     func toggleMission() {
         enqueue { [self] in
             if let w = walker { stepOut(w); return }
-            guard let st = fleet.stations.values.sorted(by: { $0.name < $1.name }).first(where: { !$0.fixtures(in: "kind:mission").isEmpty }),
-                  let origin = st.roomOrigin("kind:mission") else { return }
-            stepIn(at: st.offset + origin + SIMD2(2.5, 2.6), yaw: 0)
+            guard let st = fleet.stations.values.sorted(by: { $0.name < $1.name }).first(where: { $0.bridge != nil }),
+                  let bridge = st.bridge else { return }
+            stepIn(at: st.offset + bridge.at, yaw: 0, altitude: bridge.deck, pitch: Walker.bridgePitch)
         }
     }
 
-    func stepIn(at point: SIMD2<Double>? = nil, yaw: Double? = nil) {
+    func stepIn(at point: SIMD2<Double>? = nil, yaw: Double? = nil, altitude: Double = 0, pitch: Double? = nil) {
         guard walker == nil, let station = cameraNode.camera else { return }
         let focus = SIMD2(Double(rig.position.x), Double(rig.position.z))
         let viewYaw = Double(rig.eulerAngles.y)
@@ -115,6 +116,8 @@ extension StationController {
         let w = Walker(station: start.station.name, pos: start.pos, yaw: start.yaw,
                        top: (focus, viewYaw, Double(pitchNode.eulerAngles.x), Double(station.orthographicScale)))
         w.riding = followed?.id
+        w.altitude = altitude
+        if let pitch { w.pitch = pitch }
         w.view = wantedView(w)
         following = nil
         walker = w
@@ -288,6 +291,9 @@ extension StationController {
                 let middle = SIMD2(q.x.rounded(), q.y.rounded())
                 w.pos += (middle - q) * min(1, dt * 4)
             }
+        }
+        if let st = fleet.stations[w.station], let b = st.bridge, st.onBridge(w.pos - st.offset), w.altitude <= b.deck, was >= b.deck - 0.02 {
+            w.altitude = b.deck; w.climb = max(0, w.climb)
         }
         if w.altitude <= 0 { w.altitude = 0; w.climb = max(0, w.climb) }
         if w.altitude >= ceiling(w) { w.altitude = max(0, ceiling(w)); w.climb = min(0, w.climb) }
