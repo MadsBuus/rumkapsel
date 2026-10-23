@@ -41,10 +41,8 @@ class Body {
         }
     }
     var hammerUp = false
-    var seatedOnBowl = false
-    var seatOffset = SIMD2<Double>(0, 0)
 
-    var seated: Bool { seatedOnBowl || onCouch || sittingOn != nil }
+    var seated: Bool { onCouch || sittingOn != nil }
 
     var using: FixtureRef? { if case .use(let ref, _, _, _) = current?.kind { return ref }; return nil }
     var settledOn: (order: Int, height: Double?)?
@@ -57,7 +55,6 @@ class Body {
     var couchSince: Double?
     var couchSeated = false
 
-    var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     var drying = false
     var nextFidgetAt = 0.0
     static let seatReach = Seat.reach
@@ -71,7 +68,6 @@ class Body {
     var stallSince = 0.0
     var stallMark = ""
     var waitingOn: String?
-    var fixture: Int?
     var shortStretches = 0
 
     var promptCount = 0
@@ -152,7 +148,7 @@ class Body {
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
-    var bathing: Bool { if case .bath = current?.kind { return true }; return false }
+    var bathing: Bool { using?.room == "kind:bath" }
     var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
     var choring: Bool { if case .chore = current?.kind { return true }; return false }
     var workout: Command.Workout? { if case .exercise(let k, _, _) = current?.kind { return k }; return nil }
@@ -181,7 +177,6 @@ class Body {
         case .exercise(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind.doing
         case .galley(let fare, _, _) where phaseKind == .act && path.isEmpty: return fare.doing
         case .use(_, let kind, _, _) where inPlace: return kind.doing
-        case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
         default: return c.words
         }
     }

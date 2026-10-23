@@ -41,7 +41,6 @@ struct Command {
         case carry(crate: CrateRef, from: Spot, to: Zone)
         case deliverOffice(order: Int)
         case goTo(place: Place)
-        case bath(kind: Bath, back: Place, seconds: Double)
         case exercise(kind: Workout, back: Place, seconds: Double)
         case galley(fare: Fare, back: Place, seconds: Double)
         case use(FixtureRef, kind: FixtureKind, back: Place, seconds: Double)
@@ -55,8 +54,6 @@ struct Command {
         case flight(kind: Flight, station: String, slot: Int)
         case react(activity: Activity, place: Place, for: TimeInterval)
     }
-
-    enum Bath { case shower, quick }
 
     enum Workout: Int, CaseIterable {
         case treadmill, bench, bag, mat
@@ -125,7 +122,7 @@ struct Command {
         case .carry, .deliverOffice: return [.walk, .approach, .lift, .haul, .setDown]
         case .leave: return [.walk, .stepOut]
         case .flight: return [.approach, .descend, .unload, .rise, .leave]
-        case .bath, .exercise, .galley, .use, .pack, .stow: return [.walk, .act]
+        case .exercise, .galley, .use, .pack, .stow: return [.walk, .act]
         default: return [.walk, .settle]
         }
     }
@@ -217,11 +214,6 @@ struct Command {
         Command(kind: .deliverOffice(order: order), words: "fetching \(name) from \(Words.current.theBay)")
     }
 
-    static func bath(_ kind: Bath, back: Place, seconds: Double) -> Command {
-        Command(kind: .bath(kind: kind, back: back, seconds: seconds),
-                words: "off to \(Words.current.theBath), back to \(back.words) after")
-    }
-
     static func exercise(_ kind: Workout, back: Place, seconds: Double) -> Command {
         Command(kind: .exercise(kind: kind, back: back, seconds: seconds), words: "off to \(Words.current.theGym) for \(kind.words), back to \(back.words) after")
     }
@@ -241,7 +233,7 @@ struct Command {
 
     var visitSeconds: Double? {
         switch kind {
-        case .bath(_, _, let s), .exercise(_, _, let s), .galley(_, _, let s), .use(_, _, _, let s), .chore(_, let s): return s
+        case .exercise(_, _, let s), .galley(_, _, let s), .use(_, _, _, let s), .chore(_, let s): return s
         default: return nil
         }
     }

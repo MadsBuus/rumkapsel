@@ -680,24 +680,40 @@ struct KingdomLook: Look {
     }
 
     func furnishBath(_ bath: Room, in station: Station) -> Furnishing {
-        var f = Classic.bath(bath, in: station)
-        rustic(f.props)
-        f.towel?.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.93, 0.9, 0.8))
-        if f.props.count > 4 {
-            if let bucket = Kit.node("bucket", from: .survival) {
-                bucket.scale = SCNVector3(1.1, 1.1, 1.1)
-                bucket.position = v3(Double(f.props[0].position.x), 0, Double(f.props[0].position.z))
-                f.props[0] = bucket
+        var f = Furnishing()
+        let steel = Classic.chrome
+        for fixture in station.fixtures(in: bath.key) {
+            switch fixture.kind {
+            case .bowl:
+                if let bucket = Kit.node("bucket", from: .survival) {
+                    bucket.scale = SCNVector3(1.1, 1.1, 1.1)
+                    f.props.append(Classic.on(fixture, bucket, in: station))
+                } else {
+                    let bowl = Classic.bowl()
+                    rustic([bowl])
+                    f.props.append(Classic.on(fixture, bowl, in: station))
+                }
+            case .shower:
+                let shower = Classic.shower(steel)
+                rustic([shower])
+                f.props.append(Classic.on(fixture, shower, in: station))
+                let tub = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: 0.14), 8))
+                tub.geometry!.firstMaterial = lit(Self.planks)
+                tub.position = v3(0, 0.07, 0)
+                let water = SCNNode(geometry: faceted(SCNCylinder(radius: 0.21, height: 0.01), 8))
+                water.geometry!.firstMaterial = flat(Self.shallows)
+                water.position = v3(0, 0.07, 0)
+                tub.addChildNode(water)
+                f.props.append(Classic.on(fixture, tub, in: station, at: SIMD2(0, Hands.arm)))
+            case .towelRail:
+                let rail = Classic.towelRail(steel)
+                rustic([rail.rail])
+                rail.towel.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.93, 0.9, 0.8))
+                f.props.append(Classic.on(fixture, rail.rail, in: station))
+                f.towel = rail.towel
+            default:
+                break
             }
-            let drain = f.props[4]
-            let tub = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: 0.14), 8))
-            tub.geometry!.firstMaterial = lit(Self.planks)
-            tub.position = v3(Double(drain.position.x), 0.07, Double(drain.position.z))
-            let water = SCNNode(geometry: faceted(SCNCylinder(radius: 0.21, height: 0.01), 8))
-            water.geometry!.firstMaterial = flat(Self.shallows)
-            water.position = v3(0, 0.07, 0)
-            tub.addChildNode(water)
-            f.props[4] = tub
         }
         return f
     }

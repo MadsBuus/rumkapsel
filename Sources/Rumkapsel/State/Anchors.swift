@@ -9,13 +9,16 @@ struct Anchor: Equatable {
 }
 
 enum FixtureKind: String {
-    case console, holoTable, couch
+    case console, holoTable, couch, bowl, shower, towelRail
 
     var size: SIMD2<Double> {
         switch self {
         case .console: return SIMD2(0.86, 0.26)
         case .holoTable: return SIMD2(1.06, 1.06)
         case .couch: return SIMD2(0.8, 0.3)
+        case .bowl: return SIMD2(0.24, 0.37)
+        case .shower: return SIMD2(0.1, Hands.arm + 0.07)
+        case .towelRail: return SIMD2(0.24, 0.06)
         }
     }
 
@@ -29,6 +32,10 @@ enum FixtureKind: String {
             return [0.0, 0.85, -0.85].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2, use: .stand) }
         case .couch:
             return [Anchor(at: SIMD2(0, Seat.reach), use: .sit(height: Seat.couch), faces: .away)]
+        case .bowl:
+            return [Anchor(at: SIMD2(0, Seat.reach), use: .sit(height: Seat.height), faces: .away)]
+        case .shower, .towelRail:
+            return [Anchor(at: SIMD2(0, 0), use: .stand)]
         }
     }
 
@@ -37,6 +44,9 @@ enum FixtureKind: String {
         case .console: return "watching the boards in \(Words.current.theMission)"
         case .holoTable: return "studying the holo table"
         case .couch: return "resting on \(Words.current.theCouch)"
+        case .bowl: return "on the toilet"
+        case .shower: return "in the shower"
+        case .towelRail: return "drying off"
         }
     }
 
@@ -45,6 +55,9 @@ enum FixtureKind: String {
         case .console: return "sit at a console"
         case .holoTable: return "watch the holo table"
         case .couch: return "rest on \(Words.current.theCouch)"
+        case .bowl: return "use the toilet"
+        case .shower: return "take a shower"
+        case .towelRail: return "dry off"
         }
     }
 }
@@ -146,6 +159,7 @@ extension Station {
             let west = Double(xs.min()!) - 0.1, east = Double(xs.max()!) + 0.1
             return couches.map { c in PlacedFixture(kind: .couch, at: c, yaw: c.x < west ? .pi / 2 : c.x > east ? -.pi / 2 : .pi) }
         }
+        if key == "kind:bath", let bath = rooms[key] { return bathFixtures(bath) }
         if key == "kind:mission", !hasPad { return [] }
         return RoomLayout.of(key).map { PlacedFixture(kind: $0.kind, at: origin + $0.at, yaw: $0.yaw) }
     }
@@ -158,5 +172,23 @@ extension Station {
 
     func anchors(in key: String) -> [FixtureRef] {
         fixtures(in: key).enumerated().flatMap { i, f in f.kind.anchors.indices.map { FixtureRef(room: key, fixture: i, anchor: $0) } }
+    }
+
+    private func bathFixtures(_ bath: Room) -> [PlacedFixture] {
+        let door = doorCell(of: bath.key)
+        let maxY = bath.cells.map(\.y).max()!
+        let sign = Cell(x: bath.cells.filter { $0.y == maxY }.map(\.x).max()!, y: maxY)
+        var tiles = bath.cells.filter { $0 != door && $0 != sign }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
+        while tiles.count < 2, let more = bath.cells.first(where: { !tiles.contains($0) }) { tiles.append(more) }
+        let mid = SIMD2(bath.cells.map { Double($0.x) }.reduce(0, +), bath.cells.map { Double($0.y) }.reduce(0, +)) / Double(bath.cells.count)
+        func middle(_ c: Cell) -> SIMD2<Double> { SIMD2(Double(c.x), Double(c.y)) }
+        func corner(_ c: Cell) -> SIMD2<Double> {
+            let d = middle(c) - mid
+            return SIMD2(d.x < 0 ? -1 : 1, d.y < 0 ? -1 : 1)
+        }
+        let toilet = corner(tiles[0]), shower = corner(tiles[1])
+        return [PlacedFixture(kind: .bowl, at: middle(tiles[0]) + toilet * 0.22, yaw: atan2(0, -toilet.y)),
+                PlacedFixture(kind: .shower, at: middle(tiles[1]) + SIMD2(0.3, 0.45) * shower, yaw: atan2(0, -shower.y)),
+                PlacedFixture(kind: .towelRail, at: middle(tiles[1]) + SIMD2(0.46, -0.3) * shower, yaw: atan2(-shower.x, 0))]
     }
 }

@@ -884,8 +884,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     private func doing(_ m: Minion) -> String? {
         switch m.current?.kind {
         case .exercise: return "gym"
-        case .use: return "mission"
-        case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
+        case .use(_, .shower, _, _): return "shower"
+        case .use(_, .bowl, _, _): return "bath"
+        case .use(let ref, _, _, _) where ref.room == "kind:mission": return "mission"
         case .chore: return "roam"
         case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"
         default: return m.place == .lounge && m.activity != .sleeping ? "lounge" : nil
@@ -966,7 +967,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if !visitGalley(b, station: station, fare: m.doing == "coffee" ? .coffee : .bite) { go(.lounge) }
             }
         case "mission":
-            if b.using == nil {
+            if b.using?.room != "kind:mission" {
                 if visiting { simulation.finish(b, to: .lounge) }
                 if !takeTurnInMission(b, station: station) { go(.lounge) }
             }

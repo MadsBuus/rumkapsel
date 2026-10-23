@@ -133,68 +133,97 @@ extension Classic {
 
     static func bath(_ bath: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        let fx = station.bathFixtures(bath: bath)
-        let tk = fx.toiletCorner, sk = fx.showerCorner
+        let steel = chrome
+        for fixture in station.fixtures(in: bath.key) {
+            switch fixture.kind {
+            case .bowl:
+                f.props.append(on(fixture, bowl(), in: station))
+            case .shower:
+                f.props.append(on(fixture, shower(steel), in: station))
+                f.props.append(on(fixture, drain(), in: station, at: SIMD2(0, Hands.arm)))
+            case .towelRail:
+                let rail = towelRail(steel)
+                f.props.append(on(fixture, rail.rail, in: station))
+                f.towel = rail.towel
+            default:
+                break
+            }
+        }
+        return f
+    }
+
+    static var chrome: SCNMaterial { lit(NSColor(rgb: (0.7, 0.72, 0.78))) }
+
+    static func on(_ fixture: PlacedFixture, _ n: SCNNode, in station: Station, at p: SIMD2<Double> = SIMD2(0, 0)) -> SCNNode {
+        let w = station.offset + fixture.point(p)
+        n.position = v3(w.x, Double(n.position.y), w.y)
+        n.eulerAngles.y = CGFloat(fixture.yaw)
+        return n
+    }
+
+    static func bowl() -> SCNNode {
         let porcelain = lit(NSColor(rgb: (0.92, 0.93, 0.95)))
-        let spot = station.bowlSpot(bath: bath)
-        let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Minion.seat - 0.06, length: 0.16, chamferRadius: 0.01))
+        let bowl = SCNNode(geometry: SCNBox(width: 0.16, height: Seat.height - 0.06, length: 0.16, chamferRadius: 0.01))
         bowl.geometry!.firstMaterial = porcelain
-        bowl.position = v3(spot.x, (Minion.seat - 0.06) / 2, spot.y)
+        bowl.position = v3(0, (Seat.height - 0.06) / 2, 0)
         let seat = SCNNode(geometry: SCNBox(width: 0.24, height: 0.06, length: 0.28, chamferRadius: 0.01))
         seat.geometry!.firstMaterial = porcelain
-        seat.position = v3(0, Minion.seat - 0.03 - bowl.position.y, -0.02 * tk.y)
+        seat.position = v3(0, Seat.height - 0.03 - bowl.position.y, 0.02)
         bowl.addChildNode(seat)
         let hole = SCNNode(geometry: SCNBox(width: 0.12, height: 0.006, length: 0.14, chamferRadius: 0))
         hole.geometry!.firstMaterial = flat(NSColor(rgb: (0.55, 0.6, 0.66)))
-        hole.position = v3(0, 0.032, -0.03 * tk.y)
+        hole.position = v3(0, 0.032, 0.03)
         seat.addChildNode(hole)
         let tank = SCNNode(geometry: SCNBox(width: 0.24, height: 0.3, length: 0.1, chamferRadius: 0.01))
         tank.geometry!.firstMaterial = porcelain
-        tank.position = v3(0, Minion.seat + 0.15 - bowl.position.y, 0.16 * tk.y)
+        tank.position = v3(0, Seat.height + 0.15 - bowl.position.y, -0.16)
         bowl.addChildNode(tank)
         let button = SCNNode(geometry: SCNBox(width: 0.05, height: 0.012, length: 0.04, chamferRadius: 0))
-        button.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
+        button.geometry!.firstMaterial = chrome
         button.position = v3(0.06, 0.156, 0)
         tank.addChildNode(button)
-        f.props.append(bowl)
-        let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: 0.2, chamferRadius: 0))
-        arm.geometry!.firstMaterial = lit(NSColor(rgb: (0.7, 0.72, 0.78)))
-        let armAt = station.showerArm(bath: bath)
-        arm.position = v3(armAt.x, 0.72, armAt.y)
-        let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
-        nozzle.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        nozzle.position = v3(0, -0.03, -0.1 * sk.y)
-        arm.addChildNode(nozzle)
-        f.props.append(arm)
+        return bowl
+    }
+
+    static func shower(_ steel: SCNMaterial) -> SCNNode {
         let pole = SCNNode(geometry: SCNBox(width: 0.04, height: 0.72, length: 0.04, chamferRadius: 0))
-        pole.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        let poleAt = station.showerPole(bath: bath)
-        pole.position = v3(poleAt.x, 0.36, poleAt.y)
+        pole.geometry!.firstMaterial = steel
+        pole.position = v3(0, 0.36, 0)
         let tap = SCNNode(geometry: SCNBox(width: 0.07, height: 0.03, length: 0.05, chamferRadius: 0))
-        tap.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        tap.position = v3(0, 0.0, -0.04 * sk.y)
+        tap.geometry!.firstMaterial = steel
+        tap.position = v3(0, 0, 0.04)
         pole.addChildNode(tap)
-        f.props.append(pole)
-        let railAt = station.towelRail(bath: bath)
-        let rail = SCNNode(geometry: SCNBox(width: 0.02, height: 0.02, length: 0.24, chamferRadius: 0))
-        rail.geometry!.firstMaterial = arm.geometry!.firstMaterial
-        rail.position = v3(railAt.x, 0.46, railAt.y)
-        let towel = SCNNode(geometry: SCNBox(width: 0.035, height: 0.24, length: 0.18, chamferRadius: 0.004))
+        let arm = SCNNode(geometry: SCNBox(width: 0.04, height: 0.04, length: Hands.arm, chamferRadius: 0))
+        arm.geometry!.firstMaterial = steel
+        arm.position = v3(0, 0.36, Hands.arm / 2)
+        pole.addChildNode(arm)
+        let nozzle = SCNNode(geometry: SCNBox(width: 0.1, height: 0.04, length: 0.1, chamferRadius: 0))
+        nozzle.geometry!.firstMaterial = steel
+        nozzle.position = v3(0, -0.03, Hands.arm / 2)
+        arm.addChildNode(nozzle)
+        return pole
+    }
+
+    static func drain() -> SCNNode {
+        let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
+        drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
+        drain.position = v3(0, 0.01, 0)
+        return drain
+    }
+
+    static func towelRail(_ steel: SCNMaterial) -> (rail: SCNNode, towel: SCNNode) {
+        let rail = SCNNode(geometry: SCNBox(width: 0.24, height: 0.02, length: 0.02, chamferRadius: 0))
+        rail.geometry!.firstMaterial = steel
+        rail.position = v3(0, 0.46, 0)
+        let towel = SCNNode(geometry: SCNBox(width: 0.18, height: 0.24, length: 0.035, chamferRadius: 0.004))
         towel.geometry!.firstMaterial = lit(NSColor(rgb: (0.93, 0.56, 0.46)))
-        towel.position = v3(-0.03 * sk.x, -0.09, 0)
+        towel.position = v3(0, -0.09, 0.03)
         rail.addChildNode(towel)
-        let stripe = SCNNode(geometry: SCNBox(width: 0.04, height: 0.03, length: 0.18, chamferRadius: 0))
+        let stripe = SCNNode(geometry: SCNBox(width: 0.18, height: 0.03, length: 0.04, chamferRadius: 0))
         stripe.geometry!.firstMaterial = lit(NSColor(rgb: (0.98, 0.9, 0.82)))
         stripe.position = v3(0, -0.06, 0)
         towel.addChildNode(stripe)
-        f.props.append(rail)
-        f.towel = towel
-        let drain = SCNNode(geometry: SCNBox(width: 0.14, height: 0.006, length: 0.14, chamferRadius: 0))
-        drain.geometry!.firstMaterial = flat(NSColor(rgb: (0.28, 0.36, 0.4)))
-        let drainAt = station.showerNozzle(bath: bath)
-        drain.position = v3(drainAt.x, 0.01, drainAt.y)
-        f.props.append(drain)
-        return f
+        return (rail, towel)
     }
 
     static func gym(_ gym: Room, in station: Station) -> Furnishing {
@@ -373,6 +402,8 @@ extension Classic {
                     ray.geometry!.firstMaterial = MissionRoom.holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.35)
                     f.fixtures.append(at(ray, fixture.at + SIMD2(sin(a), cos(a)) * (r - 0.07), 0.24 + (lift + 0.1) / 2))
                 }
+            case .bowl, .shower, .towelRail:
+                break
             }
             for k in fixture.kind.anchors.indices {
                 guard let seat = fixture.place(k), case .sit(let height) = seat.use else { continue }
