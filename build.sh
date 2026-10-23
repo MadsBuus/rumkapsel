@@ -46,8 +46,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>rumkapsel</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.74</string>
-  <key>CFBundleVersion</key><string>202610231505</string>
+  <key>CFBundleShortVersionString</key><string>0.75</string>
+  <key>CFBundleVersion</key><string>202610231606</string>
   <key>RKBuild</key><string>$SHA · $SUBJ</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>

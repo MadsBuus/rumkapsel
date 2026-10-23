@@ -1,6 +1,4 @@
-- Mission control watches the launch: the crew takes the consoles and the pad screen shows the launch cam
-- Sentry on mission control's wall: errors that are climbing, one click to the worst
-- The station rebuilds only what changed, and walking in starts at once
-- The lounge couches are seats like the mission chairs
-- Past work no longer replays when the app starts
-- Shipped only on proof: the merge commit is in production, and a late merge can't pull it back
+- Every room works the same way now: the gym, galley, bath and dorm have exact spots for each piece, like mission control
+- The dorm: sleepers walk the aisle, sit on the edge and lie down; nobody crosses the beds
+- Probes wait for their office to arrive, and follow it when it moves
+- Fixed a crash from mission control's camera screens
