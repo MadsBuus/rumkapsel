@@ -388,7 +388,7 @@ extension Classic {
             n.eulerAngles.y = CGFloat(yaw)
             return n
         }
-        if let b = station.bridge { f.fixtures.append(at(MissionRoom.bridge(radius: b.radius), b.at, b.deck, yaw: MissionRoom.hexTurn)) }
+        if let b = station.bridge { f.props.append(at(MissionRoom.bridge(radius: b.radius), b.at, b.deck, yaw: MissionRoom.hexTurn)) }
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
             case .console:

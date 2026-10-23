@@ -75,7 +75,7 @@ enum MissionRoom {
             }
             guard inside else { continue }
             verts.append(SCNVector3(x, 0, z))
-            keys.append(CGPoint(x: Double.random(in: 0..<1, using: &rng), y: 1 / Double.random(in: 4...8, using: &rng)))
+            keys.append(CGPoint(x: Double.random(in: 0..<1, using: &rng), y: 1 / Double.random(in: 12...24, using: &rng)))
         }
         let element = SCNGeometryElement(indices: (0..<Int32(count)).map { $0 }, primitiveType: .point)
         element.pointSize = 0.004
@@ -94,10 +94,10 @@ enum MissionRoom {
                 #pragma body
                 float2 k = _geometry.texcoords[0];
                 float t = fract(scn_frame.time * k.y + k.x);
-                float a = scn_frame.time * 0.08 + t * 0.6;
+                float a = scn_frame.time * 0.025 + t * 0.4;
                 float3 p = _geometry.position.xyz;
                 _geometry.position.xyz = float3(p.x * cos(a) - p.z * sin(a), t * \(height), p.x * sin(a) + p.z * cos(a));
-                out.fade = sin(t * 3.14159) * (0.6 + 0.4 * sin(scn_frame.time * (1.0 + k.x * 2.0) + k.x * 40.0));
+                out.fade = sin(t * 3.14159) * (0.6 + 0.4 * sin(scn_frame.time * (0.3 + k.x * 0.6) + k.x * 40.0));
                 """,
             .fragment: """
                 #pragma body

@@ -61,6 +61,7 @@ extension Station {
             place(rooms[key], fixtures.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }
                 + seats.map { Footprint(at: $0.chair, radius: Seat.footprint) })
         }
+        if let b = bridge { place(rooms["kind:mission"], [Footprint(at: b.at, radius: (b.radius + 0.004) * 0.8)]) }
         place(rooms["kind:quarters"], fixtures(in: "kind:quarters").map { Footprint(at: $0.at, size: $0.kind.size, yaw: $0.yaw) })
         place(rooms["kind:gym"], fixtures(in: "kind:gym").filter { $0.kind == .bench || $0.kind == .bag }.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) })
         for room in offices {

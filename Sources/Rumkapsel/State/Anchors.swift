@@ -40,7 +40,7 @@ enum FixtureKind: String {
         case .console:
             return [Anchor(at: SIMD2(0, size.y / 2 + Seat.knees), use: .sit(height: Seat.height))]
         case .holoTable:
-            return [0.0, .pi / 3, -.pi / 3].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2 * cos(.pi / 6), use: .stand) }
+            return [.pi, .pi / 3, -.pi / 3].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2 * cos(.pi / 6), use: .stand) }
         case .couch:
             return [Anchor(at: SIMD2(0, Seat.reach), use: .sit(height: Seat.couch), faces: .away)]
         case .counter:
@@ -211,7 +211,7 @@ enum RoomLayout {
 extension Station {
     var bridge: (at: SIMD2<Double>, deck: Double, radius: Double)? {
         guard !fixtures(in: "kind:mission").isEmpty, let origin = roomOrigin("kind:mission") else { return nil }
-        return (origin + SIMD2(2.5, 2.72), 0.55, 0.27)
+        return (origin + SIMD2(2.5, 2.3), 0.3, 0.27)
     }
 
     func onBridge(_ q: SIMD2<Double>) -> Bool {
