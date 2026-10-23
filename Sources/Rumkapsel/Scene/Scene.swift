@@ -62,6 +62,7 @@ enum Pick {
     static let colony = 64
     static let launching = 128
     static let air = 256
+    static let holo = 512
 }
 
 enum Backdrop {

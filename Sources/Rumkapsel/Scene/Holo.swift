@@ -3,8 +3,11 @@ import SceneKit
 
 struct HoloSky: Equatable {
     enum Checks: Equatable { case none, running, passed, failed }
-    struct Planet: Equatable { let repo: String; let color: RGB }
-    struct Moon: Equatable { let id: Int; let repo: String; let stage: Stage; let checks: Checks; let commits: Int }
+    struct Planet: Equatable { let repo: String; let color: RGB; var link: String? = nil }
+    struct Moon: Equatable {
+        let id: Int; let repo: String; let stage: Stage; let checks: Checks; let commits: Int
+        var title = "", link: String? = nil
+    }
 
     var planets: [Planet] = []
     var moons: [Moon] = []
@@ -12,13 +15,34 @@ struct HoloSky: Equatable {
     static let open: [Stage] = [.working, .ready, .stored, .qa, .cleared]
 
     static func make(repos: [(repo: String, color: RGB)], records: [WorkBook.Record],
-                     checks: (WorkBook.Record) -> Checks, commits: (WorkBook.Record) -> Int) -> HoloSky {
+                     checks: (WorkBook.Record) -> Checks, commits: (WorkBook.Record) -> Int,
+                     link: (WorkBook.Record) -> String? = { $0.url }, repoLink: (String) -> String? = { _ in nil }) -> HoloSky {
         let names = Set(repos.map(\.repo))
-        var sky = HoloSky(planets: repos.map { Planet(repo: $0.repo, color: $0.color) })
+        var sky = HoloSky(planets: repos.map { Planet(repo: $0.repo, color: $0.color, link: repoLink($0.repo)) })
         sky.moons = records.filter { names.contains($0.repo) && $0.stage.map(open.contains) == true }
             .sorted { $0.id < $1.id }
-            .map { Moon(id: $0.id, repo: $0.repo, stage: $0.stage!, checks: checks($0), commits: commits($0)) }
+            .map { Moon(id: $0.id, repo: $0.repo, stage: $0.stage!, checks: checks($0), commits: commits($0), title: $0.work().name, link: link($0)) }
         return sky
+    }
+
+    static func words(_ stage: Stage) -> String {
+        switch stage {
+        case .inbound: return "not started"
+        case .working, .ready: return "being worked on"
+        case .stored: return Words.current.inStorage
+        case .qa: return "testing"
+        case .cleared: return "cleared"
+        case .shipped: return "shipped"
+        }
+    }
+
+    func hover(_ p: Planet) -> String {
+        let open = moons.filter { $0.repo == p.repo }.count
+        return "link:\(p.link ?? "")|\(p.repo) · \(open) open" + (p.link == nil ? "" : " · click for its pull requests")
+    }
+
+    static func hover(_ m: Moon) -> String {
+        "link:\(m.link ?? "")|\(m.title) · \(words(m.stage))" + (m.link == nil ? "" : " · click to open")
     }
 
     static func orbit(_ stage: Stage) -> Double {
@@ -115,6 +139,7 @@ final class HoloView {
             g.firstMaterial = MissionRoom.holo(NSColor(p.color).lighter(0.3), 0.14)
             n.addChildNode(SCNNode(geometry: g))
         }
+        n.enumerateHierarchy { c, _ in c.categoryBitMask = Pick.scenery }
         root.addChildNode(n)
         orbitLines = n
     }
@@ -133,6 +158,7 @@ final class HoloView {
         for p in sky.planets where planets[p.repo] == nil {
             let n = SCNNode(geometry: SCNSphere(radius: Self.planet))
             n.geometry!.firstMaterial = Self.glow(NSColor(p.color))
+            n.categoryBitMask = Pick.normal | Pick.holo
             root.addChildNode(n)
             planets[p.repo] = n
         }
@@ -141,6 +167,7 @@ final class HoloView {
             planets[repo] = nil
         }
         if was?.planets != sky.planets || orbitLines == nil { drawOrbits() }
+        for p in sky.planets { planets[p.repo]?.name = sky.hover(p) }
         for m in sky.moons {
             let color = NSColor(sky.planets.first { $0.repo == m.repo }?.color ?? RGB(r: 0.4, g: 0.9, b: 1))
             if let shownMoon = moons[m.id] {
@@ -148,10 +175,13 @@ final class HoloView {
                 if m.checks == .passed, shownMoon.moon.checks != .passed { shownMoon.passedAt = clock }
                 if m.checks != shownMoon.moon.checks { paint(shownMoon.ring, m.checks) }
                 shownMoon.moon = m
+                shownMoon.node.name = HoloSky.hover(m)
                 shownMoon.falling = nil
                 continue
             }
             let node = SCNNode(geometry: SCNSphere(radius: Self.moon))
+            node.name = HoloSky.hover(m)
+            node.categoryBitMask = Pick.normal | Pick.holo
             node.geometry!.firstMaterial = Self.glow(color.lighter(0.25))
             let ring = SCNNode(geometry: SCNTorus(ringRadius: Self.moon * 2, pipeRadius: 0.0025))
             node.addChildNode(ring)
@@ -247,7 +277,14 @@ extension StationController {
             },
             commits: { r in
                 r.officeKeys.lazy.compactMap { station.rooms[$0]?.worktree }.compactMap { self.github.git.commitsAhead(worktree: $0) }.first ?? 0
-            })
+            },
+            link: { r in
+                if let u = r.url { return u }
+                guard let root = roots[r.repo], let owner = self.github.nameWithOwner(repoRoot: root) else { return nil }
+                if let n = r.pulls.filter({ $0.value == "OPEN" }).keys.min() ?? r.pulls.keys.max() { return "https://github.com/\(owner)/pull/\(n)" }
+                return r.issue.map { "https://github.com/\(owner)/issues/\($0)" }
+            },
+            repoLink: { repo in roots[repo].flatMap { self.github.nameWithOwner(repoRoot: $0) }.map { "https://github.com/\($0)/pulls" } })
     }
 
     func tendHolos() {

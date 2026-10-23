@@ -97,6 +97,7 @@ final class StationView: SCNView {
     }
 
     private func node(at p: NSPoint) -> SCNNode? {
+        if let holo = hitTest(p, options: [.categoryBitMask: Pick.holo]).first?.node { return holo }
         var n = hitTest(p, options: [.boundingBoxOnly: true, .firstFoundOnly: true, .categoryBitMask: Pick.normal]).first?.node
         while let here = n, here.name == nil, let up = here.parent { n = up }
         return n

@@ -58,6 +58,8 @@ enum MissionRoom {
         halo.geometry!.firstMaterial = holo(NSColor(rgb: (1.0, 0.8, 0.45)), 0.25)
         sun.addChildNode(halo)
         sun.position = v3(0, HoloView.centre, 0)
+        sun.categoryBitMask = Pick.scenery
+        halo.categoryBitMask = Pick.scenery
         n.addChildNode(sun)
         n.addChildNode(grain())
         return n
@@ -106,6 +108,7 @@ enum MissionRoom {
         g.firstMaterial = m
         let n = SCNNode(geometry: g)
         n.name = "grain"
+        n.categoryBitMask = Pick.scenery
         return n
     }
 

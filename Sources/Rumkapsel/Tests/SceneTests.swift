@@ -34,6 +34,9 @@ enum SceneTests {
             expect(sky.moons.first { $0.id == 2 }?.checks == .failed && sky.moons.first { $0.id == 5 }?.commits == 5, "with its checks and commits")
             expect(HoloSky.orbit(.working) < HoloSky.orbit(.stored) && HoloSky.orbit(.stored) < HoloSky.orbit(.qa) && HoloSky.orbit(.qa) < HoloSky.orbit(.cleared),
                    "further out the further along")
+            let moon = HoloSky.Moon(id: 9, repo: "web", stage: .qa, checks: .none, commits: 0, title: "#5770 let studios rent", link: "https://github.com/o/web/pull/1")
+            expect(HoloSky.hover(moon) == "link:https://github.com/o/web/pull/1|#5770 let studios rent · testing · click to open", "a moon hovers its work and stage: \(HoloSky.hover(moon))")
+            expect(sky.hover(sky.planets[0]).hasSuffix("|web · 2 open"), "a planet hovers its repo and open work: \(sky.hover(sky.planets[0]))")
         }
 
         test("the holo draws a moon's new commit as a blip, and a moon that leaves falls into its planet") {
