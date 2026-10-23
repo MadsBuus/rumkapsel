@@ -823,7 +823,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for (i, m) in free.enumerated() where !m.isQA {
                 let longIdle = clock - m.freeSince > 20 * 60 && i >= 2
                 let restPlace: Place = night ? .quarters : .lounge
-                if longIdle || (i >= station.beds.count + station.couches.count) {
+                if longIdle || (i >= station.fixtures(in: "kind:quarters").count + station.couches.count) {
                     dismiss(m)
                 } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting

@@ -418,11 +418,13 @@ extension StationController {
                 monolith.name = "station:" + station.name
                 bag.add(monolith)
             }
-            statics.piece("beds:" + st, key: "\(at)|\(station.beds.map { "\($0.pos)\($0.level)" })") { bag in
-                for bed in station.beds {
-                    let b = Looks.current.bed(level: bed.level)
-                    b.position.x = station.offset.x + bed.pos.x
-                    b.position.z = station.offset.y + bed.pos.y
+            let beds = station.fixtures(in: "kind:quarters")
+            statics.piece("beds:" + st, key: "\(at)|\(beds)") { bag in
+                for bed in beds {
+                    let b = Looks.current.bed()
+                    b.position.x = station.offset.x + bed.at.x
+                    b.position.z = station.offset.y + bed.at.y
+                    b.eulerAngles.y = CGFloat(bed.yaw)
                     b.name = "room:\(station.name)|kind:quarters"
                     bag.add(b)
                 }

@@ -306,6 +306,10 @@ moves through it one way: in from the hallway at the back, out through the field
   wherever the fixture stands the body lands exactly there. A console's chair turns out to the minion,
   takes it, and swivels it in to the console; getting up runs the other way. The holo table takes three,
   standing an arm's length from its rim.
+- A bed is got into from the long side that faces into the dorm. The sleeper walks the aisle to that side,
+  turns its back on the bed, sits on the edge, and swings round into the bed's line as it lies down, head
+  on the pillow. Getting up runs the other way: it swings back out onto the edge and stands up beside the
+  bed, and only then walks. Nobody walks over a bed; the aisles between them stay open.
 - What a body wears, holds or is covered by is worked out again every frame from what is true of it now.
   A prop that belongs to a room is drawn for a body in that room, not for one still on its way there.
 - A visit lasts its whole time. A shower is two to three minutes of water over the shoulders, then a few

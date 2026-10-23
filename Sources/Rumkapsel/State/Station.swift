@@ -157,8 +157,7 @@ final class Station {
     private var doorwaysCache: [(Cell, Cell)]?
     private var doorCache: [String: Cell] = [:]
     private var couchCache: [SIMD2<Double>]?
-    private var bedCache: [(pos: SIMD2<Double>, cell: Cell, level: Int)]?
-    private func forgetFloorPlan() { blocksCache = nil; walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:]; couchCache = nil; bedCache = nil }
+    private func forgetFloorPlan() { blocksCache = nil; walkableCache = nil; yardAreaCache = nil; doorwaysCache = nil; doorCache = [:]; couchCache = nil }
     var offset = SIMD2<Double>(0, 0)
 
     let plan = Plan()
@@ -267,14 +266,6 @@ final class Station {
         return out
     }
     var monolithPosition: SIMD2<Double> { SIMD2(Double(plan.monolith.x), Double(plan.monolith.y)) }
-    var beds: [(pos: SIMD2<Double>, cell: Cell, level: Int)] {
-        if let b = bedCache { return b }
-        guard let q = rooms["kind:quarters"] else { return [] }
-        let door = doorCell(of: "kind:quarters")
-        let b = q.cells.filter { $0 != door }.sorted { ($0.y, $0.x) < ($1.y, $1.x) }.prefix(8).map { (SIMD2(Double($0.x), Double($0.y)), $0, 0) }
-        bedCache = b
-        return b
-    }
     var couches: [SIMD2<Double>] {
         if let c = couchCache { return c }
         guard let l = rooms["kind:lounge"] else { return [] }
@@ -690,7 +681,14 @@ final class Station {
         return route(from: from, to: to, avoiding: avoiding, edges: true) ?? []
     }
 
-    private func route(from: SIMD2<Double>, to: Cell, avoiding: Set<Cell>, edges: Bool) -> [SIMD2<Double>]? {
+    func path(from: SIMD2<Double>, to point: SIMD2<Double>, avoiding: Set<Cell> = []) -> [SIMD2<Double>] {
+        let goal = Station.sub(point), to = Station.cell(ofSub: goal)
+        let walk = route(from: from, to: to, avoiding: avoiding, edges: false, exactly: goal)
+            ?? route(from: from, to: to, avoiding: avoiding, edges: true, exactly: goal) ?? []
+        return walk.dropLast() + [point]
+    }
+
+    private func route(from: SIMD2<Double>, to: Cell, avoiding: Set<Cell>, edges: Bool, exactly: Cell? = nil) -> [SIMD2<Double>]? {
         let obstacles = self.obstacles.union(avoiding)
         guard walkable.contains(to) else { return [] }
         let start = Station.sub(from)
@@ -698,8 +696,9 @@ final class Station {
             let centre = Cell(x: c.x * Station.fine, y: c.y * Station.fine)
             return (-1...1).flatMap { dx in (-1...1).map { dy in Cell(x: centre.x + dx, y: centre.y + dy) } }
         }
+        let exact = exactly.flatMap { obstacles.contains($0) ? nil : $0 }
         var target = to
-        if obstacles.contains(Cell(x: to.x * Station.fine, y: to.y * Station.fine)) {
+        if exact == nil, obstacles.contains(Cell(x: to.x * Station.fine, y: to.y * Station.fine)) {
             let owner = room(at: to)?.key
             var seen: Set<Cell> = [to]; var ring = [to]
             search: while !ring.isEmpty {
@@ -715,7 +714,7 @@ final class Station {
         }
         let centre = Cell(x: target.x * Station.fine, y: target.y * Station.fine)
         let free = spots(in: target).filter { !obstacles.contains($0) }
-        let goals: Set<Cell> = !obstacles.contains(centre) ? [centre] : (free.isEmpty ? [centre] : Set(free))
+        let goals: Set<Cell> = exact.map { [$0] } ?? (!obstacles.contains(centre) ? [centre] : (free.isEmpty ? [centre] : Set(free)))
         if goals.contains(start) { return [] }
         var prev: [Cell: Cell] = [start: start]
         var queue = [start]

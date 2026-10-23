@@ -358,19 +358,9 @@ extension StationController {
             }
             let resting = m.path.isEmpty && m.state == .settled
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
-            var flatInBunk = false, onBunkEdge = false
-            if m.bed != nil, m.place == .quarters {
-                switch m.currentPose(at: clock) {
-                case .flat: flatInBunk = true
-                case .seated: onBunkEdge = m.beddingUntil > 0 || m.risingUntil > clock
-                default: break
-                }
-            }
             let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
             if m.sittingOn != nil, m.using != nil { m.smoothFacing = m.facing }
-            let wantFacing = flatInBunk ? 0
-                : onBunkEdge ? m.facing
-                : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
+            let wantFacing = m.bunk != nil ? m.facing : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))

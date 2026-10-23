@@ -373,6 +373,8 @@ extension Classic {
                     ray.geometry!.firstMaterial = MissionRoom.holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.35)
                     f.fixtures.append(at(ray, fixture.at + SIMD2(sin(a), cos(a)) * (r - 0.07), 0.24 + (lift + 0.1) / 2))
                 }
+            case .bed:
+                break
             }
             for k in fixture.kind.anchors.indices {
                 guard let seat = fixture.place(k), case .sit(let height) = seat.use else { continue }
@@ -426,25 +428,13 @@ extension Classic {
         return chair
     }
 
-    static func bed(level: Int, floorTop: Double) -> SCNNode {
-        if level == 0 {
-            let b = SCNNode(geometry: SCNBox(width: 0.34, height: Minion.bedSeat, length: 0.72, chamferRadius: 0.02))
-            b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))
-            b.position = v3(0, max(0.005, floorTop + 0.004) + Minion.bedSeat / 2, 0)
-            dress(b, top: Minion.bedSeat / 2)
-            return b
-        }
-        let slab = SCNNode(geometry: SCNBox(width: 0.36, height: 0.03, length: 0.74, chamferRadius: 0))
-        slab.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.08))
-        slab.position = v3(0, 0.34, 0)
-        for dx in [-0.16, 0.16] { for dz in [-0.35, 0.35] {
-            let post = SCNNode(geometry: SCNBox(width: 0.025, height: 0.34, length: 0.025, chamferRadius: 0))
-            post.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.22, 0.3)))
-            post.position = v3(dx, -0.17, dz)
-            slab.addChildNode(post)
-        } }
-        dress(slab, top: 0.015)
-        return slab
+    static func bed(floorTop: Double) -> SCNNode {
+        let size = FixtureKind.bed.size
+        let b = SCNNode(geometry: SCNBox(width: size.x, height: Seat.bed, length: size.y, chamferRadius: 0.02))
+        b.geometry!.firstMaterial = lit(NSColor(Colors.bed).lighter(0.1))
+        b.position = v3(0, max(0.005, floorTop + 0.004) + Seat.bed / 2, 0)
+        dress(b, top: Seat.bed / 2)
+        return b
     }
 
     private static func dress(_ mattress: SCNNode, top: Double) {

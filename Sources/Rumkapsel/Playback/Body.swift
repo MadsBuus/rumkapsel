@@ -63,8 +63,8 @@ class Body {
     static let seatReach = Seat.reach
     var wakeUntil = 0.0
     var risingUntil = 0.0
-    var beddingUntil = 0.0
-    var beddedDown = false
+    struct Bunk { let ref: FixtureRef; let since: Double; let height: Double; var until = Double.infinity; var sat = false; var flat = false }
+    var bunk: Bunk?
     static let riseSit = 0.55
     var wonderUntil = 0.0
     var blockedBy: String?
@@ -136,8 +136,7 @@ class Body {
 
     var lying: Bool {
         if onBench { return true }
-        return beddedDown && risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
-            && (activity == .sleeping || napping) && place == .quarters
+        return bunk?.flat ?? false
     }
 
     var onBench: Bool {

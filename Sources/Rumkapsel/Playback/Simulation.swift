@@ -302,6 +302,7 @@ final class Simulation<B: Body> {
         guard let station = fleet.stations[m.station] else { return }
         if case .room(let key) = place, !standing(station, key) { return send(m, to: .lounge) }
         if place == .lounge, m.place == .lounge, m.couchSeated, m.path.isEmpty { return }
+        if place == .quarters, m.place == .quarters, m.bunk != nil, m.risingUntil == 0, m.path.isEmpty { return }
         if place != .quarters {
             rouse(m)
             m.bed = nil; m.napping = false
@@ -309,7 +310,7 @@ final class Simulation<B: Body> {
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(bodies.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
-            m.bed = station.beds.indices.first { !used.contains($0) }
+            m.bed = station.fixtures(in: "kind:quarters").indices.first { !used.contains($0) }
             if m.bed == nil { place = .lounge }
         }
         if place != .lounge { m.couch = nil }
@@ -322,7 +323,11 @@ final class Simulation<B: Body> {
         }
         let cells = station.cells(of: place)
         let target: Cell
-        if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
+        var exactly: SIMD2<Double>?
+        if let b = m.bed, let ref = station.bedside(b), let bed = station.place(ref) {
+            exactly = bed.stand
+            target = Station.cell(ofSub: Station.sub(bed.stand))
+        }
         else if place == .lounge, let c = m.couch, c < station.couches.count, let lounge = station.rooms["kind:lounge"] {
             let spot = station.couches[c]
             target = lounge.cells.min { a, b in hypot(Double(a.x) - spot.x, Double(a.y) - spot.y) < hypot(Double(b.x) - spot.x, Double(b.y) - spot.y) } ?? lounge.cells[0]
@@ -337,7 +342,7 @@ final class Simulation<B: Body> {
         m.place = place
         start(m, .rest(place: place, home: m.home.key, office: station.rooms[m.home.key]?.name ?? m.home.name,
                        yours: !m.isCrew && !m.isPeer, asleep: m.activity == .sleeping))
-        m.path = route(m, to: target)
+        m.path = route(m, to: target, exactly: exactly)
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
         m.nextWanderAt = clock + Double.random(in: 1...3)
     }
@@ -350,9 +355,12 @@ final class Simulation<B: Body> {
             m.couchSince = nil
             if m.risingUntil == 0 { m.risingUntil = clock + B.riseSit + 0.3 }
         }
-        guard m.lying, m.risingUntil == 0 else { return }
-        m.risingUntil = clock + 1.1
-        m.beddedDown = false
+        guard var bunk = m.bunk, m.risingUntil == 0 else { return }
+        bunk.until = clock + min(clock - bunk.since, Seat.lieDown)
+        bunk.sat = true
+        bunk.flat = false
+        m.bunk = bunk
+        m.risingUntil = bunk.until
         m.napping = false
         m.bed = nil
     }
@@ -360,7 +368,7 @@ final class Simulation<B: Body> {
     func crowd(around m: B, round blocker: String? = nil) -> Set<Cell> {
         var out: Set<Cell> = []
         for o in bodies.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
-            if o.lying || (o.couch != nil && o.path.isEmpty) { continue }
+            if o.lying || o.bunk != nil || (o.couch != nil && o.path.isEmpty) { continue }
             let s = Station.sub(o.pos)
             if o.id == blocker { for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } } }
             else { out.insert(s) }
@@ -375,15 +383,16 @@ final class Simulation<B: Body> {
         return out
     }
 
-    func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
+    func route(_ m: B, to cell: Cell, round blocker: String? = nil, exactly point: SIMD2<Double>? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
         rouse(m)
-        var from = m.pos, back: [SIMD2<Double>] = []
-        if !station.walkable.contains(m.cell), let floor = station.nearestFloor(to: m.pos) {
+        var from = m.bunk.flatMap { station.place($0.ref)?.stand } ?? m.pos, back: [SIMD2<Double>] = []
+        if !station.walkable.contains(Cell(x: Int(from.x.rounded()), y: Int(from.y.rounded()))), let floor = station.nearestFloor(to: from) {
             from = SIMD2(Double(floor.x), Double(floor.y))
             back = [from]
-            if floor == cell { return back }
+            if floor == cell, point == nil { return back }
         }
+        if let point { return back + station.path(from: from, to: point, avoiding: crowd(around: m, round: blocker)) }
         let clear = station.path(from: from, to: cell, avoiding: crowd(around: m, round: blocker))
         return back + (clear.isEmpty ? station.path(from: from, to: cell) : clear)
     }
@@ -637,7 +646,7 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
-        if m.lying { m.napping = false; m.bed = nil; m.beddedDown = false }
+        rouse(m)
         post(.react(activity, place: place, for: minutes * 60, words: words), for: m, rank: .crew, at: m.cell, place: place)
     }
 
@@ -689,7 +698,7 @@ final class Simulation<B: Body> {
         if !m.path.isEmpty, clock >= m.wonderUntil {
             let others: [Body] = bodies.values.filter { o in
                 o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
-                    && !o.lying && !(o.couch != nil && o.path.isEmpty)
+                    && !o.lying && o.bunk == nil && !(o.couch != nil && o.path.isEmpty)
             }
             m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others)?.id
             return .walking
@@ -882,6 +891,7 @@ final class Simulation<B: Body> {
     }
 
     private func stepBody(_ m: B, station: Station, dt: Double) -> Stepped {
+        stepBunk(m, station: station)
         switch stepWalk(m, station: station, dt: dt) {
         case .waking: return .waking
         case .walking, .wondering: break
@@ -919,21 +929,26 @@ final class Simulation<B: Body> {
             m.couchSince = nil
             m.couchSeated = false
         }
-        if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
-            let spot = station.beds[b].pos
-            let aim = m.path.first ?? m.pos
-            let outward = SIMD2(aim.x >= spot.x ? 1.0 : -1.0, 0)
-            let stand = spot + outward * B.seatReach
-            if !m.beddedDown, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
-                let gap = stand - m.pos
-                if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
-                    m.beddingUntil = clock + 1.1 + Double.random(in: 0...0.8)
-                    m.facing = atan2(outward.x, outward.y)
-                }
-            }
-            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0; m.beddedDown = true }
-            let stretching = m.beddingUntil > 0 && m.beddingUntil - clock <= B.riseSit
-            m.pos += ((m.lying || stretching ? spot : stand) - m.pos) * min(1, dt * 4)
+    }
+
+    func stepBunk(_ m: B, station: Station) {
+        if var bunk = m.bunk {
+            guard let bed = station.place(bunk.ref) else { m.bunk = nil; return }
+            let s = bed.lying(clock - bunk.since, of: bunk.until - bunk.since)
+            m.pos = s.pos
+            m.facing = s.facing
+            bunk.sat = s.sat
+            bunk.flat = s.flat
+            m.bunk = clock >= bunk.until ? nil : bunk
+            return
+        }
+        guard m.path.isEmpty, m.isResting, !m.onJob, m.place == .quarters, m.state == .settled, m.risingUntil == 0,
+              let b = m.bed, let ref = station.bedside(b), let bed = station.place(ref), case .lie(let height) = bed.use else { return }
+        let gap = bed.stand - m.pos
+        if (gap.x * gap.x + gap.y * gap.y).squareRoot() > 0.05 {
+            m.path = route(m, to: Station.cell(ofSub: Station.sub(bed.stand)), exactly: bed.stand)
+        } else if m.activity == .sleeping || m.napping {
+            m.bunk = Body.Bunk(ref: ref, since: clock, height: height)
         }
     }
 }

@@ -76,24 +76,18 @@ final class Minion: Body {
     static let seat = 0.2
     static let seatedTorso = 0.62
     static let couchSeat = Seat.couch
-    static let bedSeat = 0.18
     var seatHeight: Double { sittingOn ?? (seatedOnBowl ? Minion.seat : Minion.couchSeat) }
 
     func currentPose(at clock: Double) -> Pose {
-        let onEdge = Pose.seated(height: Minion.bedSeat, at: SIMD2(0, 0))
         if onBench { return .flat(height: Minion.seat) }
-        if beddingUntil > clock {
-            return beddingUntil - clock > Minion.riseSit ? onEdge : .flat(height: Minion.bedSeat)
-        }
-        if lying { return .flat(height: Minion.bedSeat) }
+        if let bunk { return bunk.flat ? .flat(height: bunk.height) : bunk.sat ? .seated(height: bunk.height, at: SIMD2(0, 0)) : .standing }
         if risingUntil > clock {
-            return risingUntil - clock > Minion.riseSit ? onEdge : .standing
+            return risingUntil - clock > Minion.riseSit ? .seated(height: Minion.couchSeat, at: SIMD2(0, 0)) : .standing
         }
         if seated { return .seated(height: seatHeight, at: seatSpot) }
         return .standing
     }
 
-    static let bedEdge = 0.17
     override init(id: String, station: String, home: Home, cwd: String, toolCount: Int, isSubagent: Bool, start: Cell, crew: Bool = false) {
         let h = isSubagent ? 0.34 : 0.5
         let w = isSubagent ? 0.16 : 0.22
