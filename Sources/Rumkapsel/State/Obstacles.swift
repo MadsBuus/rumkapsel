@@ -47,8 +47,7 @@ extension Station {
                          Footprint(at: showerPole(bath: bath) - o, radius: 0.034), Footprint(at: towelRail(bath: bath) - o, radius: 0.096)]
                 + (kingdom ? [Footprint(at: showerNozzle(bath: bath) - o, radius: 0.208)] : []))
         }
-        if let galley { place(rooms["kind:galley"], galley.counter.map { Footprint(at: $0, radius: Galley.counterWidth / 2 * 0.8) }) }
-        for key in ["kind:mission"] {
+        for key in ["kind:mission", "kind:galley"] {
             let fixtures = self.fixtures(in: key)
             let seats = fixtures.flatMap { f in f.kind.anchors.indices.compactMap { f.place($0) }.filter { $0.use != .stand } }
             place(rooms[key], fixtures.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }

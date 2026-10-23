@@ -201,7 +201,7 @@ extension StationController {
 
     func tendKitchen(_ station: Station) {
         guard let k = kitchens[station.name] else { return }
-        let cook = minions.values.first { $0.station == station.name && $0.atCounter && $0.fare != nil }
+        let cook = minions.values.first { $0.station == station.name && $0.inPlace && $0.fare != nil }
         let p = cook.map { $0.actFor > 0 ? Timing.clamped((clock - $0.actStartedAt) / $0.actFor) : 0 } ?? 0
         let brewing = cook?.fare == .coffee, printing = cook?.fare == .bite
         let pouring = brewing && p > 0.12 && p < 0.78
@@ -366,7 +366,7 @@ extension StationController {
                 default: break
                 }
             }
-            let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
+            let onFixture = (m.bathing || m.exercising || m.seated || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
             if m.sittingOn != nil, m.using != nil { m.smoothFacing = m.facing }
             let wantFacing = flatInBunk ? 0
                 : onBunkEdge ? m.facing
@@ -463,7 +463,7 @@ extension StationController {
                     lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
                 }
             }
-            if m.fare != nil, m.atCounter {
+            if m.fare != nil, m.inPlace {
                 tilt = 0.1 + sin(t * 1.1) * 0.02; roll = sin(t * 0.7) * 0.03
             }
             if working && !atCone {

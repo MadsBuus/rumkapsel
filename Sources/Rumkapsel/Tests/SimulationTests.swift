@@ -122,22 +122,39 @@ enum SimulationTests {
             sim.hooks = SimHooks()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let galley = station.galley else { return expect(false, "a galley on the station") }
             expect(station.doorOutside(of: "kind:galley").map { station.room(at: $0)?.key } == "kind:lounge", "the galley opens into the lounge")
             expect(sim.visitGalley(m, station: station, fare: .coffee), "the galley was free")
             let other = body("b", sim: sim, station: station)
             expect(!sim.visitGalley(other, station: station, fare: .bite), "one at the counter at a time")
-            expect(step(sim, seconds: 30, until: { m.atCounter }), "reached the counter")
-            let reach = galley.machine(.coffee) - m.pos
-            expect(abs((reach.x * reach.x + reach.y * reach.y).squareRoot() - Hands.arm) < 0.03, "an arm's length from the machine: \(reach)")
-            expect(abs(atan2(sin(m.facing - galley.facing), cos(m.facing - galley.facing))) < 0.05, "facing the counter")
+            expect(step(sim, seconds: 30, until: { m.inPlace }), "reached the counter")
             let planned = m.actFor
             expect(Command.Fare.coffee.seconds.contains(planned), "a coffee takes \(planned) s")
             m.bathDue = sim.clock + 1
-            expect(step(sim, seconds: planned + 5, until: { m.fare == nil || !m.atCounter }), "done")
-            expect(!m.bathing && !m.atCounter && m.fetchSpot == nil, "a bath come due waits for the coffee")
+            expect(step(sim, seconds: planned + 5, until: { m.fare == nil || !m.inPlace }), "done")
+            expect(!m.bathing && !m.inPlace && m.fetchSpot == nil, "a bath come due waits for the coffee")
             expect(m.place == .lounge && m.mugUntil > sim.clock, "back to the lounge, mug in hand")
-            expect(sim.visitLog.first.map { $0.kind == "galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+            expect(sim.visitLog.first.map { $0.kind == "kind:galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+        }
+
+        test("a coffee and a bite: the body lands on its machine's anchor an arm's length out, facing it, and nobody else is offered the galley") {
+            for fare in Command.Fare.allCases {
+                let (sim, station, m) = fixture()
+                sim.send(m, to: .lounge)
+                _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+                expect(sim.visitGalley(m, station: station, fare: fare), "off for \(fare.words)")
+                guard let ref = m.using, let place = station.place(ref) else { return expect(false, "\(fare.words): an anchor in the galley") }
+                expect(station.fixtures(in: ref.room)[safe: ref.fixture]?.kind == fare.machine, "\(fare.words): at its own machine")
+                expect(step(sim, seconds: 30, until: { m.inPlace }), "\(fare.words): in place: \(m.words)")
+                let off = place.at + place.outward * Hands.arm - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.02 && !m.seated, "\(fare.words): on the anchor's spot: \(m.pos) against \(place.at + place.outward * Hands.arm)")
+                let reach = place.at - m.pos
+                expect(abs((reach.x * reach.x + reach.y * reach.y).squareRoot() - Hands.arm) < 0.02, "\(fare.words): an arm's length from the machine: \(reach)")
+                expect(abs(atan2(sin(m.facing - place.facing), cos(m.facing - place.facing))) < 0.05, "\(fare.words): facing it: \(m.facing) against \(place.facing)")
+                let other = body("b", sim: sim, station: station)
+                expect(!sim.freeAnchors(other, station: station, in: "kind:galley").contains(ref), "\(fare.words): nobody else is offered that anchor")
+                expect(Command.Fare.allCases.allSatisfy { !sim.visitGalley(other, station: station, fare: $0) } && sim.galleyFare(other, station: station) == nil,
+                       "\(fare.words): nor the galley at all while it is taken")
+            }
         }
 
         test("a probe researches in trips between the monolith and its office, and docks with its minion when done") {

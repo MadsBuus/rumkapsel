@@ -375,7 +375,7 @@ extension StationController {
             }
             if let galley = station.galley, let room = station.rooms["kind:galley"] {
                 roomPiece(room, extra: "\(galley.middle)|\(galley.back)", drop: { [weak self] in self?.kitchens[st] = nil }) { bag in
-                    let f = Looks.current.furnishGalley(galley, in: station)
+                    let f = Looks.current.furnishGalley(room, in: station)
                     for n in f.props { n.name = "room:" + self.roomKey(station, room); bag.add(n) }
                     for n in f.fixtures { n.name = "gym:" + self.roomKey(station, room); bag.add(n) }
                     self.kitchens[st] = f.kitchen

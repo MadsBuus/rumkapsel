@@ -156,8 +156,7 @@ class Body {
     var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
     var choring: Bool { if case .chore = current?.kind { return true }; return false }
     var workout: Command.Workout? { if case .exercise(let k, _, _) = current?.kind { return k }; return nil }
-    var fare: Command.Fare? { if case .galley(let f, _, _) = current?.kind { return f }; return nil }
-    var atCounter = false
+    var fare: Command.Fare? { if case .use(_, let kind, _, _) = current?.kind { return Command.Fare.allCases.first { $0.machine == kind } }; return nil }
     var mugUntil = 0.0
     var tripHome = false
     var tripSince = 0.0
@@ -179,7 +178,6 @@ class Body {
         switch c.kind {
         case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
         case .exercise(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind.doing
-        case .galley(let fare, _, _) where phaseKind == .act && path.isEmpty: return fare.doing
         case .use(_, let kind, _, _) where inPlace: return kind.doing
         case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
         default: return c.words

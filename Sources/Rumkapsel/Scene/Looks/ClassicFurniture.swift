@@ -24,7 +24,7 @@ struct Kitchen {
     var steam: [SCNNode]
     static let mealIn = SCNVector3(0, 0.05, -0.01), mealOut = SCNVector3(0, 0.012, 0.13)
 
-    static let mugHeight = 0.08
+    static let mugHeight = 0.08, counterTop = 0.26
 
     static func mug() -> SCNNode {
         let m = SCNNode(geometry: SCNBox(width: 0.07, height: mugHeight, length: 0.07, chamferRadius: 0.007))
@@ -262,12 +262,12 @@ extension Classic {
         return f
     }
 
-    static func galley(_ galley: Galley, in station: Station) -> Furnishing {
+    static func galley(_ room: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
-        let yaw = atan2(-galley.back.x, -galley.back.y)
-        func place(_ n: SCNNode, _ at: SIMD2<Double>, _ y: Double) {
+        func place(_ n: SCNNode, _ fixture: PlacedFixture, _ y: Double, at spot: SIMD2<Double>? = nil) {
+            let at = spot ?? fixture.at
             n.position = v3(station.offset.x + at.x, y, station.offset.y + at.y)
-            n.eulerAngles.y = CGFloat(yaw)
+            n.eulerAngles.y = CGFloat(fixture.yaw)
         }
         func box(_ w: Double, _ h: Double, _ d: Double, _ m: SCNMaterial, _ at: SCNVector3, chamfer: Double = 0) -> SCNNode {
             let n = SCNNode(geometry: SCNBox(width: w, height: h, length: d, chamferRadius: chamfer))
@@ -275,14 +275,18 @@ extension Classic {
             n.position = at
             return n
         }
-        let top = Galley.counterHeight
+        let top = Kitchen.counterTop
         let steel = lit(NSColor(rgb: (0.7, 0.72, 0.78))), dark = lit(NSColor(rgb: (0.2, 0.21, 0.25)))
-        for at in galley.counter {
-            let unit = box(Galley.counterWidth, top, Galley.counterDepth, lit(NSColor(Colors.furnitureDim)), SCNVector3Zero)
-            unit.addChildNode(box(Galley.counterWidth, 0.024, Galley.counterDepth + 0.02, lit(NSColor(Colors.furnitureLight)), v3(0, top / 2 + 0.012, 0.01)))
-            place(unit, at, top / 2)
+        let fixtures = station.fixtures(in: room.key)
+        let counters = fixtures.filter { $0.kind == .counter }
+        for counter in counters {
+            let size = counter.kind.size
+            let unit = box(size.x, top, size.y, lit(NSColor(Colors.furnitureDim)), SCNVector3Zero)
+            unit.addChildNode(box(size.x, 0.024, size.y + 0.02, lit(NSColor(Colors.furnitureLight)), v3(0, top / 2 + 0.012, 0.01)))
+            place(unit, counter, top / 2)
             f.props.append(unit)
         }
+        guard let coffeeAt = fixtures.first(where: { $0.kind == .coffeeMachine }), let printerAt = fixtures.first(where: { $0.kind == .foodPrinter }) else { return f }
 
         let machine = SCNNode()
         machine.addChildNode(box(0.17, 0.2, 0.14, steel, v3(0, 0.1, -0.02), chamfer: 0.01))
@@ -303,7 +307,7 @@ extension Classic {
         let stream = box(0.012, 0.04, 0.012, flat(NSColor(rgb: (0.36, 0.22, 0.12))), v3(0, 0.112, 0.085))
         stream.isHidden = true
         machine.addChildNode(stream)
-        place(machine, galley.machine(.coffee), top + 0.024)
+        place(machine, coffeeAt, top + 0.024)
         f.fixtures.append(machine)
 
         let printer = SCNNode()
@@ -317,7 +321,7 @@ extension Classic {
         meal.position = Kitchen.mealIn
         meal.isHidden = true
         printer.addChildNode(meal)
-        place(printer, galley.machine(.bite), top + 0.024)
+        place(printer, printerAt, top + 0.024)
         f.fixtures.append(printer)
 
         let rack = SCNNode()
@@ -327,7 +331,8 @@ extension Classic {
             mug.eulerAngles.y = CGFloat(side * 0.4)
             rack.addChildNode(mug)
         }
-        place(rack, galley.middle + galley.back * 0.43, top + 0.024)
+        let middle = counters[counters.count / 2]
+        place(rack, middle, top + 0.024, at: middle.point(SIMD2(0, -0.06)))
         f.fixtures.append(rack)
 
         f.kitchen = Kitchen(lamp: lamp, cup: cup, stream: stream, window: window, meal: meal, head: head, steam: steam)
@@ -350,6 +355,8 @@ extension Classic {
                 break
             case .console:
                 f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
+            case .counter, .coffeeMachine, .foodPrinter:
+                break
             case .holoTable:
                 let r = fixture.kind.size.x / 2
                 let table = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.03, height: 0.22), 32))

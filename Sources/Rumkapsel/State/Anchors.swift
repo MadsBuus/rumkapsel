@@ -9,13 +9,16 @@ struct Anchor: Equatable {
 }
 
 enum FixtureKind: String {
-    case console, holoTable, couch
+    case console, holoTable, couch, counter, coffeeMachine, foodPrinter
 
     var size: SIMD2<Double> {
         switch self {
         case .console: return SIMD2(0.86, 0.26)
         case .holoTable: return SIMD2(1.06, 1.06)
         case .couch: return SIMD2(0.8, 0.3)
+        case .counter: return SIMD2(0.32, 0.26)
+        case .coffeeMachine: return SIMD2(0.17, 0.22)
+        case .foodPrinter: return SIMD2(0.22, 0.22)
         }
     }
 
@@ -29,6 +32,10 @@ enum FixtureKind: String {
             return [0.0, 0.85, -0.85].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2, use: .stand) }
         case .couch:
             return [Anchor(at: SIMD2(0, Seat.reach), use: .sit(height: Seat.couch), faces: .away)]
+        case .counter:
+            return []
+        case .coffeeMachine, .foodPrinter:
+            return [Anchor(at: SIMD2(0, 0), use: .stand)]
         }
     }
 
@@ -37,6 +44,9 @@ enum FixtureKind: String {
         case .console: return "watching the boards in \(Words.current.theMission)"
         case .holoTable: return "studying the holo table"
         case .couch: return "resting on \(Words.current.theCouch)"
+        case .counter: return "leaning on the counter"
+        case .coffeeMachine: return "waiting on \(Words.current.coffee)"
+        case .foodPrinter: return "waiting on \(Words.current.bite)"
         }
     }
 
@@ -45,6 +55,9 @@ enum FixtureKind: String {
         case .console: return "sit at a console"
         case .holoTable: return "watch the holo table"
         case .couch: return "rest on \(Words.current.theCouch)"
+        case .counter: return "lean on the counter"
+        case .coffeeMachine: return "get \(Words.current.coffee)"
+        case .foodPrinter: return "get \(Words.current.bite)"
         }
     }
 }
@@ -127,6 +140,10 @@ enum RoomLayout {
                     Placed(kind: .console, at: SIMD2(4.05, 0.35), yaw: 0),
                     Placed(kind: .console, at: SIMD2(4.78, 1.6), yaw: -.pi / 2),
                     Placed(kind: .holoTable, at: SIMD2(2.5, 1.5), yaw: 0)]
+        case "kind:galley":
+            let counter = FixtureKind.counter.size
+            return [-1.0, 0, 1].map { Placed(kind: .counter, at: SIMD2($0 * counter.x, counter.y / 2 - 0.5), yaw: 0) }
+                + [Placed(kind: .coffeeMachine, at: SIMD2(0.2, -Hands.arm), yaw: 0), Placed(kind: .foodPrinter, at: SIMD2(-0.2, -Hands.arm), yaw: 0)]
         default:
             return []
         }
@@ -145,6 +162,10 @@ extension Station {
             let xs = lounge.cells.map(\.x)
             let west = Double(xs.min()!) - 0.1, east = Double(xs.max()!) + 0.1
             return couches.map { c in PlacedFixture(kind: .couch, at: c, yaw: c.x < west ? .pi / 2 : c.x > east ? -.pi / 2 : .pi) }
+        }
+        if key == "kind:galley", let galley {
+            let yaw = atan2(-galley.back.x, -galley.back.y), across = SIMD2(-galley.back.y, galley.back.x)
+            return RoomLayout.of(key).map { PlacedFixture(kind: $0.kind, at: galley.middle + across * $0.at.x - galley.back * $0.at.y, yaw: yaw + $0.yaw) }
         }
         if key == "kind:mission", !hasPad { return [] }
         return RoomLayout.of(key).map { PlacedFixture(kind: $0.kind, at: origin + $0.at, yaw: $0.yaw) }

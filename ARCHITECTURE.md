@@ -37,7 +37,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `BakedPlans.swift` | the plans baked by `floor/bake.py`, per theme |
 | `Hall.swift` | the yard's geometry: walkway, aisles, the three zones' grids, decon, the pad, its slots and field |
 | `Hull.swift` | the hull round the station |
-| `Fixtures.swift` | where the bath's, lounge's, gym's and galley's fixtures stand; `Galley`: its counter, where a minion stands at it |
+| `Fixtures.swift` | where the bath's, lounge's and gym's fixtures stand; `Galley`: its tile, which way it opens, the printer's timing |
 | `OfficeMarks.swift` | an office's package cell and cube pile |
 | `Obstacles.swift` | footprints, and what a walk goes round |
 | `Theme.swift` | `Theme`, `Vocabulary`, `Words` |

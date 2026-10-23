@@ -203,10 +203,9 @@ final class Simulation<B: Body> {
         m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         m.fixture = nil
-        m.atCounter = false
         switch old.kind {
-        case .bath(_, let back, _), .exercise(_, let back, _), .galley(_, let back, _):
-            if m.place == .bath || m.place == .gym || m.place == .galley { m.place = back }
+        case .bath(_, let back, _), .exercise(_, let back, _):
+            if m.place == .bath || m.place == .gym { m.place = back }
         case .use(let ref, _, let back, _):
             if m.place == .room(ref.room) { m.place = back }
         default: break
@@ -549,22 +548,31 @@ final class Simulation<B: Body> {
     }
 
     func galleyFare(_ m: B, station: Station) -> Command.Fare? {
-        guard station.galley != nil, !isNight(station), !m.isCrew,
-              !bodies.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.fare != nil }) else { return nil }
+        guard !isNight(station), !m.isCrew, galleyFree(m, station: station) else { return nil }
         let hour = Calendar.current.component(.hour, from: now)
         return (11..<14).contains(hour) || (18..<20).contains(hour) ? .bite : .coffee
     }
 
+    func galleyFree(_ m: B, station: Station) -> Bool {
+        let all = station.anchors(in: "kind:galley")
+        return !all.isEmpty && freeAnchors(m, station: station, in: "kind:galley").count == all.count
+    }
+
     @discardableResult
     func visitGalley(_ m: B, station: Station, fare: Command.Fare) -> Bool {
-        guard let galley = station.galley,
-              !bodies.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.fare != nil }) else { return false }
-        let back = m.place == .lounge || m.place == .room(m.home.key) ? m.place : restPlace(m)
-        guard start(m, .galley(fare, back: back, seconds: Double.random(in: fare.seconds)), announce: true) else { return false }
-        m.couch = nil; m.bed = nil; m.napping = false
-        m.place = .galley
-        m.path = route(m, to: galley.cell)
+        guard galleyFree(m, station: station),
+              let ref = freeAnchors(m, station: station, in: "kind:galley").first(where: { station.fixtures(in: $0.room)[safe: $0.fixture]?.kind == fare.machine }) else { return false }
+        let back: Place = fare == .bite ? .lounge : m.place == .lounge || m.place == .room(m.home.key) ? m.place : restPlace(m)
+        guard use(m, ref, station: station, seconds: Double.random(in: fare.seconds), back: back) else { return false }
+        m.bed = nil; m.napping = false
         return true
+    }
+
+    func served(_ m: B, _ fare: Command.Fare) {
+        switch fare {
+        case .coffee: m.mugUntil = clock + Double.random(in: 150...360)
+        case .bite: m.mealFor = Double.random(in: 70...110); m.mealUntil = clock + m.mealFor
+        }
     }
 
     @discardableResult
@@ -705,7 +713,7 @@ final class Simulation<B: Body> {
         }
         if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
             switch c.kind {
-            case .goTo, .bath, .exercise, .galley, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
+            case .goTo, .bath, .exercise, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
                 if case .work = c.kind { ownOrders[c.id] = nil }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
@@ -815,29 +823,6 @@ final class Simulation<B: Body> {
                 }
             }
             if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }
-            if m.place == .galley, let fare = m.fare, let galley = station.galley {
-                if settled, m.phaseKind == .act {
-                    if !m.atCounter {
-                        guard atArmsLength(m, of: galley.machine(fare), from: -galley.back, square: true, dt: dt) else { return .spent }
-                        m.atCounter = true
-                        m.actStartedAt = clock
-                        m.phaseUntil = clock + m.actFor
-                    }
-                    m.facing = galley.facing
-                }
-                if m.atCounter, clock >= m.phaseUntil {
-                    var back = restPlace(m)
-                    if !m.busy, case .galley(_, let where_, _) = m.current?.kind { back = fare == .bite ? .lounge : where_ }
-                    switch fare {
-                    case .coffee: m.mugUntil = clock + Double.random(in: 150...360)
-                    case .bite: m.mealFor = Double.random(in: 70...110); m.mealUntil = clock + m.mealFor
-                    }
-                    visitDone(m, "galley")
-                    m.atCounter = false
-                    finish(m, to: back)
-                    return .spent
-                }
-            }
             if m.isSubagent, settled { makeRoom(m, station: station); tripOn(m, station: station) }
             if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                 if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
