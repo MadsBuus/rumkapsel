@@ -60,7 +60,7 @@ enum MissionRoom {
         return n
     }
 
-    static func grain(count: Int = 900, radius: Double = 0.5, height: Double = 0.36) -> SCNNode {
+    static func grain(count: Int = 300, radius: Double = 0.5, height: Double = 0.36) -> SCNNode {
         var rng = SystemRandomNumberGenerator()
         var verts: [SCNVector3] = [], keys: [CGPoint] = []
         let apothem = radius * cos(.pi / 6)
@@ -98,7 +98,7 @@ enum MissionRoom {
                 """,
             .fragment: """
                 #pragma body
-                _output.color = float4(_output.color.rgb * in.fade * 0.85, in.fade);
+                _output.color = float4(_output.color.rgb * in.fade * 0.6, in.fade * 0.7);
                 """]
         g.firstMaterial = m
         let n = SCNNode(geometry: g)

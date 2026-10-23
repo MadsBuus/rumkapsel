@@ -23,10 +23,10 @@ struct HoloSky: Equatable {
 
     static func orbit(_ stage: Stage) -> Double {
         switch stage {
-        case .inbound, .working, .ready: return 0.06
-        case .stored: return 0.075
-        case .qa: return 0.09
-        case .cleared, .shipped: return 0.105
+        case .inbound, .working, .ready: return 0.075
+        case .stored: return 0.092
+        case .qa: return 0.109
+        case .cleared, .shipped: return 0.126
         }
     }
 }
@@ -53,7 +53,7 @@ final class HoloView {
     var moons: [Int: MoonNode] = [:]
     var blips: [Blip] = []
 
-    static let ring = 0.3, low = 0.06, high = 0.3, planet = 0.042, moon = 0.012, turn = 240.0, blip = 0.7
+    static let ring = 0.32, low = 0.07, high = 0.17, planet = 0.052, moon = 0.014, turn = 240.0, blip = 0.7
 
     init(root: SCNNode) { self.root = root }
 
@@ -62,15 +62,14 @@ final class HoloView {
         m.lightingModel = .constant
         m.blendMode = .alpha
         m.transparency = 0.99
-        m.writesToDepthBuffer = false
         m.diffuse.contents = NSColor.black
         m.shaderModifiers = [.fragment: """
             #pragma arguments
             float3 tint;
             #pragma body
             float rim = 1.0 - saturate(dot(normalize(_surface.normal), normalize(_surface.view)));
-            float a = 0.78 + 0.22 * pow(rim, 1.4);
-            _output.color = float4(saturate(tint * (0.75 + 0.55 * rim)) * a, a);
+            float band = 0.82 + 0.18 * step(0.5, fract(_surface.position.y * 90.0 - scn_frame.time * 0.8));
+            _output.color = float4(saturate(tint * (0.8 + 0.6 * pow(rim, 1.4)) * band), 1.0);
             """]
         let c = color.usingColorSpace(.deviceRGB) ?? color
         m.setValue(SCNVector3(c.redComponent, c.greenComponent, c.blueComponent), forKey: "tint")
@@ -93,11 +92,9 @@ final class HoloView {
     func moonAt(_ m: MoonNode, clock: Double) -> SIMD3<Double> {
         let p = planetAt(m.moon.repo, clock: clock)
         let phase = Double(m.moon.id % 97) / 97 * .pi * 2
-        let tilt = (Double(m.moon.id % 7) - 3) / 3 * 0.7
         let a = phase + clock * 0.9 * (0.05 / max(0.03, m.radius))
         let r = m.radius * scale * (1 - (m.falling ?? 0))
-        let x = sin(a) * r, z = cos(a) * r
-        return p + SIMD3(x, z * sin(tilt), z * cos(tilt))
+        return p + SIMD3(sin(a) * r, 0, cos(a) * r)
     }
 
     func show(_ sky: HoloSky, clock: Double) {
@@ -112,6 +109,18 @@ final class HoloView {
         for (repo, n) in planets where !sky.planets.contains(where: { $0.repo == repo }) {
             n.removeFromParentNode()
             planets[repo] = nil
+        }
+        for p in sky.planets {
+            guard let planet = planets[p.repo] else { continue }
+            let stages = Set(sky.moons.filter { $0.repo == p.repo }.map { HoloSky.orbit($0.stage) })
+            guard stages != Set((was?.moons ?? []).filter { $0.repo == p.repo }.map { HoloSky.orbit($0.stage) }) || planet.childNodes.isEmpty else { continue }
+            planet.childNodes.forEach { $0.removeFromParentNode() }
+            for r in stages.sorted() {
+                let orbit = SCNNode(geometry: SCNTorus(ringRadius: r, pipeRadius: 0.0012))
+                (orbit.geometry as! SCNTorus).ringSegmentCount = 64
+                orbit.geometry!.firstMaterial = MissionRoom.holo(NSColor(p.color).lighter(0.3), 0.4)
+                planet.addChildNode(orbit)
+            }
         }
         for m in sky.moons {
             let color = NSColor(sky.planets.first { $0.repo == m.repo }?.color ?? RGB(r: 0.4, g: 0.9, b: 1))
