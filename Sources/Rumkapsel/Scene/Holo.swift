@@ -23,10 +23,10 @@ struct HoloSky: Equatable {
 
     static func orbit(_ stage: Stage) -> Double {
         switch stage {
-        case .inbound, .working, .ready: return 0.075
-        case .stored: return 0.092
-        case .qa: return 0.109
-        case .cleared, .shipped: return 0.126
+        case .inbound, .working, .ready: return 0.055
+        case .stored: return 0.067
+        case .qa: return 0.079
+        case .cleared, .shipped: return 0.091
         }
     }
 }
@@ -53,7 +53,7 @@ final class HoloView {
     var moons: [Int: MoonNode] = [:]
     var blips: [Blip] = []
 
-    static let ring = 0.32, low = 0.07, high = 0.17, planet = 0.052, moon = 0.014, turn = 240.0, blip = 0.7
+    static let centre = 0.13, inner = 0.13, outer = 0.42, reach = 0.49, speed = 0.07, planet = 0.042, moon = 0.012, blip = 0.7
 
     init(root: SCNNode) { self.root = root }
 
@@ -76,23 +76,53 @@ final class HoloView {
         return m
     }
 
+    struct Orbit { let a: Double, e: Double, tilt: Double, node: Double, phase: Double }
+
+    var orbitLines: SCNNode?
     var count: Int { max(1, shown?.planets.count ?? 1) }
     var scale: Double { min(1, 6 / Double(count)).squareRoot() }
 
     func slot(_ repo: String) -> Int { shown?.planets.firstIndex { $0.repo == repo } ?? 0 }
 
-    func planetAt(_ repo: String, clock: Double) -> SIMD3<Double> {
+    func orbit(_ repo: String) -> Orbit {
         let k = Double(slot(repo)), n = Double(count)
-        let a = k / n * .pi * 2 + clock / Self.turn * .pi * 2
-        let r = count == 1 ? 0 : Self.ring
-        let h = count == 1 ? (Self.low + Self.high) / 2 : Self.low + k / (n - 1) * (Self.high - Self.low)
-        return SIMD3(sin(a) * r, h + sin(clock * 0.6 + k) * 0.006, cos(a) * r)
+        let s = Double(Planets.seed(repo) % 1000) / 1000
+        let e = 0.04 + 0.08 * s
+        let a = min(count == 1 ? (Self.inner + Self.outer) / 2 : Self.inner + k / (n - 1) * (Self.outer - Self.inner), Self.reach / (1 + e))
+        return Orbit(a: a, e: e, tilt: (s - 0.5) * 0.45, node: s * .pi * 6, phase: k * 2.39996)
+    }
+
+    func along(_ o: Orbit, _ angle: Double) -> SIMD3<Double> {
+        let b = o.a * (1 - o.e * o.e).squareRoot()
+        let x = o.a * (cos(angle) - o.e), z = b * sin(angle)
+        let y = z * sin(o.tilt), zt = z * cos(o.tilt)
+        return SIMD3(x * cos(o.node) + zt * sin(o.node), Self.centre + y, -x * sin(o.node) + zt * cos(o.node))
+    }
+
+    func planetAt(_ repo: String, clock: Double) -> SIMD3<Double> {
+        let o = orbit(repo)
+        return along(o, o.phase + clock * Self.speed * pow(Self.inner / o.a, 1.5))
+    }
+
+    private func drawOrbits() {
+        orbitLines?.removeFromParentNode()
+        let n = SCNNode()
+        for p in shown?.planets ?? [] {
+            let o = orbit(p.repo)
+            let points = (0..<96).map { k -> SCNVector3 in let q = along(o, Double(k) / 96 * .pi * 2); return SCNVector3(q.x, q.y, q.z) }
+            let idx = (0..<96).flatMap { [Int32($0), Int32(($0 + 1) % 96)] }
+            let g = SCNGeometry(sources: [SCNGeometrySource(vertices: points)], elements: [SCNGeometryElement(indices: idx, primitiveType: .line)])
+            g.firstMaterial = MissionRoom.holo(NSColor(p.color).lighter(0.3), 0.14)
+            n.addChildNode(SCNNode(geometry: g))
+        }
+        root.addChildNode(n)
+        orbitLines = n
     }
 
     func moonAt(_ m: MoonNode, clock: Double) -> SIMD3<Double> {
         let p = planetAt(m.moon.repo, clock: clock)
         let phase = Double(m.moon.id % 97) / 97 * .pi * 2
-        let a = phase + clock * 0.9 * (0.05 / max(0.03, m.radius))
+        let a = phase + clock * 0.22 * (0.05 / max(0.03, m.radius))
         let r = m.radius * scale * (1 - (m.falling ?? 0))
         return p + SIMD3(sin(a) * r, 0, cos(a) * r)
     }
@@ -110,18 +140,7 @@ final class HoloView {
             n.removeFromParentNode()
             planets[repo] = nil
         }
-        for p in sky.planets {
-            guard let planet = planets[p.repo] else { continue }
-            let stages = Set(sky.moons.filter { $0.repo == p.repo }.map { HoloSky.orbit($0.stage) })
-            guard stages != Set((was?.moons ?? []).filter { $0.repo == p.repo }.map { HoloSky.orbit($0.stage) }) || planet.childNodes.isEmpty else { continue }
-            planet.childNodes.forEach { $0.removeFromParentNode() }
-            for r in stages.sorted() {
-                let orbit = SCNNode(geometry: SCNTorus(ringRadius: r, pipeRadius: 0.0012))
-                (orbit.geometry as! SCNTorus).ringSegmentCount = 64
-                orbit.geometry!.firstMaterial = MissionRoom.holo(NSColor(p.color).lighter(0.3), 0.4)
-                planet.addChildNode(orbit)
-            }
-        }
+        if was?.planets != sky.planets || orbitLines == nil { drawOrbits() }
         for m in sky.moons {
             let color = NSColor(sky.planets.first { $0.repo == m.repo }?.color ?? RGB(r: 0.4, g: 0.9, b: 1))
             if let shownMoon = moons[m.id] {

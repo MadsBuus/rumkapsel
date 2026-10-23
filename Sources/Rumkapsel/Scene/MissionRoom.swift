@@ -52,10 +52,13 @@ enum MissionRoom {
 
     static func hologram() -> SCNNode {
         let n = SCNNode()
-        let station = SCNNode(geometry: faceted(SCNCylinder(radius: 0.05, height: 0.025), 6))
-        station.geometry!.firstMaterial = holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.9)
-        station.position = v3(0, HoloView.low / 2, 0)
-        n.addChildNode(station)
+        let sun = SCNNode(geometry: SCNSphere(radius: 0.045))
+        sun.geometry!.firstMaterial = holo(NSColor(rgb: (1.0, 0.92, 0.7)), 1)
+        let halo = SCNNode(geometry: SCNSphere(radius: 0.075))
+        halo.geometry!.firstMaterial = holo(NSColor(rgb: (1.0, 0.8, 0.45)), 0.25)
+        sun.addChildNode(halo)
+        sun.position = v3(0, HoloView.centre, 0)
+        n.addChildNode(sun)
         n.addChildNode(grain())
         return n
     }
