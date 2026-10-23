@@ -52,8 +52,10 @@ class Body {
     var sittingOn: Double? { inPlace ? settledOn?.height : nil }
 
     var onCouch: Bool {
-        !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil
+        !onJob && path.isEmpty && state == .settled && isResting && place == .lounge && couch != nil && couchSeated
     }
+    var couchSince: Double?
+    var couchSeated = false
 
     var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     var drying = false
@@ -95,6 +97,7 @@ class Body {
     var pos: SIMD2<Double>
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
+    var watchCheckAt = 0.0
     var nextBathAt = 0.0
     var nextWorkoutAt = 0.0
     var actFor = 0.0

@@ -154,6 +154,12 @@ extension StationController {
         feedsBusy = true
         let lit = seen.flatMap { name, s in s.feeds.map { f -> MissionScreens.Feed in
             var f = f
+            if f.name == "The pad", let up = flights.last(where: { $0.mission.station == name && $0.mission.ended.map { self.clock - $0.at < 20 } ?? true }) {
+                let t = max(0, Int(clock - up.mission.tZero))
+                return MissionScreens.Feed(name: f.name, camera: up.camera, material: f.material,
+                                           caption: "\(up.mission.repo) · T+" + String(format: "%02d:%02d", t / 60, t % 60) + " · " + up.mission.phase(at: clock),
+                                           home: f.home)
+            }
             if f.name == "The pad", let hold = feedHolds[name], clock < hold.until {
                 f.camera.position = v3(hold.at.x + 1.3, hold.at.y + 1.1, hold.at.z + 1.6)
                 f.camera.look(at: v3(hold.at.x, hold.at.y + 0.7, hold.at.z))

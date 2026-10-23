@@ -75,7 +75,6 @@ extension Classic {
     static func lounge(_ lounge: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         let spots = station.loungeSpots(lounge: lounge)
-        let cx = spots.table.x - station.offset.x
         let table = SCNNode(geometry: SCNBox(width: 0.9, height: 0.03, length: 0.4, chamferRadius: 0))
         table.geometry!.firstMaterial = lit(NSColor(Colors.furniture))
         table.position = v3(spots.table.x, 0.2, spots.table.y)
@@ -91,15 +90,15 @@ extension Classic {
         magazine.eulerAngles.y = 0.3
         table.addChildNode(magazine)
         f.props.append(table)
-        let lxs = lounge.cells.map(\.x)
-        for c in station.couches {
-            let along = c.x < Double(lxs.min()!) - 0.1 || c.x > Double(lxs.max()!) + 0.1
-            let couch = SCNNode(geometry: SCNBox(width: along ? 0.3 : 0.8, height: Minion.couchSeat, length: along ? 0.8 : 0.3, chamferRadius: 0.02))
+        for fixture in station.fixtures(in: lounge.key) where fixture.kind == .couch {
+            let size = fixture.kind.size
+            let couch = SCNNode(geometry: SCNBox(width: size.x, height: Seat.couch, length: size.y, chamferRadius: 0.02))
             couch.geometry!.firstMaterial = lit(NSColor(Colors.furnitureLight))
-            couch.position = v3(station.offset.x + c.x, Minion.couchSeat / 2, station.offset.y + c.y)
-            let back = SCNNode(geometry: SCNBox(width: along ? 0.08 : 0.8, height: 0.22, length: along ? 0.8 : 0.08, chamferRadius: 0.02))
+            couch.position = v3(station.offset.x + fixture.at.x, Seat.couch / 2, station.offset.y + fixture.at.y)
+            couch.eulerAngles.y = CGFloat(fixture.yaw)
+            let back = SCNNode(geometry: SCNBox(width: size.x, height: 0.22, length: 0.08, chamferRadius: 0.02))
             back.geometry!.firstMaterial = couch.geometry!.firstMaterial
-            back.position = v3(along ? (c.x < cx ? -0.11 : 0.11) : 0, 0.16, along ? 0 : 0.11)
+            back.position = v3(0, 0.16, -0.11)
             couch.addChildNode(back)
             f.props.append(couch)
         }
@@ -347,6 +346,8 @@ extension Classic {
         }
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
+            case .couch:
+                break
             case .console:
                 f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
             case .holoTable:

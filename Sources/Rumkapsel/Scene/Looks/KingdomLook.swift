@@ -657,19 +657,17 @@ struct KingdomLook: Look {
     func furnishLounge(_ lounge: Room, in station: Station) -> Furnishing {
         var f = Furnishing()
         let o = station.offset
-        let xs = lounge.cells.map(\.x)
         let spots = station.loungeSpots(lounge: lounge)
         if let fire = Kit.node("campfire-pit", from: .survival) {
             fire.scale = SCNVector3(1.8, 1.8, 1.8)
             fire.position = v3(spots.table.x, 0, spots.table.y)
             f.props.append(fire)
         }
-        for c in station.couches {
-            let along = c.x < Double(xs.min()!) - 0.1 || c.x > Double(xs.max()!) + 0.1
+        for fixture in station.fixtures(in: lounge.key) where fixture.kind == .couch {
             guard let log = Kit.node("log", from: .nature, tint: Self.forestTint) else { continue }
             log.scale = SCNVector3(0.9, 0.9, 0.9)
-            log.eulerAngles.y = along ? 0 : .pi / 2
-            log.position = v3(o.x + c.x, 0, o.y + c.y)
+            log.eulerAngles.y = CGFloat(fixture.yaw - .pi / 2)
+            log.position = v3(o.x + fixture.at.x, 0, o.y + fixture.at.y)
             f.props.append(log)
         }
         for at in station.loungeBarrels(lounge: lounge) {

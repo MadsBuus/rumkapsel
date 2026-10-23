@@ -988,14 +988,15 @@ final class Fleet {
         return (lo, hi)
     }
 
-    private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int]; var palette: Int? }
+    private struct Saved: Codable { var stations: [String: Station.Saved]; var repoColors: [String: Int]; var palette: Int?; var works: WorkBook.Saved? }
+    weak var works: WorkBook?
     static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
     private var loaded = false
 
     func save() {
         guard persists, loaded else { return }
-        let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors, palette: Fleet.paletteVersion)
+        let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors, palette: Fleet.paletteVersion, works: works?.saved)
         guard let json = try? JSONEncoder().encode(s) else { return }
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
@@ -1010,6 +1011,7 @@ final class Fleet {
             if let why = s.unreadable { keepUnreadable(data, why: "\(name)'s facts: \(why)") }
         }
         repoColors = saved.palette == Fleet.paletteVersion ? saved.repoColors : [:]
+        if let w = saved.works { works?.restore(w) }
         Fleet.publish(repoColors)
         for (name, s) in saved.stations where name != "crew" && name != "private" {
             let station = Station(name: name)
