@@ -210,6 +210,46 @@ final class WorkBook {
         records[other.id] = nil
     }
 
+    struct Saved: Codable {
+        struct Entry: Codable {
+            var repo: String
+            var branches: [String], folders: [String]
+            var issue: Int?, pulls: [String: String], crate: Int?
+            var author: String?, title: String?, url: String?
+            var stage: Int?, stagedAt: Date?, stagedBy: String?, quiet: Bool
+            var words: [String: Int]
+        }
+        var records: [Entry]
+    }
+
+    var saved: Saved {
+        Saved(records: records.values.sorted { $0.id < $1.id }.map { r in
+            Saved.Entry(repo: r.repo, branches: r.branches.sorted(), folders: r.folders.sorted(), issue: r.issue,
+                        pulls: Dictionary(uniqueKeysWithValues: r.pulls.map { (String($0.key), $0.value) }), crate: r.crate,
+                        author: r.author, title: r.title, url: r.url, stage: r.stage?.rawValue, stagedAt: r.stagedAt, stagedBy: r.stagedBy?.rawValue,
+                        quiet: r.quiet, words: Dictionary(uniqueKeysWithValues: r.words.map { ($0.key.rawValue, $0.value.rawValue) }))
+        })
+    }
+
+    func restore(_ saved: Saved) {
+        reset()
+        for e in saved.records {
+            let r = Record(id: nextId, repo: e.repo); nextId += 1
+            r.branches = Set(e.branches); r.folders = Set(e.folders); r.issue = e.issue; r.crate = e.crate
+            r.pulls = Dictionary(uniqueKeysWithValues: e.pulls.compactMap { k, v in Int(k).map { ($0, v) } })
+            r.author = e.author; r.title = e.title; r.url = e.url
+            r.stage = e.stage.flatMap(Stage.init(rawValue:)); r.stagedAt = e.stagedAt; r.stagedBy = e.stagedBy.flatMap(Source.init(rawValue:)); r.quiet = e.quiet
+            r.words = Dictionary(uniqueKeysWithValues: e.words.compactMap { k, v in Source(rawValue: k).flatMap { s in Stage(rawValue: v).map { (s, $0) } } })
+            records[r.id] = r
+            for b in r.branches { byBranch["\(r.repo)|\(b)"] = r.id }
+            for f in r.folders { byFolder["\(r.repo)|\(f)"] = r.id }
+            if let i = r.issue { byIssue["\(r.repo)#\(i)"] = r.id }
+            if let n = r.branchIssue { byIssue["\(r.repo)#\(n)"] = r.id }
+            for n in r.pulls.keys { byPull["\(r.repo)!\(n)"] = r.id }
+            if let c = r.crate { byCrate["\(r.repo)|\(c)"] = r.id }
+        }
+    }
+
     func record(id: Int) -> Record? { records[id] }
     var count: Int { records.count }
     func records(repo: String) -> [Record] { records.values.filter { $0.repo == repo }.sorted { $0.id < $1.id } }

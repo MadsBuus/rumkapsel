@@ -16,6 +16,7 @@ final class World {
         log = EventLog(dir: demo ? nil : EventLog.home)
         if demo { fleet.persists = false }
         github.watch.add { [weak sentry] in sentry?.checks() ?? [] }
+        fleet.works = works
     }
 
     func errors(repo: String) -> [SentryIssue]? {

@@ -4,6 +4,25 @@ enum WorkTests {
     private static var failures = 0
 
     static func run() -> Never {
+        test("a restart keeps each record's stage and who said it: the quick sources can't pull it back, the deciding one still can") {
+            let t = Date(timeIntervalSince1970: 1_800_000_000)
+            let book = WorkBook()
+            let r = book.note(repo: "api", branch: "gh-12/thing", pull: 12)
+            book.report(r, .stored, by: .pulls, at: t)
+            book.report(r, .qa, by: .board, at: t)
+            let again = WorkBook()
+            again.restore(book.saved)
+            var moves: [String] = []
+            again.onTransition = { _, m in moves.append("\(m.from.map { "\($0)" } ?? "-")→\(m.to)") }
+            guard let back = again.find(repo: "api", pull: 12) else { return expect(false, "the record came back") }
+            expect(again.find(repo: "api", branch: "gh-12/thing") === back && again.find(repo: "api", issue: 12) === back, "found by its branch and its issue too")
+            again.report(back, .stored, by: .pulls, at: t.addingTimeInterval(60))
+            again.report(back, .qa, by: .board, at: t.addingTimeInterval(66))
+            expect(moves.isEmpty && back.stage == .qa, "the sources answering again in any order move nothing: \(moves), at \(String(describing: back.stage))")
+            again.report(back, .stored, by: .board, at: t.addingTimeInterval(70))
+            expect(moves == ["QA→stored"] && back.stage == .stored, "the board, which decides QA, can still take it back: \(moves)")
+        }
+
         test("a branch named for its issue is that issue: office, crate and name agree") {
             let w = Work(repo: "web", branch: "gh-128/artist-search-fixes")
             expect(w.issue == 128 && w.number == 128, "issue read off the branch")
