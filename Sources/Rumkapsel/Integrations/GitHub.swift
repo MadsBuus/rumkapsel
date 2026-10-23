@@ -9,6 +9,7 @@ struct PullRequest: Equatable {
     let url: String
     var checks: String = ""
     var closes: [Int] = []
+    var mergedAt: Date?
 
     var summary: String {
         var s = "PR #\(number) " + (isDraft ? "draft" : state.lowercased())

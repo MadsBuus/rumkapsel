@@ -374,6 +374,50 @@ enum IntakeTests {
             expect(launchedWith(rig, "notes", 12), "#12 went up in a rocket on the tag: \(describe(place(rig, "notes", 12)))")
         }
 
+        test("an office whose pull request merged long ago: git has it in production, so no crate comes back and nothing launches; in storage only while git has it there") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            for inStorage in [false, true] {
+                let rig = Rig(), github = rig.world.github
+                let base = NSTemporaryDirectory() + "rumkapsel-shipped-\(UUID().uuidString)"
+                let root = base + "/api", cwd = base + "/api-patch"
+                for d in [root, cwd] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+                defer { try? FileManager.default.removeItem(atPath: base) }
+                let branch = "me/patch"
+                let pipeline = PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                                        merges: (0..<20).map { .init(base: "develop", head: "gh-\($0)/work") }
+                                                            + Array(repeating: .init(base: "staging", head: "develop"), count: 3)
+                                                            + Array(repeating: .init(base: "production", head: "staging"), count: 3),
+                                                        file: nil, defaultBranch: "develop")
+                github.inject(login: "me")
+                github.inject(owner: "me/api", for: root)
+                github.inject(pipeline: pipeline, for: root)
+                var counted = GitHubResolver.Cargo(storage: 0, deck: 0, storageNumbers: inStorage ? [12] : [], deckNumbers: [])
+                counted.exact = true
+                counted.at = rig.now
+                github.inject(cargo: counted, for: root)
+                github.inject(openPRs: [], for: root)
+                github.inject(releases: [], for: root)
+                var merged = PullRequest(number: 12, title: "patch the images", state: "MERGED", reviewDecision: "", isDraft: false, url: "https://example.invalid/api/12")
+                merged.mergedAt = rig.now.addingTimeInterval(-3600)
+                github.inject(pull: merged, for: branch, repoRoot: root)
+                let s = SessionInfo(id: "shipped-1", cwd: cwd, repo: "api", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                                    area: nil, title: nil, branch: branch, toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 1,
+                                    queuedCount: 0, eventMarkers: [:])
+                rig.simulate(scan: ScanResult(sessions: [s]))
+                rig.simulateGitHub()
+                rig.advance(32)
+                let r = rig.world.works.find(repo: "api", pull: 12)
+                if inStorage {
+                    expect(place(rig, "api", 12) == .waiting, "git has #12 in storage, so it is there: \(describe(place(rig, "api", 12)))")
+                } else {
+                    expect(r?.stage == .shipped, "#12 is shipped: \(r?.stage.map { "\($0)" } ?? "unheard")")
+                    expect(place(rig, "api", 12) == nil, "no crate for #12: \(describe(place(rig, "api", 12)))")
+                    expect(!station(rig).facts.rockets.values.contains { $0.repo == "api" }, "nothing launches: \(station(rig).facts.rockets.keys.sorted())")
+                }
+            }
+        }
+
         test("today's flow, detected: develop, staging and production; staging takes the stored crates, the release takes the deck up") {
             let (rig, sim) = org([])
             let detected = PipelineDetection.detect(branches: ["develop", "staging", "production"],

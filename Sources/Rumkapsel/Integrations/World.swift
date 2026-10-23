@@ -96,9 +96,19 @@ final class World {
     func report(crate n: Int, repo: String, _ stage: Stage, by source: Source, at: Date) {
         works.report(works.note(repo: repo, crate: n), stage, by: source, at: at)
     }
-    func report(pullState state: String?, record: WorkBook.Record?, at: Date) {
+    func report(pullState state: String?, record: WorkBook.Record?, mergedAt: Date? = nil, at: Date) {
         guard let state, let record else { return }
-        works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
+        guard state == "MERGED", let merged = mergedAt,
+              let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key, !github.pipeline(repoRoot: root).shipsOnMerge else {
+            return works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
+        }
+        guard let c = github.git.counted(repoRoot: root) else { return }
+        let numbers = Set(record.pulls.keys).union([record.number].compactMap { $0 })
+        if c.exact, c.at > merged.addingTimeInterval(60), numbers.isDisjoint(with: c.storageNumbers + c.deckNumbers) {
+            works.report(record, .shipped, by: .git, at: c.at)
+        } else {
+            works.report(record, .stored, by: .pulls, at: merged)
+        }
     }
     func isMine(office key: String) -> Bool {
         let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
@@ -430,7 +440,7 @@ final class World {
                     let key = roomKey(station, room)
                     let pull = pulls.pull(ownOffice: room)
                     let state = pull?.state
-                    if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), at: now) }
+                    if let pull, let repo = room.repo { report(pullState: state, record: works.note(repo: repo, branch: room.branch, folder: room.worktree, issue: pull.closes.first, pull: pull.number, pullState: state), mergedAt: pull.mergedAt, at: now) }
                     let merged = stage(office: room.key, repo: room.repo).map { $0 >= .stored } ?? false
                     var gone = room.worktree.map { !Workspaces.isOpen($0) } ?? false
                     if let w = room.worktree, let branch = room.branch, !sessionRooms.contains(key) {
