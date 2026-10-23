@@ -146,6 +146,9 @@ enum MissionRoom {
 }
 
 enum Screens {
+    static let tall = 0.58, annunciatorWide = 1.6, feedWide = 0.8, errorsWide = 1.05
+    static func pixels(_ wide: Double, across: Int = 480) -> (Int, Int) { (across, Int((Double(across) * tall / wide).rounded())) }
+
     private static func draw(_ w: Int, _ h: Int, _ body: (CGContext, CGFloat, CGFloat) -> Void) -> NSImage {
         let image = NSImage(size: NSSize(width: w, height: h))
         image.lockFocus()
@@ -177,7 +180,8 @@ enum Screens {
     }
 
     static func annunciator(_ rows: [MissionBoards.Row], blinking: Bool = false) -> NSImage {
-        draw(1024, 300) { c, w, h in
+        let (pw, ph) = pixels(annunciatorWide, across: 1024)
+        return draw(pw, ph) { c, w, h in
             if !blinking { c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h)) }
             let head: CGFloat = 34
             for (k, name) in MissionBoards.lamps.enumerated() where !blinking {
@@ -210,7 +214,8 @@ enum Screens {
     }
 
     static func crt(_ frame: NSImage, caption: String) -> NSImage {
-        draw(480, 300) { c, w, h in
+        let (pw, ph) = pixels(feedWide)
+        return draw(pw, ph) { c, w, h in
             frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .copy, fraction: 1)
             c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.07).cgColor)
             c.setBlendMode(.color); c.fill(CGRect(x: 0, y: 0, width: w, height: h)); c.setBlendMode(.normal)
@@ -224,7 +229,8 @@ enum Screens {
     }
 
     static func errors(_ rows: [MissionBoards.ErrorRow]) -> NSImage {
-        draw(480, 300) { c, w, h in
+        let (pw, ph) = pixels(errorsWide)
+        return draw(pw, ph) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
             NSAttributedString(string: "Errors", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 20, weight: .bold), .foregroundColor: NSColor(rgb: (0.5, 0.62, 0.62))])
                 .draw(at: NSPoint(x: 18, y: h - 38))
@@ -250,8 +256,9 @@ enum Screens {
         }
     }
 
-    static func noSignal(_ caption: String) -> NSImage {
-        draw(480, 300) { c, w, h in
+    static func noSignal(_ caption: String, wide: Double = errorsWide) -> NSImage {
+        let (pw, ph) = pixels(wide)
+        return draw(pw, ph) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
             c.setFillColor(NSColor.black.withAlphaComponent(0.4).cgColor)
             for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }

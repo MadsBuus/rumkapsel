@@ -172,7 +172,8 @@ extension StationController {
             }
             return f
         } }
-        let at = clock, size = near ? CGSize(width: 480, height: 300) : CGSize(width: 240, height: 150)
+        let (pw, ph) = Screens.pixels(Screens.feedWide)
+        let at = clock, size = near ? CGSize(width: pw, height: ph) : CGSize(width: pw / 2, height: ph / 2)
         let r = feedRenderer
         MissionScreens.queue.async { [self] in
             let t0 = CACurrentMediaTime()

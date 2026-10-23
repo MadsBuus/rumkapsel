@@ -21,7 +21,7 @@ final class Walker {
     static let craneReach = 1.5, craneTilt = -0.8
     static let thrust = 3.4, gravity = 1.6, climbLimit = 1.3, ceiling = 6.0
     static let crown = 0.1
-    static let bridgePitch = -0.2
+    static let bridgePitch = -0.15
 
     var station: String
     var pos: SIMD2<Double>
