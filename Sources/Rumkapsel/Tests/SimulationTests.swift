@@ -496,6 +496,22 @@ enum SimulationTests {
                    "facing the console, seated at the seat's height: facing \(m.facing), seated \(m.seated)")
             expect(step(sim, seconds: 40, until: { m.using == nil }) && m.place == .lounge && m.sittingOn == nil && !m.inPlace, "the turn ends back on the couch: \(m.place.words)")
         }
+        test("a launch on the pad draws a resting minion to a console to watch it, for longer than a turn") {
+            let (sim, station, m) = fixture()
+            sim.setNight(false)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            _ = step(sim, seconds: 8)
+            expect(m.using == nil, "nothing on the pad, so still on the couch")
+            _ = Rules.apply([.release(repo: "web", production: true, label: "")], at: sim.now, to: &station.facts, yard: station.yard)
+            _ = Rules.apply([.launched(repo: "web")], at: sim.now, to: &station.facts, yard: station.yard)
+            sim.play()
+            expect(sim.launchOn(station), "the launch is on")
+            expect(step(sim, seconds: 10, until: { m.using != nil }), "off to watch: \(m.words)")
+            guard let ref = m.using else { return }
+            expect(ref.room == "kind:mission" && station.place(ref)?.use != .stand, "a seat at a console, facing the wall")
+            expect(m.actFor >= 540, "watching the whole launch, not a short turn: \(m.actFor)")
+        }
         test("a minion at the holo table stands an arm's length from its rim, facing it; one body to an anchor") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)

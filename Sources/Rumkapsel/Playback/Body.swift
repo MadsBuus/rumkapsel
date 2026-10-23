@@ -97,6 +97,7 @@ class Body {
     var pos: SIMD2<Double>
     var path: [SIMD2<Double>] = []
     var nextWanderAt = 0.0
+    var watchCheckAt = 0.0
     var nextBathAt = 0.0
     var nextWorkoutAt = 0.0
     var actFor = 0.0

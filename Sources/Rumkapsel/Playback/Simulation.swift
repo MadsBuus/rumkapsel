@@ -569,7 +569,7 @@ final class Simulation<B: Body> {
 
     @discardableResult
     func startRoam(_ m: B, station: Station) -> Bool {
-        let rocketReady = (shown[station.name]?.rockets ?? [:]).contains { $0.value.venting || station.facts.rockets[$0.key]?.launched == true }
+        let rocketReady = launchOn(station)
         let window = station.hall.windowWatch
         let doorways = Set(station.yardDoorways.flatMap { [$0.0, $0.1] } + station.rooms.keys.compactMap { station.doorOutside(of: $0) })
             .subtracting(window)
@@ -593,13 +593,23 @@ final class Simulation<B: Body> {
         visitLog.append((kind: kind, lasted: m.actStartedAt > 0 ? clock - m.actStartedAt : 0, planned: m.actFor))
     }
 
+    func launchOn(_ station: Station) -> Bool {
+        (shown[station.name]?.rockets ?? [:]).contains { $0.value.venting || station.facts.rockets[$0.key]?.launched == true }
+    }
+
     @discardableResult
-    func takeTurnInMission(_ m: B, station: Station, seated: Bool? = nil) -> Bool {
+    func watchLaunch(_ m: B, station: Station) -> Bool {
+        guard launchOn(station), !isNight(station) else { return false }
+        return takeTurnInMission(m, station: station, seated: true, seconds: Double.random(in: 540...720))
+    }
+
+    @discardableResult
+    func takeTurnInMission(_ m: B, station: Station, seated: Bool? = nil, seconds: Double = Double.random(in: 180...420)) -> Bool {
         let free = freeAnchors(m, station: station, in: "kind:mission").filter { ref in
             seated.map { ($0 && station.place(ref)?.use != .stand) || (!$0 && station.place(ref)?.use == .stand) } ?? true
         }
         guard let ref = free.randomElement() else { return false }
-        return use(m, ref, station: station, seconds: Double.random(in: 180...420))
+        return use(m, ref, station: station, seconds: seconds)
     }
 
     @discardableResult
@@ -734,6 +744,10 @@ final class Simulation<B: Body> {
             if m.isChore {
                 if settled, m.phase > 0, clock >= m.phaseUntil { visitDone(m, "roam"); finish(m, to: .lounge) }
             } else if m.place == .lounge, !m.busy, m.isResting, settled, !m.isSubagent, m.bathDue == 0, !m.hasLoad {
+                if clock >= m.watchCheckAt {
+                    m.watchCheckAt = clock + Double.random(in: 2...6)
+                    if watchLaunch(m, station: station) { return .spent }
+                }
                 if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); return .spent }
             }
             if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
