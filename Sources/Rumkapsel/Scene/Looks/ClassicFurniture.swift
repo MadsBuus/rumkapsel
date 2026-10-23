@@ -254,7 +254,7 @@ extension Classic {
             case .bench:
                 let bench = SCNNode(geometry: SCNBox(width: size.x, height: Seat.height, length: size.y, chamferRadius: 0.01))
                 bench.geometry!.firstMaterial = lit(NSColor(rgb: (0.55, 0.32, 0.3)))
-                f.fixtures.append(at(bench, fixture, .zero, Seat.height / 2))
+                f.props.append(at(bench, fixture, .zero, Seat.height / 2))
                 let chest = fixture.kind.anchors[0].at
                 for side in [-1.0, 1.0] {
                     let up = SCNNode(geometry: SCNBox(width: 0.04, height: 0.6, length: 0.04, chamferRadius: 0))
@@ -287,7 +287,7 @@ extension Classic {
                 chain.geometry!.firstMaterial = steel
                 chain.position = v3(0, -0.08, 0)
                 bag.addChildNode(sack); bag.addChildNode(chain)
-                f.fixtures.append(at(bag, fixture, .zero, 1.08, turned: false))
+                f.props.append(at(bag, fixture, .zero, 1.08, turned: false))
                 f.bag = bag
             case .mat:
                 let mat = SCNNode(geometry: SCNBox(width: size.x, height: 0.012, length: size.y, chamferRadius: 0))
@@ -389,14 +389,8 @@ extension Classic {
         }
         for (i, fixture) in station.fixtures(in: room.key).enumerated() {
             switch fixture.kind {
-            case .couch:
-                break
-            case .treadmill, .bench, .bag, .mat:
-                break
             case .console:
                 f.props.append(at(MissionRoom.console(fixture.kind.size, p), fixture.at, yaw: fixture.yaw))
-            case .counter, .coffeeMachine, .foodPrinter:
-                break
             case .holoTable:
                 let r = fixture.kind.size.x / 2
                 let table = SCNNode(geometry: faceted(SCNCylinder(radius: r - 0.03, height: 0.22), 32))
@@ -420,7 +414,7 @@ extension Classic {
                     ray.geometry!.firstMaterial = MissionRoom.holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.35)
                     f.fixtures.append(at(ray, fixture.at + SIMD2(sin(a), cos(a)) * (r - 0.07), 0.24 + (lift + 0.1) / 2))
                 }
-            case .bowl, .shower, .towelRail, .bed:
+            default:
                 break
             }
             for k in fixture.kind.anchors.indices {

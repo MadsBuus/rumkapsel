@@ -30,7 +30,7 @@ extension Simulation {
         if !m.inPlace {
             if place.use == .stand, !atArmsLength(m, of: place.at, from: place.outward, square: true, dt: dt) { return true }
             if place.use == .spot { m.pos = place.at; m.facing = place.facing }
-            m.settledOn = (order, nil)
+            m.settledOn = (order, nil, false)
             m.actStartedAt = clock
             m.phaseUntil = clock + m.actFor
         }
@@ -38,7 +38,7 @@ extension Simulation {
             let s = place.sitting(clock - m.actStartedAt, of: m.actFor)
             m.pos = s.pos
             m.facing = s.facing
-            m.settledOn = (order, s.down ? height : nil)
+            m.settledOn = (order, s.down ? height : nil, s.home)
         }
         guard clock >= m.phaseUntil else { return false }
         var back = restPlace(m)

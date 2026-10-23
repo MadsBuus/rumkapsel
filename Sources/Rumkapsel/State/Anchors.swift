@@ -132,14 +132,15 @@ struct PlacedFixture: Equatable {
         var chair: SIMD2<Double> { at + outward * Seat.middle }
         var stand: SIMD2<Double> { swivels ? chair + outward * (Seat.footprint + 1 / Double(Station.fine)) : at + outward * Seat.knees }
 
-        struct Sitting { let pos: SIMD2<Double>; let facing: Double; let chair: Double; let down: Bool }
+        struct Sitting { let pos: SIMD2<Double>; let facing: Double; let chair: Double; let down: Bool; var home = false }
 
         func sitting(_ t: Double, of total: Double) -> Sitting {
             let k = max(0, min(t, total - t))
             guard swivels else {
                 let e = ease(min(1, k / Seat.sitDown))
                 let coming = t < total / 2
-                return Sitting(pos: stand + (at - stand) * e, facing: coming ? facing + .pi * (1 - e) : facing, chair: facing + .pi, down: k >= Seat.sitDown || coming)
+                return Sitting(pos: stand + (at - stand) * e, facing: coming ? facing + .pi * (1 - e) : facing, chair: facing + .pi, down: k >= Seat.sitDown || coming,
+                               home: k >= Seat.sitDown)
             }
             let out = facing + .pi
             if k < Seat.swivel {
@@ -150,7 +151,7 @@ struct PlacedFixture: Equatable {
                 return Sitting(pos: stand + (chair + outward * Seat.middle - stand) * e, facing: facing + .pi * e, chair: out + .pi, down: t < total / 2)
             }
             let f = out - .pi * ease(min(1, (k - Seat.swivel - Seat.sitDown) / Seat.swivel))
-            return Sitting(pos: chair + SIMD2(sin(f), cos(f)) * Seat.middle, facing: f, chair: f + .pi, down: true)
+            return Sitting(pos: chair + SIMD2(sin(f), cos(f)) * Seat.middle, facing: f, chair: f + .pi, down: true, home: true)
         }
 
         struct Lying: Equatable { let pos: SIMD2<Double>; let facing: Double; let sat: Bool; let flat: Bool }

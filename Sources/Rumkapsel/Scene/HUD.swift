@@ -129,10 +129,7 @@ extension StationController {
     static let iconSize = CGSize(width: 20, height: 20)
     static let iconGap: CGFloat = 8
 
-    func canOrder(_ m: Minion) -> Bool {
-        m.state == .settled && !m.busy && !m.hasLoad && !m.onJob
-            && (m.current == nil || m.phaseKind.interruptible)
-    }
+    func canOrder(_ m: Minion) -> Bool { simulation.takesOrders(m) }
 
     func bubbleTakes(point p: NSPoint) -> Bool {
         bubbleLock.lock(); defer { bubbleLock.unlock() }
@@ -153,6 +150,7 @@ extension StationController {
 
     func order(minionId: String, _ o: LoungeOrder) {
         guard let m = minions[minionId], let station = fleet.stations[m.station], canOrder(m) else { return }
+        simulation.dropIdleTurn(m)
         switch o {
         case .gym:
             guard station.rooms["kind:gym"] != nil else { logEvent("\(m.home.name): no gym here"); return }

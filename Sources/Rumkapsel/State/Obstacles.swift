@@ -62,6 +62,7 @@ extension Station {
                 + seats.map { Footprint(at: $0.chair, radius: Seat.footprint) })
         }
         place(rooms["kind:quarters"], fixtures(in: "kind:quarters").map { Footprint(at: $0.at, size: $0.kind.size, yaw: $0.yaw) })
+        place(rooms["kind:gym"], fixtures(in: "kind:gym").filter { $0.kind == .bench || $0.kind == .bag }.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) })
         for room in offices {
             guard let at = desk(room, theme: theme) else { continue }
             place(room, [Footprint(at: at, radius: kingdom ? 0.178 : 0.168)])

@@ -37,7 +37,8 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `BakedPlans.swift` | the plans baked by `floor/bake.py`, per theme |
 | `Hall.swift` | the yard's geometry: walkway, aisles, the three zones' grids, decon, the pad, its slots and field |
 | `Hull.swift` | the hull round the station |
-| `Fixtures.swift` | where the bath's, lounge's and gym's fixtures stand; `Galley`: its tile, which way it opens, the printer's timing |
+| `Fixtures.swift` | the lounge's spots, an office's wall and desk; `Galley`: its tile, which way it opens, the printer's timing |
+| `Anchors.swift` | every room's fixtures: their kinds, where each stands (`fixtures(in:)`), where a body uses one, and the sit and lie timelines |
 | `OfficeMarks.swift` | an office's package cell and cube pile |
 | `Obstacles.swift` | footprints, and what a walk goes round |
 | `Theme.swift` | `Theme`, `Vocabulary`, `Words` |
@@ -102,6 +103,7 @@ What each source says and how often is [WIRING.md](WIRING.md); what things may d
 | `Commands.swift` | `Command` (kind, phases, words), `Spot`, `CrateRef` |
 | `Walk.swift` | stepping along a path, and passing |
 | `Idle.swift` | the idle clock, the pick after an order, roam spots |
+| `WorkAt.swift` | a turn at a fixture: walk to its anchor, use it for the turn's time, go back |
 | `Routines.swift` | what a body does with its hands and wears, per activity |
 | `Callsigns.swift` | callsigns for the bubble |
 | `CrateMotion.swift` | crate arcs on the station clock |

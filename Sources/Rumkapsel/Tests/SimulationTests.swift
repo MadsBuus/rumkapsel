@@ -555,6 +555,37 @@ enum SimulationTests {
             expect(ref.room == "kind:mission" && station.place(ref)?.use != .stand, "a seat at a console, facing the wall")
             expect(m.actFor >= 540, "watching the whole launch, not a short turn: \(m.actFor)")
         }
+        test("a minion on an idle turn takes an order: off the console and straight to the bath") {
+            let (sim, station, m) = fixture()
+            sim.setNight(false)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            guard let ref = station.anchors(in: "kind:mission").first(where: { station.place($0)?.use != .stand }) else { return expect(false, "a seat") }
+            expect(sim.use(m, ref, station: station, seconds: 300), "off to the console")
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "at the console: \(m.words)")
+            expect(sim.takesOrders(m), "watching the boards is idle time: it takes orders")
+            sim.dropIdleTurn(m)
+            m.showering = true
+            expect(sim.visitBath(m, station: station) && m.bathing && m.using?.room == "kind:bath", "and goes to the shower: \(m.words)")
+            expect(!m.seated && m.sittingOn == nil, "nothing left of the console turn")
+        }
+        test("the bench: the body backs onto it upright and lies down only once it is on it") {
+            let (sim, station, m) = fixture()
+            sim.setNight(false)
+            sim.send(m, to: .lounge)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+            expect(sim.takeTurnInGym(m, station: station, on: .bench), "off to the bench")
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "at the bench: \(m.words)")
+            guard let ref = m.using, let bench = station.place(ref) else { return expect(false, "on the bench's anchor") }
+            var flatOff = false
+            _ = step(sim, seconds: Seat.sitDown + 0.3, until: {
+                let d = m.pos - bench.at
+                if m.onBench, (d.x * d.x + d.y * d.y).squareRoot() > 0.02 { flatOff = true }
+                return false
+            })
+            expect(!flatOff, "never flat anywhere but on the bench")
+            expect(m.onBench, "lying on it once it is there")
+        }
         test("a minion at the holo table stands an arm's length from its rim, facing it; one body to an anchor") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
@@ -659,6 +690,24 @@ enum SimulationTests {
             expect(couches.count > 1 && beds.count > 1, "several seated and several in bed: \(couches.count) couches, \(beds.count) beds")
             expect(Set(couches).count == couches.count, "one to a couch: \(couches.sorted())")
             expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
+        }
+
+        test("a bed is not handed out while its sleeper is still getting up out of it") {
+            let (sim, _, m) = fixture()
+            sim.refreshObstacles()
+            sim.send(m, to: .quarters)
+            _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
+            m.activity = .sleeping
+            m.napping = true
+            _ = step(sim, seconds: 6, until: { m.lying })
+            guard let ref = m.bunk?.ref else { return expect(false, "in its bunk") }
+            sim.send(m, to: .lounge)
+            expect(m.bunk != nil && m.bed == nil, "getting up: off the bed's books, still in the bunk")
+            let other = Body(id: "other", station: "work", home: m.home, cwd: "", toolCount: 0, isSubagent: false, start: m.cell)
+            other.state = .settled
+            sim.bodies[other.id] = other
+            sim.send(other, to: .quarters)
+            expect(other.bed != nil && other.bed != ref.fixture, "the other gets another bed: \(String(describing: other.bed)) against \(ref.fixture)")
         }
 
         test("a sleeper given something to do gets up out over its bed's side, onto its feet there, before it walks anywhere") {
