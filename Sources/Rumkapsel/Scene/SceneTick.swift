@@ -91,10 +91,12 @@ extension StationController {
         }
     }
 
-    func flush(at bowl: SIMD2<Double>, front: Double) {
+    func flush(_ bowl: PlacedFixture, in station: Station) {
         let water = SCNNode(geometry: SCNBox(width: 0.12, height: 0.012, length: 0.14, chamferRadius: 0))
         water.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
-        water.position = v3(bowl.x, Minion.seat + 0.006, bowl.y - 0.05 * front)
+        let at = station.offset + bowl.point(SIMD2(0, 0.05))
+        water.position = v3(at.x, Seat.height + 0.006, at.y)
+        water.eulerAngles.y = CGFloat(bowl.yaw)
         water.opacity = 0
         propRoot.addChildNode(water)
         let blink = SCNAction.sequence([.fadeOpacity(to: 1, duration: 0.06), .fadeOpacity(to: 0.3, duration: 0.1)])
@@ -201,7 +203,7 @@ extension StationController {
 
     func tendKitchen(_ station: Station) {
         guard let k = kitchens[station.name] else { return }
-        let cook = minions.values.first { $0.station == station.name && $0.atCounter && $0.fare != nil }
+        let cook = minions.values.first { $0.station == station.name && $0.inPlace && $0.fare != nil }
         let p = cook.map { $0.actFor > 0 ? Timing.clamped((clock - $0.actStartedAt) / $0.actFor) : 0 } ?? 0
         let brewing = cook?.fare == .coffee, printing = cook?.fare == .bite
         let pouring = brewing && p > 0.12 && p < 0.78
@@ -271,7 +273,7 @@ extension StationController {
 
     func play(_ cue: Cue) {
         switch cue {
-        case .flush(_, let bowl, let front): flush(at: bowl, front: front)
+        case .flush(let station, let bowl): if let st = fleet.stations[station] { flush(bowl, in: st) }
         case .fidget(let id): minions[id]?.fidget()
         case .towel(_, let station, let taken):
             statics.node(named: "towel:" + station)?.isHidden = taken
@@ -345,10 +347,9 @@ extension StationController {
     }
 
     private func pose(_ m: Minion, station: Station, dt: Double) {
-            let inBath = m.bathing && m.phaseKind == .act && m.path.isEmpty
-            if inBath, m.showering, !m.drying, m.fetchSpot == nil, clock >= m.nextDropAt, let bath = station.rooms["kind:bath"] {
+            if case .use(let ref, .shower, _, _) = m.current?.kind, m.inPlace, !m.drying, clock < m.phaseUntil, clock >= m.nextDropAt, let head = station.place(ref) {
                 m.nextDropAt = clock + 0.05
-                let nozzle = station.showerNozzle(bath: bath)
+                let nozzle = station.offset + head.at + head.outward * Hands.arm
                 let drop = SCNNode(geometry: SCNBox(width: 0.035, height: 0.06, length: 0.035, chamferRadius: 0))
                 drop.geometry!.firstMaterial = flat(NSColor(rgb: (0.62, 0.82, 0.95)))
                 drop.position = v3(nozzle.x + Double.random(in: -0.04...0.04), 0.66, nozzle.y + Double.random(in: -0.04...0.04))
@@ -358,19 +359,9 @@ extension StationController {
             }
             let resting = m.path.isEmpty && m.state == .settled
             let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
-            var flatInBunk = false, onBunkEdge = false
-            if m.bed != nil, m.place == .quarters {
-                switch m.currentPose(at: clock) {
-                case .flat: flatInBunk = true
-                case .seated: onBunkEdge = m.beddingUntil > 0 || m.risingUntil > clock
-                default: break
-                }
-            }
-            let onFixture = (m.bathing || m.exercising || m.seated || m.atCounter || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
+            let onFixture = (m.bathing || m.exercising || m.seated || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
             if m.sittingOn != nil, m.using != nil { m.smoothFacing = m.facing }
-            let wantFacing = flatInBunk ? 0
-                : onBunkEdge ? m.facing
-                : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
+            let wantFacing = m.bunk != nil ? m.facing : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)
             if !(working && !m.pyramids.isEmpty && m.nearCone) && !(m.place == .lounge && resting) && !(m.isQA && resting) {
                 var delta = wantFacing - m.smoothFacing
                 delta = atan2(sin(delta), cos(delta))
@@ -447,13 +438,13 @@ extension StationController {
                     }
                 }
             }
-            if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
+            if m.inPlace, let kind = m.workout {
                 let props = gymProps[station.name]
                 switch kind {
                 case .treadmill:
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
                 case .bench:
-                    props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
+                    if m.onBench { props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16) }
                 case .bag:
                     let jab = max(0, sin(t * 5.5))
                     lean = jab * 0.09; tilt = 0.1 + jab * 0.12; roll = sin(t * 5.5) * 0.05
@@ -461,9 +452,10 @@ extension StationController {
                     props?.bag.eulerAngles = SCNVector3(-a * cos(m.smoothFacing + .pi), 0, a * sin(m.smoothFacing + .pi))
                 case .mat:
                     lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
+                default: break
                 }
             }
-            if m.fare != nil, m.atCounter {
+            if m.fare != nil, m.inPlace {
                 tilt = 0.1 + sin(t * 1.1) * 0.02; roll = sin(t * 0.7) * 0.03
             }
             if working && !atCone {

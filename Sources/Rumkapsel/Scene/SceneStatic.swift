@@ -375,7 +375,7 @@ extension StationController {
             }
             if let galley = station.galley, let room = station.rooms["kind:galley"] {
                 roomPiece(room, extra: "\(galley.middle)|\(galley.back)", drop: { [weak self] in self?.kitchens[st] = nil }) { bag in
-                    let f = Looks.current.furnishGalley(galley, in: station)
+                    let f = Looks.current.furnishGalley(room, in: station)
                     for n in f.props { n.name = "room:" + self.roomKey(station, room); bag.add(n) }
                     for n in f.fixtures { n.name = "gym:" + self.roomKey(station, room); bag.add(n) }
                     self.kitchens[st] = f.kitchen
@@ -418,11 +418,13 @@ extension StationController {
                 monolith.name = "station:" + station.name
                 bag.add(monolith)
             }
-            statics.piece("beds:" + st, key: "\(at)|\(station.beds.map { "\($0.pos)\($0.level)" })") { bag in
-                for bed in station.beds {
-                    let b = Looks.current.bed(level: bed.level)
-                    b.position.x = station.offset.x + bed.pos.x
-                    b.position.z = station.offset.y + bed.pos.y
+            let beds = station.fixtures(in: "kind:quarters")
+            statics.piece("beds:" + st, key: "\(at)|\(beds)") { bag in
+                for bed in beds {
+                    let b = Looks.current.bed()
+                    b.position.x = station.offset.x + bed.at.x
+                    b.position.z = station.offset.y + bed.at.y
+                    b.eulerAngles.y = CGFloat(bed.yaw)
                     b.name = "room:\(station.name)|kind:quarters"
                     bag.add(b)
                 }

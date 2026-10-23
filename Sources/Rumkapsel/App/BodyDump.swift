@@ -9,13 +9,14 @@ extension StationController {
 
         for st in fleet.stations.values.sorted(by: { $0.name < $1.name }) where station == nil || st.name == station {
             let here = minions.values.filter { $0.station == st.name }.sorted { $0.home.name < $1.home.name }
-            say("station \(st.name): \(here.count) bodies · \(st.beds.count) beds · clock \(String(format: "%.1f", clock))")
-            say("  who              place        activity      cmd        rest job crew  bed  down  bedIn  riseIn lying bench pose")
+            let beds = st.fixtures(in: "kind:quarters")
+            say("station \(st.name): \(here.count) bodies · \(beds.count) beds · clock \(String(format: "%.1f", clock))")
+            say("  who              place        activity      cmd        rest job crew  bed  bunk  inBed  riseIn lying bench pose")
             for m in here {
                 let pose: String
                 switch m.currentPose(at: clock) {
                 case .standing: pose = "standing"
-                case .seated(let h, _): pose = String(format: "seated %.2f", h)
+                case .seated(let h): pose = String(format: "seated %.2f", h)
                 case .flat(let h): pose = String(format: "flat %.2f", h)
                 }
                 let cmd: String
@@ -24,19 +25,19 @@ extension StationController {
                             pad(m.activity.label.prefix(13).description, 13), pad(cmd, 10),
                             pad(m.isResting ? "yes" : "no", 4), pad(m.onJob ? "yes" : "no", 3),
                             pad(m.isCrew ? "yes" : m.isSubagent ? "sub" : "no", 5),
-                            pad(m.bed.map(String.init) ?? "-", 4), pad(m.beddedDown ? "yes" : "no", 5),
-                            pad(num(m.beddingUntil), 6), pad(num(m.risingUntil), 6),
+                            pad(m.bed.map(String.init) ?? "-", 4), pad(m.bunk.map { $0.flat ? "flat" : $0.sat ? "edge" : "up" } ?? "-", 5),
+                            pad(m.bunk.map { String(format: "%.1f", clock - $0.since) } ?? "-", 6), pad(num(m.risingUntil), 6),
                             pad(m.lying ? "yes" : "no", 5), pad(m.onBench ? "yes" : "no", 5), pose].joined(separator: " "))
             }
             let inBed = here.filter { $0.bed != nil }
             if !inBed.isEmpty {
                 say("  bunks: index  bedAt            bodyAt           off")
                 for m in inBed {
-                    guard let b = m.bed, b < st.beds.count else {
+                    guard let b = m.bed, let bed = st.bedside(b).flatMap({ st.place($0) }) else {
                         say("  " + pad(m.home.name.prefix(16).description, 16) + " bed \(m.bed.map(String.init) ?? "-") — no such bunk on this floor")
                         continue
                     }
-                    let spot = st.beds[b].pos
+                    let spot = m.lying ? bed.flat : bed.stand
                     let off = ((m.pos.x - spot.x) * (m.pos.x - spot.x) + (m.pos.y - spot.y) * (m.pos.y - spot.y)).squareRoot()
                     say("  " + [pad(m.home.name.prefix(16).description, 16), pad(String(b), 6),
                                 pad(String(format: "%.2f,%.2f", spot.x, spot.y), 16),

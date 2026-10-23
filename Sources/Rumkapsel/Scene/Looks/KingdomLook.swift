@@ -680,24 +680,40 @@ struct KingdomLook: Look {
     }
 
     func furnishBath(_ bath: Room, in station: Station) -> Furnishing {
-        var f = Classic.bath(bath, in: station)
-        rustic(f.props)
-        f.towel?.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.93, 0.9, 0.8))
-        if f.props.count > 4 {
-            if let bucket = Kit.node("bucket", from: .survival) {
-                bucket.scale = SCNVector3(1.1, 1.1, 1.1)
-                bucket.position = v3(Double(f.props[0].position.x), 0, Double(f.props[0].position.z))
-                f.props[0] = bucket
+        var f = Furnishing()
+        let steel = Classic.chrome
+        for fixture in station.fixtures(in: bath.key) {
+            switch fixture.kind {
+            case .bowl:
+                if let bucket = Kit.node("bucket", from: .survival) {
+                    bucket.scale = SCNVector3(1.1, 1.1, 1.1)
+                    f.props.append(Classic.on(fixture, bucket, in: station))
+                } else {
+                    let bowl = Classic.bowl()
+                    rustic([bowl])
+                    f.props.append(Classic.on(fixture, bowl, in: station))
+                }
+            case .shower:
+                let shower = Classic.shower(steel)
+                rustic([shower])
+                f.props.append(Classic.on(fixture, shower, in: station))
+                let tub = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: 0.14), 8))
+                tub.geometry!.firstMaterial = lit(Self.planks)
+                tub.position = v3(0, 0.07, 0)
+                let water = SCNNode(geometry: faceted(SCNCylinder(radius: 0.21, height: 0.01), 8))
+                water.geometry!.firstMaterial = flat(Self.shallows)
+                water.position = v3(0, 0.07, 0)
+                tub.addChildNode(water)
+                f.props.append(Classic.on(fixture, tub, in: station, at: SIMD2(0, Hands.arm)))
+            case .towelRail:
+                let rail = Classic.towelRail(steel)
+                rustic([rail.rail])
+                rail.towel.geometry?.firstMaterial?.diffuse.contents = NSColor(rgb: (0.93, 0.9, 0.8))
+                f.props.append(Classic.on(fixture, rail.rail, in: station))
+                f.towel = rail.towel
+            default:
+                break
             }
-            let drain = f.props[4]
-            let tub = SCNNode(geometry: faceted(SCNCylinder(radius: 0.26, height: 0.14), 8))
-            tub.geometry!.firstMaterial = lit(Self.planks)
-            tub.position = v3(Double(drain.position.x), 0.07, Double(drain.position.z))
-            let water = SCNNode(geometry: faceted(SCNCylinder(radius: 0.21, height: 0.01), 8))
-            water.geometry!.firstMaterial = flat(Self.shallows)
-            water.position = v3(0, 0.07, 0)
-            tub.addChildNode(water)
-            f.props[4] = tub
         }
         return f
     }
@@ -705,10 +721,11 @@ struct KingdomLook: Look {
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing {
         var f = Classic.gym(gym, in: station)
         rustic(f.fixtures)
-        if let tread = f.fixtures.first {
-            let bale = SCNNode(geometry: SCNBox(width: 0.42, height: 0.26, length: 0.6, chamferRadius: 0.03))
+        if let tread = station.fixtures(in: gym.key).first(where: { $0.kind == .treadmill }), !f.fixtures.isEmpty {
+            let bale = SCNNode(geometry: SCNBox(width: tread.kind.size.x, height: 0.26, length: 0.6, chamferRadius: 0.03))
             bale.geometry!.firstMaterial = lit(Self.straw)
-            bale.position = v3(Double(tread.position.x), 0.13, Double(tread.position.z))
+            bale.position = v3(station.offset.x + tread.at.x, 0.13, station.offset.y + tread.at.y)
+            bale.eulerAngles.y = CGFloat(tread.yaw)
             for z in [-0.18, 0.18] {
                 let band = SCNNode(geometry: SCNBox(width: 0.44, height: 0.27, length: 0.03, chamferRadius: 0))
                 band.geometry!.firstMaterial = lit(Self.wood)
@@ -728,21 +745,14 @@ struct KingdomLook: Look {
         return f
     }
 
-    func bed(level: Int) -> SCNNode {
-        guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(level: level, floorTop: floorTop) }
+    func bed() -> SCNNode {
+        guard let roll = Kit.node("bedroll", from: .survival) else { return Classic.bed(floorTop: floorTop) }
         roll.scale = SCNVector3(0.85, 0.85, 0.85)
         roll.geometry?.materials.forEach { $0.multiply.contents = NSColor(rgb: (0.95, 0.85, 0.62)) }
-        if level == 0 {
-            let n = SCNNode()
-            roll.position = v3(0, 0.06, 0)
-            n.addChildNode(roll)
-            return n
-        }
-        let bunk = Classic.bed(level: level, floorTop: floorTop)
-        rustic([bunk])
+        let n = SCNNode()
         roll.position = v3(0, 0.06, 0)
-        bunk.addChildNode(roll)
-        return bunk
+        n.addChildNode(roll)
+        return n
     }
 
     // MARK: work in the village

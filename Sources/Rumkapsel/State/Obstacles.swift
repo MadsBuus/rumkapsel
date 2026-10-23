@@ -2,7 +2,14 @@ import Foundation
 
 struct Footprint {
     let at: SIMD2<Double>
-    let radius: Double
+    let half: SIMD2<Double>
+
+    init(at: SIMD2<Double>, radius: Double) { self.at = at; half = SIMD2(radius, radius) }
+    init(at: SIMD2<Double>, size: SIMD2<Double>, yaw: Double) {
+        self.at = at
+        let c = abs(cos(yaw)), s = abs(sin(yaw))
+        half = SIMD2(c * size.x + s * size.y, s * size.x + c * size.y) * 0.4
+    }
 
     static func crate(_ at: SIMD2<Double>, _ zone: Zone = .waiting, failing: Bool = false, scale: Double = 1) -> Footprint {
         Footprint(at: at, radius: (failing ? 0.5312 : 0.52) * zone.crateSize * scale)
@@ -15,8 +22,8 @@ struct Footprint {
 
     var cells: [Cell] {
         let f = Double(Station.fine)
-        let xs = Int(((at.x - radius) * f).rounded())...Int(((at.x + radius) * f).rounded())
-        let ys = Int(((at.y - radius) * f).rounded())...Int(((at.y + radius) * f).rounded())
+        let xs = Int(((at.x - half.x) * f).rounded())...Int(((at.x + half.x) * f).rounded())
+        let ys = Int(((at.y - half.y) * f).rounded())...Int(((at.y + half.y) * f).rounded())
         return xs.flatMap { x in ys.map { Cell(x: x, y: $0) } }
     }
 }
@@ -43,18 +50,18 @@ extension Station {
             place(lounge, rest + seats)
         }
         if let bath = rooms["kind:bath"] {
-            place(bath, [Footprint(at: bowlSpot(bath: bath) - o, radius: kingdom ? 0.0634 : 0.148), Footprint(at: showerArm(bath: bath) - o, radius: 0.1),
-                         Footprint(at: showerPole(bath: bath) - o, radius: 0.034), Footprint(at: towelRail(bath: bath) - o, radius: 0.096)]
-                + (kingdom ? [Footprint(at: showerNozzle(bath: bath) - o, radius: 0.208)] : []))
+            place(bath, fixtures(in: bath.key).flatMap { f -> [Footprint] in
+                let own = Footprint(at: f.at, radius: kingdom && f.kind == .bowl ? 0.0634 : max(f.kind.size.x, f.kind.size.y) / 2 * 0.8)
+                return [own] + (kingdom && f.kind == .shower ? [Footprint(at: f.point(SIMD2(0, Hands.arm)), radius: 0.208)] : [])
+            })
         }
-        if let galley { place(rooms["kind:galley"], galley.counter.map { Footprint(at: $0, radius: Galley.counterWidth / 2 * 0.8) }) }
-        for key in ["kind:mission"] {
+        for key in ["kind:mission", "kind:galley"] {
             let fixtures = self.fixtures(in: key)
             let seats = fixtures.flatMap { f in f.kind.anchors.indices.compactMap { f.place($0) }.filter { $0.use != .stand } }
             place(rooms[key], fixtures.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }
                 + seats.map { Footprint(at: $0.chair, radius: Seat.footprint) })
         }
-        place(rooms["kind:quarters"], beds.map { Footprint(at: $0.pos, radius: $0.level > 0 ? 0.296 : kingdom ? 0.2066 : 0.288) })
+        place(rooms["kind:quarters"], fixtures(in: "kind:quarters").map { Footprint(at: $0.at, size: $0.kind.size, yaw: $0.yaw) })
         for room in offices {
             guard let at = desk(room, theme: theme) else { continue }
             place(room, [Footprint(at: at, radius: kingdom ? 0.178 : 0.168)])

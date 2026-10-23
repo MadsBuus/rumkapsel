@@ -155,8 +155,8 @@ extension StationController {
         guard let m = minions[minionId], let station = fleet.stations[m.station], canOrder(m) else { return }
         switch o {
         case .gym:
-            guard let gym = station.rooms["kind:gym"] else { logEvent("\(m.home.name): no gym here"); return }
-            guard takeTurnInGym(m, station: station, gym: gym) else { logEvent("\(m.home.name): every piece of gear is taken"); return }
+            guard station.rooms["kind:gym"] != nil else { logEvent("\(m.home.name): no gym here"); return }
+            guard takeTurnInGym(m, station: station) else { logEvent("\(m.home.name): every piece of gear is taken"); return }
         case .shower, .toilet:
             m.showering = o == .shower
             guard station.rooms["kind:bath"] != nil else { logEvent("\(m.home.name): no bath here"); return }

@@ -8,9 +8,10 @@ extension StationController {
         let st = fleet.stations[station]
         let start: Cell
         let parent = s.isSubagent ? minions.values.first { $0.station == station && !$0.isSubagent && $0.home.key == home.key } : nil
+        let office = st.flatMap { simulation.standing($0, home.key) ? $0.rooms[home.key]?.cells : nil } ?? []
         if let parent { start = parent.cell }
-        else if s.isSubagent { start = st?.rooms[home.key]?.cells.first ?? st?.coreCenter ?? Cell(x: 0, y: 0) }
-        else if let cells = st?.rooms[home.key]?.cells, !cells.isEmpty { start = cells[minions.count % cells.count] }
+        else if s.isSubagent { start = office.first ?? st?.coreCenter ?? Cell(x: 0, y: 0) }
+        else if !office.isEmpty { start = office[minions.count % office.count] }
         else { start = st?.hangarCells.first ?? st?.cells(of: .quarters).randomElement() ?? Cell(x: 0, y: 0) }
         let m = Minion(id: s.id, station: station, home: home, cwd: s.cwd, toolCount: s.toolCount, isSubagent: s.isSubagent, start: start)
         if let parent { m.pos = parent.pos }
@@ -55,7 +56,7 @@ extension StationController {
     func standCell(_ st: Station, near cell: Cell) -> Cell { simulation.standCell(st, near: cell) }
     @discardableResult func visitBath(_ m: Minion, station: Station) -> Bool { simulation.visitBath(m, station: station) }
     @discardableResult func visitGalley(_ m: Minion, station: Station, fare: Command.Fare) -> Bool { simulation.visitGalley(m, station: station, fare: fare) }
-    @discardableResult func takeTurnInGym(_ m: Minion, station: Station, gym: Room) -> Bool { simulation.takeTurnInGym(m, station: station, gym: gym) }
+    @discardableResult func takeTurnInGym(_ m: Minion, station: Station, on kind: FixtureKind? = nil) -> Bool { simulation.takeTurnInGym(m, station: station, on: kind) }
     @discardableResult func takeTurnInMission(_ m: Minion, station: Station, seated: Bool? = nil) -> Bool { simulation.takeTurnInMission(m, station: station, seated: seated) }
     @discardableResult func startRoam(_ m: Minion, station: Station) -> Bool { simulation.startRoam(m, station: station) }
     func react(_ m: Minion, _ activity: Activity, place: Place, minutes: Double, words: String) { simulation.react(m, activity, place: place, minutes: minutes, words: words) }

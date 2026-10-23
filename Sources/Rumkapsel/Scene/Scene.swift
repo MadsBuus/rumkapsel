@@ -823,7 +823,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             for (i, m) in free.enumerated() where !m.isQA {
                 let longIdle = clock - m.freeSince > 20 * 60 && i >= 2
                 let restPlace: Place = night ? .quarters : .lounge
-                if longIdle || (i >= station.beds.count + station.couches.count) {
+                if longIdle || (i >= station.fixtures(in: "kind:quarters").count + station.couches.count) {
                     dismiss(m)
                 } else if !m.onJob && !m.bathing && !m.isChore && m.place != restPlace && m.place != .bath && !(m.place == .lounge && restPlace == .quarters && m.bed == nil && night == false) {
                     m.activity = night ? .sleeping : .waiting
@@ -883,11 +883,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func doing(_ m: Minion) -> String? {
         switch m.current?.kind {
-        case .exercise: return "gym"
-        case .use: return "mission"
-        case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
+        case .use(_, .shower, _, _): return "shower"
+        case .use(_, .bowl, _, _): return "bath"
+        case .use(let ref, _, _, _): return m.fare.map { $0 == .coffee ? "coffee" : "bite" } ?? (ref.room == "kind:gym" ? "gym" : "mission")
         case .chore: return "roam"
-        case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"
         default: return m.place == .lounge && m.activity != .sleeping ? "lounge" : nil
         }
     }
@@ -947,7 +946,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case "gym":
             if !b.exercising {
                 if visiting { simulation.finish(b, to: .gym) }
-                if !(station.rooms["kind:gym"].map { takeTurnInGym(b, station: station, gym: $0) } ?? false) { go(.lounge) }
+                if !takeTurnInGym(b, station: station) { go(.lounge) }
             }
         case "bath", "shower":
             if !b.bathing {
@@ -966,7 +965,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if !visitGalley(b, station: station, fare: m.doing == "coffee" ? .coffee : .bite) { go(.lounge) }
             }
         case "mission":
-            if b.using == nil {
+            if b.using?.room != "kind:mission" {
                 if visiting { simulation.finish(b, to: .lounge) }
                 if !takeTurnInMission(b, station: station) { go(.lounge) }
             }

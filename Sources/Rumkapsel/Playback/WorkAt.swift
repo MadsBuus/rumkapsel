@@ -8,14 +8,19 @@ extension Simulation {
     }
 
     @discardableResult
-    func use(_ m: B, _ ref: FixtureRef, station: Station, seconds: Double) -> Bool {
+    func use(_ m: B, _ ref: FixtureRef, station: Station, seconds: Double, back: Place? = nil) -> Bool {
         guard let place = station.place(ref), let kind = station.fixtures(in: ref.room)[safe: ref.fixture]?.kind,
               let room = station.rooms[ref.room] else { return false }
-        let back = m.place
+        let back = back ?? m.place
         guard start(m, .use(ref, kind: kind, back: back, seconds: seconds), announce: true), m.using == ref else { return false }
         m.couch = nil
         m.place = .room(ref.room)
-        let last = place.use == .stand ? place.at + place.outward * Hands.arm : place.stand
+        let last: SIMD2<Double>
+        switch place.use {
+        case .stand: last = place.at + place.outward * Hands.arm
+        case .spot: last = place.at
+        case .sit, .lie: last = place.stand
+        }
         m.path = route(m, to: standCell(station, near: last, within: Set(room.cells))) + [last]
         return true
     }
@@ -24,6 +29,7 @@ extension Simulation {
         guard let ref = m.using, let order = m.current?.id, m.path.isEmpty, m.phaseKind == .act, let place = station.place(ref) else { return false }
         if !m.inPlace {
             if place.use == .stand, !atArmsLength(m, of: place.at, from: place.outward, square: true, dt: dt) { return true }
+            if place.use == .spot { m.pos = place.at; m.facing = place.facing }
             m.settledOn = (order, nil)
             m.actStartedAt = clock
             m.phaseUntil = clock + m.actFor
@@ -37,6 +43,7 @@ extension Simulation {
         guard clock >= m.phaseUntil else { return false }
         var back = restPlace(m)
         if !m.busy, case .use(_, _, let where_, _) = m.current?.kind { back = where_ }
+        if let fare = m.fare { served(m, fare) }
         visitDone(m, ref.room)
         finish(m, to: back)
         return true

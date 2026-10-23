@@ -115,7 +115,6 @@ enum Routines {
         let working = m.busy && resting && !m.isSubagent && m.activity != .waiting
             && !m.exercising && !m.bathing && !m.onJob
         if working, !m.pyramids.isEmpty, m.nearCone { return coneTools[m.toolSlot(at: clock)] }
-        if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil { return nil }
         if working { return tool(for: m.activity) }
         if m.place == .lounge, resting, m.couch != nil { return .tablet }
         return nil

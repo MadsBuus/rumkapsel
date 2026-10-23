@@ -15,7 +15,7 @@ struct Cargo {
 }
 
 enum Cue {
-    case flush(station: String, bowl: SIMD2<Double>, front: Double)
+    case flush(station: String, bowl: PlacedFixture)
     case fidget(String)
     case towel(String, station: String, taken: Bool)
     case hop(String)
@@ -199,14 +199,9 @@ final class Simulation<B: Body> {
 
     func dropLeftovers(_ m: B, of old: Command) {
         m.fetchSpot = nil
-        m.seatedOnBowl = false
         m.napping = false
         if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
-        m.fixture = nil
-        m.atCounter = false
         switch old.kind {
-        case .bath(_, let back, _), .exercise(_, let back, _), .galley(_, let back, _):
-            if m.place == .bath || m.place == .gym || m.place == .galley { m.place = back }
         case .use(let ref, _, let back, _):
             if m.place == .room(ref.room) { m.place = back }
         default: break
@@ -225,6 +220,7 @@ final class Simulation<B: Body> {
         m.phase = 0
         m.phaseUntil = 0
         m.fetchSpot = nil
+        if m.drying { m.drying = false; cue(.towel(m.id, station: m.station, taken: false)) }
         if takeNext(m) { return }
         if let place { send(m, to: place) } else { idle(m, after: last) }
     }
@@ -300,8 +296,9 @@ final class Simulation<B: Body> {
     func send(_ m: B, to place: Place) {
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
-        if case .room(let key) = place, !standing(station, key) { return send(m, to: .lounge) }
+        if case .room(let key) = place, !standing(station, key) { return send(m, to: m.isSubagent ? probePlace(m) : .lounge) }
         if place == .lounge, m.place == .lounge, m.couchSeated, m.path.isEmpty { return }
+        if place == .quarters, m.place == .quarters, m.bunk != nil, m.risingUntil == 0, m.path.isEmpty { return }
         if place != .quarters {
             rouse(m)
             m.bed = nil; m.napping = false
@@ -309,7 +306,7 @@ final class Simulation<B: Body> {
         var place = place
         if place == .quarters, m.bed == nil {
             let used = Set(bodies.values.filter { $0.station == m.station && $0.id != m.id }.compactMap(\.bed))
-            m.bed = station.beds.indices.first { !used.contains($0) }
+            m.bed = station.fixtures(in: "kind:quarters").indices.first { !used.contains($0) }
             if m.bed == nil { place = .lounge }
         }
         if place != .lounge { m.couch = nil }
@@ -322,7 +319,11 @@ final class Simulation<B: Body> {
         }
         let cells = station.cells(of: place)
         let target: Cell
-        if let b = m.bed, b < station.beds.count { target = station.beds[b].cell }
+        var exactly: SIMD2<Double>?
+        if let b = m.bed, let ref = station.bedside(b), let bed = station.place(ref) {
+            exactly = bed.stand
+            target = Station.cell(ofSub: Station.sub(bed.stand))
+        }
         else if place == .lounge, let c = m.couch, c < station.couches.count, let lounge = station.rooms["kind:lounge"] {
             let spot = station.couches[c]
             target = lounge.cells.min { a, b in hypot(Double(a.x) - spot.x, Double(a.y) - spot.y) < hypot(Double(b.x) - spot.x, Double(b.y) - spot.y) } ?? lounge.cells[0]
@@ -337,7 +338,7 @@ final class Simulation<B: Body> {
         m.place = place
         start(m, .rest(place: place, home: m.home.key, office: station.rooms[m.home.key]?.name ?? m.home.name,
                        yours: !m.isCrew && !m.isPeer, asleep: m.activity == .sleeping))
-        m.path = route(m, to: target)
+        m.path = route(m, to: target, exactly: exactly)
         if m.path.isEmpty, abs(m.pos.x - Double(target.x)) + abs(m.pos.y - Double(target.y)) > 1 { m.path = [SIMD2(Double(target.x), Double(target.y))] }
         m.nextWanderAt = clock + Double.random(in: 1...3)
     }
@@ -350,9 +351,12 @@ final class Simulation<B: Body> {
             m.couchSince = nil
             if m.risingUntil == 0 { m.risingUntil = clock + B.riseSit + 0.3 }
         }
-        guard m.lying, m.risingUntil == 0 else { return }
-        m.risingUntil = clock + 1.1
-        m.beddedDown = false
+        guard var bunk = m.bunk, m.risingUntil == 0 else { return }
+        bunk.until = clock + min(clock - bunk.since, Seat.lieDown)
+        bunk.sat = true
+        bunk.flat = false
+        m.bunk = bunk
+        m.risingUntil = bunk.until
         m.napping = false
         m.bed = nil
     }
@@ -360,7 +364,7 @@ final class Simulation<B: Body> {
     func crowd(around m: B, round blocker: String? = nil) -> Set<Cell> {
         var out: Set<Cell> = []
         for o in bodies.values where o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5 {
-            if o.lying || (o.couch != nil && o.path.isEmpty) { continue }
+            if o.lying || o.bunk != nil || (o.couch != nil && o.path.isEmpty) { continue }
             let s = Station.sub(o.pos)
             if o.id == blocker { for dx in -1...1 { for dy in -1...1 { out.insert(Cell(x: s.x + dx, y: s.y + dy)) } } }
             else { out.insert(s) }
@@ -375,15 +379,16 @@ final class Simulation<B: Body> {
         return out
     }
 
-    func route(_ m: B, to cell: Cell, round blocker: String? = nil) -> [SIMD2<Double>] {
+    func route(_ m: B, to cell: Cell, round blocker: String? = nil, exactly point: SIMD2<Double>? = nil) -> [SIMD2<Double>] {
         guard let station = fleet.stations[m.station] else { return [] }
         rouse(m)
-        var from = m.pos, back: [SIMD2<Double>] = []
-        if !station.walkable.contains(m.cell), let floor = station.nearestFloor(to: m.pos) {
+        var from = m.bunk.flatMap { station.place($0.ref)?.stand } ?? m.pos, back: [SIMD2<Double>] = []
+        if !station.walkable.contains(Cell(x: Int(from.x.rounded()), y: Int(from.y.rounded()))), let floor = station.nearestFloor(to: from) {
             from = SIMD2(Double(floor.x), Double(floor.y))
             back = [from]
-            if floor == cell { return back }
+            if floor == cell, point == nil { return back }
         }
+        if let point { return back + station.path(from: from, to: point, avoiding: crowd(around: m, round: blocker)) }
         let clear = station.path(from: from, to: cell, avoiding: crowd(around: m, round: blocker))
         return back + (clear.isEmpty ? station.path(from: from, to: cell) : clear)
     }
@@ -502,28 +507,48 @@ final class Simulation<B: Body> {
 
     @discardableResult
     func visitBath(_ m: B, station: Station) -> Bool {
-        guard let bath = station.rooms["kind:bath"] else { return false }
-        let taken = Set(bodies.values.filter { $0.id != m.id && $0.station == m.station && $0.bathing }.compactMap(\.fixture))
-        let want = m.showering ? 1 : 0
-        guard let fixture = [want, 1 - want].first(where: { !taken.contains($0) }) else { return false }
-        m.showering = fixture == 1
+        let fixtures = station.fixtures(in: "kind:bath"), free = freeAnchors(m, station: station, in: "kind:bath")
+        let order: [FixtureKind] = m.showering ? [.shower, .bowl] : [.bowl, .shower]
+        guard let ref = order.lazy.compactMap({ kind in free.first { fixtures[$0.fixture].kind == kind } }).first else { return false }
+        m.showering = fixtures[ref.fixture].kind == .shower
         m.bathDue = 0
-        let back = m.place
-        send(m, to: .bath)
-        guard start(m, .bath(m.showering ? .shower : .quick, back: back, seconds: m.showering ? Double.random(in: 120...180) : 60)) else { return false }
-        m.fixture = fixture
-        let f = station.bathFixtures(bath: bath)
-        let cell = m.showering ? f.shower : f.toilet
-        m.path = route(m, to: cell)
-        let nozzle = station.showerNozzle(bath: bath)
-        m.fetchSpot = m.showering ? SIMD2(nozzle.x - station.offset.x, nozzle.y - station.offset.y)
-                                  : SIMD2(Double(cell.x) + 0.02 * f.toiletCorner.x, Double(cell.y) - 0.1 * f.toiletCorner.y)
-        m.facing = m.showering ? atan2(f.showerCorner.x, -f.showerCorner.y) : atan2(f.toiletCorner.x, f.toiletCorner.y)
-        return true
+        return use(m, ref, station: station, seconds: m.showering ? Double.random(in: 120...180) : 60)
+    }
+
+    func stepBath(_ m: B, station: Station, dt: Double) -> Bool {
+        guard let ref = m.using, m.inPlace, m.path.isEmpty else { return false }
+        let fixtures = station.fixtures(in: ref.room)
+        guard let fixture = fixtures[safe: ref.fixture], let place = fixture.place(ref.anchor) else { return false }
+        switch fixture.kind {
+        case .bowl:
+            guard m.sittingOn != nil else { return false }
+            if !place.sitting(clock - m.actStartedAt, of: m.actFor).down {
+                cue(.flush(station: station.name, bowl: fixture))
+            } else if clock >= m.nextFidgetAt {
+                if m.nextFidgetAt > m.actStartedAt { cue(.fidget(m.id)) }
+                m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
+            }
+            return false
+        case .shower:
+            guard clock >= m.phaseUntil else { return false }
+            if !m.drying {
+                if let rail = fixtures.first(where: { $0.kind == .towelRail })?.place(0),
+                   !atArmsLength(m, of: rail.at, from: rail.outward, square: true, dt: dt) { return true }
+                m.drying = true
+                m.phaseUntil = clock + 4
+                cue(.towel(m.id, station: station.name, taken: true))
+                return true
+            }
+            m.drying = false
+            cue(.towel(m.id, station: station.name, taken: false))
+            return false
+        default:
+            return false
+        }
     }
 
     func pickIdle(_ m: B, station: Station) {
-        let gymFree = station.rooms["kind:gym"] != nil && freeGymFixture(m) != nil
+        let gymFree = !freeAnchors(m, station: station, in: "kind:gym").isEmpty
         let pick = IdlePick.pick(roll: Double.random(in: 0..<1), night: isNight(station), crew: m.isCrew,
                                  gymFree: gymFree, bath: station.rooms["kind:bath"] != nil, shower: Bool.random(),
                                  galley: galleyFare(m, station: station), mission: !isNight(station) && !freeAnchors(m, station: station, in: "kind:mission").isEmpty)
@@ -531,7 +556,7 @@ final class Simulation<B: Body> {
         case .roam:
             startRoam(m, station: station)
         case .gym:
-            if let gym = station.rooms["kind:gym"], takeTurnInGym(m, station: station, gym: gym) { return }
+            if takeTurnInGym(m, station: station) { return }
             startRoam(m, station: station)
         case .bath(let shower):
             m.showering = shower
@@ -549,22 +574,31 @@ final class Simulation<B: Body> {
     }
 
     func galleyFare(_ m: B, station: Station) -> Command.Fare? {
-        guard station.galley != nil, !isNight(station), !m.isCrew,
-              !bodies.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.fare != nil }) else { return nil }
+        guard !isNight(station), !m.isCrew, galleyFree(m, station: station) else { return nil }
         let hour = Calendar.current.component(.hour, from: now)
         return (11..<14).contains(hour) || (18..<20).contains(hour) ? .bite : .coffee
     }
 
+    func galleyFree(_ m: B, station: Station) -> Bool {
+        let all = station.anchors(in: "kind:galley")
+        return !all.isEmpty && freeAnchors(m, station: station, in: "kind:galley").count == all.count
+    }
+
     @discardableResult
     func visitGalley(_ m: B, station: Station, fare: Command.Fare) -> Bool {
-        guard let galley = station.galley,
-              !bodies.values.contains(where: { $0.id != m.id && $0.station == m.station && $0.fare != nil }) else { return false }
-        let back = m.place == .lounge || m.place == .room(m.home.key) ? m.place : restPlace(m)
-        guard start(m, .galley(fare, back: back, seconds: Double.random(in: fare.seconds)), announce: true) else { return false }
-        m.couch = nil; m.bed = nil; m.napping = false
-        m.place = .galley
-        m.path = route(m, to: galley.cell)
+        guard galleyFree(m, station: station),
+              let ref = freeAnchors(m, station: station, in: "kind:galley").first(where: { station.fixtures(in: $0.room)[safe: $0.fixture]?.kind == fare.machine }) else { return false }
+        let back: Place = fare == .bite ? .lounge : m.place == .lounge || m.place == .room(m.home.key) ? m.place : restPlace(m)
+        guard use(m, ref, station: station, seconds: Double.random(in: fare.seconds), back: back) else { return false }
+        m.bed = nil; m.napping = false
         return true
+    }
+
+    func served(_ m: B, _ fare: Command.Fare) {
+        switch fare {
+        case .coffee: m.mugUntil = clock + Double.random(in: 150...360)
+        case .bite: m.mealFor = Double.random(in: 70...110); m.mealUntil = clock + m.mealFor
+        }
     }
 
     @discardableResult
@@ -613,22 +647,10 @@ final class Simulation<B: Body> {
     }
 
     @discardableResult
-    func takeTurnInGym(_ m: B, station: Station, gym: Room) -> Bool {
-        guard let kind = freeGymFixture(m) else { return false }
-        let back = m.place
-        m.couch = nil
-        send(m, to: .gym)
-        start(m, .exercise(kind, back: back, seconds: Double.random(in: 240...480)), announce: true)
-        let stand = station.gymStand(gym: gym, kind)
-        m.path = route(m, to: stand.cell)
-        m.fetchSpot = stand.spot
-        m.facing = stand.facing
-        return true
-    }
-
-    func freeGymFixture(_ m: B) -> Command.Workout? {
-        let taken = Set(bodies.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
-        return Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
+    func takeTurnInGym(_ m: B, station: Station, on kind: FixtureKind? = nil) -> Bool {
+        let free = freeAnchors(m, station: station, in: "kind:gym").filter { ref in kind.map { station.fixtures(in: ref.room)[safe: ref.fixture]?.kind == $0 } ?? true }
+        guard let ref = free.randomElement() else { return false }
+        return use(m, ref, station: station, seconds: Double.random(in: 240...480))
     }
 
     // MARK: crew
@@ -637,7 +659,7 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
-        if m.lying { m.napping = false; m.bed = nil; m.beddedDown = false }
+        rouse(m)
         post(.react(activity, place: place, for: minutes * 60, words: words), for: m, rank: .crew, at: m.cell, place: place)
     }
 
@@ -689,7 +711,7 @@ final class Simulation<B: Body> {
         if !m.path.isEmpty, clock >= m.wonderUntil {
             let others: [Body] = bodies.values.filter { o in
                 o.id != m.id && o.station == m.station && o.state != .leaving && o.opacity > 0.5
-                    && !o.lying && !(o.couch != nil && o.path.isEmpty)
+                    && !o.lying && o.bunk == nil && !(o.couch != nil && o.path.isEmpty)
             }
             m.blockedBy = Walk.step(m, speed: speed, dt: dt, others: others)?.id
             return .walking
@@ -705,7 +727,7 @@ final class Simulation<B: Body> {
         }
         if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
             switch c.kind {
-            case .goTo, .bath, .exercise, .galley, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
+            case .goTo, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
                 if case .work = c.kind { ownOrders[c.id] = nil }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
@@ -751,93 +773,11 @@ final class Simulation<B: Body> {
                 if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); return .spent }
             }
             if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
-            if m.place == .bath {
-                if settled, let spot = m.fetchSpot {
-                    let d = spot - m.pos
-                    if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
-                    m.fetchSpot = nil
-                    if let bath = station.rooms["kind:bath"] {
-                        let f = station.bathFixtures(bath: bath)
-                        let corner = m.showering ? f.showerCorner : f.toiletCorner
-                        m.facing = m.drying ? atan2(f.showerCorner.x, 0) : atan2(corner.x, corner.y)
-                    }
-                }
-                if settled, !m.showering, let bath = station.rooms["kind:bath"] {
-                    let standAt = m.phaseUntil - 0.7
-                    let bowl = station.bowlSpot(bath: bath)
-                    let f = station.bathFixtures(bath: bath)
-                    if !m.seatedOnBowl, clock < standAt, m.phaseUntil > 0 {
-                        let to = bowl - station.offset - m.pos
-                        m.facing = atan2(0, -f.toiletCorner.y)
-                        let across = to.x * cos(m.facing) - to.y * sin(m.facing), ahead = to.x * sin(m.facing) + to.y * cos(m.facing)
-                        m.seatedOnBowl = true
-                        m.seatOffset = SIMD2(across, ahead - 0.02 + B.seatReach)
-                        m.nextFidgetAt = clock + Double.random(in: 1.5...3)
-                    } else if m.seatedOnBowl, clock >= standAt {
-                        m.seatedOnBowl = false
-                        cue(.flush(station: station.name, bowl: bowl, front: f.toiletCorner.y))
-                    } else if m.seatedOnBowl, clock >= m.nextFidgetAt {
-                        m.nextFidgetAt = clock + Double.random(in: 1.5...3.5)
-                        cue(.fidget(m.id))
-                    }
-                }
-                if clock >= m.phaseUntil && settled {
-                    if m.showering, !m.drying, let bath = station.rooms["kind:bath"] {
-                        m.drying = true
-                        m.phaseUntil = clock + 4
-                        m.fetchSpot = station.towelStand(bath: bath) - station.offset
-                        cue(.towel(m.id, station: station.name, taken: true))
-                    } else {
-                        if m.drying { m.drying = false; cue(.towel(m.id, station: station.name, taken: false)) }
-                        m.seatedOnBowl = false
-                        m.fixture = nil
-                        var back = restPlace(m)
-                        if !m.busy, case .bath(_, let where_, _) = m.current?.kind { back = where_ }
-                        visitDone(m, "bath")
-                        finish(m, to: back)
-                    }
-                }
-            } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
+            if m.bathing, stepBath(m, station: station, dt: dt) { return .spent }
+            if m.place != .bath, m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                 if !visitBath(m, station: station) { return .spent }
             }
-            if m.place == .gym, m.exercising {
-                if settled, let spot = m.fetchSpot {
-                    let d = spot - m.pos
-                    if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
-                    m.fetchSpot = nil
-                    if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = station.gymStand(gym: gym, kind).facing }
-                }
-                if clock >= m.phaseUntil && settled && m.fetchSpot == nil {
-                    var back = restPlace(m)
-                    if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
-                    visitDone(m, "gym")
-                    finish(m, to: back)
-                }
-            }
             if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }
-            if m.place == .galley, let fare = m.fare, let galley = station.galley {
-                if settled, m.phaseKind == .act {
-                    if !m.atCounter {
-                        guard atArmsLength(m, of: galley.machine(fare), from: -galley.back, square: true, dt: dt) else { return .spent }
-                        m.atCounter = true
-                        m.actStartedAt = clock
-                        m.phaseUntil = clock + m.actFor
-                    }
-                    m.facing = galley.facing
-                }
-                if m.atCounter, clock >= m.phaseUntil {
-                    var back = restPlace(m)
-                    if !m.busy, case .galley(_, let where_, _) = m.current?.kind { back = fare == .bite ? .lounge : where_ }
-                    switch fare {
-                    case .coffee: m.mugUntil = clock + Double.random(in: 150...360)
-                    case .bite: m.mealFor = Double.random(in: 70...110); m.mealUntil = clock + m.mealFor
-                    }
-                    visitDone(m, "galley")
-                    m.atCounter = false
-                    finish(m, to: back)
-                    return .spent
-                }
-            }
             if m.isSubagent, settled { makeRoom(m, station: station); tripOn(m, station: station) }
             if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
                 if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
@@ -882,6 +822,7 @@ final class Simulation<B: Body> {
     }
 
     private func stepBody(_ m: B, station: Station, dt: Double) -> Stepped {
+        stepBunk(m, station: station)
         switch stepWalk(m, station: station, dt: dt) {
         case .waking: return .waking
         case .walking, .wondering: break
@@ -919,21 +860,26 @@ final class Simulation<B: Body> {
             m.couchSince = nil
             m.couchSeated = false
         }
-        if m.path.isEmpty, m.isResting, m.place == .quarters, let b = m.bed, b < station.beds.count {
-            let spot = station.beds[b].pos
-            let aim = m.path.first ?? m.pos
-            let outward = SIMD2(aim.x >= spot.x ? 1.0 : -1.0, 0)
-            let stand = spot + outward * B.seatReach
-            if !m.beddedDown, m.beddingUntil == 0, m.activity == .sleeping || m.napping {
-                let gap = stand - m.pos
-                if (gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.08 {
-                    m.beddingUntil = clock + 1.1 + Double.random(in: 0...0.8)
-                    m.facing = atan2(outward.x, outward.y)
-                }
-            }
-            if m.beddingUntil > 0, clock >= m.beddingUntil { m.beddingUntil = 0; m.beddedDown = true }
-            let stretching = m.beddingUntil > 0 && m.beddingUntil - clock <= B.riseSit
-            m.pos += ((m.lying || stretching ? spot : stand) - m.pos) * min(1, dt * 4)
+    }
+
+    func stepBunk(_ m: B, station: Station) {
+        if var bunk = m.bunk {
+            guard let bed = station.place(bunk.ref) else { m.bunk = nil; return }
+            let s = bed.lying(clock - bunk.since, of: bunk.until - bunk.since)
+            m.pos = s.pos
+            m.facing = s.facing
+            bunk.sat = s.sat
+            bunk.flat = s.flat
+            m.bunk = clock >= bunk.until ? nil : bunk
+            return
+        }
+        guard m.path.isEmpty, m.isResting, !m.onJob, m.place == .quarters, m.state == .settled, m.risingUntil == 0,
+              let b = m.bed, let ref = station.bedside(b), let bed = station.place(ref), case .lie(let height) = bed.use else { return }
+        let gap = bed.stand - m.pos
+        if (gap.x * gap.x + gap.y * gap.y).squareRoot() > 0.05 {
+            m.path = route(m, to: Station.cell(ofSub: Station.sub(bed.stand)), exactly: bed.stand)
+        } else if m.activity == .sleeping || m.napping {
+            m.bunk = Body.Bunk(ref: ref, since: clock, height: height)
         }
     }
 }

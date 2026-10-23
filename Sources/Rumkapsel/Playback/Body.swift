@@ -41,10 +41,8 @@ class Body {
         }
     }
     var hammerUp = false
-    var seatedOnBowl = false
-    var seatOffset = SIMD2<Double>(0, 0)
 
-    var seated: Bool { seatedOnBowl || onCouch || sittingOn != nil }
+    var seated: Bool { onCouch || sittingOn != nil }
 
     var using: FixtureRef? { if case .use(let ref, _, _, _) = current?.kind { return ref }; return nil }
     var settledOn: (order: Int, height: Double?)?
@@ -57,21 +55,19 @@ class Body {
     var couchSince: Double?
     var couchSeated = false
 
-    var seatSpot: SIMD2<Double> { seatedOnBowl ? seatOffset : SIMD2(0, 0) }
     var drying = false
     var nextFidgetAt = 0.0
     static let seatReach = Seat.reach
     var wakeUntil = 0.0
     var risingUntil = 0.0
-    var beddingUntil = 0.0
-    var beddedDown = false
+    struct Bunk { let ref: FixtureRef; let since: Double; let height: Double; var until = Double.infinity; var sat = false; var flat = false }
+    var bunk: Bunk?
     static let riseSit = 0.55
     var wonderUntil = 0.0
     var blockedBy: String?
     var stallSince = 0.0
     var stallMark = ""
     var waitingOn: String?
-    var fixture: Int?
     var shortStretches = 0
 
     var promptCount = 0
@@ -99,7 +95,6 @@ class Body {
     var nextWanderAt = 0.0
     var watchCheckAt = 0.0
     var nextBathAt = 0.0
-    var nextWorkoutAt = 0.0
     var actFor = 0.0
     var actStartedAt = 0.0
     var idle = IdleClock()
@@ -136,13 +131,10 @@ class Body {
 
     var lying: Bool {
         if onBench { return true }
-        return beddedDown && risingUntil == 0 && beddingUntil == 0 && !onJob && path.isEmpty && state == .settled
-            && (activity == .sleeping || napping) && place == .quarters
+        return bunk?.flat ?? false
     }
 
-    var onBench: Bool {
-        exercising && workout == .bench && path.isEmpty && fetchSpot == nil && phaseKind == .act
-    }
+    var onBench: Bool { workout == .bench && sittingOn != nil }
 
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isPeer && !isQA
@@ -152,12 +144,11 @@ class Body {
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }
     var isChore: Bool { if case .chore = current?.kind { return true }; return false }
-    var bathing: Bool { if case .bath = current?.kind { return true }; return false }
-    var exercising: Bool { if case .exercise = current?.kind { return true }; return false }
+    var bathing: Bool { using?.room == "kind:bath" }
+    var exercising: Bool { workout != nil }
     var choring: Bool { if case .chore = current?.kind { return true }; return false }
-    var workout: Command.Workout? { if case .exercise(let k, _, _) = current?.kind { return k }; return nil }
-    var fare: Command.Fare? { if case .galley(let f, _, _) = current?.kind { return f }; return nil }
-    var atCounter = false
+    var workout: FixtureKind? { if case .use(let ref, let kind, _, _) = current?.kind, ref.room == "kind:gym" { return kind }; return nil }
+    var fare: Command.Fare? { if case .use(_, let kind, _, _) = current?.kind { return Command.Fare.allCases.first { $0.machine == kind } }; return nil }
     var mugUntil = 0.0
     var tripHome = false
     var tripSince = 0.0
@@ -178,10 +169,7 @@ class Body {
         guard let c = current else { return "nothing in particular" }
         switch c.kind {
         case .goTo(let place) where path.isEmpty && state == .settled: return place.hereWords
-        case .exercise(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind.doing
-        case .galley(let fare, _, _) where phaseKind == .act && path.isEmpty: return fare.doing
         case .use(_, let kind, _, _) where inPlace: return kind.doing
-        case .bath(let kind, _, _) where phaseKind == .act && path.isEmpty: return kind == .shower ? "in the shower" : "on the toilet"
         default: return c.words
         }
     }

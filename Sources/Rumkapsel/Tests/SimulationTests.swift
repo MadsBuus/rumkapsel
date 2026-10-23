@@ -22,7 +22,7 @@ enum SimulationTests {
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = false
             expect(sim.visitBath(m, station: station), "the bowl was free")
-            expect(m.bathing && m.place == .bath && m.fixture == 0, "off to the bowl")
+            expect(m.bathing && m.place == .bath && kind(m) == .bowl, "off to the bowl")
             var arrivedAt = 0.0, satAt = 0.0, sat = false, flushed = false
             _ = step(sim, seconds: 30, until: {
                 if m.phaseKind == .act, arrivedAt == 0 { arrivedAt = sim.clock }
@@ -42,7 +42,7 @@ enum SimulationTests {
             expect(!m.seated, "up off the seat")
             expect(sim.clock - arrivedAt >= 60 - 0.05, "lasted its whole time: \(sim.clock - arrivedAt) s")
             expect(m.place == .lounge, "back to where it came from: \(m.place.words)")
-            expect(sim.visitLog.count == 1 && sim.visitLog[0].kind == "bath" && sim.visitLog[0].lasted >= 59.9, "logged: \(sim.visitLog)")
+            expect(sim.visitLog.count == 1 && sim.visitLog[0].kind == "kind:bath" && sim.visitLog[0].lasted >= 59.9, "logged: \(sim.visitLog)")
         }
 
         test("a shower ends at the towel rail: a beat drying off, the towel taken and hung back") {
@@ -50,7 +50,7 @@ enum SimulationTests {
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = true
-            expect(sim.visitBath(m, station: station) && m.fixture == 1, "the shower was free")
+            expect(sim.visitBath(m, station: station) && kind(m) == .shower, "the shower was free")
             _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
             let planned = m.actFor
             expect(planned >= 120 && planned <= 180, "two to three minutes: \(planned)")
@@ -58,7 +58,7 @@ enum SimulationTests {
             func drain() { for c in sim.drainCues() { if case .towel(_, _, let t) = c { if t { taken = true } else { hung = true } } } }
             _ = step(sim, seconds: planned + 1, until: { drain(); return m.drying })
             expect(m.drying && taken, "out from under the water and over to the rail with the towel")
-            expect(m.fixture == 1 && m.bathing, "the shower is still held while drying")
+            expect(kind(m) == .shower && m.bathing, "the shower is still held while drying")
             _ = step(sim, seconds: 8, until: { drain(); return !m.bathing })
             expect(!m.drying && hung && m.place == .lounge, "the towel back on the rail, and back to the lounge")
         }
@@ -73,7 +73,7 @@ enum SimulationTests {
             _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
             sim.react(m, .coding("src"), place: .quarters, minutes: 2, words: "johan is shipping")
             expect(m.current.map { if case .react = $0.kind { return true }; return false } == true, "the reaction is in hand at once: \(m.words)")
-            expect(m.fixture == nil && !m.drying, "and the shower is let go")
+            expect(m.using == nil && !m.drying, "and the shower is let go")
             expect(m.place == .quarters && (!m.path.isEmpty || station.cells(of: .quarters).contains(m.cell)), "and the body is on its way to its place, not standing in the bath: place \(m.place.words), path \(m.path.count)")
         }
 
@@ -83,17 +83,44 @@ enum SimulationTests {
             for m in [a, b, c] { sim.send(m, to: .lounge) }
             _ = step(sim, seconds: 30, until: { [a, b, c].allSatisfy { $0.path.isEmpty } })
             a.showering = true
-            expect(sim.visitBath(a, station: station) && a.fixture == 1, "the first takes the shower")
+            expect(sim.visitBath(a, station: station) && kind(a) == .shower, "the first takes the shower")
             b.showering = true
-            expect(sim.visitBath(b, station: station) && b.fixture == 0 && !b.showering, "the second wanted it too and gets the bowl instead")
+            expect(sim.visitBath(b, station: station) && kind(b) == .bowl && !b.showering, "the second wanted it too and gets the bowl instead")
             expect(!sim.visitBath(c, station: station) && !c.bathing, "the third finds both taken, while the first two are still walking")
             _ = step(sim, seconds: 30, until: { a.phaseKind == .act && b.phaseKind == .act })
-            expect(a.fetchSpot != b.fetchSpot, "on different fixtures: \(String(describing: a.fetchSpot)) and \(String(describing: b.fetchSpot))")
+            expect(a.using != b.using, "on different fixtures: \(String(describing: a.using)) and \(String(describing: b.using))")
             expect(!sim.visitBath(c, station: station), "still turned away with both in use")
             _ = step(sim, seconds: 70, until: { !b.bathing })
-            expect(b.fixture == nil, "the bowl is given back when the visit ends")
+            expect(b.using == nil, "the bowl is given back when the visit ends")
             c.showering = false
-            expect(sim.visitBath(c, station: station) && c.fixture == 0, "and the next visitor gets it")
+            expect(sim.visitBath(c, station: station) && kind(c) == .bowl, "and the next visitor gets it")
+        }
+
+        test("the bath on anchors: the bowl's visitor sits on its seat facing away from it at the seat's height, the shower's stands at its place, and nobody else is offered either") {
+            let (sim, station, a) = fixture()
+            let b = body("b", sim: sim, station: station), c = body("c", sim: sim, station: station)
+            for m in [a, b, c] { sim.send(m, to: .lounge) }
+            _ = step(sim, seconds: 30, until: { [a, b, c].allSatisfy { $0.path.isEmpty } })
+            a.showering = false
+            b.showering = true
+            expect(sim.visitBath(a, station: station) && sim.visitBath(b, station: station), "both off to the bath")
+            guard let bowl = a.using, let shower = b.using, let seat = station.place(bowl), let tap = station.place(shower) else { return expect(false, "each has a place") }
+            let fixtures = station.fixtures(in: "kind:bath")
+            expect(fixtures[bowl.fixture].kind == .bowl && fixtures[shower.fixture].kind == .shower, "the bowl and the shower")
+            let offered = sim.freeAnchors(c, station: station, in: "kind:bath")
+            expect(!offered.contains(bowl) && !offered.contains(shower), "nobody else is offered a taken one: \(offered)")
+            expect(step(sim, seconds: 30, until: { a.inPlace && b.inPlace }), "both in place: \(a.words), \(b.words)")
+            _ = step(sim, seconds: Seat.sitDown + 0.2)
+            let off = seat.at - a.pos
+            expect((off.x * off.x + off.y * off.y).squareRoot() < 0.005, "on the seat: \(a.pos) against \(seat.at)")
+            let behind = fixtures[bowl.fixture].at - a.pos, away = atan2(-behind.x, -behind.y)
+            expect(abs(atan2(sin(a.facing - away), cos(a.facing - away))) < 0.01 && abs(atan2(sin(a.facing - seat.facing), cos(a.facing - seat.facing))) < 0.01,
+                   "facing away from the bowl: facing \(a.facing), away \(away)")
+            expect(a.seated && a.sittingOn == Seat.height, "seated at the seat's height: \(String(describing: a.sittingOn))")
+            let stand = tap.at + tap.outward * Hands.arm, gap = stand - b.pos
+            expect((gap.x * gap.x + gap.y * gap.y).squareRoot() < 0.03 && !b.seated, "standing at its place: \(b.pos) against \(stand)")
+            let toward = atan2(tap.at.x - b.pos.x, tap.at.y - b.pos.y)
+            expect(abs(atan2(sin(b.facing - toward), cos(b.facing - toward))) < 0.05, "facing the tap")
         }
 
         test("a turn in the gym lasts its time on the fixture and ends back where the body was") {
@@ -101,11 +128,10 @@ enum SimulationTests {
             sim.hooks = SimHooks()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
-            expect(sim.takeTurnInGym(m, station: station, gym: gym), "a fixture was free")
+            expect(sim.takeTurnInGym(m, station: station), "a fixture was free")
             let kind = m.workout
-            expect(kind != nil && m.place == .gym && m.exercising, "off to the gym for \(kind.map(\.words) ?? "nothing")")
-            _ = step(sim, seconds: 30, until: { m.phaseKind == .act && m.fetchSpot == nil })
+            expect(kind != nil && m.place == .gym && m.exercising, "off to the gym to \(kind.map(\.going) ?? "nothing")")
+            _ = step(sim, seconds: 30, until: { m.inPlace })
             let planned = m.actFor
             expect(planned >= 240 && planned <= 480, "four to eight minutes: \(planned)")
             if kind == .bench {
@@ -114,7 +140,7 @@ enum SimulationTests {
             }
             _ = step(sim, seconds: planned + 5, until: { !m.exercising })
             expect(!m.exercising && !m.onBench && m.place == .lounge, "the turn over, back to the lounge; on the bench: \(m.onBench)")
-            expect(sim.visitLog.first.map { $0.kind == "gym" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+            expect(sim.visitLog.first.map { $0.kind == "kind:gym" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
         }
 
         test("a coffee: in through the lounge, made at arm's length facing the counter, then back to the couch with a mug") {
@@ -122,22 +148,39 @@ enum SimulationTests {
             sim.hooks = SimHooks()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let galley = station.galley else { return expect(false, "a galley on the station") }
             expect(station.doorOutside(of: "kind:galley").map { station.room(at: $0)?.key } == "kind:lounge", "the galley opens into the lounge")
             expect(sim.visitGalley(m, station: station, fare: .coffee), "the galley was free")
             let other = body("b", sim: sim, station: station)
             expect(!sim.visitGalley(other, station: station, fare: .bite), "one at the counter at a time")
-            expect(step(sim, seconds: 30, until: { m.atCounter }), "reached the counter")
-            let reach = galley.machine(.coffee) - m.pos
-            expect(abs((reach.x * reach.x + reach.y * reach.y).squareRoot() - Hands.arm) < 0.03, "an arm's length from the machine: \(reach)")
-            expect(abs(atan2(sin(m.facing - galley.facing), cos(m.facing - galley.facing))) < 0.05, "facing the counter")
+            expect(step(sim, seconds: 30, until: { m.inPlace }), "reached the counter")
             let planned = m.actFor
             expect(Command.Fare.coffee.seconds.contains(planned), "a coffee takes \(planned) s")
             m.bathDue = sim.clock + 1
-            expect(step(sim, seconds: planned + 5, until: { m.fare == nil || !m.atCounter }), "done")
-            expect(!m.bathing && !m.atCounter && m.fetchSpot == nil, "a bath come due waits for the coffee")
+            expect(step(sim, seconds: planned + 5, until: { m.fare == nil || !m.inPlace }), "done")
+            expect(!m.bathing && !m.inPlace && m.fetchSpot == nil, "a bath come due waits for the coffee")
             expect(m.place == .lounge && m.mugUntil > sim.clock, "back to the lounge, mug in hand")
-            expect(sim.visitLog.first.map { $0.kind == "galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+            expect(sim.visitLog.first.map { $0.kind == "kind:galley" && $0.lasted + 0.25 >= $0.planned } == true, "lasted its whole time: \(sim.visitLog)")
+        }
+
+        test("a coffee and a bite: the body lands on its machine's anchor an arm's length out, facing it, and nobody else is offered the galley") {
+            for fare in Command.Fare.allCases {
+                let (sim, station, m) = fixture()
+                sim.send(m, to: .lounge)
+                _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+                expect(sim.visitGalley(m, station: station, fare: fare), "off for \(fare.words)")
+                guard let ref = m.using, let place = station.place(ref) else { return expect(false, "\(fare.words): an anchor in the galley") }
+                expect(station.fixtures(in: ref.room)[safe: ref.fixture]?.kind == fare.machine, "\(fare.words): at its own machine")
+                expect(step(sim, seconds: 30, until: { m.inPlace }), "\(fare.words): in place: \(m.words)")
+                let off = place.at + place.outward * Hands.arm - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.02 && !m.seated, "\(fare.words): on the anchor's spot: \(m.pos) against \(place.at + place.outward * Hands.arm)")
+                let reach = place.at - m.pos
+                expect(abs((reach.x * reach.x + reach.y * reach.y).squareRoot() - Hands.arm) < 0.02, "\(fare.words): an arm's length from the machine: \(reach)")
+                expect(abs(atan2(sin(m.facing - place.facing), cos(m.facing - place.facing))) < 0.05, "\(fare.words): facing it: \(m.facing) against \(place.facing)")
+                let other = body("b", sim: sim, station: station)
+                expect(!sim.freeAnchors(other, station: station, in: "kind:galley").contains(ref), "\(fare.words): nobody else is offered that anchor")
+                expect(Command.Fare.allCases.allSatisfy { !sim.visitGalley(other, station: station, fare: $0) } && sim.galleyFare(other, station: station) == nil,
+                       "\(fare.words): nor the galley at all while it is taken")
+            }
         }
 
         test("a probe researches in trips between the monolith and its office, and docks with its minion when done") {
@@ -298,7 +341,7 @@ enum SimulationTests {
             sim.play()
             sim.assignOrders()
             expect(m.current?.crate?.number == 440, "out of the shower for the carry: \(m.words)")
-            expect(m.fixture == nil && !m.drying && m.place != .bath, "off the fixture, no towel, and the bath no longer its place")
+            expect(m.using == nil && !m.drying && m.place != .bath, "off the fixture, no towel, and the bath no longer its place")
         }
 
         test("dismissed with a crate on its arms, a body sets it down first, then leaves") {
@@ -528,6 +571,28 @@ enum SimulationTests {
             let other = sim.bodies.values.first { $0.id != m.id && $0.station == m.station }
             if let other { expect(!sim.freeAnchors(other, station: station, in: "kind:mission").contains(ref), "nobody else is offered that place") }
         }
+        test("a body sent to each piece of gym gear lands on its anchor, faces the way the anchor says, and nobody else is offered that piece") {
+            let (sim, station, m) = fixture()
+            let other = body("b", sim: sim, station: station)
+            let gear = station.fixtures(in: "kind:gym")
+            expect(gear.map(\.kind) == [.treadmill, .bench, .bag, .mat], "four pieces: \(gear.map(\.kind))")
+            for ref in station.anchors(in: "kind:gym") {
+                guard let place = station.place(ref) else { return expect(false, "a place at \(ref)") }
+                let kind = gear[ref.fixture].kind
+                sim.send(m, to: .lounge)
+                _ = step(sim, seconds: 30, until: { m.path.isEmpty })
+                expect(sim.use(m, ref, station: station, seconds: 20) && m.workout == kind, "off to the \(kind)")
+                expect(step(sim, seconds: 60, until: { m.inPlace }), "in place on the \(kind): \(m.words) at \(m.pos)")
+                _ = step(sim, seconds: Seat.sitDown + 0.1)
+                let off = place.at - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.01, "on the \(kind)'s anchor: \(m.pos) against \(place.at)")
+                expect(abs(atan2(sin(m.facing - place.facing), cos(m.facing - place.facing))) < 0.01, "facing the way the \(kind) says: \(m.facing) against \(place.facing)")
+                expect(kind == .bench ? m.onBench && m.lying : !m.seated, "\(kind == .bench ? "flat on the bench" : "on its feet"): seated \(m.seated)")
+                expect(!sim.freeAnchors(other, station: station, in: "kind:gym").contains(ref), "nobody else is offered the \(kind)")
+                expect(!sim.takeTurnInGym(other, station: station, on: kind), "nor sent to it")
+                expect(step(sim, seconds: 40, until: { m.using == nil }) && !m.onBench, "the turn on the \(kind) ends")
+            }
+        }
         test("a job that cuts in on the way to a fixture takes the body clean: not using it, not in place, not seated, place given back") {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
@@ -542,18 +607,17 @@ enum SimulationTests {
             let (sim, station, m) = fixture()
             sim.send(m, to: .lounge)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
-            guard let gym = station.rooms["kind:gym"] else { return expect(false, "a gym on the station") }
-            expect(sim.takeTurnInGym(m, station: station, gym: gym) && m.fetchSpot != nil && m.place == .gym, "off to the gym, a fixture spot in mind")
+            expect(sim.takeTurnInGym(m, station: station) && m.using != nil && m.place == .gym, "off to the gym, a piece of gear in mind")
             _ = step(sim, seconds: 1)
             sim.start(m, .deliverOffice(order: 9001, name: "an office"))
-            expect(!m.exercising && m.fetchSpot == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words), spot \(String(describing: m.fetchSpot))")
+            expect(!m.exercising && m.using == nil && !m.onBench && m.place == .lounge, "the errand is in hand and the turn's leftovers are gone: \(m.words), place \(m.place.words)")
             sim.finish(m)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty })
             m.showering = false
-            expect(sim.visitBath(m, station: station) && m.fixture == 0, "then off to the bowl")
+            expect(sim.visitBath(m, station: station) && kind(m) == .bowl, "then off to the bowl")
             _ = step(sim, seconds: 1)
             sim.start(m, .deliverOffice(order: 9002, name: "an office"))
-            expect(!m.bathing && m.fixture == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: fixture \(String(describing: m.fixture)), place \(m.place.words)")
+            expect(!m.bathing && m.using == nil && !m.seated && m.fetchSpot == nil && m.place != .bath, "and again clean: using \(String(describing: m.using)), place \(m.place.words)")
         }
 
         test("the pad drones stay on their rack when the station shifts in the world") {
@@ -597,27 +661,60 @@ enum SimulationTests {
             expect(Set(beds).count == beds.count, "one to a bed: \(beds.sorted())")
         }
 
-        test("a sleeper given something to do stands up where it lies before it walks anywhere") {
+        test("a sleeper given something to do gets up out over its bed's side, onto its feet there, before it walks anywhere") {
             let (sim, station, m) = fixture()
+            sim.refreshObstacles()
             sim.send(m, to: .quarters)
             _ = step(sim, seconds: 30, until: { m.path.isEmpty && m.place == .quarters })
             m.activity = .sleeping
             m.napping = true
             _ = step(sim, seconds: 6, until: { m.lying })
             expect(m.lying, "asleep in the quarters, flat on its back")
-            let bedSpot = m.pos
+            guard let ref = m.bunk?.ref, let bed = station.place(ref) else { return expect(false, "in its bunk") }
 
             sim.send(m, to: .lounge)
             expect(m.risingUntil > 0, "roused: it is getting to its feet, not walking yet")
-            expect(!m.lying, "and it stands up at once, rather than waiting until it walks")
-            var moved = 0.0
-            _ = step(sim, seconds: 1.0, beat: {
-                moved = max(moved, ((m.pos.x - bedSpot.x) * (m.pos.x - bedSpot.x)
-                                    + (m.pos.y - bedSpot.y) * (m.pos.y - bedSpot.y)).squareRoot())
+            expect(!m.lying, "and it sits up at once, rather than waiting until it walks")
+            let span = bed.stand - bed.flat, reach = (span.x * span.x + span.y * span.y).squareRoot()
+            var strayed = 0.0
+            let rose = step(sim, seconds: Seat.lieDown + 0.5, until: {
+                guard m.bunk != nil else { return true }
+                let d = m.pos - bed.flat, along = (d.x * span.x + d.y * span.y) / reach
+                strayed = max(strayed, abs(d.x * span.y - d.y * span.x) / reach, -along, along - reach)
+                return false
             })
-            expect(moved < 0.05, String(format: "it stays where it lay while it rises: moved %.2f", moved))
+            expect(rose && strayed < 0.01, String(format: "it rises out over its bed's side and nowhere else: strayed %.3f", strayed))
+            let up = bed.stand - m.pos
+            expect((up.x * up.x + up.y * up.y).squareRoot() < 0.05, "on its feet at the bed's side: \(m.pos) against \(bed.stand)")
             _ = step(sim, seconds: 30, until: { m.place == .lounge && m.path.isEmpty })
             expect(m.place == .lounge, "and then walks there")
+        }
+
+        test("sleepers sent to bed walk the aisles to the side their bed's anchor says and lie down along it at its height, one to a bed") {
+            let (sim, station, first) = fixture()
+            sim.refreshObstacles()
+            let beds = station.fixtures(in: "kind:quarters")
+            let frames = Set(beds.flatMap { Footprint(at: $0.at, size: $0.kind.size, yaw: $0.yaw).cells })
+            let crowd = [first] + (1..<beds.count).map { body("s\($0)", sim: sim, station: station) }
+            for m in crowd { m.activity = .sleeping; sim.send(m, to: .quarters) }
+            var over: Set<String> = []
+            let abed = step(sim, seconds: 90, until: {
+                for m in crowd where m.bunk == nil && frames.contains(Station.sub(m.pos)) { over.insert(m.id) }
+                return crowd.allSatisfy(\.lying)
+            })
+            expect(abed, "all in bed: \(crowd.filter { !$0.lying }.map { "\($0.id) at \($0.pos)" })")
+            expect(over.isEmpty, "nobody walked over a bed: \(over.sorted())")
+            _ = step(sim, seconds: Seat.stretch)
+            for m in crowd {
+                guard let b = m.bed, let bunk = m.bunk, bunk.ref == station.bedside(b), let bed = station.place(bunk.ref),
+                      case .lie(let height) = bed.use else { expect(false, "\(m.id) is in the bunk its bed says"); continue }
+                let off = bed.flat - m.pos
+                expect((off.x * off.x + off.y * off.y).squareRoot() < 0.01, "\(m.id) lies on its bed: \(m.pos) against \(bed.flat)")
+                expect(abs(atan2(sin(m.facing - beds[b].yaw), cos(m.facing - beds[b].yaw))) < 0.01, "\(m.id) lies along it, head to the pillow: \(m.facing)")
+                expect(bunk.flat && bunk.height == height && height == Seat.bed, "\(m.id) flat at the mattress's height: \(bunk.height)")
+            }
+            let held = crowd.compactMap(\.bed)
+            expect(held.count == crowd.count && Set(held).count == held.count, "one to a bed: \(held.sorted())")
         }
 
         test("night falls: a sleeping body goes to bed and sleeps there; in the morning it goes to the lounge") {
@@ -687,6 +784,11 @@ enum SimulationTests {
         m.activity = .waiting
         sim.bodies[m.id] = m
         return m
+    }
+
+    private static func kind(_ m: Body) -> FixtureKind? {
+        if case .use(_, let kind, _, _) = m.current?.kind { return kind }
+        return nil
     }
 
     private static func step(_ sim: Simulation<Body>, seconds: Double, until done: () -> Bool = { false }, beat: @escaping () -> Void = {}) -> Bool {

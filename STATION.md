@@ -302,25 +302,31 @@ moves through it one way: in from the hallway at the back, out through the field
   is too small for a name; its machines say what it is.
 - The middle of a room stays clear to walk through. Mission control alone keeps its holo table there, with
   a way round it on every side.
-- A fixture says where a body uses it: a seat to sit on or a rim to stand at, in its own measurements, and
+- A fixture says where a body uses it: a seat to sit on, a rim to stand at or a spot to stand on, in its own measurements, and
   wherever the fixture stands the body lands exactly there. A console's chair turns out to the minion,
   takes it, and swivels it in to the console; getting up runs the other way. The holo table takes three,
   standing an arm's length from its rim.
+- A bed is got into from the long side that faces into the dorm. The sleeper walks the aisle to that side,
+  turns its back on the bed, sits on the edge, and swings round into the bed's line as it lies down, head
+  on the pillow. Getting up runs the other way: it swings back out onto the edge and stands up beside the
+  bed, and only then walks. Nobody walks over a bed; the aisles between them stay open.
 - What a body wears, holds or is covered by is worked out again every frame from what is true of it now.
   A prop that belongs to a room is drawn for a body in that room, not for one still on its way there.
 - A visit lasts its whole time. A shower is two to three minutes of water over the shoulders, then a few
   seconds at the rail with the towel. A pee is a sit: turn round, down onto the bowl, a shuffle on the
   seat now and then, up as the time runs out, and the bowl flushes behind.
 - The gym has four fixtures, a treadmill, a bench with a barbell, a bag and a mat, one minion to each, a
-  turn lasting its whole time.
+  turn lasting its whole time. The treadmill, the bag and the mat each have a spot to stand on; the bench is
+  a seat the minion backs onto and lies down along, the bar over its chest.
 - The galley takes one minion at a time, standing at the counter an arm's length from its machine. A coffee
   is twenty-odd seconds: a mug under the spout, the pour, the steam. Then the mug goes along in the hand, back
   to the couch or the desk, steaming, sipped now and then, for a few minutes; a carry, the bath or the gym
   drinks it up first. A bite is printed in ten seconds: the printer's window glows while a bowl of noodles
   grows inside, then slides out. The minion takes it to a couch and eats it there, a spoonful at a time,
   crumbs and all. The bowl is printed too, and eaten last.
-- Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting, the idle
-  drift to the window to watch.
+- Nobody goes onto the pad. The field is as far as anyone walks. When a rocket stands venting or flies, the
+  loungers take the consoles in mission control for the length of the launch, the pad screen shows the
+  launch cam, and those roaming drift to the window to watch.
 
 ## A minion's day
 
