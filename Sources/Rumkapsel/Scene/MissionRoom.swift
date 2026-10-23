@@ -50,6 +50,20 @@ enum MissionRoom {
         return n
     }
 
+    static func needle(_ radius: Double) -> SCNNode {
+        let n = SCNNode()
+        let ink = lit(NSColor(rgb: (0.96, 0.93, 0.84)))
+        let blade = SCNNode(geometry: SCNBox(width: 0.006, height: radius * 0.9, length: 0.004, chamferRadius: 0.001))
+        blade.geometry!.firstMaterial = ink
+        blade.position = v3(0, radius * 0.9 / 2 - radius * 0.12, 0)
+        let cap = SCNNode(geometry: SCNCylinder(radius: radius * 0.1, height: 0.008))
+        cap.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.33)))
+        cap.eulerAngles.x = .pi / 2
+        n.addChildNode(blade); n.addChildNode(cap)
+        n.eulerAngles.z = CGFloat(-RepoStatus.calm.angle)
+        return n
+    }
+
     static func hologram() -> SCNNode {
         let n = SCNNode()
         let sun = SCNNode(geometry: SCNSphere(radius: 0.045))
@@ -179,36 +193,56 @@ enum Screens {
         }
     }
 
-    static func annunciator(_ rows: [MissionBoards.Row], blinking: Bool = false) -> NSImage {
+    static func dialCell(_ i: Int, of n: Int, w: Double, h: Double) -> (centre: CGPoint, radius: Double) {
+        let lines = n > 4 ? 2 : 1, across = max(1, (n + lines - 1) / lines)
+        let cw = w / Double(across), ch = h / Double(lines)
+        let col = i % across, line = i / across
+        let radius = min(cw * 0.36, ch * 0.34)
+        return (CGPoint(x: cw * (Double(col) + 0.5), y: h - ch * (Double(line) + 1) + ch * 0.56), radius)
+    }
+
+    static func dial(_ i: Int, of n: Int) -> (hub: SCNVector3, radius: Double) {
+        let (pw, ph) = pixels(annunciatorWide, across: 1024)
+        let cell = dialCell(i, of: n, w: Double(pw), h: Double(ph))
+        let scale = annunciatorWide / Double(pw)
+        return (SCNVector3((Double(cell.centre.x) / Double(pw) - 0.5) * annunciatorWide, (Double(cell.centre.y) / Double(ph) - 0.5) * tall, 0.02), cell.radius * scale)
+    }
+
+    static func dials(_ rows: [MissionBoards.Row]) -> NSImage {
         let (pw, ph) = pixels(annunciatorWide, across: 1024)
         return draw(pw, ph) { c, w, h in
-            if !blinking { c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h)) }
-            let head: CGFloat = 34
-            for (k, name) in MissionBoards.lamps.enumerated() where !blinking {
-                let s = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .semibold), .foregroundColor: NSColor(rgb: (0.7, 0.72, 0.75))])
-                s.draw(at: NSPoint(x: 240 + CGFloat(k) * 128 + (116 - s.size().width) / 2, y: h - head + 6))
-            }
-            let count = max(5, rows.count), rowH = (h - head) / CGFloat(count)
-            for r in 0..<count {
-                let y = h - head - rowH * CGFloat(r + 1)
-                if r < rows.count, !blinking {
-                    let row = rows[r]
-                    c.setFillColor(NSColor(row.color).cgColor); c.fill(CGRect(x: 8, y: y + 4, width: 210, height: rowH - 8))
-                    var size: CGFloat = min(24, rowH - 12)
-                    var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
-                    while name.size().width > 196 && size > 10 {
-                        size -= 1
-                        name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
-                    }
-                    name.draw(at: NSPoint(x: 16, y: y + (rowH - name.size().height) / 2))
+            c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            for (i, row) in rows.enumerated() {
+                let (o, r) = dialCell(i, of: rows.count, w: Double(w), h: Double(h))
+                let rr = CGFloat(r)
+                func at(_ a: Double, _ d: CGFloat) -> CGPoint { CGPoint(x: o.x + d * CGFloat(sin(a)), y: o.y + d * CGFloat(cos(a))) }
+                c.setFillColor(NSColor(rgb: (0.1, 0.105, 0.11)).cgColor)
+                c.fillEllipse(in: CGRect(x: o.x - rr, y: o.y - rr, width: rr * 2, height: rr * 2))
+                c.setStrokeColor(NSColor(row.color).cgColor); c.setLineWidth(rr * 0.11)
+                c.strokeEllipse(in: CGRect(x: o.x - rr, y: o.y - rr, width: rr * 2, height: rr * 2))
+                let steps = RepoStatus.allCases.count, span = RepoStatus.sweep * 2 / Double(steps - 1)
+                for st in RepoStatus.allCases {
+                    let mid = st.angle, from = mid - span / 2 + 0.03, to = mid + span / 2 - 0.03
+                    let lit = st == row.status
+                    c.setStrokeColor(st.color.withAlphaComponent(lit ? 1 : 0.28).cgColor)
+                    c.setLineWidth(rr * (lit ? 0.16 : 0.1))
+                    c.addArc(center: o, radius: rr * 0.74, startAngle: CGFloat(.pi / 2 - from), endAngle: CGFloat(.pi / 2 - to), clockwise: true)
+                    c.strokePath()
                 }
-                for k in 0..<MissionBoards.lamps.count {
-                    let blinks = r < rows.count && (rows[r].blink.indices.contains(k) ? rows[r].blink[k] : 0) > 0
-                    if blinking != blinks && blinking { continue }
-                    let lamp = r < rows.count && !(blinks && !blinking) ? rows[r].lamps[k] : .dark
-                    c.setFillColor(lampColor(lamp).cgColor)
-                    c.fill(CGRect(x: 240 + CGFloat(k) * 128, y: y + 4, width: 116, height: rowH - 8))
+                c.setStrokeColor(NSColor(rgb: (0.75, 0.76, 0.72)).cgColor); c.setLineWidth(2)
+                for k in 0...12 {
+                    let a = -RepoStatus.sweep + Double(k) / 12 * RepoStatus.sweep * 2
+                    c.move(to: at(a, rr * 0.86)); c.addLine(to: at(a, rr * (k % 2 == 0 ? 0.97 : 0.92))); c.strokePath()
                 }
+                let word = NSAttributedString(string: row.status.words, attributes: [.font: NSFont.monospacedSystemFont(ofSize: rr * 0.26, weight: .heavy), .foregroundColor: row.status.color])
+                word.draw(at: NSPoint(x: o.x - word.size().width / 2, y: o.y - rr * 0.62))
+                var size = min(34, rr * 0.34)
+                var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor(row.color).lighter(0.2)])
+                while name.size().width > rr * 2.6 && size > 9 {
+                    size -= 1
+                    name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor(row.color).lighter(0.2)])
+                }
+                name.draw(at: NSPoint(x: o.x - name.size().width / 2, y: o.y - rr - name.size().height - 4))
             }
         }
     }

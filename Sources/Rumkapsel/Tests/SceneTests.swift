@@ -39,6 +39,20 @@ enum SceneTests {
             expect(sky.hover(sky.planets[0]).hasSuffix("|web · 2 open"), "a planet hovers its repo and open work: \(sky.hover(sky.planets[0]))")
         }
 
+        test("a repo's status is the most urgent thing true of it, and its needle sits further right the more urgent") {
+            func of(_ d: MissionBoards.Lamp = .dark, _ c: MissionBoards.Lamp = .dark, _ w: MissionBoards.Lamp = .dark, _ r: MissionBoards.Lamp = .dark, _ e: MissionBoards.Lamp = .dark) -> RepoStatus {
+                RepoStatus.of(deploy: d, checks: c, waiting: w, release: r, errors: e)
+            }
+            expect(of() == .calm && of(.green, .green, .dark, .dark, .green) == .calm, "nothing to do is calm")
+            expect(of(.amber) == .flying, "a deploy underway is flying")
+            expect(of(.dark, .dark, .green) == .ready && of(.dark, .dark, .dark, .green) == .ready, "cleared work or a go rocket is ready")
+            expect(of(.dark, .dark, .amber, .green) == .testing, "untested crates outrank ready")
+            expect(of(.dark, .dark, .amber, .amber) == .holding, "a holding rocket outranks testing")
+            expect(of(.dark, .red, .amber, .amber) == .failing && of(.red) == .failing && of(.dark, .dark, .dark, .dark, .red) == .failing, "anything red is failing, first")
+            let angles = RepoStatus.allCases.map(\.angle)
+            expect(angles == angles.sorted() && abs(angles.first! + angles.last!) < 1e-9, "the needle sweeps evenly left to right: \(angles)")
+        }
+
         test("the holo draws a moon's new commit as a blip, and a moon that leaves falls into its planet") {
             let view = HoloView(root: SCNNode())
             let web = HoloSky.Planet(repo: "web", color: RGB(r: 1, g: 0.5, b: 0.4))

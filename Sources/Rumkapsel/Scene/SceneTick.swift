@@ -176,7 +176,7 @@ extension StationController {
         }
         for station in fleet.stations.values { tendKitchen(station); swivelChairs(station, dt: dt) }
         if !headless || walker != nil { prepareWalk() }
-        blinkBoards()
+        swingNeedles(dt: dt)
         if clock - holoTendedAt >= 1 || clock < holoTendedAt {
             holoTendedAt = clock
             timed("holo") { tendHolos() }

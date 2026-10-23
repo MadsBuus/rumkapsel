@@ -391,7 +391,7 @@ extension StationController {
                     if let faces = f.faces {
                         let cameras = self.feedCameras(station)
                         nodes += cameras.map(\.camera)
-                        self.missionScreens[st] = MissionScreens(annunciator: faces.annunciator, blink: faces.blink, clock: faces.clock, errors: faces.errors, errorsNode: faces.errorsNode,
+                        self.missionScreens[st] = MissionScreens(annunciator: faces.annunciator, board: faces.board, clock: faces.clock, errors: faces.errors, errorsNode: faces.errorsNode,
                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
                                                                  wall: faces.wall)
                     }

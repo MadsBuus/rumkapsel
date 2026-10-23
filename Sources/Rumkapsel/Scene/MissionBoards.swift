@@ -1,11 +1,49 @@
 import AppKit
 import SceneKit
 
+enum RepoStatus: Int, CaseIterable, Comparable {
+    case calm, flying, ready, testing, holding, failing
+    static func < (a: RepoStatus, b: RepoStatus) -> Bool { a.rawValue < b.rawValue }
+
+    var words: String {
+        switch self {
+        case .calm: return "calm"
+        case .flying: return "flying"
+        case .ready: return "ready"
+        case .testing: return "testing"
+        case .holding: return "holding"
+        case .failing: return "failing"
+        }
+    }
+
+    var color: NSColor {
+        switch self {
+        case .calm: return NSColor(rgb: (0.45, 0.75, 0.55))
+        case .flying: return NSColor(rgb: (0.4, 0.85, 1.0))
+        case .ready: return NSColor(rgb: (0.85, 0.9, 0.4))
+        case .testing: return NSColor(rgb: (1.0, 0.82, 0.3))
+        case .holding: return NSColor(rgb: (1.0, 0.62, 0.2))
+        case .failing: return NSColor(rgb: (1.0, 0.28, 0.24))
+        }
+    }
+
+    static let sweep = 1.65
+    var angle: Double { -RepoStatus.sweep + Double(rawValue) / Double(RepoStatus.allCases.count - 1) * RepoStatus.sweep * 2 }
+
+    static func of(deploy: MissionBoards.Lamp, checks: MissionBoards.Lamp, waiting: MissionBoards.Lamp, release: MissionBoards.Lamp, errors: MissionBoards.Lamp) -> RepoStatus {
+        if [deploy, checks, errors].contains(.red) { return .failing }
+        if release == .amber { return .holding }
+        if waiting == .amber { return .testing }
+        if waiting == .green || release == .green { return .ready }
+        if deploy == .amber { return .flying }
+        return .calm
+    }
+}
+
 struct MissionBoards: Equatable {
     enum Lamp: Equatable { case dark, green, amber, red }
-    struct Row: Equatable { let repo: String; let color: RGB; let lamps: [Lamp]; var blink: [Double] = [] }
+    struct Row: Equatable { let repo: String; let color: RGB; let status: RepoStatus; var quiver = false }
 
-    static let lamps = ["Deploy", "Checks", "Waiting", "Release", "Errors", "Alarm"]
     static let rows = 8
 
     struct ErrorRow: Equatable { let repo: String; let color: RGB; let hourly: [Int]; let level: Sentry.Level; let lastHour: Int }
@@ -21,8 +59,10 @@ struct MissionBoards: Equatable {
 
 struct MissionScreens {
     struct Feed { let name: String; let camera: SCNNode; let material: SCNMaterial; var caption: String; let home: SCNMatrix4 }
+    final class Needle { let node: SCNNode; var angle: Double; var target: Double; var quiver = false; init(_ n: SCNNode, at a: Double) { node = n; angle = a; target = a } }
     let annunciator: SCNMaterial
-    let blink: SCNNode
+    let board: SCNNode
+    var needles: [String: Needle] = [:]
     let clock: SCNMaterial
     let errors: SCNMaterial
     let errorsNode: SCNNode
@@ -55,9 +95,9 @@ extension StationController {
             case .rising?: errors = .amber
             case .spiking?: errors = .red
             }
-            let alarm: MissionBoards.Lamp = [deploy, checks, errors].contains(.red) ? .red : .dark
-            return MissionBoards.Row(repo: repo, color: fleet.color(forRepo: repo), lamps: [deploy, checks, waiting, release, errors, alarm],
-                                     blink: [deployBlink, 0, 0, 0, 0, 0])
+            return MissionBoards.Row(repo: repo, color: fleet.color(forRepo: repo),
+                                     status: RepoStatus.of(deploy: deploy, checks: checks, waiting: waiting, release: release, errors: errors),
+                                     quiver: deployBlink > 0)
         }
         if ConfigStore.shared.current.sentryOrg != nil || !world.errorsByProject.isEmpty {
             let followed = Set(world.errorsByProject.values.map(\.repo))
@@ -95,8 +135,18 @@ extension StationController {
         let now = missionBoards(station)
         guard now != screens.shown else { return }
         if screens.shown?.rows != now.rows {
-            show(Screens.annunciator(now.rows), on: screens.annunciator)
-            if let m = screens.blink.geometry?.firstMaterial { show(Screens.annunciator(now.rows, blinking: true), on: m) }
+            show(Screens.dials(now.rows), on: screens.annunciator)
+            if screens.shown?.rows.map(\.repo) != now.rows.map(\.repo) {
+                screens.needles.values.forEach { $0.node.removeFromParentNode() }
+                screens.needles = [:]
+                for (i, row) in now.rows.enumerated() {
+                    let n = MissionRoom.needle(Screens.dial(i, of: now.rows.count).radius)
+                    n.position = Screens.dial(i, of: now.rows.count).hub
+                    screens.board.addChildNode(n)
+                    screens.needles[row.repo] = .init(n, at: RepoStatus.calm.angle)
+                }
+            }
+            for row in now.rows { screens.needles[row.repo]?.target = row.status.angle; screens.needles[row.repo]?.quiver = row.quiver }
         }
         if screens.shown?.clock != now.clock { show(Screens.nixieClock(now.clock), on: screens.clock) }
         if screens.shown == nil || screens.shown?.errors != now.errors {
@@ -107,10 +157,13 @@ extension StationController {
         missionScreens[station.name] = screens
     }
 
-    func blinkBoards() {
+    func swingNeedles(dt: Double) {
         for s in missionScreens.values {
-            let rate = s.shown?.rows.flatMap(\.blink).max() ?? 0
-            s.blink.isHidden = rate <= 0 || (clock * rate).truncatingRemainder(dividingBy: 1) >= 0.5
+            for n in s.needles.values where abs(n.target - n.angle) > 0.0005 || n.quiver {
+                n.angle += (n.target - n.angle) * min(1, dt * 2.5)
+                let shake = n.quiver ? sin(clock * 31) * 0.035 + sin(clock * 17) * 0.02 : 0
+                n.node.eulerAngles.z = CGFloat(-(n.angle + shake))
+            }
         }
     }
 

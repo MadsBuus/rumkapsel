@@ -13,7 +13,7 @@ struct Furnishing {
     var holo: SCNNode?
 }
 
-struct MissionFaces { let annunciator: SCNMaterial; let blink: SCNNode; let clock: SCNMaterial; let errors: SCNMaterial; let errorsNode: SCNNode; let feeds: [SCNMaterial]; let wall: SIMD3<Double> }
+struct MissionFaces { let annunciator: SCNMaterial; let board: SCNNode; let clock: SCNMaterial; let errors: SCNMaterial; let errorsNode: SCNNode; let feeds: [SCNMaterial]; let wall: SIMD3<Double> }
 
 struct Kitchen {
     var lamp: SCNNode
@@ -425,13 +425,7 @@ extension Classic {
         for x in [0.1, 4.9] { f.fixtures.append(at(MissionRoom.box(0.05, high + 0.04, 0.05, frame, at: SCNVector3Zero), SIMD2(origin.x + x, north + 0.04), (high + 0.04) / 2)) }
         for y in [high + 0.015, low - 0.04] { f.fixtures.append(at(MissionRoom.box(4.85, 0.035, 0.035, frame, at: SCNVector3Zero), SIMD2(origin.x + 2.5, north + 0.04), y)) }
         func face(_ n: SCNNode) -> SCNMaterial { n.childNodes.first!.geometry!.firstMaterial! }
-        let annunciator = MissionRoom.screen(Screens.annunciatorWide, Screens.tall, Screens.annunciator([]), at: SCNVector3Zero, bezel: 0.025)
-        let blink = SCNNode(geometry: SCNPlane(width: Screens.annunciatorWide, height: Screens.tall))
-        let bm = SCNMaterial(); bm.lightingModel = .constant; bm.writesToDepthBuffer = false
-        blink.geometry!.firstMaterial = bm
-        blink.position = v3(0, 0, 0.0125)
-        blink.isHidden = true
-        annunciator.addChildNode(blink)
+        let annunciator = MissionRoom.screen(Screens.annunciatorWide, Screens.tall, Screens.dials([]), at: SCNVector3Zero, bezel: 0.025)
         f.fixtures.append(at(annunciator, SIMD2(origin.x + 1.0, north + 0.06), middle))
         let feeds = [2.3, 3.15].map { x -> SCNNode in
             let crt = MissionRoom.screen(Screens.feedWide, Screens.tall, Screens.noSignal("", wide: Screens.feedWide), at: SCNVector3Zero, bezel: 0.04)
@@ -444,7 +438,7 @@ extension Classic {
         let m = SCNMaterial(); m.diffuse.contents = Screens.nixieClock(nil); m.emission.contents = Screens.nixieClock(nil); m.lightingModel = .constant
         clock.geometry!.firstMaterial = m
         f.fixtures.append(at(clock, SIMD2(origin.x + 2.725, north + 0.07), high + 0.09))
-        f.faces = MissionFaces(annunciator: face(annunciator), blink: blink, clock: m, errors: face(errors), errorsNode: errors, feeds: feeds.map(face), wall: SIMD3(o.x + origin.x + 2.5, middle, o.y + north))
+        f.faces = MissionFaces(annunciator: face(annunciator), board: annunciator, clock: m, errors: face(errors), errorsNode: errors, feeds: feeds.map(face), wall: SIMD3(o.x + origin.x + 2.5, middle, o.y + north))
         let sill = 0.14, beam = 0.08, depth = 3.0, west = origin.x
         f.fixtures.append(at(MissionRoom.box(0.07, sill, depth, Bulkhead.steel, at: SCNVector3Zero), SIMD2(west, north + depth / 2), sill / 2))
         f.fixtures.append(at(MissionRoom.box(0.07, beam, depth, Bulkhead.steel, at: SCNVector3Zero), SIMD2(west, north + depth / 2), wall - beam / 2))
