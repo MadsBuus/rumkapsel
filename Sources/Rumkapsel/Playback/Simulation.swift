@@ -205,8 +205,8 @@ final class Simulation<B: Body> {
         m.fixture = nil
         m.atCounter = false
         switch old.kind {
-        case .bath(_, let back, _), .exercise(_, let back, _), .galley(_, let back, _):
-            if m.place == .bath || m.place == .gym || m.place == .galley { m.place = back }
+        case .bath(_, let back, _), .galley(_, let back, _):
+            if m.place == .bath || m.place == .galley { m.place = back }
         case .use(let ref, _, let back, _):
             if m.place == .room(ref.room) { m.place = back }
         default: break
@@ -523,7 +523,7 @@ final class Simulation<B: Body> {
     }
 
     func pickIdle(_ m: B, station: Station) {
-        let gymFree = station.rooms["kind:gym"] != nil && freeGymFixture(m) != nil
+        let gymFree = !freeAnchors(m, station: station, in: "kind:gym").isEmpty
         let pick = IdlePick.pick(roll: Double.random(in: 0..<1), night: isNight(station), crew: m.isCrew,
                                  gymFree: gymFree, bath: station.rooms["kind:bath"] != nil, shower: Bool.random(),
                                  galley: galleyFare(m, station: station), mission: !isNight(station) && !freeAnchors(m, station: station, in: "kind:mission").isEmpty)
@@ -531,7 +531,7 @@ final class Simulation<B: Body> {
         case .roam:
             startRoam(m, station: station)
         case .gym:
-            if let gym = station.rooms["kind:gym"], takeTurnInGym(m, station: station, gym: gym) { return }
+            if takeTurnInGym(m, station: station) { return }
             startRoam(m, station: station)
         case .bath(let shower):
             m.showering = shower
@@ -613,22 +613,10 @@ final class Simulation<B: Body> {
     }
 
     @discardableResult
-    func takeTurnInGym(_ m: B, station: Station, gym: Room) -> Bool {
-        guard let kind = freeGymFixture(m) else { return false }
-        let back = m.place
-        m.couch = nil
-        send(m, to: .gym)
-        start(m, .exercise(kind, back: back, seconds: Double.random(in: 240...480)), announce: true)
-        let stand = station.gymStand(gym: gym, kind)
-        m.path = route(m, to: stand.cell)
-        m.fetchSpot = stand.spot
-        m.facing = stand.facing
-        return true
-    }
-
-    func freeGymFixture(_ m: B) -> Command.Workout? {
-        let taken = Set(bodies.values.filter { $0.id != m.id && $0.station == m.station && $0.exercising }.compactMap(\.workout))
-        return Command.Workout.allCases.filter { !taken.contains($0) }.randomElement()
+    func takeTurnInGym(_ m: B, station: Station, on kind: FixtureKind? = nil) -> Bool {
+        let free = freeAnchors(m, station: station, in: "kind:gym").filter { ref in kind.map { station.fixtures(in: ref.room)[safe: ref.fixture]?.kind == $0 } ?? true }
+        guard let ref = free.randomElement() else { return false }
+        return use(m, ref, station: station, seconds: Double.random(in: 240...480))
     }
 
     // MARK: crew
@@ -705,7 +693,7 @@ final class Simulation<B: Body> {
         }
         if m.path.isEmpty, m.phaseKind == .walk, let c = m.current {
             switch c.kind {
-            case .goTo, .bath, .exercise, .galley, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
+            case .goTo, .bath, .galley, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
                 if case .work = c.kind { ownOrders[c.id] = nil }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
@@ -799,20 +787,6 @@ final class Simulation<B: Body> {
                 }
             } else if m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                 if !visitBath(m, station: station) { return .spent }
-            }
-            if m.place == .gym, m.exercising {
-                if settled, let spot = m.fetchSpot {
-                    let d = spot - m.pos
-                    if (d.x * d.x + d.y * d.y).squareRoot() > 0.03 { m.pos += d * min(1, dt * 5); return .spent }
-                    m.fetchSpot = nil
-                    if let gym = station.rooms["kind:gym"], let kind = m.workout { m.facing = station.gymStand(gym: gym, kind).facing }
-                }
-                if clock >= m.phaseUntil && settled && m.fetchSpot == nil {
-                    var back = restPlace(m)
-                    if !m.busy, case .exercise(_, let where_, _) = m.current?.kind { back = where_ }
-                    visitDone(m, "gym")
-                    finish(m, to: back)
-                }
             }
             if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }
             if m.place == .galley, let fare = m.fare, let galley = station.galley {

@@ -705,10 +705,11 @@ struct KingdomLook: Look {
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing {
         var f = Classic.gym(gym, in: station)
         rustic(f.fixtures)
-        if let tread = f.fixtures.first {
-            let bale = SCNNode(geometry: SCNBox(width: 0.42, height: 0.26, length: 0.6, chamferRadius: 0.03))
+        if let tread = station.fixtures(in: gym.key).first(where: { $0.kind == .treadmill }), !f.fixtures.isEmpty {
+            let bale = SCNNode(geometry: SCNBox(width: tread.kind.size.x, height: 0.26, length: 0.6, chamferRadius: 0.03))
             bale.geometry!.firstMaterial = lit(Self.straw)
-            bale.position = v3(Double(tread.position.x), 0.13, Double(tread.position.z))
+            bale.position = v3(station.offset.x + tread.at.x, 0.13, station.offset.y + tread.at.y)
+            bale.eulerAngles.y = CGFloat(tread.yaw)
             for z in [-0.18, 0.18] {
                 let band = SCNNode(geometry: SCNBox(width: 0.44, height: 0.27, length: 0.03, chamferRadius: 0))
                 band.geometry!.firstMaterial = lit(Self.wood)

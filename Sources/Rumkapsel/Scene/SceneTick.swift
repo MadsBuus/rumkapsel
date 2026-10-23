@@ -447,13 +447,13 @@ extension StationController {
                     }
                 }
             }
-            if m.exercising, m.phaseKind == .act, m.path.isEmpty, m.fetchSpot == nil, let kind = m.workout {
+            if m.inPlace, let kind = m.workout {
                 let props = gymProps[station.name]
                 switch kind {
                 case .treadmill:
                     tilt = 0.2; lift = abs(sin(t * 9)) * 0.05; roll = sin(t * 9) * 0.04
                 case .bench:
-                    props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16)
+                    if m.onBench { props?.bar.position.y = CGFloat(0.5 + max(0, sin(t * 2.4)) * 0.16) }
                 case .bag:
                     let jab = max(0, sin(t * 5.5))
                     lean = jab * 0.09; tilt = 0.1 + jab * 0.12; roll = sin(t * 5.5) * 0.05
@@ -461,6 +461,7 @@ extension StationController {
                     props?.bag.eulerAngles = SCNVector3(-a * cos(m.smoothFacing + .pi), 0, a * sin(m.smoothFacing + .pi))
                 case .mat:
                     lift = abs(sin(t * 6)) * 0.14; roll = sin(t * 6) * 0.14; tilt = -0.05
+                default: break
                 }
             }
             if m.fare != nil, m.atCounter {

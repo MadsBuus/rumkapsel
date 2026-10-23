@@ -883,8 +883,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     private func doing(_ m: Minion) -> String? {
         switch m.current?.kind {
-        case .exercise: return "gym"
-        case .use: return "mission"
+        case .use(let ref, _, _, _): return ref.room == "kind:gym" ? "gym" : "mission"
         case .bath(let kind, _, _): return kind == .shower ? "shower" : "bath"
         case .chore: return "roam"
         case .galley(let fare, _, _): return fare == .coffee ? "coffee" : "bite"
@@ -947,7 +946,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         case "gym":
             if !b.exercising {
                 if visiting { simulation.finish(b, to: .gym) }
-                if !(station.rooms["kind:gym"].map { takeTurnInGym(b, station: station, gym: $0) } ?? false) { go(.lounge) }
+                if !takeTurnInGym(b, station: station) { go(.lounge) }
             }
         case "bath", "shower":
             if !b.bathing {
@@ -966,7 +965,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if !visitGalley(b, station: station, fare: m.doing == "coffee" ? .coffee : .bite) { go(.lounge) }
             }
         case "mission":
-            if b.using == nil {
+            if b.using?.room != "kind:mission" {
                 if visiting { simulation.finish(b, to: .lounge) }
                 if !takeTurnInMission(b, station: station) { go(.lounge) }
             }

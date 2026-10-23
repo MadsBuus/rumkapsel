@@ -44,7 +44,7 @@ extension StationController {
         logEvent(line)
         for (k, seed) in [0, 2, 4, 7].enumerated() { after(Double(k) * 0.14) { [weak self] in self?.drone.ping(seed: seed) } }
         for m in minions.values where m.station == station && m.state == .settled {
-            let atTable = m.using != nil && m.sittingOn == nil
+            let atTable = m.using?.room == "kind:mission" && m.sittingOn == nil
             let tester: Bool = { if case .qa = m.current?.kind { return true }; return false }()
             if atTable || tester { play(.hop(m.id)) }
         }
