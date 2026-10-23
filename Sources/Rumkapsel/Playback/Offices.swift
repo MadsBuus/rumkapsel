@@ -151,8 +151,11 @@ extension Simulation {
     func standing(_ st: Station, _ key: String) -> Bool {
         guard !key.hasPrefix("kind:") else { return true }
         guard st.rooms[key] != nil else { return false }
-        guard let o = shown[st.name]?.offices[key] else { return true }
-        if case .folding = o.phase { return false }
+        guard let o = shown[st.name]?.offices[key] else { return false }
+        switch o.phase {
+        case .folding, .ordered: return false
+        default: break
+        }
         return st.facts.offices[key] != nil
     }
 
@@ -177,6 +180,7 @@ extension Simulation {
         for key in view.offices.keys.sorted() where st.facts.offices[key] == nil { leave(st, key, &view, &dropped) }
         stow(st, &view)
         shown[st.name] = view
+        for key in view.offices.keys.sorted() where before.offices[key] == nil && standing(st, key) { moveIn(st.name, key) }
         for id in dropped {
             for m in bodies.values where m.station == st.name {
                 guard case .deliverOffice(let k)? = m.current?.kind, k == id else { continue }
@@ -305,6 +309,10 @@ extension Simulation {
         cue(.redraw)
     }
 
+    func moveIn(_ station: String, _ office: String) {
+        for m in bodies.values where m.station == station && m.home.key == office && !m.onJob && m.state == .settled { send(m, to: restPlace(m)) }
+    }
+
     func unfold(_ id: Int) {
         guard let d = delivery(id), var view = shown[d.station] else { return }
         view.deliveries[id] = nil
@@ -314,6 +322,7 @@ extension Simulation {
             onEvent(.log("new office: \(view.offices[d.room]?.name ?? d.room)"))
         }
         shown[d.station] = view
+        moveIn(d.station, d.room)
         cue(.floor)
     }
 
