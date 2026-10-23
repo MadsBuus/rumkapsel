@@ -60,7 +60,8 @@ final class HoloView {
     static func glow(_ color: NSColor) -> SCNMaterial {
         let m = SCNMaterial()
         m.lightingModel = .constant
-        m.blendMode = .add
+        m.blendMode = .alpha
+        m.transparency = 0.99
         m.writesToDepthBuffer = false
         m.diffuse.contents = NSColor.black
         m.shaderModifiers = [.fragment: """
@@ -68,8 +69,8 @@ final class HoloView {
             float3 tint;
             #pragma body
             float rim = 1.0 - saturate(dot(normalize(_surface.normal), normalize(_surface.view)));
-            float a = 0.5 + 0.5 * pow(rim, 1.4);
-            _output.color = float4(tint * a, a);
+            float a = 0.78 + 0.22 * pow(rim, 1.4);
+            _output.color = float4(saturate(tint * (0.75 + 0.55 * rim)) * a, a);
             """]
         let c = color.usingColorSpace(.deviceRGB) ?? color
         m.setValue(SCNVector3(c.redComponent, c.greenComponent, c.blueComponent), forKey: "tint")
