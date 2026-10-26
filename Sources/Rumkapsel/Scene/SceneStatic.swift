@@ -383,14 +383,15 @@ extension StationController {
             }
             if let room = station.rooms["kind:mission"], !station.fixtures(in: room.key).isEmpty {
                 roomPiece(room, extra: "\(station.hall.padCenter)|\(station.hangarCenter)",
-                          drop: { [weak self] in self?.chairs[st] = nil; self?.missionScreens[st] = nil }) { bag in
+                          drop: { [weak self] in self?.chairs[st] = nil; self?.missionScreens[st] = nil; self?.holos[st] = nil }) { bag in
                     let f = Looks.current.furnishMission(room, in: station)
                     var nodes = f.props + f.fixtures
                     self.chairs[st] = f.chairs
+                    self.holos[st] = f.holo.map(HoloView.init)
                     if let faces = f.faces {
                         let cameras = self.feedCameras(station)
                         nodes += cameras.map(\.camera)
-                        self.missionScreens[st] = MissionScreens(annunciator: faces.annunciator, blink: faces.blink, clock: faces.clock, errors: faces.errors, errorsNode: faces.errorsNode,
+                        self.missionScreens[st] = MissionScreens(annunciator: faces.annunciator, board: faces.board, clock: faces.clock, errors: faces.errors, errorsNode: faces.errorsNode,
                                                                  feeds: zip(cameras, faces.feeds).map { .init(name: $0.0.name, camera: $0.0.camera, material: $0.1, caption: $0.0.name, home: $0.0.camera.transform) },
                                                                  wall: faces.wall)
                     }

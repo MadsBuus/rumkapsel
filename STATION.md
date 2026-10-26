@@ -78,11 +78,19 @@ a free slot, and a fixed room is never put anywhere else. If its tiles cannot be
 nothing moves for it.
 
 **Mission control** stands by the pad, its far wall a window onto it. Three consoles face the boards
-raised on a steel gantry along the north wall, and a holo table in the middle shows the station's little
-system turning above it at eye height. There is room to walk in round the table; **M** walks you in.
-The boards are an annunciator with a row of lamps per repository (deploy, checks, waiting, release,
-errors, alarm), two old monitors with live feeds of the pad and the bay, and a screen for errors and
-alarms that shows no signal until a source feeds it. The feeds refresh often only when you are close.
+raised on a steel gantry along the north wall. In the middle a hex holo table holds the station's work as
+a solar system over a pond that is a hole into space: the station is the sun, each repository a planet on
+its own slow, tilted, nearly round orbit, each open piece of work a moon that circles further out the
+further along it is and falls into its planet when it ships. A commit is a blip from moon to planet; a
+ring spins round a moon while its checks run, flashes green when they pass, stays red when they fail. A
+fine grain of light drifts up through it. Hovering a planet or a moon says what it is; clicking opens it.
+A floating bridge stands against the table's south side; **M** puts you on it, a minion's height above
+the holo, the boards behind it.
+The boards are a dial board, two old monitors with live feeds of the pad and the bay, and a screen for
+errors and alarms that shows no signal until a source feeds it. Each repository has one status, the most
+urgent thing true of it: failing, holding, testing, ready, flying or calm. The busy ones get a 1950s gauge
+each, most urgent first, the needle swinging to the status; the calm ones sit along the bottom as tiny
+gauges. The feeds refresh often only when you are close.
 
 ## Air and weight
 

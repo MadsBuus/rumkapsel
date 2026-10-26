@@ -36,6 +36,17 @@ neighbours share facts and events instead of offices and GitHub answers.
   head and slide in at the third level, a hop above that; the pickup mirrors each. The postures exist; the
   slides do not.
 - **Roam spots with something to look at**, rather than any clear spot.
+- **The dorm on the shared turn.** Beds keep their own bunk routine and their own booking (`m.bed`) beside
+  `use`/`freeAnchors`, so the dorm is still a room with its own rules. A sleeper sitting on its bed's edge
+  is walked through; solid, it would jam the tight aisle, so the dorm wants room first (it holds a bed on
+  every tile but the door, and its middle is not clear).
+- **The towel rail as a fixture.** The step from the shower to the rail is a slide, and the bath's drying
+  is its own branch; the rail has an anchor nothing hands out.
+- **A neighbour's gym says which piece**: peers share only "gym", so a neighbour on the treadmill at home
+  boxes the bag here.
+- **The barbell goes back on its rack** after a press instead of freezing mid-lift.
+- **The gallery's bowl and bed tiles** are hand-built beside the station's, and the bed tile walks in
+  from the side rather than up the aisle.
 
 ## The order board
 

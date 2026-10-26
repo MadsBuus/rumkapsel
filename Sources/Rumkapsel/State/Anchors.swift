@@ -17,7 +17,7 @@ enum FixtureKind: String {
     var size: SIMD2<Double> {
         switch self {
         case .console: return SIMD2(0.86, 0.26)
-        case .holoTable: return SIMD2(1.06, 1.06)
+        case .holoTable: return SIMD2(1.2, 1.2)
         case .couch: return SIMD2(0.8, 0.3)
         case .counter: return SIMD2(0.32, 0.26)
         case .coffeeMachine: return SIMD2(0.17, 0.22)
@@ -40,7 +40,7 @@ enum FixtureKind: String {
         case .console:
             return [Anchor(at: SIMD2(0, size.y / 2 + Seat.knees), use: .sit(height: Seat.height))]
         case .holoTable:
-            return [0.0, 0.85, -0.85].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2, use: .stand) }
+            return [.pi, .pi / 3, -.pi / 3].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2 * cos(.pi / 6), use: .stand) }
         case .couch:
             return [Anchor(at: SIMD2(0, Seat.reach), use: .sit(height: Seat.couch), faces: .away)]
         case .counter:
@@ -209,6 +209,17 @@ enum RoomLayout {
 }
 
 extension Station {
+    var bridge: (at: SIMD2<Double>, deck: Double, radius: Double)? {
+        guard !fixtures(in: "kind:mission").isEmpty, let origin = roomOrigin("kind:mission") else { return nil }
+        return (origin + SIMD2(2.5, 2.3), 0.3, 0.27)
+    }
+
+    func onBridge(_ q: SIMD2<Double>) -> Bool {
+        guard let b = bridge else { return false }
+        let d = q - b.at, apothem = b.radius * cos(.pi / 6)
+        return (0..<3).allSatisfy { k in abs(d.x * sin(Double(k) * .pi / 3) + d.y * cos(Double(k) * .pi / 3)) <= apothem }
+    }
+
     func roomOrigin(_ key: String) -> SIMD2<Double>? {
         guard let room = rooms[key], !room.cells.isEmpty else { return nil }
         return SIMD2(Double(room.cells.map(\.x).min()!) - 0.5, Double(room.cells.map(\.y).min()!) - 0.5)

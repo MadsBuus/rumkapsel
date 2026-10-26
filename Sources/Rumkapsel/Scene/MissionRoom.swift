@@ -33,23 +33,96 @@ enum MissionRoom {
         return n
     }
 
+    static let hexTurn = Double.pi / 6
+
+    static func bridge(radius r: Double) -> SCNNode {
+        let deck = SCNNode(geometry: faceted(SCNCylinder(radius: r, height: 0.035)))
+        deck.geometry!.firstMaterial = lit(Palette.ops.console)
+        deck.position = v3(0, -0.0175, 0)
+        let edge = SCNNode(geometry: faceted(SCNTube(innerRadius: r - 0.025, outerRadius: r + 0.004, height: 0.008)))
+        edge.geometry!.firstMaterial = flat(NSColor(rgb: (0.45, 0.95, 1.0)))
+        edge.position = v3(0, 0.002, 0)
+        let glow = SCNNode(geometry: faceted(SCNCylinder(radius: r * 0.7, height: 0.004)))
+        glow.geometry!.firstMaterial = holo(NSColor(rgb: (0.4, 0.9, 1.0)), 0.55)
+        glow.position = v3(0, -0.038, 0)
+        let n = SCNNode()
+        for c in [deck, edge, glow] { n.addChildNode(c) }
+        return n
+    }
+
+    static func needle(_ radius: Double) -> SCNNode {
+        let n = SCNNode()
+        let ink = lit(NSColor(rgb: (0.96, 0.93, 0.84)))
+        let blade = SCNNode(geometry: SCNBox(width: 0.006, height: radius * 0.9, length: 0.004, chamferRadius: 0.001))
+        blade.geometry!.firstMaterial = ink
+        blade.position = v3(0, radius * 0.9 / 2 - radius * 0.12, 0)
+        let cap = SCNNode(geometry: SCNCylinder(radius: radius * 0.1, height: 0.008))
+        cap.geometry!.firstMaterial = lit(NSColor(rgb: (0.3, 0.31, 0.33)))
+        cap.eulerAngles.x = .pi / 2
+        n.addChildNode(blade); n.addChildNode(cap)
+        n.eulerAngles.z = CGFloat(-RepoStatus.calm.angle)
+        return n
+    }
+
     static func hologram() -> SCNNode {
         let n = SCNNode()
-        let cyan = NSColor(rgb: (0.4, 0.9, 1.0))
-        let station = SCNNode(geometry: faceted(SCNCylinder(radius: 0.06, height: 0.03), 6))
-        station.geometry!.firstMaterial = holo(cyan, 0.9)
-        station.position = v3(0, 0.1, 0)
-        n.addChildNode(station)
-        for (r, a, size) in [(0.22, 0.4, 0.035), (0.33, 2.2, 0.05), (0.4, 4.1, 0.03), (0.28, 5.3, 0.025)] {
-            let orbit = SCNNode(geometry: SCNTorus(ringRadius: r, pipeRadius: 0.002))
-            orbit.geometry!.firstMaterial = holo(cyan, 0.45)
-            orbit.position = v3(0, 0.1, 0)
-            n.addChildNode(orbit)
-            let planet = SCNNode(geometry: SCNSphere(radius: size))
-            planet.geometry!.firstMaterial = holo(cyan, 0.7)
-            planet.position = v3(sin(a) * r, 0.1, cos(a) * r)
-            n.addChildNode(planet)
+        let sun = SCNNode(geometry: SCNSphere(radius: 0.045))
+        sun.geometry!.firstMaterial = holo(NSColor(rgb: (1.0, 0.92, 0.7)), 1)
+        let halo = SCNNode(geometry: SCNSphere(radius: 0.075))
+        halo.geometry!.firstMaterial = holo(NSColor(rgb: (1.0, 0.8, 0.45)), 0.25)
+        sun.addChildNode(halo)
+        sun.position = v3(0, HoloView.centre, 0)
+        sun.categoryBitMask = Pick.scenery
+        halo.categoryBitMask = Pick.scenery
+        n.addChildNode(sun)
+        n.addChildNode(grain())
+        return n
+    }
+
+    static func grain(count: Int = 300, radius: Double = 0.5, height: Double = 0.36) -> SCNNode {
+        var rng = SystemRandomNumberGenerator()
+        var verts: [SCNVector3] = [], keys: [CGPoint] = []
+        let apothem = radius * cos(.pi / 6)
+        while verts.count < count {
+            let x = Double.random(in: -radius...radius, using: &rng), z = Double.random(in: -radius...radius, using: &rng)
+            let inside = (0..<3).allSatisfy { k in
+                let a = Double(k) * .pi / 3
+                return abs(x * sin(a) + z * cos(a)) <= apothem
+            }
+            guard inside else { continue }
+            verts.append(SCNVector3(x, 0, z))
+            keys.append(CGPoint(x: Double.random(in: 0..<1, using: &rng), y: 1 / Double.random(in: 12...24, using: &rng)))
         }
+        let element = SCNGeometryElement(indices: (0..<Int32(count)).map { $0 }, primitiveType: .point)
+        element.pointSize = 0.004
+        element.minimumPointScreenSpaceRadius = 0.5
+        element.maximumPointScreenSpaceRadius = 16
+        let g = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(textureCoordinates: keys)], elements: [element])
+        let m = SCNMaterial()
+        m.lightingModel = .constant
+        m.diffuse.contents = NSColor(rgb: (0.55, 0.95, 1.0))
+        m.blendMode = .add
+        m.writesToDepthBuffer = false
+        m.shaderModifiers = [
+            .geometry: """
+                #pragma varyings
+                float fade;
+                #pragma body
+                float2 k = _geometry.texcoords[0];
+                float t = fract(scn_frame.time * k.y + k.x);
+                float a = scn_frame.time * 0.025 + t * 0.4;
+                float3 p = _geometry.position.xyz;
+                _geometry.position.xyz = float3(p.x * cos(a) - p.z * sin(a), t * \(height), p.x * sin(a) + p.z * cos(a));
+                out.fade = sin(t * 3.14159) * (0.6 + 0.4 * sin(scn_frame.time * (0.3 + k.x * 0.6) + k.x * 40.0));
+                """,
+            .fragment: """
+                #pragma body
+                _output.color = float4(_output.color.rgb * in.fade * 0.6, in.fade * 0.7);
+                """]
+        g.firstMaterial = m
+        let n = SCNNode(geometry: g)
+        n.name = "grain"
+        n.categoryBitMask = Pick.scenery
         return n
     }
 
@@ -87,6 +160,9 @@ enum MissionRoom {
 }
 
 enum Screens {
+    static let tall = 0.58, annunciatorWide = 1.6, feedWide = 0.8, errorsWide = 1.05
+    static func pixels(_ wide: Double, across: Int = 480) -> (Int, Int) { (across, Int((Double(across) * tall / wide).rounded())) }
+
     private static func draw(_ w: Int, _ h: Int, _ body: (CGContext, CGFloat, CGFloat) -> Void) -> NSImage {
         let image = NSImage(size: NSSize(width: w, height: h))
         image.lockFocus()
@@ -117,55 +193,113 @@ enum Screens {
         }
     }
 
-    static func annunciator(_ rows: [MissionBoards.Row], blinking: Bool = false) -> NSImage {
-        draw(1024, 300) { c, w, h in
-            if !blinking { c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h)) }
-            let head: CGFloat = 34
-            for (k, name) in MissionBoards.lamps.enumerated() where !blinking {
-                let s = NSAttributedString(string: name, attributes: [.font: NSFont.systemFont(ofSize: 20, weight: .semibold), .foregroundColor: NSColor(rgb: (0.7, 0.72, 0.75))])
-                s.draw(at: NSPoint(x: 240 + CGFloat(k) * 128 + (116 - s.size().width) / 2, y: h - head + 6))
+    static func dialCell(_ i: Int, of n: Int, w: Double, h: Double) -> (centre: CGPoint, radius: Double) {
+        let lines = n > 4 ? 2 : 1, across = max(1, (n + lines - 1) / lines)
+        let cw = w / Double(across), ch = h / Double(lines)
+        let col = i % across, line = i / across
+        let radius = min(cw * 0.36, ch * 0.34)
+        return (CGPoint(x: cw * (Double(col) + 0.5), y: h - ch * (Double(line) + 1) + ch * 0.56), radius)
+    }
+
+    static let lightStrip = 86.0
+
+    static func dial(_ i: Int, of n: Int) -> (hub: SCNVector3, radius: Double) {
+        let (pw, ph) = pixels(annunciatorWide, across: 1024)
+        var cell = dialCell(i, of: n, w: Double(pw), h: Double(ph) - lightStrip)
+        cell.centre.y += CGFloat(lightStrip)
+        let scale = annunciatorWide / Double(pw)
+        return (SCNVector3((Double(cell.centre.x) / Double(pw) - 0.5) * annunciatorWide, (Double(cell.centre.y) / Double(ph) - 0.5) * tall, 0.02), cell.radius * scale)
+    }
+
+    static func dials(_ all: [MissionBoards.Row]) -> NSImage {
+        let (pw, ph) = pixels(annunciatorWide, across: 1024)
+        let (rows, lights) = MissionBoards.split(all)
+        return draw(pw, ph) { c, w, h in
+            c.setFillColor(NSColor(rgb: (0.06, 0.06, 0.07)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            let strip = CGFloat(lightStrip)
+            c.setFillColor(NSColor(rgb: (0.035, 0.035, 0.04)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: strip))
+            var x: CGFloat = 34
+            for row in lights {
+                let o = CGPoint(x: x, y: strip - 34), r: CGFloat = 21
+                c.setFillColor(NSColor(rgb: (0.1, 0.105, 0.11)).cgColor)
+                c.fillEllipse(in: CGRect(x: o.x - r, y: o.y - r, width: r * 2, height: r * 2))
+                c.setStrokeColor(NSColor(row.color).cgColor); c.setLineWidth(3.5)
+                c.strokeEllipse(in: CGRect(x: o.x - r, y: o.y - r, width: r * 2, height: r * 2))
+                let a = row.status.angle
+                c.setStrokeColor(row.status == .calm ? NSColor(rgb: (0.8, 0.78, 0.7)).cgColor : row.status.color.cgColor); c.setLineWidth(2.5)
+                c.move(to: o); c.addLine(to: CGPoint(x: o.x + r * 0.75 * CGFloat(sin(a)), y: o.y + r * 0.75 * CGFloat(cos(a)))); c.strokePath()
+                var size: CGFloat = 13
+                var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor(row.color).withAlphaComponent(0.8)])
+                while name.size().width > 64 && size > 8 {
+                    size -= 1
+                    name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .bold), .foregroundColor: NSColor(row.color).withAlphaComponent(0.8)])
+                }
+                name.draw(at: NSPoint(x: o.x - name.size().width / 2, y: 4))
+                x += 70
+                if x > w - 200 { break }
             }
-            let count = max(5, rows.count), rowH = (h - head) / CGFloat(count)
-            for r in 0..<count {
-                let y = h - head - rowH * CGFloat(r + 1)
-                if r < rows.count, !blinking {
-                    let row = rows[r]
-                    c.setFillColor(NSColor(row.color).cgColor); c.fill(CGRect(x: 8, y: y + 4, width: 210, height: rowH - 8))
-                    var size: CGFloat = min(24, rowH - 12)
-                    var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
-                    while name.size().width > 196 && size > 10 {
-                        size -= 1
-                        name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor.black])
-                    }
-                    name.draw(at: NSPoint(x: 16, y: y + (rowH - name.size().height) / 2))
+            let calm = lights.filter { $0.status == .calm }.count, more = lights.count - calm
+            let tally = [calm > 0 ? "\(calm) calm" : nil, more > 0 ? "+\(more) waiting" : nil].compactMap { $0 }.joined(separator: " · ")
+            let t = NSAttributedString(string: tally, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 24, weight: .bold), .foregroundColor: NSColor(rgb: (0.55, 0.7, 0.62))])
+            t.draw(at: NSPoint(x: w - 18 - t.size().width, y: (strip - t.size().height) / 2))
+            if rows.isEmpty {
+                let s = NSAttributedString(string: "All calm", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 56, weight: .heavy), .foregroundColor: RepoStatus.calm.color])
+                s.draw(at: NSPoint(x: (w - s.size().width) / 2, y: strip + (h - strip - s.size().height) / 2))
+            }
+            for (i, row) in rows.enumerated() {
+                var (o, r) = dialCell(i, of: rows.count, w: Double(w), h: Double(h) - Double(strip))
+                o.y += strip
+                let rr = CGFloat(r)
+                func at(_ a: Double, _ d: CGFloat) -> CGPoint { CGPoint(x: o.x + d * CGFloat(sin(a)), y: o.y + d * CGFloat(cos(a))) }
+                c.setFillColor(NSColor(rgb: (0.1, 0.105, 0.11)).cgColor)
+                c.fillEllipse(in: CGRect(x: o.x - rr, y: o.y - rr, width: rr * 2, height: rr * 2))
+                c.setStrokeColor(NSColor(row.color).cgColor); c.setLineWidth(rr * 0.11)
+                c.strokeEllipse(in: CGRect(x: o.x - rr, y: o.y - rr, width: rr * 2, height: rr * 2))
+                let steps = RepoStatus.allCases.count, span = RepoStatus.sweep * 2 / Double(steps - 1)
+                for st in RepoStatus.allCases {
+                    let mid = st.angle, from = mid - span / 2 + 0.03, to = mid + span / 2 - 0.03
+                    let lit = st == row.status
+                    c.setStrokeColor(st.color.withAlphaComponent(lit ? 1 : 0.28).cgColor)
+                    c.setLineWidth(rr * (lit ? 0.16 : 0.1))
+                    c.addArc(center: o, radius: rr * 0.74, startAngle: CGFloat(.pi / 2 - from), endAngle: CGFloat(.pi / 2 - to), clockwise: true)
+                    c.strokePath()
                 }
-                for k in 0..<MissionBoards.lamps.count {
-                    let blinks = r < rows.count && (rows[r].blink.indices.contains(k) ? rows[r].blink[k] : 0) > 0
-                    if blinking != blinks && blinking { continue }
-                    let lamp = r < rows.count && !(blinks && !blinking) ? rows[r].lamps[k] : .dark
-                    c.setFillColor(lampColor(lamp).cgColor)
-                    c.fill(CGRect(x: 240 + CGFloat(k) * 128, y: y + 4, width: 116, height: rowH - 8))
+                c.setStrokeColor(NSColor(rgb: (0.75, 0.76, 0.72)).cgColor); c.setLineWidth(2)
+                for k in 0...12 {
+                    let a = -RepoStatus.sweep + Double(k) / 12 * RepoStatus.sweep * 2
+                    c.move(to: at(a, rr * 0.86)); c.addLine(to: at(a, rr * (k % 2 == 0 ? 0.97 : 0.92))); c.strokePath()
                 }
+                let word = NSAttributedString(string: row.status.words, attributes: [.font: NSFont.monospacedSystemFont(ofSize: rr * 0.26, weight: .heavy), .foregroundColor: row.status.color])
+                word.draw(at: NSPoint(x: o.x - word.size().width / 2, y: o.y - rr * 0.62))
+                var size = min(34, rr * 0.34)
+                var name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor(row.color).lighter(0.2)])
+                while name.size().width > rr * 2.6 && size > 9 {
+                    size -= 1
+                    name = NSAttributedString(string: row.repo, attributes: [.font: NSFont.systemFont(ofSize: size, weight: .heavy), .foregroundColor: NSColor(row.color).lighter(0.2)])
+                }
+                name.draw(at: NSPoint(x: o.x - name.size().width / 2, y: o.y - rr - name.size().height - 4))
             }
         }
     }
 
     static func crt(_ frame: NSImage, caption: String) -> NSImage {
-        draw(320, 200) { c, w, h in
+        let (pw, ph) = pixels(feedWide)
+        return draw(pw, ph) { c, w, h in
             frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .copy, fraction: 1)
-            c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.22).cgColor)
+            c.setFillColor(NSColor(rgb: (0.35, 0.85, 0.95)).withAlphaComponent(0.07).cgColor)
             c.setBlendMode(.color); c.fill(CGRect(x: 0, y: 0, width: w, height: h)); c.setBlendMode(.normal)
-            c.setFillColor(NSColor.black.withAlphaComponent(0.28).cgColor)
+            c.setFillColor(NSColor.black.withAlphaComponent(0.12).cgColor)
             for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }
-            let glow = CGGradient(colorsSpace: nil, colors: [NSColor.clear.cgColor, NSColor.black.withAlphaComponent(0.55).cgColor] as CFArray, locations: [0.55, 1])!
+            let glow = CGGradient(colorsSpace: nil, colors: [NSColor.clear.cgColor, NSColor.black.withAlphaComponent(0.3).cgColor] as CFArray, locations: [0.7, 1])!
             c.drawRadialGradient(glow, startCenter: CGPoint(x: w / 2, y: h / 2), startRadius: 0, endCenter: CGPoint(x: w / 2, y: h / 2), endRadius: w * 0.62, options: [])
-            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 15, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
-                .draw(at: NSPoint(x: 12, y: h - 26))
+            NSAttributedString(string: caption, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 21, weight: .bold), .foregroundColor: NSColor(rgb: (0.85, 1, 0.95))])
+                .draw(at: NSPoint(x: 16, y: h - 36))
         }
     }
 
     static func errors(_ rows: [MissionBoards.ErrorRow]) -> NSImage {
-        draw(480, 300) { c, w, h in
+        let (pw, ph) = pixels(errorsWide)
+        return draw(pw, ph) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
             NSAttributedString(string: "Errors", attributes: [.font: NSFont.monospacedSystemFont(ofSize: 20, weight: .bold), .foregroundColor: NSColor(rgb: (0.5, 0.62, 0.62))])
                 .draw(at: NSPoint(x: 18, y: h - 38))
@@ -191,8 +325,9 @@ enum Screens {
         }
     }
 
-    static func noSignal(_ caption: String) -> NSImage {
-        draw(480, 300) { c, w, h in
+    static func noSignal(_ caption: String, wide: Double = errorsWide) -> NSImage {
+        let (pw, ph) = pixels(wide)
+        return draw(pw, ph) { c, w, h in
             c.setFillColor(NSColor(rgb: (0.03, 0.05, 0.06)).cgColor); c.fill(CGRect(x: 0, y: 0, width: w, height: h))
             c.setFillColor(NSColor.black.withAlphaComponent(0.4).cgColor)
             for y in stride(from: CGFloat(0), to: h, by: 3) { c.fill(CGRect(x: 0, y: y, width: w, height: 1)) }

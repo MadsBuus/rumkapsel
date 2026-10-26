@@ -62,6 +62,7 @@ enum Pick {
     static let colony = 64
     static let launching = 128
     static let air = 256
+    static let holo = 512
 }
 
 enum Backdrop {
@@ -283,6 +284,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     var chairs: [String: [FixtureRef: SCNNode]] = [:]
+    var holos: [String: HoloView] = [:]
+    var holoTendedAt = 0.0
     var missionScreens: [String: MissionScreens] = [:]
     var boardsCheckedAt = 0.0, feedsRolledAt = 0.0, feedsFarAt = 0.0, feedsBusy = false
     var walkAskedAt: Double?
