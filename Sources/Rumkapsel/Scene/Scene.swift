@@ -369,6 +369,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var storyPanel: CrateStoryPanel?
     var storyOf: (station: String, id: CrateID)?
     var storyClock = 0.0
+    var storyCheck: (id: CrateID, check: CrateCheck?)?
     var setupCard: SetupCard?
     var cardFacts: SetupCardFacts?
     var answeredCards: Set<String> = []

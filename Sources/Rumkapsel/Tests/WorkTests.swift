@@ -37,6 +37,28 @@ enum WorkTests {
             expect(world.works.find(repo: "api", pull: 12)?.stage == .stored, "and its work book, stage and all")
         }
 
+        test("a recheck lists only what disagrees: a stale word, a source ahead, an unknown pull request, proof of production, a misplaced crate") {
+            var c = CrateCheck(id: CrateID(repo: "api", number: 5820), at: Date())
+            c.answers = [.init(source: .board, says: "status QA", stage: .qa), .init(source: .pulls, says: "pull request #5822 merged", stage: .stored),
+                         .init(source: .git, says: "#5822's merge commit is on staging, not in production", stage: .qa)]
+            c.linked = [5822]; c.known = [5822]
+            c.believed = .qa; c.heard = [.board: .qa, .pulls: .stored, .git: .qa]
+            c.place = .testing; c.placeByStage = .testing; c.drawn = .testing
+            expect(c.mismatches.isEmpty, "all agree: \(c.mismatches)")
+            c.answers[0] = .init(source: .board, says: "status Ready to ship", stage: .cleared)
+            expect(c.mismatches == ["board says cleared now; the station last heard QA from it", "board says cleared, ahead of the station's QA"], "the board moved on: \(c.mismatches)")
+            c.answers[0] = .init(source: .board, says: "status QA", stage: .qa)
+            c.known = []
+            expect(c.mismatches == ["GitHub links pull request #5822; the station doesn't know it"], "a pull request the station lost: \(c.mismatches)")
+            c.known = [5822]
+            c.answers[2] = .init(source: .git, says: "in production", stage: .shipped)
+            c.heard[.git] = .shipped
+            expect(c.mismatches.contains("its merge commit is in production, but the station has it at QA"), "proof it shipped: \(c.mismatches)")
+            c.answers[2] = .init(source: .git, says: "on staging", stage: .qa); c.heard[.git] = .qa
+            c.place = .waiting
+            expect(c.mismatches.contains { $0.hasPrefix("the \(Words.current.crate) stands") } && c.mismatches.contains { $0.hasPrefix("drawn") }, "misplaced and drawn elsewhere: \(c.mismatches)")
+        }
+
         test("a branch named for its issue is that issue: office, crate and name agree") {
             let w = Work(repo: "web", branch: "gh-128/artist-search-fixes")
             expect(w.issue == 128 && w.number == 128, "issue read off the branch")
