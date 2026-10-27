@@ -262,7 +262,9 @@ extension World {
             let yard = works.records(repo: repo).filter { r in r.number != nil && r.stage.map { $0 >= .stored && $0 < .shipped } == true }
             learn(.sweep(repo: repo, keep: yard.compactMap(\.number).sorted()), repo: repo)
             for r in yard {
-                learn(.work(WorkNews(crate: CrateID(repo: repo, number: r.number!), office: office(for: r)?.room.key, stage: r.stage!, quiet: true)), repo: repo)
+                var news = WorkNews(crate: CrateID(repo: repo, number: r.number!), office: office(for: r)?.room.key, stage: r.stage!, quiet: true)
+                news.untested = offBoard(r)
+                learn(.work(news), repo: repo)
             }
         }
         learn(.restack)

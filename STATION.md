@@ -131,6 +131,9 @@ moves through it one way: in from the hallway at the back, out through the field
   cleared rows.
 - **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached
   across the near one, with a toss when a crate stands there: the gravity is low, so it drifts over.
+- **Work nobody can test**: where the project board decides testing, merged work that is not on the project
+  (neither its pull request nor the issue it closes), such as a back-merge, skips the testing rows: on
+  staging it waits on the cleared rows for the release.
 - **A repository that doesn't ship** keeps a merged crate in storage for three hours; then it fades where it
   stands, carried by nobody (`Rules.unshippedFor`, on the tick).
 - **A staging release** that merges sends its repository's stored crates across to the testing rows,
