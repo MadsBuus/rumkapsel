@@ -17,15 +17,15 @@ enum RuleTests {
             expect(logs(fx) == ["web #5 to \(Zone.waiting.words)"], "said once: \(logs(fx))")
         }
 
-        test("a repository that doesn't ship: a crate stored a day ago leaves storage on the tick; one that ships keeps its crates") {
+        test("a repository that doesn't ship: a crate stored three hours ago leaves storage on the tick; one that ships keeps its crates") {
             var f = Facts()
             apply(&f, [.policy(repo: "lib", RepoFacts(ships: false)), .policy(repo: "web", RepoFacts()),
                        work("lib", 1, .stored, quiet: true), work("web", 2, .stored, quiet: true)])
             expect(f.crates[id("lib", 1)]?.storedAt == t0 && f.crates[id("web", 2)]?.storedAt == t0, "stored now")
-            apply(&f, [.tick], at: t0.addingTimeInterval(23 * 3600))
-            expect(f.crates[id("lib", 1)]?.place == .waiting, "23 hours: still in storage")
-            apply(&f, [.tick], at: t0.addingTimeInterval(25 * 3600))
-            expect(f.crates[id("lib", 1)] == nil, "25 hours: gone")
+            apply(&f, [.tick], at: t0.addingTimeInterval(2.5 * 3600))
+            expect(f.crates[id("lib", 1)]?.place == .waiting, "two and a half hours: still in storage")
+            apply(&f, [.tick], at: t0.addingTimeInterval(3.5 * 3600))
+            expect(f.crates[id("lib", 1)] == nil, "three and a half hours: gone")
             apply(&f, [.tick], at: t0.addingTimeInterval(30 * 24 * 3600))
             expect(f.crates[id("web", 2)]?.place == .waiting, "a shipping repository's crate never goes")
         }
