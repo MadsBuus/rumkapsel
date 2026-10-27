@@ -108,6 +108,15 @@ final class World {
     }
     func report(pullState state: String?, record: WorkBook.Record?, shipped: Bool = false, at: Date) {
         guard let state, let record else { return }
+        if !record.housekeeping, state == "MERGED", let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key,
+           record.pulls.keys.contains(where: { github.pulls.pull(number: $0, repoRoot: root)?.backMerge == true })
+            || record.branches.contains(where: { github.pulls.pull(branch: $0, repoRoot: root)?.backMerge == true }) {
+            record.housekeeping = true
+            StationLog.write("stage", "\(record.repo) \(record.work().label): a back-merge, not work")
+            if let n = record.number {
+                learn(.work(WorkNews(crate: CrateID(repo: record.repo, number: n), stage: record.stage ?? .stored, quiet: true, housekeeping: true)), repo: record.repo)
+            }
+        }
         if shipped { return works.report(record, .shipped, by: .git, at: at) }
         works.report(record, PullRequests.stage(for: state), by: .pulls, at: at)
     }

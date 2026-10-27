@@ -28,6 +28,16 @@ enum RuleTests {
             expect(f.crates[id("web", 9)]?.place == .testing, "work on the project still goes to the testing rows")
         }
 
+        test("housekeeping (a back-merge) never stands in the yard, and a crate it already has goes") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "web", staged), work("web", 14219, .stored)])
+            expect(f.crates[id("web", 14219)]?.place == .waiting, "stored before it was known for a back-merge")
+            apply(&f, [.work(WorkNews(crate: id("web", 14219), stage: .qa, quiet: true, housekeeping: true))])
+            expect(f.crates[id("web", 14219)] == nil, "known now: gone from the yard")
+            apply(&f, [.work(WorkNews(crate: id("web", 14219), stage: .cleared, housekeeping: true))])
+            expect(f.crates[id("web", 14219)] == nil, "and it never comes back")
+        }
+
         test("a repository that doesn't ship: a crate stored three hours ago leaves storage on the tick; one that ships keeps its crates") {
             var f = Facts()
             apply(&f, [.policy(repo: "lib", RepoFacts(ships: false)), .policy(repo: "web", RepoFacts()),

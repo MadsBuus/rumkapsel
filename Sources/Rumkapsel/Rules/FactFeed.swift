@@ -73,6 +73,7 @@ extension World {
         var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil, by: t.by,
                             pull: pull == crate.number ? nil : pull)
         news.untested = offBoard(record)
+        news.housekeeping = record.housekeeping
         if t.to == .stored, let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key, github.pipeline(repoRoot: root).shipsOnMerge {
             news.link = waitingURL(repo: record.repo)
         }

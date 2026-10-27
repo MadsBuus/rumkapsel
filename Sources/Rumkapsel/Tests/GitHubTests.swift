@@ -279,6 +279,52 @@ enum GitHubTests {
             expect(!PullSource.shipped(merged(after), repoRoot: dir, github: tags), "after the tag: not shipped")
         }
 
+        test("a back-merge brings staging's tip into develop for the first time; work branched after an earlier back-merge does not") {
+            let dir = GitWatch.real(NSTemporaryDirectory()) + "/rk-backmerge-\(UUID().uuidString)"
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: dir) }
+            func head() -> String {
+                GitHubResolver().run(["git", "rev-parse", "HEAD"], cwd: dir).flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
+            func merge(_ branch: String, into base: String) -> (head: String, merge: String) {
+                git(["checkout", "-q", branch], dir)
+                let h = head()
+                git(["checkout", "-q", base], dir)
+                git(["merge", "-q", "--no-ff", "-m", "merge \(branch)", branch], dir)
+                return (h, head())
+            }
+            git(["init", "-q", "-b", "develop"], dir)
+            git(["commit", "-q", "--allow-empty", "-m", "start"], dir)
+            git(["checkout", "-q", "-b", "staging"], dir)
+            git(["commit", "-q", "--allow-empty", "-m", "release to staging"], dir)
+            git(["update-ref", "refs/remotes/origin/staging", "HEAD"], dir)
+            git(["checkout", "-q", "develop"], dir)
+            git(["checkout", "-q", "-b", "gh-1/feature"], dir)
+            git(["commit", "-q", "--allow-empty", "-m", "feature (#1)"], dir)
+            let feature = merge("gh-1/feature", into: "develop")
+            git(["checkout", "-q", "-b", "develop-v1"], dir)
+            git(["merge", "-q", "--no-ff", "-m", "staging into develop-v1", "origin/staging"], dir)
+            let back = merge("develop-v1", into: "develop")
+            git(["checkout", "-q", "-b", "gh-2/after"], dir)
+            git(["commit", "-q", "--allow-empty", "-m", "after (#2)"], dir)
+            let after = merge("gh-2/after", into: "develop")
+            let github = GitHubResolver()
+            github.frozen = true
+            github.inject(pipeline: PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                                             merges: (0..<20).map { .init(base: "develop", head: "gh-\($0)/work") }
+                                                                 + Array(repeating: .init(base: "staging", head: "develop"), count: 3)
+                                                                 + Array(repeating: .init(base: "production", head: "staging"), count: 3),
+                                                             file: nil, defaultBranch: "develop"), for: dir)
+            let soon = ISO8601DateFormatter().string(from: Date().addingTimeInterval(60))
+            func pr(_ m: (head: String, merge: String), base: String = "develop") -> [String: Any] {
+                ["state": "MERGED", "baseRefName": base, "headRefOid": m.head, "mergeCommit": ["oid": m.merge], "mergedAt": soon]
+            }
+            expect(PullSource.backMerge(pr(back), repoRoot: dir, github: github), "develop-v1, carrying staging's release into develop: a back-merge")
+            expect(!PullSource.backMerge(pr(feature), repoRoot: dir, github: github), "a feature: not a back-merge")
+            expect(!PullSource.backMerge(pr(after), repoRoot: dir, github: github), "a feature branched after the back-merge, staging already in develop: not one")
+            expect(!PullSource.backMerge(pr(back, base: "staging"), repoRoot: dir, github: github), "into a branch other than develop: not a back-merge")
+        }
+
         say(failures == 0 ? "github: all passed" : "github: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

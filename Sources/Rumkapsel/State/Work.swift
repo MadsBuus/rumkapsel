@@ -103,6 +103,7 @@ final class WorkBook {
         var stagedBy: Source?
         var quiet = false
         var words: [Source: Stage] = [:]
+        var housekeeping = false
 
         init(id: Int, repo: String) { self.id = id; self.repo = repo }
 
@@ -205,6 +206,7 @@ final class WorkBook {
         for (n, s) in other.pulls { record.pulls[n] = record.pulls[n] ?? s; byPull["\(record.repo)!\(n)"] = record.id }
         if let n = other.crate { record.crate = record.crate ?? n; byCrate["\(record.repo)|\(n)"] = record.id }
         record.author = record.author ?? other.author; record.title = record.title ?? other.title; record.url = record.url ?? other.url
+        record.housekeeping = record.housekeeping || other.housekeeping
         if let s = other.stage, record.stage.map({ s > $0 }) ?? true { record.stage = s; record.stagedAt = other.stagedAt; record.stagedBy = other.stagedBy }
         for (src, st) in other.words where record.words[src].map({ st > $0 }) ?? true { record.words[src] = st }
         records[other.id] = nil
@@ -218,6 +220,7 @@ final class WorkBook {
             var author: String?, title: String?, url: String?
             var stage: Int?, stagedAt: Date?, stagedBy: String?, quiet: Bool
             var words: [String: Int]
+            var housekeeping: Bool?
         }
         var records: [Entry]
     }
@@ -227,7 +230,8 @@ final class WorkBook {
             Saved.Entry(repo: r.repo, branches: r.branches.sorted(), folders: r.folders.sorted(), issue: r.issue,
                         pulls: Dictionary(uniqueKeysWithValues: r.pulls.map { (String($0.key), $0.value) }), crate: r.crate,
                         author: r.author, title: r.title, url: r.url, stage: r.stage?.rawValue, stagedAt: r.stagedAt, stagedBy: r.stagedBy?.rawValue,
-                        quiet: r.quiet, words: Dictionary(uniqueKeysWithValues: r.words.map { ($0.key.rawValue, $0.value.rawValue) }))
+                        quiet: r.quiet, words: Dictionary(uniqueKeysWithValues: r.words.map { ($0.key.rawValue, $0.value.rawValue) }),
+                        housekeeping: r.housekeeping ? true : nil)
         })
     }
 
@@ -237,7 +241,7 @@ final class WorkBook {
             let r = Record(id: nextId, repo: e.repo); nextId += 1
             r.branches = Set(e.branches); r.folders = Set(e.folders); r.issue = e.issue; r.crate = e.crate
             r.pulls = Dictionary(uniqueKeysWithValues: e.pulls.compactMap { k, v in Int(k).map { ($0, v) } })
-            r.author = e.author; r.title = e.title; r.url = e.url
+            r.author = e.author; r.title = e.title; r.url = e.url; r.housekeeping = e.housekeeping ?? false
             r.stage = e.stage.flatMap(Stage.init(rawValue:)); r.stagedAt = e.stagedAt; r.stagedBy = e.stagedBy.flatMap(Source.init(rawValue:)); r.quiet = e.quiet
             r.words = Dictionary(uniqueKeysWithValues: e.words.compactMap { k, v in Source(rawValue: k).flatMap { s in Stage(rawValue: v).map { (s, $0) } } })
             records[r.id] = r
