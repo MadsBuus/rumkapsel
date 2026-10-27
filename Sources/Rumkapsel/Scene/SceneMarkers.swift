@@ -313,9 +313,23 @@ extension StationController {
 enum OfficeLight { case occupied, empty, dark }
 
 extension StationController {
-    func restackYard() {
-        world.learn(.restack)
-        logEvent("the yard restacked")
+    func rebuildYard() {
+        lookAgain()
+        enqueue { [self] in
+            let jobs = world.yardNumbers()
+            let asked = jobs.map(\.numbers.count).reduce(0, +)
+            StationLog.write("yard", "rebuild: asking GitHub about \(asked) crates in \(jobs.count) repositories")
+            logEvent("rebuilding the yard: asking GitHub about \(asked) crates")
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                let dug = jobs.map { (repo: $0.repo, found: github.pulls.dig($0.numbers, repoRoot: $0.root)) }
+                enqueue { [self] in
+                    let pulls = dug.flatMap { $0.found.values.flatMap { $0 } }
+                    StationLog.write("yard", "rebuild: \(pulls.count) pull request(s) found, \(pulls.filter(\.shipped).count) in production")
+                    world.rebuildYard(dug: dug)
+                    logEvent("the yard rebuilt from what GitHub says now")
+                }
+            }
+        }
     }
 
     func looseCrate(_ crate: CrateRef) -> SCNNode {

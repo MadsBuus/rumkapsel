@@ -447,6 +447,26 @@ final class PullSource: Intake {
         ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
     }
 
+    struct Dug: Equatable { let number: Int; let state: String; let shipped: Bool }
+
+    func dig(_ numbers: [Int], repoRoot: String) -> [Int: [Dug]] {
+        guard let github else { return [:] }
+        func pull(_ n: Int) -> Dug? {
+            guard let data = github.run(["gh", "pr", "view", "\(n)", "--json", "number,state,mergeCommit"], cwd: repoRoot),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let state = o["state"] as? String else { return nil }
+            return Dug(number: n, state: state, shipped: PullSource.shipped(o, repoRoot: repoRoot, github: github))
+        }
+        var out: [Int: [Dug]] = [:]
+        for n in numbers {
+            if let p = pull(n) { out[n] = [p]; continue }
+            guard let data = github.run(["gh", "issue", "view", "\(n)", "--json", "closedByPullRequestsReferences"], cwd: repoRoot),
+                  let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let refs = ((o["closedByPullRequestsReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
+            out[n] = refs.compactMap(pull)
+        }
+        return out
+    }
+
     static func shipped(_ o: [String: Any], repoRoot: String, github: GitHubResolver) -> Bool {
         guard o["state"] as? String == "MERGED", let oid = (o["mergeCommit"] as? [String: Any])?["oid"] as? String else { return false }
         let p = github.pipeline(repoRoot: repoRoot)

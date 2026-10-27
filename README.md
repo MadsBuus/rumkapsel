@@ -79,7 +79,7 @@ minion to ride along behind it; W A S D steps off, Esc goes back up.
 
 The menus repeat these and add Settings (⌘,), Refresh GitHub (⌘⇧R), Reset Colours, Reset Office Layout,
 and a Develop menu: the Graphics Gallery (⌘⇧G), the Playbook (⌘⇧P), the body and facts reports (⌘⇧B, ⌘⇧L),
-Restack the Yard, Skip to the Facts, and Rehearse Launch.
+Rebuild the Yard (asks GitHub where each crate really stands and re-places them all), Skip to the Facts, and Rehearse Launch.
 
 ## Themes
 

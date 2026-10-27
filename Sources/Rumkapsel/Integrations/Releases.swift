@@ -238,6 +238,36 @@ extension World {
         learn(.sweep(repo: repo, keep: listed.union(held).sorted()), repo: repo)
     }
 
+    func yardNumbers() -> [(root: String, repo: String, numbers: [Int])] {
+        var seen = Set<String>()
+        return repoRoots.sorted { $0.key < $1.key }.compactMap { root, info in
+            guard seen.insert(info.repo).inserted else { return nil }
+            let numbers = works.records(repo: info.repo).filter { $0.stage.map { $0 >= .stored && $0 < .shipped } == true }.compactMap(\.number)
+            return numbers.isEmpty ? nil : (root, info.repo, numbers.sorted())
+        }
+    }
+
+    func rebuildYard(dug: [(repo: String, found: [Int: [PullSource.Dug]])] = []) {
+        for (repo, found) in dug {
+            for (n, pulls) in found.sorted(by: { $0.key < $1.key }) {
+                for p in pulls {
+                    let r = works.note(repo: repo, issue: p.number == n ? nil : n, pull: p.number, pullState: p.state)
+                    report(pullState: p.state, record: r, shipped: p.shipped, at: now)
+                }
+            }
+        }
+        yardStamps = [:]
+        feed.swept = []
+        for repo in Set(repoRoots.values.map(\.repo)).sorted() {
+            let yard = works.records(repo: repo).filter { r in r.number != nil && r.stage.map { $0 >= .stored && $0 < .shipped } == true }
+            learn(.sweep(repo: repo, keep: yard.compactMap(\.number).sorted()), repo: repo)
+            for r in yard {
+                learn(.work(WorkNews(crate: CrateID(repo: repo, number: r.number!), office: office(for: r)?.room.key, stage: r.stage!, quiet: true)), repo: repo)
+            }
+        }
+        learn(.restack)
+    }
+
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
 }
 

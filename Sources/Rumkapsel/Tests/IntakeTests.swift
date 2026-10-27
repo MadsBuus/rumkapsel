@@ -61,6 +61,26 @@ enum IntakeTests {
             expect([440, 441].allSatisfy { place(rig, "web", $0) == .testing }, "the board still saying storage does not pull them back: \(describe(place(rig, "web", 440)))")
         }
 
+        test("rebuilding the yard puts every crate where its work's stage says and sweeps the ones no work holds") {
+            let (rig, _) = org([("Target: web#455", 0)])
+            rig.advance(20)
+            expect(place(rig, "web", 440) == .waiting, "#440 starts in storage")
+            rig.world.learn(.work(WorkNews(crate: CrateID(repo: "web", number: 440), stage: .qa, quiet: true)), repo: "web")
+            rig.world.learn(.work(WorkNews(crate: CrateID(repo: "web", number: 999), stage: .stored, quiet: true)), repo: "web")
+            rig.advance(5)
+            expect(place(rig, "web", 440) == .testing && place(rig, "web", 999) == .waiting, "the yard has gone wrong: \(describe(place(rig, "web", 440))), \(describe(place(rig, "web", 999)))")
+            rig.world.rebuildYard()
+            rig.advance(10)
+            expect(place(rig, "web", 440) == .waiting, "#440 back in storage, where its work is: \(describe(place(rig, "web", 440)))")
+            expect(place(rig, "web", 999) == nil, "and the crate no work holds is gone: \(describe(place(rig, "web", 999)))")
+            rig.world.rebuildYard(dug: [(repo: "web", found: [440: [PullSource.Dug(number: 1440, state: "MERGED", shipped: true)],
+                                                              441: [PullSource.Dug(number: 1441, state: "MERGED", shipped: false)]])])
+            rig.advance(10)
+            expect(place(rig, "web", 440) == nil, "the issue whose pull request is in production has shipped: \(describe(place(rig, "web", 440)))")
+            expect(place(rig, "web", 441) == .waiting, "the one merged but not in production stays in storage: \(describe(place(rig, "web", 441)))")
+            expect(rig.world.works.find(repo: "web", pull: 1441)?.number == 441, "and its pull request is linked to its work again")
+        }
+
         test("a saved board is history: a stale Shipped on it launches nothing, and the live board confirming storage says nothing") {
             let (rig, _) = org([("Target: web#455", 0)])
             let github = rig.world.github
