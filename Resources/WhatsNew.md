@@ -1,3 +1,2 @@
-- Fixed: changing a setting no longer wipes the station; the yard and all work history now survive it
-- Rebuild the Yard (Develop menu): asks GitHub where every crate really stands and puts them all right
-- A repository that never ships clears merged work from storage after three hours instead of a day
+- Recheck a crate: click a crate and ask GitHub where it really stands; anything the station has wrong is listed
+- Work that isn't on the project (like a back-merge) no longer lands on the testing rows; it waits with the cleared ones for the release
