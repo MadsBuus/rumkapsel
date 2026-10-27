@@ -2,7 +2,7 @@ import Foundation
 
 private enum Field: String, CodingKey {
     case e, repo, facts, crate, office, stage, closed, quiet, link, pull, key, via, by = "for", from, to, merged, closedAt, open, n, deploy
-    case production, label, hotfix, crates, keep, source
+    case production, label, hotfix, crates, keep, source, untested
 }
 
 extension CrateID {
@@ -48,6 +48,7 @@ extension Event: Codable {
             if !w.link.isEmpty { try c.encode(w.link, forKey: .link) }
             try c.encodeIfPresent(w.by?.rawValue, forKey: .source)
             try c.encodeIfPresent(w.pull, forKey: .pull)
+            if w.untested { try c.encode(true, forKey: .untested) }
         case .office(.opened(let key, let repo, let via)):
             try put("officeOpened", repo: repo)
             try c.encode(key, forKey: .key)
@@ -128,7 +129,7 @@ extension Event: Codable {
             self = .work(WorkNews(crate: try crate(.crate), office: try c.decodeIfPresent(String.self, forKey: .office), stage: try Stage(name: text(.stage)),
                                   closed: try flag(.closed), quiet: try flag(.quiet), link: try c.decodeIfPresent(String.self, forKey: .link) ?? "",
                                   by: try c.decodeIfPresent(String.self, forKey: .source).flatMap(Source.init(rawValue:)),
-                                  pull: try c.decodeIfPresent(Int.self, forKey: .pull)))
+                                  pull: try c.decodeIfPresent(Int.self, forKey: .pull), untested: try flag(.untested)))
         case "officeOpened":
             let via: OfficeFact.Via
             switch try text(.via) {

@@ -9,6 +9,7 @@ struct WorkNews: Equatable {
     var link = ""
     var by: Source?
     var pull: Int?
+    var untested = false
 }
 
 enum OfficeNews: Equatable {
@@ -183,6 +184,7 @@ enum Rules {
         let id = news.crate, r = f.repo(id.repo)
         let old = f.crates[id]?.place
         var to = place(news.stage, r, office: news.office, old: old)
+        if news.untested, to == .testing { to = .cleared }
         if r.shipsOnMerge, to == .waiting, old != .waiting {
             to = .aboard(mergeRocket(id, link: news.link, quiet: news.quiet, now, &f, &fx))
         }

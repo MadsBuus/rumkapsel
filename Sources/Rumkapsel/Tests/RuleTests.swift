@@ -17,6 +17,17 @@ enum RuleTests {
             expect(logs(fx) == ["web #5 to \(Zone.waiting.words)"], "said once: \(logs(fx))")
         }
 
+        test("work nobody can test, not on the project, skips the testing rows: on staging it waits with the cleared") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "web", staged), work("web", 8, .stored)])
+            var news = WorkNews(crate: id("web", 8), stage: .qa)
+            news.untested = true
+            apply(&f, [.work(news)])
+            expect(f.crates[id("web", 8)]?.place == .cleared, "a back-merge on staging is cleared, not tested: \(String(describing: f.crates[id("web", 8)]?.place))")
+            apply(&f, [work("web", 9, .stored), work("web", 9, .qa)])
+            expect(f.crates[id("web", 9)]?.place == .testing, "work on the project still goes to the testing rows")
+        }
+
         test("a repository that doesn't ship: a crate stored three hours ago leaves storage on the tick; one that ships keeps its crates") {
             var f = Facts()
             apply(&f, [.policy(repo: "lib", RepoFacts(ships: false)), .policy(repo: "web", RepoFacts()),

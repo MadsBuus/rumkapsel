@@ -72,10 +72,17 @@ extension World {
         let pull = record.pulls.filter { state == nil || $0.value == state }.keys.max()
         var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil, by: t.by,
                             pull: pull == crate.number ? nil : pull)
+        news.untested = offBoard(record)
         if t.to == .stored, let root = repoRoots.first(where: { $0.value.repo == record.repo })?.key, github.pipeline(repoRoot: root).shipsOnMerge {
             news.link = waitingURL(repo: record.repo)
         }
         learn(.work(news), repo: record.repo)
+    }
+
+    func offBoard(_ r: WorkBook.Record) -> Bool {
+        guard let items = github.board.items, items.contains(where: { $0.repo == r.repo && !$0.status.isEmpty }) else { return false }
+        let numbers = Set([r.number, r.issue].compactMap { $0} + r.pulls.keys)
+        return !items.contains { $0.repo == r.repo && numbers.contains($0.number) }
     }
 
     func learnClosed(office key: String, repo: String?) {

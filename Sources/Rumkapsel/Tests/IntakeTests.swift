@@ -81,6 +81,15 @@ enum IntakeTests {
             expect(rig.world.works.find(repo: "web", pull: 1441)?.number == 441, "and its pull request is linked to its work again")
         }
 
+        test("work is off the project only when neither its pull request nor the issue it closes is on the board") {
+            let (rig, _) = org([("Target: web#455", 0)])
+            rig.advance(5)
+            let backMerge = rig.world.works.note(repo: "web", branch: "develop-v1", pull: 1219, pullState: "MERGED")
+            expect(rig.world.offBoard(backMerge), "a back-merge nobody put on the project is off it")
+            let stored = rig.world.works.note(repo: "web", issue: 440, pull: 1440, pullState: "MERGED")
+            expect(!rig.world.offBoard(stored), "work whose issue is on the board is on it")
+        }
+
         test("a saved board is history: a stale Shipped on it launches nothing, and the live board confirming storage says nothing") {
             let (rig, _) = org([("Target: web#455", 0)])
             let github = rig.world.github

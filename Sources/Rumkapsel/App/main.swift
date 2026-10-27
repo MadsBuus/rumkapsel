@@ -256,6 +256,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let at = num("--rebuild") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.rebuildYard() }
         }
+        if let at = num("--recheck") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                guard let station = self?.simulator?.station ?? self?.controller else { return }
+                let id = args.firstIndex(of: "--story").flatMap { args.count > $0 + 1 ? try? CrateID(text: args[$0 + 1]) : nil }
+                station.enqueue { if let id { station.openStory(id) }; station.recheckStory() }
+            }
+        }
         if let at = num("--mission") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleMission() }
         }

@@ -5,7 +5,11 @@ struct CrateStoryFacts {
     let title: String?
     let color: NSColor
     let told: CrateStory.Told
+    var check: CrateCheck?
+    var checking = false
 }
+
+struct RecheckAsk {}
 
 extension StationController {
     // MARK: crate story
@@ -16,6 +20,7 @@ extension StationController {
         panel.autoresizingMask = [.minXMargin, .height]
         panel.isHidden = true
         panel.onGo = { [weak self] id in self?.enqueue { self?.openCrate(id) } }
+        panel.onRecheck = { [weak self] in self?.enqueue { self?.recheckStory() } }
         view.addSubview(panel)
         storyPanel = panel
     }
@@ -50,6 +55,22 @@ extension StationController {
         }
     }
 
+    func recheckStory() {
+        guard let (station, id) = storyOf, let st = fleet.stations[station], let root = world.recheckRoot(id) else { return }
+        storyCheck = (id, nil)
+        drawStory()
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let asked = world.askAbout(id, root: root)
+            enqueue { [self] in
+                guard storyOf?.id == id else { return }
+                let check = world.crateCheck(id, station: st, asked: asked, drawn: simulation.shown[station]?.crates[id]?.zone)
+                StationLog.write("recheck", "\(id): " + (check.mismatches.isEmpty ? "everything agrees" : check.mismatches.joined(separator: " · ")))
+                storyCheck = (id, check)
+                drawStory()
+            }
+        }
+    }
+
     func closeStory() {
         storyPanel?.isHidden = true
         enqueue { [self] in storyOf = nil }
@@ -59,7 +80,9 @@ extension StationController {
         guard let (station, id) = storyOf else { return }
         storyClock = clock
         let told = CrateStory.tell(world.log.history(station, id), now: world.now, current: fleet.stations[station]?.facts.crates[id])
-        let facts = CrateStoryFacts(id: id, title: crateWords(repo: id.repo, number: id.number).title, color: NSColor(fleet.color(forRepo: id.repo)), told: told)
+        let mine = storyCheck?.id == id ? storyCheck : nil
+        let facts = CrateStoryFacts(id: id, title: crateWords(repo: id.repo, number: id.number).title, color: NSColor(fleet.color(forRepo: id.repo)), told: told,
+                                    check: mine?.check, checking: mine != nil && mine?.check == nil)
         DispatchQueue.main.async { [self] in
             guard let panel = storyPanel, reveal || !panel.isHidden else { return }
             panel.show(facts, fromEnd: reveal)
@@ -76,8 +99,14 @@ extension StationController {
 final class CrateStoryPanel: NSView {
     private let text = LinkedText()
     private let scroll = NSScrollView()
-    var onGo: ((CrateID) -> Void)? {
-        didSet { text.onGo = { [weak self] t in if let id = t as? CrateID { self?.onGo?(id) } } }
+    var onGo: ((CrateID) -> Void)? { didSet { wire() } }
+    var onRecheck: (() -> Void)? { didSet { wire() } }
+
+    private func wire() {
+        text.onGo = { [weak self] t in
+            if let id = t as? CrateID { self?.onGo?(id) }
+            if t is RecheckAsk { self?.onRecheck?() }
+        }
     }
 
     override init(frame: NSRect) {
@@ -139,6 +168,32 @@ final class CrateStoryPanel: NSView {
             add(title + "\n", [LinkedText.target: f.id, .font: NSFont.systemFont(ofSize: 13), .foregroundColor: Palette.text.withAlphaComponent(0.8), .paragraphStyle: sub])
         } else {
             add("\n", [.font: NSFont.systemFont(ofSize: 6), .paragraphStyle: sub])
+        }
+
+        let block = NSMutableParagraphStyle(); block.firstLineHeadIndent = indent; block.headIndent = indent + 14; block.paragraphSpacing = 3
+        if f.checking {
+            add("Asking GitHub and git about this \(Words.current.crate)…\n\n", [.font: SpaceLogStyle.italic(12), .foregroundColor: Palette.dim, .paragraphStyle: block])
+        } else if let c = f.check {
+            let clock = DateFormatter(); clock.dateFormat = "HH:mm"
+            add("Rechecked at \(clock.string(from: c.at))  ", [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: Palette.text, .paragraphStyle: block])
+            add("again\n", [LinkedText.target: RecheckAsk(), .font: NSFont.systemFont(ofSize: 12), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: block])
+            if let failed = c.failed { add(failed + "\n", [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: block]) }
+            for a in c.answers {
+                add("\(a.source.rawValue): \(a.says)" + (a.stage.map { " → \($0)" } ?? "") + "\n", [.font: SpaceLogStyle.mono(11), .foregroundColor: Palette.text.withAlphaComponent(0.85), .paragraphStyle: block])
+            }
+            let heard = c.heard.sorted { $0.key.rawValue < $1.key.rawValue }.map { "\($0.key.rawValue) \($0.value)" }.joined(separator: ", ")
+            add("station: " + (c.believed.map { "\($0)" + (c.believedBy.map { ", decided by \($0.rawValue)" } ?? "") } ?? "no stage")
+                + (heard.isEmpty ? "" : " (heard: \(heard))") + "; stands \(CrateCheck.words(c.place))\n",
+                [.font: SpaceLogStyle.mono(11), .foregroundColor: Palette.text.withAlphaComponent(0.85), .paragraphStyle: block])
+            let wrong = c.mismatches
+            if wrong.isEmpty {
+                add("Everything agrees.\n\n", [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: RepoStatus.calm.color, .paragraphStyle: block])
+            } else {
+                for m in wrong { add("• " + Self.sentence(m) + "\n", [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: block]) }
+                add("\n", [.font: NSFont.systemFont(ofSize: 6), .paragraphStyle: block])
+            }
+        } else {
+            add("Recheck with GitHub\n\n", [LinkedText.target: RecheckAsk(), .font: NSFont.systemFont(ofSize: 12.5, weight: .medium), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: block])
         }
 
         if f.told.lines.isEmpty {
