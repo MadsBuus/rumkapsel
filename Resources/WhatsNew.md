@@ -1,7 +1,3 @@
-- Mission control's holo table is a solar system of your work: the station is the sun, each repo a planet, each open piece of work a moon that moves outward as it goes from storage to testing to cleared
-- A commit sends a blip into its planet; a ring spins while checks run; hover or click a planet or moon to open it
-- A floating bridge by the holo: press M to stand on it and watch
-- Status dials: each busy repo gets a gauge whose needle swings to failing, holding, testing, ready or flying; calm repos sit small along the bottom
-- Bigger wall screens and sharper, brighter camera feeds
-- Minions at a console, the gym, the bath or the galley now take your orders
-- Fixed: the bench, gym gear in the way, and a bed given away while its sleeper got up
+- Fixed: changing a setting no longer wipes the station; the yard and all work history now survive it
+- Rebuild the Yard (Develop menu): asks GitHub where every crate really stands and puts them all right
+- A repository that never ships clears merged work from storage after three hours instead of a day
