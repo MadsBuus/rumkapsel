@@ -10,6 +10,7 @@ struct PullRequest: Equatable {
     var checks: String = ""
     var closes: [Int] = []
     var shipped = false
+    var backMerge = false
 
     var summary: String {
         var s = "PR #\(number) " + (isDraft ? "draft" : state.lowercased())

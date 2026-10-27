@@ -264,6 +264,7 @@ extension World {
             for r in yard {
                 var news = WorkNews(crate: CrateID(repo: repo, number: r.number!), office: office(for: r)?.room.key, stage: r.stage!, quiet: true)
                 news.untested = offBoard(r)
+                news.housekeeping = r.housekeeping
                 learn(.work(news), repo: repo)
             }
         }

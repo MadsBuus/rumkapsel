@@ -131,6 +131,9 @@ moves through it one way: in from the hallway at the back, out through the field
   cleared rows.
 - **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached
   across the near one, with a toss when a crate stands there: the gravity is low, so it drifts over.
+- **A back-merge is not work**: a pull request that brings staging's or production's tip into develop for
+  the first time (as of its merge) gets no crate; one it already has goes. It is told in the log as a
+  back-merge.
 - **Work nobody can test**: where the project board decides testing, merged work that is not on the project
   (neither its pull request nor the issue it closes), such as a back-merge, skips the testing rows: on
   staging it waits on the cleared rows for the release.

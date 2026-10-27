@@ -217,13 +217,14 @@ final class PullSource: Intake {
         queue.async { [self] in
             defer { if landed(key) { refetch(pull: number, branch: "", repoRoot: repoRoot) } }
             guard let github = self.github,
-                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,closingIssuesReferences"], cwd: repoRoot),
+                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,closingIssuesReferences,headRefOid,baseRefName,mergedAt"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
             var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
                                  state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
                                  isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
             pr.closes = PullSource.closes(o)
             pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
+            pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
             lock.lock(); byNumber[key] = (pr, Date()); lock.unlock()
             github.note(task: pr, repoRoot: repoRoot)
             github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
@@ -260,11 +261,12 @@ final class PullSource: Intake {
                 pr.checks = checks
                 pr.closes = PullSource.closes(o)
                 pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
+                pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
                 github.note(task: pr, repoRoot: repoRoot)
                 github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
                 return pr
             }
-            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,statusCheckRollup,closingIssuesReferences"
+            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,statusCheckRollup,closingIssuesReferences,headRefOid,baseRefName,mergedAt"
             var answered = false
             if let out = github.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
@@ -465,6 +467,21 @@ final class PullSource: Intake {
             out[n] = refs.compactMap(pull)
         }
         return out
+    }
+
+    static func backMerge(_ o: [String: Any], repoRoot: String, github: GitHubResolver) -> Bool {
+        let p = github.pipeline(repoRoot: repoRoot)
+        guard o["state"] as? String == "MERGED", o["baseRefName"] as? String == p.trunk, let head = o["headRefOid"] as? String,
+              let merge = (o["mergeCommit"] as? [String: Any])?["oid"] as? String, let at = o["mergedAt"] as? String else { return false }
+        func text(_ args: [String]) -> String? {
+            github.run(args, cwd: repoRoot).flatMap { String(data: $0, encoding: .utf8) }?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let before = text(["git", "rev-parse", merge + "^1"]), !before.isEmpty else { return false }
+        func inside(_ a: String, _ b: String) -> Bool { github.run(["git", "merge-base", "--is-ancestor", a, b], cwd: repoRoot) != nil }
+        return [p.staging, p.production].filter { !$0.isEmpty }.contains { branch in
+            guard let tip = text(["git", "rev-list", "-1", "--first-parent", "--before=" + at, "origin/" + branch]), !tip.isEmpty else { return false }
+            return inside(tip, head) && !inside(tip, before)
+        }
     }
 
     static func shipped(_ o: [String: Any], repoRoot: String, github: GitHubResolver) -> Bool {
