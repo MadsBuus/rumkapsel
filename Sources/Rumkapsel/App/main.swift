@@ -253,6 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if let at = num("--walk") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleWalk() }
         }
+        if let at = num("--rebuild") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.rebuildYard() }
+        }
         if let at = num("--mission") {
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in (self?.simulator?.station ?? self?.controller)?.toggleMission() }
         }
@@ -379,7 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         bodies.keyEquivalentModifierMask = [.command, .shift]
         let facts = develop.addItem(withTitle: "Copy Facts Report", action: #selector(copyFacts), keyEquivalent: "l")
         facts.keyEquivalentModifierMask = [.command, .shift]
-        develop.addItem(withTitle: "Restack the Yard", action: #selector(restackYard), keyEquivalent: "")
+        develop.addItem(withTitle: "Rebuild the Yard", action: #selector(rebuildYard), keyEquivalent: "")
         develop.addItem(withTitle: "Skip to the Facts", action: #selector(skipToFacts), keyEquivalent: "")
         develop.addItem(.separator())
         develop.addItem(withTitle: "Rehearse Launch", action: #selector(rehearseLaunch), keyEquivalent: "")
@@ -424,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     }
 
     @objc func resetView() { controller.resetView() }
-    @objc func restackYard() { controller.restackYard() }
+    @objc func rebuildYard() { controller.rebuildYard() }
     @objc func skipToFacts() { controller.simulation.skip() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }

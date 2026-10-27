@@ -131,7 +131,7 @@ moves through it one way: in from the hallway at the back, out through the field
   cleared rows.
 - **Carriers** work the near row from the aisle at arm's length. A tile on the row behind is reached
   across the near one, with a toss when a crate stands there: the gravity is low, so it drifts over.
-- **A repository that doesn't ship** keeps a merged crate in storage for a day; then it fades where it
+- **A repository that doesn't ship** keeps a merged crate in storage for three hours; then it fades where it
   stands, carried by nobody (`Rules.unshippedFor`, on the tick).
 - **A staging release** that merges sends its repository's stored crates across to the testing rows,
   whether or not the board has moved their cards: what git finds on staging is on staging.

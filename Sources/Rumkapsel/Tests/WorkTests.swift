@@ -23,6 +23,20 @@ enum WorkTests {
             expect(moves == ["QA→stored"] && back.stage == .stored, "the board, which decides QA, can still take it back: \(moves)")
         }
 
+        test("a settings change reloads the station from its save: a save in between can't empty it") {
+            let world = World(demo: false)
+            world.fleet.load(alone: true)
+            _ = world.fleet.station("work").ensureRoom(key: "task:api#12", name: "#12", repo: "api", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            let r = world.works.note(repo: "api", branch: "gh-12/thing", pull: 12)
+            world.works.report(r, .stored, by: .pulls, at: Date())
+            world.reset()
+            world.fleet.save()
+            Fleet.writing.sync {}
+            world.fleet.load(alone: true)
+            expect(world.fleet.stations["work"]?.rooms["task:api#12"] != nil, "the station came back")
+            expect(world.works.find(repo: "api", pull: 12)?.stage == .stored, "and its work book, stage and all")
+        }
+
         test("a branch named for its issue is that issue: office, crate and name agree") {
             let w = Work(repo: "web", branch: "gh-128/artist-search-fixes")
             expect(w.issue == 128 && w.number == 128, "issue read off the branch")

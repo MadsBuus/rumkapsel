@@ -165,7 +165,7 @@ final class World {
     func reset() {
         fleet.save()
         Fleet.writing.sync {}
-        fleet.removeAllStations()
+        fleet.unload()
         log.forget()
         repoRoots = [:]
         readyRepos = []

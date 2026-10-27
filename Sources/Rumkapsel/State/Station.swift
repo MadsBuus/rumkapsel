@@ -877,7 +877,7 @@ final class Fleet {
         ConfigStore.shared.current.station(cwd: cwd, owner: owner, repo: repo)
     }
 
-    func removeAllStations() { stations = [:] }
+    func unload() { stations = [:]; loaded = false }
     func removeStation(named name: String) { stations[name] = nil }
 
     func recolorRooms() {

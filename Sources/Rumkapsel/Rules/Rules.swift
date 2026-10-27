@@ -46,7 +46,7 @@ enum Effect: Equatable {
 }
 
 enum Rules {
-    static let closedFor: TimeInterval = 600, launchedFor: TimeInterval = 600, unshippedFor: TimeInterval = 24 * 3600
+    static let closedFor: TimeInterval = 600, launchedFor: TimeInterval = 600, unshippedFor: TimeInterval = 3 * 3600
 
     static func apply(_ events: [Event], at now: Date, to f: inout Facts, yard g: YardGeometry) -> [Effect] {
         var fx: [Effect] = []
