@@ -21,7 +21,8 @@ final class CrateMotion {
     init(node: SCNNode, legs: [MotionLeg], start: Double, yawTo: Double?, onDone: (() -> Void)?) {
         self.node = node; self.legs = legs; self.start = start
         from = SIMD3(Double(node.position.x), Double(node.position.y), Double(node.position.z))
-        yaw = yawTo.map { (Double(node.eulerAngles.y), $0) }
+        let facing = Double(node.eulerAngles.y)
+        yaw = yawTo.map { (facing, facing + atan2(sin($0 - facing), cos($0 - facing))) }
         self.onDone = onDone
     }
 

@@ -85,6 +85,22 @@ enum SceneTests {
             expect(c.statics.rebuilt.isEmpty, "and once is enough: \(c.statics.rebuilt.sorted())")
         }
 
+        test("a crate set down turns the short way to its yaw, however many turns its carrier has wound up") {
+            for (start, target) in [(0.0, 4 * Double.pi + 0.3), (-0.2, -4 * Double.pi - 0.1), (3.0, -3.0), (0.5, 0.5 + 9 * Double.pi)] {
+                let node = SCNNode()
+                node.eulerAngles.y = CGFloat(start)
+                let motion = CrateMotion(node: node, legs: [MotionLeg(to: .zero, seconds: 1)], start: 0, yawTo: target, onDone: nil)
+                var widest = 0.0
+                for step in 0...20 {
+                    _ = motion.apply(at: Double(step) / 20)
+                    widest = max(widest, abs(Double(node.eulerAngles.y) - start))
+                }
+                let off = Double(node.eulerAngles.y) - target
+                expect(widest <= .pi + 1e-6, "\(start) to \(target): turned \(widest), more than half a turn")
+                expect(abs(atan2(sin(off), cos(off))) < 1e-6, "\(start) to \(target): lands on its yaw, at \(node.eulerAngles.y)")
+            }
+        }
+
         say(failures == 0 ? "scene: all passed" : "scene: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
