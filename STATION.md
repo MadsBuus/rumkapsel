@@ -411,6 +411,7 @@ moves through it one way: in from the hallway at the back, out through the field
   sign's; with neither it is not hung. The pad's and the yard's float side by side in the middle of
   the yard's back wall, above the crates, the pad's nearest the pad. Two posters hang two tiles
   apart. The look decides whether it hangs them (`hangsPosters`); Classic does.
+- I (View > Posters) hides them from above; they start shown, and walking always shows them.
 - On the wall a poster wears a small copy of its art; the leaflet shows it full size.
 - Now and then a poster glitches like a tired screen for half a second: bands tear sideways, scanlines,
   a flicker, a rolling bar. Each keeps its own clock (about once a minute or two), so they never glitch

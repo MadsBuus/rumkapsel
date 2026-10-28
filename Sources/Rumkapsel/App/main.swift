@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     var controller: StationController!
     private var dumpSignal: DispatchSourceSignal?
     var musicItem: NSMenuItem!
+    var postersItem: NSMenuItem!
     var floatItem: NSMenuItem!
     var viewMenu: NSMenu!
     var updater: SPUStandardUpdaterController!
@@ -371,6 +372,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         floatItem = view.addItem(withTitle: "Float on Top", action: #selector(toggleFloat), keyEquivalent: "f")
         floatItem.state = UserDefaults.standard.bool(forKey: "float") ? .on : .off
         musicItem = view.addItem(withTitle: "Music", action: #selector(toggleMusic), keyEquivalent: "m")
+        postersItem = view.addItem(withTitle: "Posters", action: #selector(togglePosters), keyEquivalent: "i")
+        postersItem.state = .on
 
         let station = menu("Station")
         let refresh = station.addItem(withTitle: "Refresh GitHub", action: #selector(refreshGitHub), keyEquivalent: "r")
@@ -406,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === viewMenu else { return }
+        postersItem.state = controller?.postersOff == true ? .off : .on
         for item in menu.items where item.representedObject as? String == "focus" { menu.removeItem(item) }
         let names = controller?.fleet.ordered.map(\.name) ?? []
         guard names.count > 1 else { return }
@@ -440,6 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
     @objc func skipToFacts() { controller.simulation.skip() }
     @objc func walk() { controller.toggleWalk() }
     @objc func toggleSpaceLog() { controller.toggleSpaceLog() }
+    @objc func togglePosters() { controller.togglePosters() }
     @objc func toggleNeighbours() { controller.toggleNeighbours() }
     @objc func resetColors() { controller.resetColors() }
     @objc func resetOfficeLayout() { controller.resetOfficeLayout() }
