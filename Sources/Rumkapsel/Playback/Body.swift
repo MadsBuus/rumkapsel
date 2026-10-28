@@ -60,6 +60,9 @@ class Body {
     static let seatReach = Seat.reach
     var wakeUntil = 0.0
     var risingUntil = 0.0
+    var seatLeft: (ref: FixtureRef, at: Double)?
+    var seatDown: Double?
+    static var seatRise: Double { 2 * Seat.swivel + Seat.sitDown }
     struct Bunk { let ref: FixtureRef; let since: Double; let height: Double; var until = Double.infinity; var sat = false; var flat = false }
     var bunk: Bunk?
     static let riseSit = 0.55
@@ -138,7 +141,11 @@ class Body {
     var isFree: Bool {
         !onJob && !hasLoad && !isSubagent && !isCrew && !isPeer && !isQA
             && state != .leaving && wakeUntil == 0
-            && (current == nil || phaseKind.interruptible)
+            && (current == nil || phaseKind.interruptible || atConsole)
+    }
+    var atConsole: Bool {
+        if inPlace, case .use(_, .planningConsole, _, _)? = current?.kind { return true }
+        return false
     }
     var isResting: Bool { current?.isRest ?? true }
     var isQA: Bool { if case .qa = current?.kind { return true }; return false }

@@ -124,7 +124,10 @@ extension StationController {
         drawCones(m)
         simulation.refreshObstacles()
         if !m.isCrew && !m.isPeer && !m.isSubagent {
-            simulation.post(Command(kind: .work(office: key), words: "working your message in \(m.home.name)"), for: m, rank: .message, at: cell, place: .room(key))
+            let console = simulation.console(of: m, station: station).flatMap { station.place($0) }
+            if console != nil, m.using?.room == key { return }
+            let at = console.map { Station.cell(ofSub: Station.sub($0.stand)) } ?? cell
+            simulation.post(Command(kind: .work(office: key), words: "working your message in \(m.home.name)"), for: m, rank: .message, at: at, place: .room(key))
             return
         }
         guard !m.onJob else { return }
@@ -192,6 +195,11 @@ extension StationController {
 
     func setCrewRoster(_ members: [String: CrewMember]) {
         let station = fleet.station("work")
+        for m in minions.values where m.isCrew && !m.isPeer {
+            guard let member = members[String(m.id.dropFirst(5))], member.homeKey != m.home.key else { continue }
+            m.home = Home(key: member.homeKey, name: m.home.name, repo: member.repo, issue: nil)
+            if !m.busy, !m.onJob { send(m, to: simulation.crewRest(m)) }
+        }
         for (login, member) in members where minions["crew:" + login] == nil {
             let home = Home(key: member.homeKey, name: login, repo: member.repo, issue: nil)
             let start = station.cells(of: .quarters).randomElement() ?? station.coreCenter
@@ -200,7 +208,7 @@ extension StationController {
             m.activity = .sleeping
             minionRoot.addChildNode(m.node)
             minions[m.id] = m
-            send(m, to: .quarters)
+            send(m, to: simulation.crewRest(m))
         }
         for m in minions.values where m.isCrew && !m.isPeer && members[String(m.id.dropFirst(5))] == nil { despawn(m) }
     }

@@ -197,10 +197,15 @@ extension StationController {
     }
 
     func swivelChairs(_ station: Station, dt: Double) {
-        for (ref, chair) in chairs[station.name] ?? [:] {
+        let epic = epicChairs.filter { $0.key.hasPrefix(station.name + "|") }.map { ($0.value.ref, $0.value.chair) }
+        for (ref, chair) in Array(chairs[station.name] ?? [:]) + epic {
             guard let place = station.place(ref) else { continue }
-            if let user = minions.values.first(where: { $0.station == station.name && $0.using == ref && $0.inPlace }) {
+            let user = minions.values.first { $0.station == station.name && $0.using == ref && $0.inPlace }
+            Classic.recline(chair, by: user?.currentPose(at: clock) == .reclined(height: Seat.height) ? Minion.recline : 0)
+            if let user {
                 chair.eulerAngles.y = CGFloat(place.sitting(clock - user.actStartedAt, of: user.actFor).chair)
+            } else if let left = minions.values.first(where: { $0.station == station.name && $0.seatLeft?.ref == ref && $0.risingUntil > clock })?.seatLeft {
+                chair.eulerAngles.y = CGFloat(place.sitting(Minion.seatRise + clock - left.at, of: 2 * Minion.seatRise).chair)
             } else {
                 let now = Double(chair.eulerAngles.y), rest = place.facing + .pi
                 chair.eulerAngles.y = CGFloat(now + atan2(sin(rest - now), cos(rest - now)) * min(1, dt * 4))
@@ -365,7 +370,7 @@ extension StationController {
                 drop.runAction(.sequence([fall, .fadeOut(duration: 0.08), .removeFromParentNode()]))
             }
             let resting = m.path.isEmpty && m.state == .settled
-            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob
+            let working = m.busy && resting && !m.isSubagent && m.activity != .waiting && !m.exercising && !m.bathing && !m.onJob && !m.inPlace
             let onFixture = (m.bathing || m.exercising || m.seated || m.inPlace) && m.path.isEmpty && m.fetchSpot == nil
             if m.sittingOn != nil, m.using != nil { m.smoothFacing = m.facing }
             let wantFacing = m.bunk != nil ? m.facing : (m.path.isEmpty && !onFixture && !m.onJob ? idleFacing(m) : m.facing)

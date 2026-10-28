@@ -95,16 +95,19 @@ struct OfficeFact: Codable, Equatable {
     var merged = false
     var closedAt: Date?
     var via: Via = .appear
+    var epic: Epic?
+
+    struct Epic: Codable, Equatable { var shipped = 0; var closed = false }
 
     init(key: String, repo: String?, via: Via = .appear) { self.key = key; self.repo = repo; self.via = via }
 
     func keyed(_ key: String) -> OfficeFact {
         var o = OfficeFact(key: key, repo: repo, via: via)
-        o.crate = crate; o.merged = merged; o.closedAt = closedAt
+        o.crate = crate; o.merged = merged; o.closedAt = closedAt; o.epic = epic
         return o
     }
 
-    enum CodingKeys: String, CodingKey { case key, repo, crate, merged, closedAt }
+    enum CodingKeys: String, CodingKey { case key, repo, crate, merged, closedAt, epic }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,6 +116,7 @@ struct OfficeFact: Codable, Equatable {
         crate = try c.decodeIfPresent(CrateID.self, forKey: .crate)
         merged = try c.decodeIfPresent(Bool.self, forKey: .merged) ?? false
         closedAt = try c.decodeIfPresent(Date.self, forKey: .closedAt)
+        epic = try c.decodeIfPresent(Epic.self, forKey: .epic)
     }
 }
 

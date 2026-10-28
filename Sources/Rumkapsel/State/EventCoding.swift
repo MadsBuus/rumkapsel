@@ -2,7 +2,7 @@ import Foundation
 
 private enum Field: String, CodingKey {
     case e, repo, facts, crate, office, stage, closed, quiet, link, pull, key, via, by = "for", from, to, merged, closedAt, open, n, deploy
-    case production, label, hotfix, crates, keep, source, housekeeping, untested
+    case production, label, hotfix, crates, keep, source, housekeeping, untested, epic, shipped
 }
 
 extension CrateID {
@@ -64,12 +64,17 @@ extension Event: Codable {
             try put("officeRenamed")
             try c.encode(from, forKey: .from)
             try c.encode(to, forKey: .to)
-        case .office(.status(let key, let crate, let merged, let closedAt)):
+        case .office(.status(let key, let crate, let merged, let closedAt, let epic)):
             try put("officeStatus")
             try c.encode(key, forKey: .key)
             try c.encodeIfPresent(crate?.description, forKey: .crate)
             if merged { try c.encode(true, forKey: .merged) }
             try c.encodeIfPresent(closedAt, forKey: .closedAt)
+            switch epic {
+            case .open(let shipped)?: try c.encode("open", forKey: .epic); try c.encode(shipped, forKey: .shipped)
+            case .closed?: try c.encode("closed", forKey: .epic)
+            case nil: break
+            }
         case .office(.gone(let key)):
             try put("officeGone")
             try c.encode(key, forKey: .key)
@@ -142,8 +147,14 @@ extension Event: Codable {
         case "officeRenamed":
             self = .office(.renamed(from: try text(.from), to: try text(.to)))
         case "officeStatus":
+            let epic: EpicNews?
+            switch try c.decodeIfPresent(String.self, forKey: .epic) {
+            case "open": epic = .open(shipped: try c.decodeIfPresent(Int.self, forKey: .shipped) ?? 0)
+            case "closed": epic = .closed
+            default: epic = nil
+            }
             self = .office(.status(try text(.key), crate: try c.decodeIfPresent(String.self, forKey: .crate).map(CrateID.init(text:)), merged: try flag(.merged),
-                                   closedAt: try c.decodeIfPresent(Date.self, forKey: .closedAt)))
+                                   closedAt: try c.decodeIfPresent(Date.self, forKey: .closedAt), epic: epic))
         case "officeGone":
             self = .office(.gone(try text(.key)))
         case "decon":
@@ -187,7 +198,7 @@ extension Event: Codable {
         case .work(let w): return "work \(w.crate) \(w.stage.name)" + (w.closed ? " closed" : "") + (w.office.map { " in \($0)" } ?? "") + (w.by.map { " by \($0)" } ?? "")
         case .office(.opened(let key, _, _)): return "office \(key) opened"
         case .office(.renamed(let from, let to)): return "office \(from) renamed \(to)"
-        case .office(.status(let key, _, let merged, _)): return "office \(key) status" + (merged ? " merged" : "")
+        case .office(.status(let key, _, let merged, _, let epic)): return "office \(key) status" + (merged ? " merged" : "") + (epic.map { " epic \($0)" } ?? "")
         case .office(.gone(let key)): return "office \(key) gone"
         case .decon(let repo, let open, _): return "decon \(repo) \(list(open))"
         case .deconClosed(let id): return "decon \(id) closed"

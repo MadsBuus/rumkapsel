@@ -122,7 +122,7 @@ struct Command {
 
     var holdsMug: Bool {
         switch kind {
-        case .chore, .qa: return true
+        case .chore, .qa, .use(_, .planningConsole, _, _): return true
         default: return false
         }
     }

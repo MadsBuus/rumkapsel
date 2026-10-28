@@ -101,6 +101,19 @@ The flight is `Scene/FlightCraft.swift`, `Scene/Plating.swift` and the cameras i
 - **A smaller minion**, about 0.85 of the size, behind a setting, watched for what it breaks in the poses,
   the hands and the crate arcs.
 
+## Epics
+
+- **Several crates in one office at once** (a slice not yet carried and the next pull request): the
+  packed one stands beside the console and any other on the next cell. They should stand in a row along
+  the console.
+- **The tally** gets its mark when the release merges, while the slice may still be on the rows.
+- **The floor title** can run under the console; the title should leave the console's cells free (the
+  console must not move with a rename).
+- **A third crate** in one office shares the second's cell.
+- **Links beyond the branch**: GitHub sub-issues (an open parent whose sub-issue's crate merged is an epic)
+  and GitHub's own `N-title` branches, for teams without the `gh-N/` habit.
+- **Kingdom and Kenney** draw Classic's planning console in place of their own desk or banner.
+
 ## Ideas
 
 - **Spacewalks**: a minion suited, on its jetpack, out through the field. What for is open.

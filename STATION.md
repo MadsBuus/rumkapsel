@@ -210,6 +210,25 @@ moves through it one way: in from the hallway at the back, out through the field
   packs its crate; each new commit is a cube its minion stows, one at a time.
 - An office's hover says how old the work in it is and, when it has gone quiet, for how long.
 
+## Epics
+
+- An issue is an **epic** while it is open and one of its pull requests has merged without closing it. That
+  pull request is a **slice**: a crate of its own, packed beside the epic's console and carried out like
+  any other. An issue with no pull request yet is ordinary work; so is one whose pull request closes it.
+- The epic's office stays while the issue is open. Against its far wall stands a 1950s planning console:
+  a tilted drafting board under a lit blueprint, a swivel chair, a lamp, and on two posts above it a tally
+  plate that gets a mark for each slice that ships. A pennant in the repository's colour stands on its
+  pole by the door. They unfold with the office, or grow in where an office turns into an epic, and go
+  with it when it folds.
+- Its minion is a resident: it codes at the console, upright, while its session works, and leans back in
+  the chair while the session is quiet, by day, instead of going to the lounge: no look round, gym or
+  mission turn. Now and then it fetches a coffee or a bite from the galley; it eats the bite on the couch
+  and brings the coffee back to the chair. Waiting for you, it gets up and paces like any minion. It takes
+  carries as from a desk, goes to the bath and, at night, to bed. Out of the chair it always swivels and
+  steps out the same way. A teammate's resident works seated at the console while their pushes and
+  reviews come in.
+- When the issue closes, the office ends like any finished office, even in your own checkout.
+
 ## Rockets
 
 - One shape, `RocketShape`, for the station and the flight: a 1950s rocket, one streamlined body, a long
@@ -372,7 +391,8 @@ moves through it one way: in from the hallway at the back, out through the field
 ## Tasks and work
 
 - An issue is a task; a pull request is work done for it. A crate is a task: with a board, the issue the
-  pull request closes, else the pull request's own number. One crate per task, however many pull
+  pull request closes, else the pull request's own number; a pull request that only names its issue (its
+  branch, not its closing words) is a crate of its own (see **Epics**). One crate per task, however many pull
   requests it took; its hover names the task and whose work it is. Its click opens its story: each step
   from the event log with its time and what moved it, said as what happened (#5762 merged, staging release #5769 merged), and how long it took from the
   merge to production. The story's title, or a double click on the crate, opens the task.

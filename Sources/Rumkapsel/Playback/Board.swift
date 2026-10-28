@@ -209,6 +209,7 @@ extension Simulation {
         default: break
         }
         onEvent(.log("\(m.home.name) leaves \(c.words) for something more urgent"))
+        standUp(m)
         m.current = nil; m.phase = 0; m.phaseUntil = 0; m.fetchSpot = nil; m.path = []
         m.wonderUntil = clock + 0.5
     }

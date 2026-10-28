@@ -104,13 +104,16 @@ final class WorkBook {
         var quiet = false
         var words: [Source: Stage] = [:]
         var housekeeping = false
+        var epic: Int?
+        var issueOpen: Bool?
 
         init(id: Int, repo: String) { self.id = id; self.repo = repo }
 
-        var branchIssue: Int? { branches.lazy.compactMap { Work.issue(inBranch: $0, repo: self.repo) }.min() }
+        var branchIssue: Int? { epic != nil ? nil : branches.lazy.compactMap { Work.issue(inBranch: $0, repo: self.repo) }.min() }
         func work(branch preferred: String? = nil) -> Work {
             let branch = preferred.flatMap { branches.contains($0) ? $0 : nil } ?? branches.sorted().first
             let open = pulls.filter { $0.value == "OPEN" }.keys.min()
+            if let epic { return Work(repo: repo, branch: preferred ?? branch, issue: epic) }
             return Work(repo: repo, branch: branch, issue: branchIssue, pull: open ?? pulls.keys.max())
         }
         var number: Int? { issue ?? branchIssue ?? pulls.keys.min() ?? crate }
@@ -153,6 +156,7 @@ final class WorkBook {
     }
 
     var workflow: (String) -> Workflow = { _ in Workflow() }
+    var clock: () -> Date = Date.init
 
     func report(_ record: Record, _ stage: Stage, by source: Source, at: Date) {
         if let t = record.hear(Signal(stage: stage, by: source, at: at), workflow: workflow(record.repo)) { onTransition?(record, t) }
@@ -166,7 +170,18 @@ final class WorkBook {
 
     @discardableResult
     func note(repo: String, branch: String? = nil, folder: String? = nil, issue: Int? = nil, pull: Int? = nil, pullState: String? = nil,
-              author: String? = nil, title: String? = nil, url: String? = nil) -> Record {
+              closes: [Int]? = nil, author: String? = nil, title: String? = nil, url: String? = nil) -> Record {
+        if let pull, let n = branch.flatMap({ Work.issue(inBranch: $0, repo: repo) }) ?? find(repo: repo, pull: pull)?.epic,
+           isSlice(repo, pull: pull, of: n, closes: closes) {
+            if branch != nil || folder != nil { enter(repo: repo, branch: branch, folder: folder) }
+            return slice(repo, pull: pull, of: n, issue: closes?.first ?? issue, pullState: pullState, author: author, title: title, url: url)
+        }
+        return enter(repo: repo, branch: branch, folder: folder, issue: issue, pull: pull, pullState: pullState, closes: closes, author: author, title: title, url: url)
+    }
+
+    @discardableResult
+    private func enter(repo: String, branch: String? = nil, folder: String? = nil, issue: Int? = nil, pull: Int? = nil, pullState: String? = nil,
+                       closes: [Int]? = nil, author: String? = nil, title: String? = nil, url: String? = nil) -> Record {
         var found: [Record] = []
         if let branch, !Work.notWork.contains(branch) {
             if let r = find(repo: repo, branch: branch) { found.append(r) }
@@ -195,7 +210,41 @@ final class WorkBook {
         if let author, !author.isEmpty, author != "?" { record.author = author }
         if let title, !title.isEmpty { record.title = title }
         if let url, !url.isEmpty { record.url = url }
+        if let e = record.epic, closes?.contains(e) == true { record.epic = nil }
         return record
+    }
+
+    @discardableResult
+    func heard(repo: String, pull: Int, closes: [Int], pullState: String? = nil) -> Record? {
+        guard let held = find(repo: repo, pull: pull) else { return nil }
+        guard held.epic == nil, let n = held.branchIssue, isSlice(repo, pull: pull, of: n, closes: closes) else { return held }
+        return slice(repo, pull: pull, of: n, issue: closes.first, pullState: pullState ?? held.pulls[pull], author: nil, title: nil, url: nil)
+    }
+
+    func slices(repo: String, of issue: Int) -> [Record] { records.values.filter { $0.repo == repo && $0.epic == issue }.sorted { $0.id < $1.id } }
+
+    private func isSlice(_ repo: String, pull: Int, of issue: Int, closes: [Int]?) -> Bool {
+        guard pull != issue else { return false }
+        if let closes { return !closes.contains(issue) }
+        return find(repo: repo, pull: pull)?.epic == issue
+    }
+
+    private func slice(_ repo: String, pull: Int, of epic: Int, issue: Int?, pullState: String?, author: String?, title: String?, url: String?) -> Record {
+        if let held = find(repo: repo, pull: pull), held.epic == nil { split(pull, from: held) }
+        let s = enter(repo: repo, issue: issue == epic ? nil : issue, pull: pull, pullState: pullState, author: author, title: title, url: url)
+        s.epic = epic
+        return s
+    }
+
+    private func split(_ pull: Int, from r: Record) {
+        r.pulls[pull] = nil
+        byPull["\(r.repo)!\(pull)"] = nil
+        guard r.pulls.isEmpty, let was = r.stage, was > .working else { return }
+        for s in [Source.pulls, .git, .deploy] { r.words[s] = nil }
+        let to = r.words.values.max() ?? .working
+        guard to < was else { return }
+        r.stage = to; r.stagedAt = clock(); r.stagedBy = r.words.first { $0.value == to }?.key ?? .pulls; r.quiet = false
+        onTransition?(r, Transition(from: was, to: to, by: r.stagedBy ?? .pulls, at: clock()))
     }
 
     private func merge(_ other: Record, into record: Record) {
@@ -207,6 +256,8 @@ final class WorkBook {
         if let n = other.crate { record.crate = record.crate ?? n; byCrate["\(record.repo)|\(n)"] = record.id }
         record.author = record.author ?? other.author; record.title = record.title ?? other.title; record.url = record.url ?? other.url
         record.housekeeping = record.housekeeping || other.housekeeping
+        record.issueOpen = record.issueOpen ?? other.issueOpen
+        if record.epic == nil, let e = other.epic, e != record.issue, e != record.branchIssue { record.epic = e }
         if let s = other.stage, record.stage.map({ s > $0 }) ?? true { record.stage = s; record.stagedAt = other.stagedAt; record.stagedBy = other.stagedBy }
         for (src, st) in other.words where record.words[src].map({ st > $0 }) ?? true { record.words[src] = st }
         records[other.id] = nil
@@ -221,6 +272,8 @@ final class WorkBook {
             var stage: Int?, stagedAt: Date?, stagedBy: String?, quiet: Bool
             var words: [String: Int]
             var housekeeping: Bool?
+            var epic: Int?
+            var issueOpen: Bool?
         }
         var records: [Entry]
     }
@@ -231,7 +284,7 @@ final class WorkBook {
                         pulls: Dictionary(uniqueKeysWithValues: r.pulls.map { (String($0.key), $0.value) }), crate: r.crate,
                         author: r.author, title: r.title, url: r.url, stage: r.stage?.rawValue, stagedAt: r.stagedAt, stagedBy: r.stagedBy?.rawValue,
                         quiet: r.quiet, words: Dictionary(uniqueKeysWithValues: r.words.map { ($0.key.rawValue, $0.value.rawValue) }),
-                        housekeeping: r.housekeeping ? true : nil)
+                        housekeeping: r.housekeeping ? true : nil, epic: r.epic, issueOpen: r.issueOpen)
         })
     }
 
@@ -241,7 +294,7 @@ final class WorkBook {
             let r = Record(id: nextId, repo: e.repo); nextId += 1
             r.branches = Set(e.branches); r.folders = Set(e.folders); r.issue = e.issue; r.crate = e.crate
             r.pulls = Dictionary(uniqueKeysWithValues: e.pulls.compactMap { k, v in Int(k).map { ($0, v) } })
-            r.author = e.author; r.title = e.title; r.url = e.url; r.housekeeping = e.housekeeping ?? false
+            r.author = e.author; r.title = e.title; r.url = e.url; r.housekeeping = e.housekeeping ?? false; r.epic = e.epic; r.issueOpen = e.issueOpen
             r.stage = e.stage.flatMap(Stage.init(rawValue:)); r.stagedAt = e.stagedAt; r.stagedBy = e.stagedBy.flatMap(Source.init(rawValue:)); r.quiet = e.quiet
             r.words = Dictionary(uniqueKeysWithValues: e.words.compactMap { k, v in Source(rawValue: k).flatMap { s in Stage(rawValue: v).map { (s, $0) } } })
             records[r.id] = r

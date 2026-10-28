@@ -13,6 +13,38 @@ enum IntakeTests {
             expect(place(rig, "ios", 298) == .waiting, "#298 in storage: \(describe(place(rig, "ios", 298)))")
         }
 
+        test("a pull request merged as part of its issue: a crate of its own to storage, and the issue's office stays as an epic until the issue closes") {
+            let (rig, sim) = org([("Target: ios#298", 0), ("Open PR, part of the issue", 32), ("Merge PR", 4.8)])
+            let slice = rig.world.works.slices(repo: "ios", of: 298).first?.pulls.keys.first ?? 0
+            expect(slice != 0 && slice != 298, "the pull request is a slice of #298: #\(slice)")
+            expect(place(rig, "ios", slice) == .waiting, "#\(slice) in storage: \(describe(place(rig, "ios", slice)))")
+            expect(place(rig, "ios", 298) == nil, "#298 has no crate: \(describe(place(rig, "ios", 298)))")
+            let office = station(rig).facts.offices["task:ios#298"]
+            expect(office?.epic == OfficeFact.Epic(shipped: 0) && office?.merged == false, "the office stands as an epic: \(String(describing: office))")
+            then(rig, sim, [("Issue closes", 20)])
+            expect(station(rig).facts.offices["task:ios#298"] == nil, "the closed issue's office is gone")
+            expect(place(rig, "ios", slice) == .waiting, "and #\(slice) waits in storage still")
+        }
+
+        test("a teammate's pull request merged as part of his issue: its own crate to storage, and his office stays as an epic") {
+            let (rig, _) = org([("Target: api#5158", 0), ("Teammate: New branch", 48), ("Teammate: Open PR, part of the issue", 30), ("Teammate: Merge PR", 10),
+                                  ("Scan: again", 60), ("GitHub: Poll", 10)])
+            let key = station(rig).facts.offices.values.first { $0.via == .shuttle(for: "crew:leo") }?.key ?? ""
+            let issue = Int(key.split(separator: "#").last ?? "") ?? 0
+            let slice = rig.world.works.slices(repo: "api", of: issue).first?.pulls.keys.first ?? 0
+            expect(slice != 0 && slice != issue, "the pull request is a slice of #\(issue): #\(slice)")
+            expect(place(rig, "api", slice) == .waiting, "#\(slice) in storage: \(describe(place(rig, "api", slice)))")
+            expect(place(rig, "api", issue) == nil, "#\(issue) has no crate: \(describe(place(rig, "api", issue)))")
+            expect(station(rig).rooms[key] != nil, "his office stands")
+            expect(station(rig).facts.offices[key]?.epic == OfficeFact.Epic(shipped: 0), "it stands as an epic: \(String(describing: station(rig).facts.offices[key]))")
+        }
+
+        test("a pull request that closes its issue, merged: the issue's crate in storage and no epic") {
+            let (rig, _) = org([("Target: ios#298", 0), ("Open PR", 32), ("Merge PR", 4.8)])
+            expect(place(rig, "ios", 298) == .waiting && rig.world.works.slices(repo: "ios", of: 298).isEmpty, "#298 in storage: \(describe(place(rig, "ios", 298)))")
+            expect(station(rig).facts.offices["task:ios#298"]?.epic == nil, "no epic")
+        }
+
         test("a branch with no issue, opened, merged and prompted again: one office, its crate in storage") {
             let (rig, sim) = org([("Target: ios#298", 0), ("New branch, no issue", 48), ("Open PR", 32), ("Merge PR", 4.8), ("Prompt", 30)])
             expect(count(sim, .officeOpened("task:ios/claude/"), after: "Merge PR") == 0, "no office opened for the branch after the merge")

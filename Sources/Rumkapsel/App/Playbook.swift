@@ -26,6 +26,10 @@ enum PlaybookWait: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral {
         } }
     }
     static func loaded(_ n: Int) -> PlaybookWait { crate(n, "in the rocket") { if case .aboard = $0 { return true }; return false } }
+    static let sliceOut = PlaybookWait.until("#455's slice out on the rows") { c in
+        let slices = c.world.works.slices(repo: "web", of: 455).compactMap(\.number)
+        return c.simulation.shown.values.contains { v in slices.contains { n in if case .row? = v.crates[CrateID(repo: "web", number: n)] { return true }; return false } }
+    }
     static let bodiesUp = PlaybookWait.until("bodies spawned") { c in !c.minions.isEmpty }
     static let rocketOnPad = PlaybookWait.until("web's rocket on the pad") { c in c.simulation.shown.values.contains { $0.rockets.values.contains { $0.repo == "web" } } }
     static let bodyOnDeck = PlaybookWait.until("somebody in the hall") { c in
@@ -128,6 +132,16 @@ enum Playbook {
                       camera: .whole(1.8), tail: 8, yard: true, rooms: [], crowd: false),
         PlaybookEntry("pull request", "PR closed unmerged", "crate turns red", at([("Open PR", 2), ("Close PR", 2)]),
                       camera: .follow(who, 4), tail: 16, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "Epic: part of the issue merged", "a pull request that doesn't close its issue: its crate is carried to storage and the office stays, with a planning console, a pennant and a tally",
+                      at([("Set: session = coding", 1), ("Open PR, part of the issue", 2), ("Merge PR", .sliceOut)]),
+                      camera: .follow(who, 3), tail: 16, yard: true, rooms: [], crowd: false),
+        PlaybookEntry("pull request", "Epic: resident at the console", "the epic's minion codes upright at the console while its session works, and leans back there when it goes quiet",
+                      at([("Set: session = coding", 1), ("Open PR, part of the issue", 2), ("Merge PR", .sliceOut),
+                          ("Prompt", 12), ("Set: session = sleeping", 14)]),
+                      camera: .follow(who, 3), tail: 30, yard: true),
+        PlaybookEntry("pull request", "Epic: issue closed", "the epic's issue closes: the office packs up and leaves like any finished office",
+                      at([("Open PR, part of the issue", 2), ("Merge PR", .sliceOut), ("Issue closes", 4)]),
+                      camera: .whole(1.8), tail: 14, yard: true, rooms: [], crowd: false),
 
         PlaybookEntry("release", "Staging PR merged", "web's crates are carried from storage to the staged rows, the back row by a toss",
                       [("16x", 0.5), ("Release: Staging opens", 0.25), ("1x", 0.25), ("Release: Staging merges", .toStaged), ("1x", .stagedDown)],
