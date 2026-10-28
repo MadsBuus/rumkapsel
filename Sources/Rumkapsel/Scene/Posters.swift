@@ -2,7 +2,7 @@ import AppKit
 import SceneKit
 
 enum Poster: String, CaseIterable {
-    case yard, mission, rocket, crew, lounge, galley, bath, decon, shapes
+    case yard, mission, rocket, crew, lounge, galley, bath, decon, shapes, bay, gym
 
     static func file(_ p: Poster) -> String { "poster-\(p.rawValue).jpg" }
 
@@ -17,6 +17,8 @@ enum Poster: String, CaseIterable {
         case .bath: return "Squeaky clean, super keen"
         case .decon: return "Unknown objects"
         case .shapes: return "What's what"
+        case .bay: return "New work lands here"
+        case .gym: return "No pain, no main"
         }
     }
 
@@ -62,6 +64,16 @@ enum Poster: String, CaseIterable {
             "Merged, it is carried into storage and ships like any crate, counted as tested.",
             "Closed, it is ejected and forgotten.",
         ]
+        case .bay: return [
+            "A shuttle in is new work: a new session, or a teammate's new work.",
+            "It lands the office as a hexagon, its berth burning in the repository's colour, and a minion carries it to its plot.",
+            "A session that is over and has nothing left boards a shuttle out.",
+        ]
+        case .gym: return [
+            "A minion in the gym is resting: its session is quiet, and it is day.",
+            "Treadmill, bench, bag and mat, one minion to each.",
+            "Give it work and it drops the bar at once.",
+        ]
         case .shapes: return [
             "A cube is a commit. A ghost cube is work not committed yet.",
             "A crate is a pull request. Its light blinks while checks run, then turns red or green.",
@@ -76,7 +88,8 @@ enum Poster: String, CaseIterable {
         case .mission: return ("Feed the alarm screen: Monitors, in Settings", 4)
         case .crew: return ("When a quiet minion sleeps, in Settings", 0)
         case .shapes: return ("Your repositories, in Settings", 1)
-        case .lounge, .galley, .bath, .decon: return nil
+        case .bay: return ("Whose new work lands: Teammates, in Settings", 3)
+        case .lounge, .galley, .bath, .decon, .gym: return nil
         }
     }
 
@@ -86,7 +99,10 @@ enum Poster: String, CaseIterable {
             return (cells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, Set(cells))
         }
         switch self {
-        case .yard, .rocket, .decon: return ([], [])
+        case .yard, .rocket: return ([], [])
+        case .decon: return (st.hall.deconCells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, Set(st.hall.deconCells))
+        case .bay: return (st.hangarCells.sorted { ($0.y, $0.x) < ($1.y, $1.x) }, Set(st.hangarCells))
+        case .gym: return fixed("kind:gym")
         case .mission: return fixed("kind:mission")
         case .crew: return fixed("kind:quarters")
         case .lounge: return fixed("kind:lounge")
@@ -100,11 +116,12 @@ enum Poster: String, CaseIterable {
         let poster: Poster
         let cell: Cell
         let wall: SIMD2<Int>
+        let high: Bool
     }
 
     static let reach = 6, apart = 2
-    static let order: [Poster] = [.mission, .galley, .bath, .lounge, .crew, .shapes]
-    static let backWall: [Poster] = [.rocket, .yard, .decon]
+    static let order: [Poster] = [.mission, .galley, .bath, .gym, .lounge, .crew, .decon, .bay, .shapes]
+    static let backWall: [Poster] = [.rocket, .yard]
 
     static func hang(_ st: Station) -> [Spot] {
         let walk = st.walkable
@@ -113,8 +130,9 @@ enum Poster: String, CaseIterable {
         let fixedRooms = st.rooms.filter { $0.key.hasPrefix("kind:") }
         let fixed = Set(fixedRooms.flatMap(\.value.cells) + st.hall.cells + st.hall.deconCells)
         var taken = Set(st.furniture(Looks.theme, offices: []).map(Station.cell(ofSub:)))
+        var gear: Set<Cell> = []
         for (key, room) in fixedRooms {
-            for f in st.fixtures(in: key) { taken.insert(Cell(x: Int(f.at.x.rounded()), y: Int(f.at.y.rounded()))) }
+            for f in st.fixtures(in: key) { gear.insert(Cell(x: Int(f.at.x.rounded()), y: Int(f.at.y.rounded()))) }
             guard let door = st.doorCell(of: key) else { continue }
             taken.insert(door)
             if let far = room.cells.max(by: { (abs($0.x - door.x) + abs($0.y - door.y), $0.y, $0.x) < (abs($1.x - door.x) + abs($1.y - door.y), $1.y, $1.x) }) { taken.insert(far) }
@@ -130,12 +148,13 @@ enum Poster: String, CaseIterable {
             let (inside, area) = poster.room(st)
             guard !area.isEmpty else { continue }
             var best: (score: [Int], spot: Spot)?
-            func consider(_ score: [Int], _ c: Cell, _ d: SIMD2<Int>) {
-                if best.map({ score.lexicographicallyPrecedes($0.score) }) ?? true { best = (score, Spot(poster: poster, cell: c, wall: d)) }
+            func consider(_ score: [Int], _ c: Cell, _ d: SIMD2<Int>, high: Bool = false) {
+                if best.map({ score.lexicographicallyPrecedes($0.score) }) ?? true { best = (score, Spot(poster: poster, cell: c, wall: d, high: high)) }
             }
             for c in inside where !taken.contains(c) && free(c) {
+                let over = gear.contains(c)
                 for (k, d) in walls.enumerated() where shut(c, d) && !area.contains(Cell(x: c.x + d.x, y: c.y + d.y)) {
-                    consider([0, k], c, d)
+                    consider([0, over ? 1 : 0, k], c, d, high: over)
                 }
             }
             if best == nil {
@@ -181,10 +200,11 @@ enum Poster: String, CaseIterable {
 }
 
 enum PosterOnWall {
-    static let width = 0.36, height = 0.48, lift = 0.25
+    static let width = 0.36, height = 0.48, low = 0.25, high = 0.7
 
     static func node(_ spot: Poster.Spot, offset: SIMD2<Double>) -> SCNNode {
         let n = SCNNode()
+        let lift = spot.high ? high : low
         let face = PosterFace.node(spot.poster, width: width, height: height)
         face.position = v3(0, lift + height / 2, 0.012)
         n.addChildNode(face)
