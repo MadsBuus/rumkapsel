@@ -142,6 +142,9 @@ moves through it one way: in from the hallway at the back, out through the field
 - **A staging release** that merges sends its repository's stored crates across to the testing rows,
   whether or not the board has moved their cards: what git finds on staging is on staging.
   A tester's tick sends a crate to the cleared rows.
+- **A rocket waiting on testing**: while a repository's release rocket stands on the pad, chevrons in its
+  colour run across the aisle from each tile of its untested crates to the cleared rows. A tile shared by
+  several repositories takes their colours in turn.
 - **The pad wall** is a field, the same sheet the ships fly through: glass until a vortex forms, then
   striped while it runs.
 - **Decon** is a room behind storage, entered from the walkway's back end: see **Decon**.
