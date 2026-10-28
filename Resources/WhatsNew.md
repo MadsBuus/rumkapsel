@@ -1,2 +1,5 @@
-- Recheck a crate: click a crate and ask GitHub where it really stands; anything the station has wrong is listed
-- Work that isn't on the project (like a back-merge) no longer lands on the testing rows; it waits with the cleared ones for the release
+## What's new in 0.79
+
+- Posters in the rooms, and a dramatic lighting switch
+- Arrows from the untested crates to the cleared rows while a rocket waits
+- A back-merge is not work: it gets no crate
