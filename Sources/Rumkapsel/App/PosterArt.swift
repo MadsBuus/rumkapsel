@@ -22,6 +22,8 @@ enum PosterArt {
         case .lounge: return lounge()
         case .galley: return galley()
         case .bath: return bath()
+        case .bay: return bay()
+        case .gym: return gym()
         }
     }
 
@@ -707,6 +709,98 @@ enum PosterArt {
             k.say("A minion in the shower just worked hard", k.font(46, .heavy), ink, x: 600, top: 1290, align: .center, kern: 1)
             k.say("Never while busy: work calls, it leaves at once", k.font(34, .medium), dim, x: 600, top: 1360, align: .center)
             k.ribbon("Hygiene is productivity!")
+        }
+    }
+
+    // MARK: the bay: arrivals
+
+    static func bay() -> NSImage {
+        let ship = SCNNode()
+        let hull = Classic.shuttle(color: repo)
+        ship.addChildNode(hull)
+        let office = Props.crate(color: repo)
+        office.position = v3(0, -0.42, 0)
+        ship.addChildNode(office)
+        let craft = object(ship, yaw: -0.5, pitch: -0.3, pixels: 700, margin: 1.15)
+        let hero = mascot()
+        return paint(nil) { k in
+            stars(k)
+            k.say("NEW WORK", k.font(150), ink, x: 64, top: 50, kern: 3)
+            k.say("LANDS HERE.", k.font(150), repo, x: 64, top: 210, kern: 3)
+            k.image(craft, x: 90, top: 380, width: 620)
+            let berth = NSRect(x: 160, y: k.H - 1040, width: 500, height: 96)
+            k.glow(repo, radius: 30) {
+                repo.withAlphaComponent(0.25).setFill(); NSBezierPath(ovalIn: berth).fill()
+                let rim = NSBezierPath(ovalIn: berth); rim.lineWidth = 8; repo.setStroke(); rim.stroke()
+            }
+            k.straight(NSPoint(x: 410, y: 860), NSPoint(x: 410, y: 960), color: ink, width: 10, dashed: true)
+            k.mascot(hero, x: 740, top: 560, width: 400)
+            let board = NSRect(x: 70, y: k.H - 1440, width: 1060, height: 340)
+            NSColor(rgb: (0.06, 0.07, 0.09)).setFill(); NSBezierPath(roundedRect: board, xRadius: 22, yRadius: 22).fill()
+            let edge = NSBezierPath(roundedRect: board, xRadius: 22, yRadius: 22); edge.lineWidth = 4
+            k.glow(.white, radius: 10) { NSColor(white: 0.8, alpha: 1).setStroke(); edge.stroke() }
+            k.say("ARRIVALS & DEPARTURES", k.font(34, .heavy), dim, x: 600, top: 1122, align: .center, kern: 6)
+            func flap(_ text: String, x: CGFloat, top: CGFloat, color: NSColor) {
+                let f = NSFont.monospacedSystemFont(ofSize: 46, weight: .heavy)
+                var cx = x
+                for ch in text {
+                    let tile = NSRect(x: cx, y: k.H - top - 66, width: 40, height: 66)
+                    NSColor(rgb: (0.13, 0.14, 0.17)).setFill(); NSBezierPath(roundedRect: tile, xRadius: 5, yRadius: 5).fill()
+                    NSColor(white: 0, alpha: 0.6).setFill(); NSRect(x: tile.minX, y: tile.midY - 1, width: tile.width, height: 2).fill()
+                    if ch != " " { k.say(String(ch), f, color, x: tile.midX, top: top + 4, align: .center) }
+                    cx += 43
+                }
+            }
+            for (i, row) in [("IN ", "NEW SESSION", green), ("IN ", "TEAMMATE'S WORK", green), ("OUT", "SESSION OVER", amber)].enumerated() {
+                let top = 1180 + CGFloat(i) * 82
+                flap(row.0, x: 110, top: top, color: row.2)
+                flap(row.1, x: 290, top: top, color: ink)
+            }
+            k.ribbon("Every arrival is a party! Mind the field!")
+        }
+    }
+
+    // MARK: the gym: a circuit
+
+    static func gym() -> NSImage {
+        let set = Classic.bench()
+        let benchNode = SCNNode()
+        set.seat.position = v3(0, Seat.height / 2, 0)
+        benchNode.addChildNode(set.seat)
+        for up in set.uprights { up.node.position = v3(up.at.x, Classic.rackHeight, up.at.y); benchNode.addChildNode(up.node) }
+        set.bar.position = v3(set.chest.x, Classic.barHeight, set.chest.y)
+        benchNode.addChildNode(set.bar)
+        let tread = Classic.treadmill()
+        let (post, sack) = Classic.punchBag()
+        let bagNode = SCNNode()
+        post.position = v3(0, 0.55, -0.42)
+        sack.position = v3(0, 1.08, 0)
+        bagNode.addChildNode(post); bagNode.addChildNode(sack)
+        let stations: [(NSImage, String, NSColor)] = [
+            (object(tread, yaw: -0.7, pixels: 500, margin: 1.2), "TREADMILL", working),
+            (object(benchNode, yaw: -0.7, pixels: 500, margin: 1.2), "BENCH", amber),
+            (object(bagNode, yaw: -0.7, pixels: 500, margin: 1.15), "BAG", Props.failRed),
+            (mascot { root in
+                let mat = Classic.mat()
+                mat.position = v3(0, -0.012, 0)
+                mat.eulerAngles.y = -0.45
+                root.addChildNode(mat)
+            }, "MAT", green),
+        ]
+        let punch = NSColor(rgb: (1.0, 0.42, 0.3))
+        return paint(nil) { k in
+            stars(k)
+            k.say("NO PAIN,", k.font(170), ink, x: 64, top: 50, kern: 3)
+            k.say("NO MAIN!", k.font(170), punch, x: 64, top: 230, kern: 3)
+            for (i, st) in stations.enumerated() {
+                let x: CGFloat = i % 2 == 0 ? 80 : 640, top: CGFloat = i < 2 ? 500 : 900
+                k.card(x: x, top: top, width: 480, height: 360, tint: st.2)
+                if st.1 == "MAT" { k.mascot(st.0, x: x + 120, top: top + 4, width: 240) } else { k.image(st.0, x: x + 100, top: top + 10, width: 280) }
+                k.say(st.1, k.font(46, .heavy), st.2, x: x + 240, top: top + 290, align: .center, kern: 4)
+            }
+            k.say("In the gym? Resting, and free for work", k.font(48, .heavy), ink, x: 600, top: 1300, align: .center, kern: 1)
+            k.say("Give it an order: it drops the bar at once", k.font(36, .medium), dim, x: 600, top: 1380, align: .center)
+            k.ribbon("Strong minions ship strong code!")
         }
     }
 
