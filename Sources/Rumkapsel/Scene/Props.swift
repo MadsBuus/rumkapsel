@@ -2,6 +2,8 @@ import AppKit
 import SceneKit
 
 enum Props {
+    static let footName = "crate-foot"
+
     static func foot(size: Double) -> SCNNode {
         let f = SCNNode(geometry: SCNPlane(width: size, height: size))
         f.geometry!.firstMaterial = flat(NSColor(rgb: (0.05, 0.05, 0.08)))
@@ -25,7 +27,7 @@ enum Props {
     static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false, number: Int? = nil,
                         title: String? = nil, who: String? = nil) -> SCNNode {
         let n = SCNNode()
-        let h = size * 0.8
+        let h = size * Zone.crateHeight
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
         box.materials = [flat(color), flat(color.darker(0.13)), flat(color), flat(color.darker(0.13)), flat(color.lighter(0.14)), flat(color)]
         for m in box.materials { Detail.apply(Detail.crate(for: number), to: m) }
@@ -40,15 +42,25 @@ enum Props {
         let s = SCNNode(geometry: strap)
         s.position = v3(0, h / 2, 0)
         n.addChildNode(s)
-        let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
-        plate.geometry!.name = Props.plateName
-        plate.geometry!.firstMaterial = flat(band)
-        plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
-        if blink { plate.runAction(Props.blinking()) }
-        n.addChildNode(plate)
-        if let number { n.addChildNode(crateNumber(number, size: size, height: h)) }
-        if let title, !title.isEmpty { n.addChildNode(crateTag(title: title, who: who, size: size, height: h)) }
-        n.addChildNode(foot(size: size * 1.3))
+        for side in [0.0, .pi] {
+            func stick(_ c: SCNNode) {
+                let p = c.position
+                c.position = side == 0 ? p : SCNVector3(-p.x, p.y, -p.z)
+                c.eulerAngles.y = CGFloat(side)
+                n.addChildNode(c)
+            }
+            let plate = SCNNode(geometry: SCNBox(width: size * 0.3, height: h * 0.28, length: 0.012, chamferRadius: 0))
+            plate.geometry!.name = Props.plateName
+            plate.geometry!.firstMaterial = flat(band)
+            plate.position = v3(size * 0.2, h * 0.36, size / 2 + 0.006)
+            if blink { plate.runAction(Props.blinking()) }
+            stick(plate)
+            if let number { stick(crateNumber(number, size: size, height: h)) }
+            if let title, !title.isEmpty { stick(crateTag(title: title, who: who, size: size, height: h)) }
+        }
+        let f = foot(size: size * 1.3)
+        f.geometry!.name = Props.footName
+        n.addChildNode(f)
         return n
     }
 

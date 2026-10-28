@@ -13,7 +13,7 @@ extension StationController {
     }
 
     private func relight(_ pkg: SCNNode, light: NSColor, blink: Bool, failing: Bool, size: Double) {
-        if let plate = pkg.childNodes.first(where: { $0.geometry?.name == Props.plateName }) {
+        for plate in pkg.childNodes where plate.geometry?.name == Props.plateName {
             plate.geometry?.firstMaterial = flat(light)
             let blinking = plate.action(forKey: "blink") != nil
             if blink && !blinking { plate.runAction(Props.blinking(), forKey: "blink") }
@@ -354,7 +354,7 @@ extension StationController {
             switch at {
             case .hands:
                 live.insert(key)
-                if let n = crateNodes[key] { dress(n, station, id, zone: heading(station, id)) }
+                if let n = crateNodes[key] { dress(n, station, id, zone: heading(station, id)); shade(n, onFloor: false) }
                 continue
             case .vortex:
                 live.insert(key)
@@ -382,6 +382,7 @@ extension StationController {
                 live.insert(key)
                 crateNodes[key].map(rack)
                 let n = crateNode(station, id, zone: to.zone, at: from, yaw: to.yaw)
+                shade(n, onFloor: to.pos.y < 0.01)
                 if !crateMoving(n), simd_distance(position(n), to.pos) > 0.01 {
                     let left = since + Hands.settleSeconds - clock
                     if left > 0.05 { moveCrate(n, legs: [MotionLeg(to: to.pos, seconds: left, ease: .easeIn)]) } else { n.position = v3(to.pos.x, to.pos.y, to.pos.z) }
@@ -402,6 +403,7 @@ extension StationController {
                 n.position = v3(pos.x, pos.y, pos.z)
                 n.eulerAngles.y = CGFloat(yaw)
             }
+            shade(n, onFloor: pos.y < 0.01)
             keep.insert(ObjectIdentifier(n))
         }
         for (key, n) in crateNodes where key.hasPrefix(station.name + "|") && !live.contains(key) {
@@ -459,6 +461,10 @@ extension StationController {
         crateNodes[key] = n
         dress(n, station, id, zone: zone)
         return n
+    }
+
+    func shade(_ n: SCNNode, onFloor: Bool) {
+        n.childNodes.first { $0.geometry?.name == Props.footName }?.isHidden = !onFloor
     }
 
     private func dress(_ n: SCNNode, _ station: Station, _ id: CrateID, zone: Zone) {
