@@ -343,8 +343,12 @@ extension StationController {
             }
             let posters = Looks.current.hangsPosters ? Poster.hang(station) : []
             statics.piece("posters:" + st, key: at + "|\(station.hall.backWall)|\(posters.map { "\($0.poster.rawValue)\($0.cell)\($0.wall)\($0.high)" })") { bag in
-                for spot in posters { bag.add(PosterOnWall.node(spot, offset: station.offset)) }
-                if Looks.current.hangsPosters, let row = PosterRow.node(station, offset: station.offset) { bag.add(row) }
+                var nodes = posters.map { PosterOnWall.node($0, offset: station.offset) }
+                if Looks.current.hangsPosters, let row = PosterRow.node(station, offset: station.offset) { nodes.append(row) }
+                for n in nodes {
+                    n.isHidden = postersHidden
+                    bag.add(n, as: "posters")
+                }
             }
             statics.piece("dress:" + st, key: yard + "|\(station.bounds.min)|\(station.bounds.max)") { bag in
                 for prop in Looks.current.dress(station: station) {

@@ -24,6 +24,20 @@ extension StationController {
         }
     }
 
+    var postersHidden: Bool { postersOff && walker == nil }
+
+    func togglePosters() {
+        postersOff.toggle()
+        enqueue { [self] in
+            showPosters()
+            if postersOff { closePoster() }
+        }
+    }
+
+    func showPosters() {
+        for n in statics.tagged("posters") { n.isHidden = postersHidden }
+    }
+
     func closePoster() { DispatchQueue.main.async { [self] in posterPanel?.isHidden = true } }
 
     func posterTakes(point p: NSPoint) -> Bool {
