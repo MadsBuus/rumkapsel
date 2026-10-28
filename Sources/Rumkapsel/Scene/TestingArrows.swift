@@ -35,7 +35,7 @@ final class TestingArrow {
 
 extension StationController {
     func drawTestingArrows() {
-        var want: [String: (at: SIMD2<Double>, repos: Set<String>)] = [:]
+        var want: [String: (station: String, at: SIMD2<Double>, repos: Set<String>)] = [:]
         for st in fleet.stations.values {
             var waiting = Set<String>()
             for (_, r) in simulation.shownRockets(st) where r.kind == .release && r.climbing == nil && r.leaving == nil {
@@ -45,8 +45,7 @@ extension StationController {
             for (id, at) in simulation.shown[st.name]?.crates ?? [:] {
                 guard case .row(let s) = at, s.zone == .testing, st.facts.crates[id]?.zone == .testing,
                       waiting.contains(id.repo) else { continue }
-                let at: SIMD2<Double> = st.offset + SIMD2(Double(s.cell.x), Double(crossing))
-                want[st.name + "|\(s.cell.x)", default: (at, [])].repos.insert(id.repo)
+                want[st.name + "|\(s.cell.x)", default: (st.name, SIMD2(Double(s.cell.x), Double(crossing)), [])].repos.insert(id.repo)
             }
         }
         for (key, arrow) in testingArrows where want[key] == nil {
@@ -54,13 +53,14 @@ extension StationController {
             testingArrows[key] = nil
         }
         for (key, w) in want {
+            guard let anchor = stationAnchors[w.station] else { continue }
             let arrow = testingArrows[key] ?? {
                 let made = TestingArrow()
-                made.node.position = v3(w.at.x, 0.014, w.at.y)
-                propRoot.addChildNode(made.node)
                 testingArrows[key] = made
                 return made
             }()
+            if arrow.node.parent !== anchor { anchor.addChildNode(arrow.node) }
+            arrow.node.position = v3(w.at.x, 0.014, w.at.y)
             arrow.repos = w.repos.sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
             roll(arrow)
         }

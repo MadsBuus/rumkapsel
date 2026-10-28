@@ -330,6 +330,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var vortexViews: [String: VortexView] = [:]
     var testingArrows: [String: TestingArrow] = [:]
     var lights: [SCNNode] = []
+    var postersOff = false
     var padRings: [String: SCNNode] = [:]
     var padStrips: [String: (node: SCNNode, shown: Double)] = [:]
     var padsDrawn = ""
@@ -573,6 +574,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
                 if neighboursPanel?.isHidden == false { toggleNeighbours() }
                 if storyPanel?.isHidden == false { closeStory() }
+            case "i": togglePosters()
             case "l": toggleSpaceLog()
             case "n": toggleNeighbours()
             case "g": refreshGitHub()

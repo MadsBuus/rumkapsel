@@ -110,6 +110,7 @@ extension StationController {
         m.node.addChildNode(node)
         node.position = m.node.convertPosition(at, from: nil)
         node.eulerAngles.y = CGFloat(Double(node.eulerAngles.y) - m.smoothFacing)
+        shade(node, onFloor: false)
         let from = SIMD3(Double(node.position.x), Double(node.position.y), Double(node.position.z))
         moveCrate(node, legs: m.floating ? Routines.floatLegs(from: from, to: .zero, headHeight: m.headHeight, toss: false)
                                          : Routines.liftLegs(from: from.y, handsAt: m.handsAt, headHeight: m.headHeight))
@@ -130,6 +131,7 @@ extension StationController {
         node.position = v3(pos.x, pos.y, pos.z)
         node.eulerAngles = SCNVector3(0, yaw, 0)
         propRoot.addChildNode(node)
+        shade(node, onFloor: pos.y < 0.01)
         drone.thud()
         m.carried = nil
     }

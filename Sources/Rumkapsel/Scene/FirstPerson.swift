@@ -121,6 +121,7 @@ extension StationController {
         w.view = wantedView(w)
         following = nil
         walker = w
+        showPosters()
         for n in [w.sky, w.dome, w.walls] { scene.rootNode.addChildNode(n) }
         hud.addChild(w.title); hud.addChild(w.subtitle)
         walkAskedAt = CACurrentMediaTime()
@@ -173,6 +174,7 @@ extension StationController {
         for n in w.fragments { n.opacity = 1; n.isHidden = false }
         w.title.removeFromParent(); w.subtitle.removeFromParent()
         walker = nil
+        showPosters()
         for n in legendNodes + jobNodes { n.alpha = 1 }
         for m in minions.values { m.staticSeen = true }
         guard let camera = w.stationCamera else { return }

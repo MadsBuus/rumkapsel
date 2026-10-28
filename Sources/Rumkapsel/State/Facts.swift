@@ -16,6 +16,8 @@ enum Zone: String, Codable, CaseIterable {
 
     var isRow: Bool { self != .decon }
     var crateSize: Double { self == .decon ? 0.3 : 0.38 }
+    static let crateHeight = 0.8
+    var stackStep: Double { crateSize * Zone.crateHeight }
 
     var words: String {
         switch self {
