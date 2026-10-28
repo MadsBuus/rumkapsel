@@ -431,6 +431,8 @@ extension StationController {
                 if m.isSubagent { parts.append("subagent") }
                 infoLabel.text = parts.joined(separator: "   ")
             }
+        } else if h.hasPrefix("poster:"), let poster = Poster(rawValue: String(h.dropFirst(7))) {
+            infoLabel.text = "Poster: \(poster.title) · click to read it"
         } else if h.hasPrefix("link:") {
             infoLabel.text = String(h.split(separator: "|", maxSplits: 1).last ?? "")
         } else if h.hasPrefix("rocket:") {

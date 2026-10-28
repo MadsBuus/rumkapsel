@@ -975,6 +975,7 @@ struct KingdomLook: Look {
     }
 
     var writesOnFloor: Bool { false }
+    var hangsPosters: Bool { false }
 
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
         guard let wall = station.officeWall(room) else { return nil }

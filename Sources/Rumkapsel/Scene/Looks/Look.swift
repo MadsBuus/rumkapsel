@@ -89,6 +89,7 @@ protocol Look {
     func jetpack(height: Double, depth: Double) -> SCNNode?
     func padDrone() -> SCNNode?
     var writesOnFloor: Bool { get }
+    var hangsPosters: Bool { get }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode?
     var workSparks: Bool { get }
     var detailsFloors: Bool { get }
@@ -147,6 +148,7 @@ extension Look {
     func jetpack(height: Double, depth: Double) -> SCNNode? { nil }
     func padDrone() -> SCNNode? { nil }
     var writesOnFloor: Bool { true }
+    var hangsPosters: Bool { true }
     func tool(_ tool: Minion.Tool, height: Double, depth: Double) -> SCNNode? { nil }
     var workSparks: Bool { true }
     var detailsFloors: Bool { true }

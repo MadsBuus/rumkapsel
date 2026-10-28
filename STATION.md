@@ -391,6 +391,30 @@ moves through it one way: in from the hallway at the back, out through the field
 - An office a neighbour stops claiming goes; one held by a neighbour who disconnects stays for a day, so
   their return does not move it.
 
+## Posters
+
+- A poster does two jobs. For you it leads with one thing worth knowing because it changes what you do; for
+  the minions it ends on the morale office's ribbon, cheerful a little past the truth. All share the type,
+  the colours of what they show and the same minion, smiling, a heart sticker on its pocket; each has its
+  own layout.
+- Nine: the yard (pack, test, ship), mission control (eyes on the needles), by the pad (merge when it
+  vents), the dorm (no cone? your turn), the lounge (leisure is mandatory), the galley (printed fresh), the
+  bath (squeaky clean), decon (unknown objects) and the plaza (what's what). The gym and the bay have none.
+- A poster floats, framed, inside the room it is about, against a wall that faces the view, on no fixture,
+  the doorway or the far corner where the room's name is cut. A room without such a wall gets it on the
+  hallway against its own wall or a fixed room's as near it as the hallway goes, never an office's, never a
+  sign's; with neither it is not hung. The pad's, the yard's and decon's float side by side in the
+  middle of the yard's back wall, above the crates, the pad's nearest the pad. Two posters hang two tiles
+  apart. The look decides whether it hangs them (`hangsPosters`); Classic does.
+- On the wall a poster wears a small copy of its art; the leaflet shows it full size.
+- Now and then a poster glitches like a tired screen for half a second: bands tear sideways, scanlines,
+  a flicker, a rolling bar. Each keeps its own clock (about once a minute or two), so they never glitch
+  together.
+- Clicking one opens its leaflet at the side: the poster, three lines, and where to set it up in Settings
+  when there is something to set.
+- The art is the station's own models, baked by `--bake-posters` into `Resources/Posters`;
+  `--look-dev <out.png> poster:<name>` draws one, `poster:row` the back-wall row.
+
 ## Humour, kept dry
 
 The station takes its work seriously and itself not at all. The log is the station's computer speaking,
