@@ -78,7 +78,7 @@ enum Pitch: Hashable {
 extension YardSpot {
     var slot: Slot { Slot(zone: zone, column: column, level: level) }
     func lowered(to level: Int) -> YardSpot {
-        YardSpot(zone: zone, column: column, level: level, cell: cell, pos: SIMD3(pos.x, Double(level) * Hands.level, pos.z), yaw: yaw)
+        YardSpot(zone: zone, column: column, level: level, cell: cell, pos: SIMD3(pos.x, Double(level) * zone.stackStep, pos.z), yaw: yaw)
     }
 }
 

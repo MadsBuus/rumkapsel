@@ -715,48 +715,44 @@ enum PosterArt {
     // MARK: the bay: arrivals
 
     static func bay() -> NSImage {
-        let ship = SCNNode()
+        let landed = SCNNode()
         let hull = Classic.shuttle(color: repo)
-        ship.addChildNode(hull)
-        let office = Props.crate(color: repo)
-        office.position = v3(0, -0.42, 0)
-        ship.addChildNode(office)
-        let craft = object(ship, yaw: -0.5, pitch: -0.3, pixels: 700, margin: 1.15)
-        let hero = mascot()
+        hull.position = v3(0, 0.3, 0)
+        landed.addChildNode(hull)
+        let cargo = Props.crate(color: repo)
+        cargo.position = v3(0.55, 0, 0.1)
+        landed.addChildNode(cargo)
+        let ship = object(landed, yaw: -0.5, pitch: -0.35, pixels: 600, margin: 1.15)
+        let hero = mascot { root in
+            let hex = Props.crate(color: repo)
+            hex.scale = SCNVector3(0.42, 0.42, 0.42)
+            hex.position = v3(0, 0.6, 0)
+            root.addChildNode(hex)
+        }
+        let plot = SCNNode()
+        for x in 0..<3 { for z in 0..<2 {
+            let tile = SCNNode(geometry: SCNBox(width: 0.94, height: 0.04, length: 0.94, chamferRadius: 0.02))
+            tile.geometry!.firstMaterial = flat(repo.withAlphaComponent(1).lighter(0.08 * Double((x + z) % 2)))
+            tile.position = v3(Double(x), 0, Double(z))
+            plot.addChildNode(tile)
+        } }
+        let office = object(plot, yaw: -0.785, pitch: -0.62, pixels: 600, margin: 1.05)
         return paint(nil) { k in
             stars(k)
-            k.say("NEW WORK", k.font(150), ink, x: 64, top: 50, kern: 3)
-            k.say("LANDS HERE.", k.font(150), repo, x: 64, top: 210, kern: 3)
-            k.image(craft, x: 90, top: 380, width: 620)
-            let berth = NSRect(x: 160, y: k.H - 1040, width: 500, height: 96)
-            k.glow(repo, radius: 30) {
-                repo.withAlphaComponent(0.25).setFill(); NSBezierPath(ovalIn: berth).fill()
-                let rim = NSBezierPath(ovalIn: berth); rim.lineWidth = 8; repo.setStroke(); rim.stroke()
+            k.say("NEW SESSION?", k.font(150), ink, x: 64, top: 50, kern: 3)
+            k.say("SHUTTLE'S IN!", k.font(150), repo, x: 64, top: 210, kern: 3)
+            k.image(ship, x: 10, top: 560, width: 430)
+            k.mascot(hero, x: 400, top: 440, width: 400)
+            k.image(office, x: 770, top: 560, width: 420)
+            k.say("artist search", k.font(46, .heavy), .white, x: 936, top: 784, align: .center)
+            k.hop(NSPoint(x: 330, y: 640), NSPoint(x: 470, y: 690), lift: 110, color: ink)
+            k.hop(NSPoint(x: 760, y: 690), NSPoint(x: 900, y: 700), lift: 110, color: ink)
+            for (i, word) in ["LANDS", "CARRIED", "UNFOLDS"].enumerated() {
+                k.say(word, k.font(64, .heavy), i == 2 ? repo : ink, x: 220 + CGFloat(i) * 380, top: 1050, align: .center, kern: 5)
             }
-            k.straight(NSPoint(x: 410, y: 860), NSPoint(x: 410, y: 960), color: ink, width: 10, dashed: true)
-            k.mascot(hero, x: 740, top: 560, width: 400)
-            let board = NSRect(x: 70, y: k.H - 1440, width: 1060, height: 340)
-            NSColor(rgb: (0.06, 0.07, 0.09)).setFill(); NSBezierPath(roundedRect: board, xRadius: 22, yRadius: 22).fill()
-            let edge = NSBezierPath(roundedRect: board, xRadius: 22, yRadius: 22); edge.lineWidth = 4
-            k.glow(.white, radius: 10) { NSColor(white: 0.8, alpha: 1).setStroke(); edge.stroke() }
-            k.say("ARRIVALS & DEPARTURES", k.font(34, .heavy), dim, x: 600, top: 1122, align: .center, kern: 6)
-            func flap(_ text: String, x: CGFloat, top: CGFloat, color: NSColor) {
-                let f = NSFont.monospacedSystemFont(ofSize: 46, weight: .heavy)
-                var cx = x
-                for ch in text {
-                    let tile = NSRect(x: cx, y: k.H - top - 66, width: 40, height: 66)
-                    NSColor(rgb: (0.13, 0.14, 0.17)).setFill(); NSBezierPath(roundedRect: tile, xRadius: 5, yRadius: 5).fill()
-                    NSColor(white: 0, alpha: 0.6).setFill(); NSRect(x: tile.minX, y: tile.midY - 1, width: tile.width, height: 2).fill()
-                    if ch != " " { k.say(String(ch), f, color, x: tile.midX, top: top + 4, align: .center) }
-                    cx += 43
-                }
-            }
-            for (i, row) in [("IN ", "NEW SESSION", green), ("IN ", "TEAMMATE'S WORK", green), ("OUT", "SESSION OVER", amber)].enumerated() {
-                let top = 1180 + CGFloat(i) * 82
-                flap(row.0, x: 110, top: top, color: row.2)
-                flap(row.1, x: 290, top: top, color: ink)
-            }
-            k.ribbon("Every arrival is a party! Mind the field!")
+            k.say("Every new session flies in with its office", k.font(48, .heavy), ink, x: 600, top: 1230, align: .center, kern: 1)
+            k.say("A teammate's new work arrives the same way", k.font(36, .medium), dim, x: 600, top: 1310, align: .center)
+            k.ribbon("Every arrival is a party!")
         }
     }
 

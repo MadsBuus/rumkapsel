@@ -17,7 +17,7 @@ enum Poster: String, CaseIterable {
         case .bath: return "Squeaky clean, super keen"
         case .decon: return "Unknown objects"
         case .shapes: return "What's what"
-        case .bay: return "New work lands here"
+        case .bay: return "New session? Shuttle's in"
         case .gym: return "No pain, no main"
         }
     }
@@ -65,9 +65,9 @@ enum Poster: String, CaseIterable {
             "Closed, it is ejected and forgotten.",
         ]
         case .bay: return [
-            "A shuttle in is new work: a new session, or a teammate's new work.",
-            "It lands the office as a hexagon, its berth burning in the repository's colour, and a minion carries it to its plot.",
-            "A session that is over and has nothing left boards a shuttle out.",
+            "Every new session flies in by shuttle, its office packed as a hexagon.",
+            "A minion carries the hexagon to the empty plot, and it unfolds into the office, tile by tile.",
+            "A teammate's new work arrives the same way. A session that is over flies out when nothing is left.",
         ]
         case .gym: return [
             "A minion in the gym is resting: its session is quiet, and it is day.",
@@ -90,6 +90,18 @@ enum Poster: String, CaseIterable {
         case .shapes: return ("Your repositories, in Settings", 1)
         case .bay: return ("Whose new work lands: Teammates, in Settings", 3)
         case .lounge, .galley, .bath, .decon, .gym: return nil
+        }
+    }
+
+    private var key: String? {
+        switch self {
+        case .gym: return "kind:gym"
+        case .mission: return "kind:mission"
+        case .crew: return "kind:quarters"
+        case .lounge: return "kind:lounge"
+        case .galley: return "kind:galley"
+        case .bath: return "kind:bath"
+        case .yard, .rocket, .decon, .bay, .shapes: return nil
         }
     }
 
@@ -129,6 +141,7 @@ enum Poster: String, CaseIterable {
         let signs = Set(Signs.plan(st).map { [$0.cell.x, $0.cell.y, $0.wall.x, $0.wall.y] })
         let fixedRooms = st.rooms.filter { $0.key.hasPrefix("kind:") }
         let fixed = Set(fixedRooms.flatMap(\.value.cells) + st.hall.cells + st.hall.deconCells)
+        let offices = Set(st.rooms.filter { !$0.key.hasPrefix("kind:") }.flatMap(\.value.cells))
         var taken = Set(st.furniture(Looks.theme, offices: []).map(Station.cell(ofSub:)))
         var gear: Set<Cell> = []
         for (key, room) in fixedRooms {
@@ -154,7 +167,16 @@ enum Poster: String, CaseIterable {
             for c in inside where !taken.contains(c) && free(c) {
                 let over = gear.contains(c)
                 for (k, d) in walls.enumerated() where shut(c, d) && !area.contains(Cell(x: c.x + d.x, y: c.y + d.y)) {
-                    consider([0, over ? 1 : 0, k], c, d, high: over)
+                    consider([0, over ? 2 : 0, k], c, d, high: over)
+                }
+            }
+            if let key = poster.key, let out = st.doorOutside(of: key) {
+                for c in hall where free(c) && abs(c.x - out.x) + abs(c.y - out.y) <= 1 {
+                    for (k, d) in walls.enumerated() where shut(c, d) {
+                        let n = Cell(x: c.x + d.x, y: c.y + d.y)
+                        guard !offices.contains(n), !walk.contains(n) || fixed.contains(n) else { continue }
+                        consider([0, 1, abs(c.x - out.x) + abs(c.y - out.y), k], c, d)
+                    }
                 }
             }
             if best == nil {

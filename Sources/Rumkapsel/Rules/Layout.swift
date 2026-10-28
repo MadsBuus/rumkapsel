@@ -59,7 +59,7 @@ enum Layout {
                 let side = column % 2 == 0 ? -0.25 : 0.25
                 for (level, c) in stack.sorted(by: { $0.seq < $1.seq }).enumerated() {
                     let (jx, jz, yaw) = zone == .waiting ? jitter(repo: c.id.repo, number: c.id.number) : (0, 0, 0)
-                    let pos = SIMD3(g.offset.x + Double(cell.x) + side + jx, Double(level) * Hands.level, g.offset.y + Double(cell.y) + jz)
+                    let pos = SIMD3(g.offset.x + Double(cell.x) + side + jx, Double(level) * zone.stackStep, g.offset.y + Double(cell.y) + jz)
                     out[c.id] = YardSpot(zone: zone, column: column, level: level, cell: cell, pos: pos, yaw: yaw)
                 }
             }

@@ -402,11 +402,12 @@ moves through it one way: in from the hallway at the back, out through the field
   own layout.
 - Eleven: the yard (pack, test, ship), mission control (eyes on the needles), by the pad (merge when it
   vents), the dorm (no cone? your turn), the lounge (leisure is mandatory), the galley (printed fresh), the
-  bath (squeaky clean), decon (unknown objects), the plaza (what's what), the bay (new work lands here) and
+  bath (squeaky clean), decon (unknown objects), the plaza (what's what), the bay (new session? shuttle's in) and
   the gym (no pain, no main).
 - A poster floats, framed, inside the room it is about, against a wall that faces the view, on no fixture,
   the doorway or the far corner where the room's name is cut; if only a fixture's tile is left, it hangs
-  high above the fixture. A room without such a wall gets it on the
+  high above the fixture, unless the hallway beside its door has a wall for it. A room without such a
+  wall gets it on the
   hallway against its own wall or a fixed room's as near it as the hallway goes, never an office's, never a
   sign's; with neither it is not hung. The pad's and the yard's float side by side in the middle of
   the yard's back wall, above the crates, the pad's nearest the pad. Two posters hang two tiles
