@@ -326,6 +326,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var padFields: [String: HangarField] = [:]
     var vortexViews: [String: VortexView] = [:]
     var testingArrows: [String: TestingArrow] = [:]
+    var lights: [SCNNode] = []
     var padRings: [String: SCNNode] = [:]
     var padStrips: [String: (node: SCNNode, shown: Double)] = [:]
     var padsDrawn = ""
@@ -368,6 +369,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var neighboursPanel: NeighboursPanel?
     var neighboursOpen = false
     var storyPanel: CrateStoryPanel?
+    var posterPanel: PosterPanel?
     var storyOf: (station: String, id: CrateID)?
     var storyClock = 0.0
     var storyCheck: (id: CrateID, check: CrateCheck?)?
@@ -375,6 +377,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var cardFacts: SetupCardFacts?
     var answeredCards: Set<String> = []
     var onChangeRepo: ((String) -> Void)?
+    var onOpenSettings: ((Int) -> Void)?
     let setupLabel = SKLabelNode()
     let setupPlate = SKSpriteNode()
     var setupProblems: [String] = []
@@ -464,7 +467,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.cardTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.posterTakes(point: p) == true || self?.cardTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
         view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
         view.onDoubleClick = { [weak self] node, floor in
             let n = node?.name ?? ""
@@ -479,6 +482,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let self { DispatchQueue.main.async { for f in self.flights where f.size > 0 { self.setSize(f, 0) } } }
             let n = node?.name ?? ""
             if StationController.crate(named: n) == nil && !n.hasPrefix("box:") { self?.closeStory() }
+            if let poster = n.hasPrefix("poster:") ? Poster(rawValue: String(n.dropFirst(7))) : nil { self?.openPoster(poster); return }
+            self?.closePoster()
             if n.hasPrefix("minion:") {
                 let id = String(n.dropFirst(7))
                 self?.enqueue { if self?.walker != nil { self?.ride(minionId: id) } else { self?.follow(minionId: id) } }
@@ -580,6 +585,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
         installStory()
+        installPosterPanel()
         installCard()
         if !simulated { Bulkhead.prepare() }
         if demo {
@@ -614,19 +620,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         rig.addChildNode(pitchNode)
         scene.rootNode.addChildNode(rig)
 
-        let sun = SCNNode()
-        sun.light = SCNLight()
-        sun.light!.type = .directional
-        sun.light!.intensity = 700
-        sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
-        sun.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
-        scene.rootNode.addChildNode(sun)
-        let ambient = SCNNode()
-        ambient.light = SCNLight()
-        ambient.light!.type = .ambient
-        ambient.light!.intensity = 550
-        ambient.light!.categoryBitMask = ~(Pick.planet | Pick.colony | Pick.onboard)
-        scene.rootNode.addChildNode(ambient)
+        light()
         buildBackdrop()
         rebuildStatic()
     }
@@ -1292,8 +1286,10 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
 
     func applyConfigChange(from old: AppConfig, to new: AppConfig) {
         applySharing()
+        if old.dramaticLight != new.dramaticLight { enqueue { [self] in light() } }
         var renamed = old.withoutAnswers
         renamed.shareName = new.shareName
+        renamed.dramaticLight = new.dramaticLight
         guard renamed != new.withoutAnswers else { return }
         enqueue { [self] in
             let cfg = ConfigStore.shared.current

@@ -7,6 +7,8 @@ enum LookDev {
         if shot == "crates" { crates(out: out) }
         if shot == "rockets" { rockets(out: out) }
         if shot == "signs" { signs(out: out) }
+        if shot == "poster:row" { image(out: out, PosterArt.object(PosterRow.row(), yaw: 0.35, pitch: -0.25, pixels: 1100, margin: 1.05)) }
+        if shot.hasPrefix("poster:"), let p = Poster(rawValue: String(shot.dropFirst(7))) { poster(out: out, p) }
         if shot.hasPrefix("wall") {
             let parts = shot.split(separator: ":")
             let style = parts.count > 1 ? Bulkhead.Style(rawValue: String(parts[1])) ?? .hallway : .hallway
@@ -92,11 +94,16 @@ enum LookDev {
         render(scene, from: eye, to: out)
     }
 
+    private static func poster(out: String, _ poster: Poster) -> Never { image(out: out, PosterArt.draw(poster)) }
+
+    private static func image(out: String, _ image: NSImage) -> Never {
+        guard let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { exit(1) }
+        try? png.write(to: URL(fileURLWithPath: out))
+        exit(0)
+    }
+
     private static func render(_ scene: SCNScene, from eye: SCNNode, to out: String) -> Never {
-        let renderer = SCNRenderer(device: MTLCreateSystemDefaultDevice(), options: nil)
-        renderer.scene = scene
-        renderer.pointOfView = eye
-        let image = renderer.snapshot(atTime: 1, with: CGSize(width: 1600, height: 1000), antialiasingMode: .multisampling4X)
+        let image = PosterArt.snapshot(scene, from: eye, size: CGSize(width: 1600, height: 1000))
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else { exit(1) }
         try? png.write(to: URL(fileURLWithPath: out))
         exit(0)

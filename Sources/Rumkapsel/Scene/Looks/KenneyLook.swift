@@ -3,6 +3,7 @@ import SceneKit
 
 struct KenneyLook: Look {
     var background: NSColor { Kit.sky }
+    var hangsPosters: Bool { false }
     var viewYaw: Double { .pi / 4 + .pi }
     var floorTop: Double { Kit.plateTop }
     var dotsHallway: Bool { false }

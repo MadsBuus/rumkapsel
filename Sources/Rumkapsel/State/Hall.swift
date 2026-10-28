@@ -28,6 +28,7 @@ struct Hall {
     let deconHatch: (pos: SIMD2<Double>, facing: SIMD2<Double>)
 
     var deckCells: [Cell] { clearedCells + stagedCells }
+    var backWall: [Cell] { cells.filter { $0.x == (cells.map(\.x).min() ?? 0) } }
     var lanes: Set<Cell> { Set(aisleCells + walkwayCells) }
     var clearingAisle: [Cell] {
         guard let front = clearedCells.map(\.y).max(), let back = stagedCells.map(\.y).min() else { return [] }

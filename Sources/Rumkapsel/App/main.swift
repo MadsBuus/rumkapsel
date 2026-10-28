@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
         if args.contains("--dump-colors") { ColorDump.run() }
         if args.contains("--bake-plating") { Plating.bake(FlightCraft.Materials.families) }
         if args.contains("--bake-walls") { Bulkhead.bake() }
+        if args.contains("--bake-posters") { PosterArt.bake(into: Poster.sourceRoot) }
         if args.contains("--bake-detail") { Detail.bake() }
         if args.contains("--bake-suits") { Suit.bake() }
         if let i = args.firstIndex(of: "--look-dev"), args.count > i + 1 { LookDev.run(out: args[i + 1], shot: args.count > i + 2 ? args[i + 2] : "hull") }
@@ -142,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
 
         controller = StationController(frame: NSRect(origin: .zero, size: size), demo: demo, simulated: simulatorOnly || playbookOnly)
         controller.onChangeRepo = { [weak self] repo in self?.showSettings(repo: repo) }
+        controller.onOpenSettings = { [weak self] tab in self?.settingsModel.tab = tab; self?.showSettings(repo: nil) }
         window.contentView = controller.view
         if !Scripted.run { DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.controller.prepareFlight() } }
         controller.viewSize = controller.view.bounds.size

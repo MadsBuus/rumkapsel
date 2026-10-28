@@ -90,6 +90,7 @@ struct SettingsView: View {
                 if let credit = model.config.theme.credit {
                     Text(credit).font(.caption).foregroundStyle(.secondary)
                 }
+                Toggle("Dramatic lighting", isOn: Binding(get: { model.config.dramaticLight ?? false }, set: { model.config.dramaticLight = $0 ? true : nil }))
                 Picker("New offices open", selection: Binding(get: { model.config.officePlacement }, set: { model.config.placementName = $0.rawValue })) {
                     ForEach(OfficePlacement.allCases) { Text($0.title).tag($0) }
                 }

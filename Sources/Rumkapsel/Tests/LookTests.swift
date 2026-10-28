@@ -10,16 +10,17 @@ enum LookTests {
         var classic: [String] = []
         var letters = true
         var rims = true
+        var posters = true
     }
 
     private static let claims: [Theme: Claim] = [
         .classic: Claim(classic: ["input", "output", "crate", "hold", "tool", "message",
                                   "office", "station", "figure", "drone", "jetpack"]),
         .kenney: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold"],
-                       classic: ["tool", "message", "drone", "jetpack"], rims: false),
+                       classic: ["tool", "message", "drone", "jetpack"], rims: false, posters: false),
         .kingdom: Claim(drawn: ["input", "output", "office", "station", "figure", "crate", "hold",
                                 "tool", "message"],
-                        classic: ["drone", "jetpack"], letters: false, rims: false),
+                        classic: ["drone", "jetpack"], letters: false, rims: false, posters: false),
     ]
 
     static func run() -> Never {
@@ -88,6 +89,9 @@ enum LookTests {
                 expect(ShownRocket.climbSeconds >= Looks.current.launchSeconds && end.opacity <= 0.001,
                        "climb \(ShownRocket.climbSeconds) s, launch \(Looks.current.launchSeconds) s, opacity at the end \(end.opacity)")
                 expect(!theme.kickRises || RocketGeometry.clearing < ShownRocket.climbSeconds, "the rocket clears the pad lift before it goes: \(RocketGeometry.clearing) s")
+            }
+            test("\(theme.title) hangs the posters: \(claim.posters)") {
+                expect(Looks.current.hangsPosters == claim.posters, "hangsPosters is \(Looks.current.hangsPosters)")
             }
             test("\(theme.title) rims its offices: \(claim.rims)") {
                 expect(Looks.current.rimsOffices == claim.rims, "rimsOffices is \(Looks.current.rimsOffices)")

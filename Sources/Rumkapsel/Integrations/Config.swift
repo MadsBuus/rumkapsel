@@ -40,6 +40,7 @@ struct AppConfig: Codable, Equatable {
     var themeName: String?
     var theme: Theme { Theme(rawValue: themeName ?? "") ?? .classic }
     var placementName: String?
+    var dramaticLight: Bool?
     var officePlacement: OfficePlacement { OfficePlacement(rawValue: placementName ?? "") ?? .rings }
     var shareOnLAN: Bool = false
     var shareName: String = NSUserName()
@@ -178,7 +179,7 @@ enum ConfigFile {
         let raw = raws[url.path] ?? [:]
         var out = raw
         for (k, v) in fresh where k != "repos" { out[k] = v }
-        for k in ["viewerLogin", "showRepoTitles", "themeName", "placementName", "projectOwner", "projectNumber", "projectStatuses", "projectField", "useProject"]
+        for k in ["viewerLogin", "showRepoTitles", "themeName", "placementName", "dramaticLight", "projectOwner", "projectNumber", "projectStatuses", "projectField", "useProject"]
             where fresh[k] == nil { out[k] = nil }
         let before = raw["repos"] as? [String: Any] ?? [:]
         var repos: [String: Any] = [:]
