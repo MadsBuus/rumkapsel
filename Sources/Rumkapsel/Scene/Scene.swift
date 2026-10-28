@@ -325,6 +325,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var fields: [String: HangarField] = [:]
     var padFields: [String: HangarField] = [:]
     var vortexViews: [String: VortexView] = [:]
+    var testingArrows: [String: TestingArrow] = [:]
     var lights: [SCNNode] = []
     var padRings: [String: SCNNode] = [:]
     var padStrips: [String: (node: SCNNode, shown: Double)] = [:]
@@ -1186,6 +1187,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             tickPuffs(dt: dt)
             tickPadFields()
             drawVortices()
+            drawTestingArrows()
         }
         tickCrateMotions()
         tickOffices()

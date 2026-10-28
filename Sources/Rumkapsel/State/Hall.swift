@@ -30,6 +30,10 @@ struct Hall {
     var deckCells: [Cell] { clearedCells + stagedCells }
     var backWall: [Cell] { cells.filter { $0.x == (cells.map(\.x).min() ?? 0) } }
     var lanes: Set<Cell> { Set(aisleCells + walkwayCells) }
+    var clearingAisle: [Cell] {
+        guard let front = clearedCells.map(\.y).max(), let back = stagedCells.map(\.y).min() else { return [] }
+        return aisleCells.filter { $0.y > front && $0.y < back }
+    }
 
     private init() {
         cells = []; walkwayCells = []; aisleCells = []; clearedCells = []; stagedCells = []; storageCells = []
