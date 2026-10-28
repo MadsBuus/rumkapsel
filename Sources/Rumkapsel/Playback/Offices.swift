@@ -21,8 +21,15 @@ struct ShownOffice: Equatable {
     var openedAt: Date
     var look = Look()
     var phase: Phase
+    var epic: OfficeFact.Epic?
+    var epicAt = 0.0
 
-    static let fadeSeconds = 2.5, crateFolds = 0.35
+    static let fadeSeconds = 2.5, crateFolds = 0.35, furnishSeconds = 0.9
+
+    func furnished(at clock: Double) -> Double {
+        let t = ShownOffice.clamp((clock - epicAt) / ShownOffice.furnishSeconds)
+        return 1 - (1 - t) * (1 - t)
+    }
 
     func room(_ key: String) -> Room {
         let r = Room(key: key, name: name, repo: repo, color: color, cells: cells, lastActive: lastActive, openedAt: openedAt)
@@ -165,7 +172,11 @@ extension Simulation {
         for (id, since) in view.folds where clock - since >= ShownOffice.crateFolds { view.folds[id] = nil }
         for key in view.offices.keys.sorted() {
             guard let o = view.offices[key] else { continue }
-            if case .folding = o.phase {} else if st.facts.offices[key] != nil, let room = st.rooms[key] { view.offices[key] = shot(st, room, o.phase) }
+            if case .folding = o.phase {} else if st.facts.offices[key] != nil, let room = st.rooms[key] {
+                var now = shot(st, room, o.phase)
+                now.epicAt = o.epic == nil && now.epic != nil ? clock : o.epicAt
+                view.offices[key] = now
+            }
             guard o.done(at: clock) else { continue }
             if case .folding = o.phase {
                 view.offices[key] = nil
@@ -202,7 +213,7 @@ extension Simulation {
                                     who: world.occupant(of: full))
         return ShownOffice(cells: room.cells, door: st.doorCell(of: room.key), outside: st.doorOutside(of: room.key), name: room.name,
                            repo: room.repo, color: room.color, branch: room.branch, repoRoot: room.repoRoot, worktree: room.worktree,
-                           lastActive: room.lastActive, openedAt: room.openedAt, look: look, phase: phase)
+                           lastActive: room.lastActive, openedAt: room.openedAt, look: look, phase: phase, epic: st.facts.offices[room.key]?.epic)
     }
 
     private func arrive(_ st: Station, _ key: String, _ view: inout Shown) {
@@ -401,8 +412,10 @@ extension Simulation {
     }
 
     private func linger(_ st: Station) {
-        let gone = (shown[st.name]?.offices ?? [:]).filter { st.rooms[$0.key] == nil }
+        let offices = shown[st.name]?.offices ?? [:]
+        let gone = offices.filter { st.rooms[$0.key] == nil }
         st.linger(Dictionary(uniqueKeysWithValues: gone.map { ($0.key, $0.value.room($0.key)) }))
+        st.show(epics: offices.compactMapValues(\.epic))
     }
 
     private func cancel(_ id: Int) {

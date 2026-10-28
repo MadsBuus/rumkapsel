@@ -446,8 +446,8 @@ extension StationController {
                 let shown = office.map { $0.label(at: clock) } ?? 1
                 let fading = office.map { o in room.cells.map { o.tile($0, at: clock) } } ?? []
                 let drawnKey = "\(at)|\(room.cells)|\(NSColor(room.color))|\(look)|\(light)|\(String(describing: door))|\(office?.up ?? false)|\(shown)|\(fading)|"
-                    + "\(sign(for: room, who: look.who))|\(touching(edges, room.cells))|\(around(station, room.cells))"
-                statics.piece("office:" + key, key: drawnKey, drop: { [weak self] in self?.roomTiles[key] = nil; self?.officeParts[key] = nil }) { bag in
+                    + "\(sign(for: room, who: look.who))|\(touching(edges, room.cells))|\(around(station, room.cells))|\(String(describing: office?.epic))|\(String(describing: station.planningConsole(room.key)))"
+                statics.piece("office:" + key, key: drawnKey, drop: { [weak self] in self?.roomTiles[key] = nil; self?.officeParts[key] = nil; self?.epicChairs[key] = nil; self?.epicProps[key] = nil }) { bag in
                     drawOffice(station, room, office, look: look, light: light, door: door, shown: shown, into: bag)
                 }
             }
@@ -541,6 +541,21 @@ extension StationController {
                     bag.add(edge)
                 }
             }
+        }
+        epicChairs[key] = nil
+        epicProps[key] = nil
+        if let office, office.up, let epic = office.epic {
+            let f = Looks.current.furnishEpic(room, in: station, epic: epic, color: full)
+            let grown = office.furnished(at: clock)
+            for n in f.props + f.fixtures {
+                n.name = "room:" + key
+                n.opacity = CGFloat(shown)
+                n.scale = SCNVector3(1, max(0.01, grown), 1)
+                parts.append((n, 1))
+                bag.add(n)
+            }
+            epicChairs[key] = f.chairs.first.map { ($0.key, $0.value) }
+            epicProps[key] = f.props + f.fixtures
         }
         officeParts[key] = office != nil ? parts : nil
     }

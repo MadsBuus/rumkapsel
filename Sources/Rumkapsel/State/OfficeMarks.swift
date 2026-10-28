@@ -5,6 +5,7 @@ struct OfficeMarks {
     var ghosts = 0
     var pull: PullRequest?
     var package: Cell?
+    var number: Int?
     var pile: [Cube] = []
     var packaged: Bool { package != nil }
 }
@@ -43,9 +44,15 @@ extension Station {
     func farCells(_ room: Room) -> [Cell] {
         let door = doorCell(of: room.key) ?? room.cells.first!
         let written = self.written[room.key] ?? []
+        let console = consoleCells(room.key)
+        func near(_ c: Cell) -> Int { console.map { abs($0.x - c.x) + abs($0.y - c.y) }.min() ?? 0 }
         return room.cells.sorted { a, b in
+            if console.contains(a) != console.contains(b) { return console.contains(b) }
+            if !console.isEmpty, (a == door) != (b == door) { return b == door }
+            if !console.isEmpty, (near(a) <= 1) != (near(b) <= 1) { return near(a) <= 1 }
             let wa = written.contains(a), wb = written.contains(b)
             if wa != wb { return !wa }
+            if near(a) != near(b) { return near(a) < near(b) }
             let da = abs(a.x - door.x) + abs(a.y - door.y), db = abs(b.x - door.x) + abs(b.y - door.y)
             return da != db ? da > db : (a.y, a.x) < (b.y, b.x)
         }
@@ -67,24 +74,38 @@ extension Simulation {
     private func fresh(_ st: Station, _ room: Room) -> OfficeMarks? {
         let full = st.name + "|" + room.key
         guard let branch = room.branch else {
-            guard let boxes = world.crewBoxes[full] ?? world.peerBoxes[full], !crateLeft(st, room) else { return nil }
             let peer = world.crewRoomInfo[full] == nil ? world.peerPull(full) : nil
             let number = world.crewPull(full) ?? peer?.pull
+            let left = crateLeft(st, room, pull: number)
+            guard let boxes = world.crewBoxes[full] ?? world.peerBoxes[full], !left || st.isEpic(room.key) else { return nil }
             let closed = world.isClosed(full)
             var pr = PullRequest(number: number ?? 0, title: "", state: closed ? "CLOSED" : (peer?.pullState ?? (number != nil ? "OPEN" : boxes.state)),
                                  reviewDecision: peer?.review ?? "", isDraft: false, url: "")
             pr.checks = peer?.checks ?? ""
-            return OfficeMarks(count: min(16, max(1, boxes.count)), pull: pr, package: number != nil || closed ? package(st, room) : nil)
+            return OfficeMarks(count: min(16, max(1, boxes.count)), pull: left ? nil : pr, package: !left && (number != nil || closed) ? package(st, room) : nil,
+                               number: crate(st, room, pull: number))
         }
         let local = world.localState(room)
         let dirty = room.worktree.map { world.github.git.dirtyFiles(worktree: $0) } ?? 0
-        guard local.commits > 0 || dirty > 0, !crateLeft(st, room) else { return nil }
         let pr = room.repoRoot.flatMap { world.github.pulls.pull(branch: branch, repoRoot: $0) }
-        return OfficeMarks(count: world.cubes(room) ?? 0, ghosts: min(8, Int(pow(Double(dirty), 0.6).rounded(.up))), pull: pr, package: pr != nil ? package(st, room) : nil)
+        let left = crateLeft(st, room, pull: pr?.number)
+        guard local.commits > 0 || dirty > 0, !left || st.isEpic(room.key) else { return nil }
+        return OfficeMarks(count: world.cubes(room) ?? 0, ghosts: min(8, Int(pow(Double(dirty), 0.6).rounded(.up))), pull: left ? nil : pr,
+                           package: !left && pr != nil ? package(st, room) : nil,
+                           number: crate(st, room, pull: pr?.number))
     }
 
-    private func crateLeft(_ st: Station, _ room: Room) -> Bool {
-        guard let repo = room.repo, let r = world.works.find(officeKey: room.key, repo: repo), let n = r.number else { return false }
+    private func packed(_ room: Room, pull: Int?) -> WorkBook.Record? {
+        guard let repo = room.repo else { return nil }
+        return pull.flatMap { world.works.find(repo: repo, pull: $0) }.flatMap { $0.epic != nil ? $0 : nil } ?? world.works.find(officeKey: room.key, repo: repo)
+    }
+
+    private func crate(_ st: Station, _ room: Room, pull: Int?) -> Int? {
+        packed(room, pull: pull).flatMap { $0.epic != nil ? $0.number : nil } ?? world.taskNumber(room) ?? pull
+    }
+
+    private func crateLeft(_ st: Station, _ room: Room, pull: Int?) -> Bool {
+        guard let repo = room.repo, let r = packed(room, pull: pull), let n = r.number else { return false }
         if r.stage.map({ $0 >= .stored }) == true { return true }
         guard let at = shown[st.name]?.crates[CrateID(repo: repo, number: n)] else { return false }
         return at != .office(room.key)
@@ -97,7 +118,7 @@ extension Simulation {
 
     private func package(_ st: Station, _ room: Room) -> Cell {
         let full = st.name + "|" + room.key
-        if let held = packageCells[full], room.cells.contains(held) { return held }
+        if let held = packageCells[full], room.cells.contains(held), !st.consoleCells(room.key).contains(held) { return held }
         let coned = Set(bodies.values.filter { $0.station == st.name }.flatMap(\.cones))
         let cells = st.farCells(room)
         let cell = cells.first { !coned.contains($0) } ?? cells.first!

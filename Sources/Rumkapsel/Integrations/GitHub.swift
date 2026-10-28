@@ -8,7 +8,7 @@ struct PullRequest: Equatable {
     let isDraft: Bool
     let url: String
     var checks: String = ""
-    var closes: [Int] = []
+    var closes: [Int]?
     var shipped = false
     var backMerge = false
 
@@ -99,6 +99,7 @@ struct OpenPR: Equatable, Codable {
     let branch: String
     let url: String
     let createdAt: Date
+    var closes: [Int]? = nil
 }
 
 final class GitHubResolver {
@@ -254,7 +255,7 @@ final class GitHubResolver {
     }
 
     func note(task pr: PullRequest, repoRoot: String) {
-        guard let issue = pr.closes.first else { return }
+        guard let issue = pr.closes?.first else { return }
         lock.lock()
         guard let owner = owners[repoRoot] else { lock.unlock(); return }
         let repo = String(owner.split(separator: "/").last ?? "")
@@ -615,6 +616,12 @@ extension GitHubResolver {
     func inject(pull pr: PullRequest, number: Int, repoRoot: String) {
         guard frozen else { return }
         pulls.inject(pull: pr, number: number, repoRoot: repoRoot)
+    }
+
+    func inject(issue number: Int, open: Bool, repoRoot: String) {
+        guard frozen else { return }
+        pulls.inject(issue: number, open: open, repoRoot: repoRoot)
+        notify()
     }
 
     func inject(feed events: [FeedEvent], for repoRoot: String) {

@@ -263,8 +263,8 @@ final class SimulatorModel: ObservableObject {
         for r in repos {
             let sent = launches.filter { $0.repo == r }.map(\.pr)
             var open = offices.filter { $0.repo == r && ($0.owner == .teammate ? $0.prOpen : $0.pull?.state == "OPEN") }.map {
-                OpenPR(number: $0.number, title: $0.title, author: $0.owner == .me ? "me" : $0.who, isBot: false, branch: $0.branch,
-                       url: "https://example.invalid/\(r)/\($0.number)", createdAt: $0.startedAt)
+                OpenPR(number: $0.pull?.number ?? $0.number, title: $0.title, author: $0.owner == .me ? "me" : $0.who, isBot: false, branch: $0.branch,
+                       url: "https://example.invalid/\(r)/\($0.pull?.number ?? $0.number)", createdAt: $0.startedAt, closes: $0.pull?.closes)
             }
             open += (botPRs[r] ?? []).map {
                 OpenPR(number: $0.number, title: $0.title, author: bot, isBot: true, branch: $0.branch,
@@ -756,8 +756,11 @@ final class SimulatorModel: ObservableObject {
                        mine && o?.pull != nil ? .already("this office already has a pull request") : needsMine),
                 button("Approve PR", "…is approved", needsOpenPull),
                 button("Checks failing", "…checks go red", needsOpenPull),
+                button("Open PR, part of the issue", "Opens a pull request that doesn't close the issue",
+                       mine && o?.pull?.state == "OPEN" ? .already("this office already has an open pull request") : needsMine),
                 button("Merge PR", "…is merged", needsOpenPull),
                 button("Close PR", "…is closed unmerged", needsOpenPull),
+                button("Issue closes", "The office's issue is closed", needsMine),
                 button("New branch in repo", "A new office of mine in \(repo)"),
                 button("New branch, no issue", "A new office of mine in \(repo), on a branch with no issue in its name"),
             ]),
@@ -765,6 +768,7 @@ final class SimulatorModel: ObservableObject {
                 button("Teammate: New branch", "A new branch in \(repo)"),
                 button("Teammate: Push", "He pushes", teammateAny),
                 button("Teammate: Open PR", "He opens a pull request", teammateBranch),
+                button("Teammate: Open PR, part of the issue", "He opens a pull request that doesn't close the issue", teammateBranch),
                 button("Teammate: Merge PR", "…merges it", teammatePull),
                 button("Teammate: Close PR", "…closes it unmerged", teammatePull),
                 button("Teammate: Close PR (feed lags)", "…closes it, the feed lagging", teammatePull),
@@ -1016,11 +1020,14 @@ final class SimulatorModel: ObservableObject {
             sessions[target]?.last = station.now
             pushGitHub()
             pushScan()
-        case "Open PR", "Approve PR", "Checks failing", "Merge PR", "Close PR":
+        case "Open PR", "Open PR, part of the issue", "Approve PR", "Checks failing", "Merge PR", "Close PR":
             guard let o = office else { return }
-            let n = o.home.issue ?? o.number
+            let part = name == "Open PR, part of the issue"
+            let n = part ? nextIssue(o.repo) : o.pull?.number ?? o.home.issue ?? o.number
             let url = "https://example.invalid/\(o.repo)/\(n)"
             let title = "work on \(o.branch)"
+            let closes = part ? [] : o.pull?.closes
+            if part, let issue = o.home.issue { github.inject(issue: issue, open: board.first { $0.repo == o.repo && $0.number == issue }?.isClosed != true, repoRoot: root(o.repo)) }
             var pr = PullRequest(number: n, title: title, state: "OPEN", reviewDecision: "REVIEW_REQUIRED", isDraft: false, url: url)
             switch name {
             case "Approve PR": pr = PullRequest(number: n, title: title, state: "OPEN", reviewDecision: "APPROVED", isDraft: false, url: url)
@@ -1029,7 +1036,14 @@ final class SimulatorModel: ObservableObject {
             case "Close PR": pr = PullRequest(number: n, title: title, state: "CLOSED", reviewDecision: "", isDraft: false, url: url)
             default: break
             }
+            pr.closes = closes
             setPull(pr, on: o.uid)
+        case "Issue closes":
+            guard let o = office, let issue = o.home.issue else { return }
+            if let i = board.firstIndex(where: { $0.repo == o.repo && $0.number == issue }) { board[i].state = "CLOSED"; board[i].updatedAt = station.now }
+            github.inject(issue: issue, open: false, repoRoot: root(o.repo))
+            pushGitHub()
+            pushScan()
 
         case "Teammate: New branch":
             let n = nextIssue(repo)
@@ -1041,10 +1055,16 @@ final class SimulatorModel: ObservableObject {
             feedEvent("branch_create", repo: repo, branch: o.branch, pr: nil, title: nil)
             feedEvent("push", repo: repo, branch: o.branch, pr: nil, title: nil, detail: "1")
             pushGitHub()
-        case "Teammate: Open PR":
+        case "Teammate: Open PR", "Teammate: Open PR, part of the issue":
             guard let o = leoBranchWithoutPR, let i = index(o.uid) else { return }
             offices[i].prOpen = true
-            feedEvent("pr_open", repo: o.repo, branch: o.branch, pr: o.number, title: o.title)
+            if name.hasSuffix("part of the issue") {
+                var pr = PullRequest(number: nextIssue(o.repo), title: o.title, state: "OPEN", reviewDecision: "", isDraft: false, url: "")
+                pr.closes = []
+                offices[i].pull = pr
+                github.inject(issue: o.number, open: true, repoRoot: root(o.repo))
+            }
+            feedEvent("pr_open", repo: o.repo, branch: o.branch, pr: offices[i].pull?.number ?? o.number, title: o.title)
             pushGitHub()
         case "Teammate: Push":
             guard let o = leoOffice, let i = index(o.uid) else { return }
@@ -1056,12 +1076,14 @@ final class SimulatorModel: ObservableObject {
             guard let o = leoOpenPR else { return }
             offices.removeAll { $0.uid == o.uid }
             let fate = name.contains("Merge PR") ? "MERGED" : "CLOSED"
-            pullFates["\(o.repo)#\(o.number)"] = fate
-            let answer = PullRequest(number: o.number, title: o.title, state: fate, reviewDecision: "", isDraft: false, url: "https://example.invalid/\(o.repo)/\(o.number)")
+            let n = o.pull?.number ?? o.number
+            pullFates["\(o.repo)#\(n)"] = fate
+            var answer = PullRequest(number: n, title: o.title, state: fate, reviewDecision: "", isDraft: false, url: "https://example.invalid/\(o.repo)/\(n)")
+            answer.closes = o.pull?.closes
             github.inject(pull: answer, for: o.branch, repoRoot: root(o.repo))
-            github.inject(pull: answer, number: o.number, repoRoot: root(o.repo))
+            github.inject(pull: answer, number: n, repoRoot: root(o.repo))
             if !name.hasSuffix("(feed lags)") {
-                feedEvent(fate == "MERGED" ? "pr_merge" : "pr_close", repo: o.repo, branch: o.branch, pr: o.number, title: o.title)
+                feedEvent(fate == "MERGED" ? "pr_merge" : "pr_close", repo: o.repo, branch: o.branch, pr: n, title: o.title)
             }
             pushGitHub()
 
@@ -1315,7 +1337,7 @@ final class SimulatorModel: ObservableObject {
             case .opened(let key, _, .shuttle(let who)): what = "opened \(st)|\(key) by shuttle for \(who ?? "anyone")"
             case .opened(let key, _, let via): what = "opened \(st)|\(key) \(via)"
             case .renamed(let from, let to): what = "renamed \(st)|\(from) -> \(to)"
-            case .status(let key, _, let merged, let closedAt): what = "status \(st)|\(key)\(merged ? " merged" : "")\(closedAt == nil ? "" : " closed")"
+            case .status(let key, _, let merged, let closedAt, _): what = "status \(st)|\(key)\(merged ? " merged" : "")\(closedAt == nil ? "" : " closed")"
             case .gone(let key): what = "gone \(st)|\(key)"
             }
             return "office " + what + (why.isEmpty ? "" : " (\(why))")

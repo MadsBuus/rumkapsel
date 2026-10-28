@@ -102,6 +102,33 @@ final class PullSource: Intake {
         return byNumber[repoRoot + "#\(number)"] != nil
     }
 
+    private var issues: [String: (open: Bool, at: Date)] = [:]
+
+    func issueOpen(_ number: Int, repoRoot: String) -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return issues[repoRoot + "#\(number)"]?.open
+    }
+
+    func refresh(issue number: Int, repoRoot: String) {
+        guard let github, !github.frozen else { return }
+        let key = repoRoot + "?\(number)"
+        lock.lock()
+        if let (_, at) = issues[repoRoot + "#\(number)"], Date().timeIntervalSince(at) < github.baseInterval { lock.unlock(); return }
+        if inFlight.contains(key) { lock.unlock(); return }
+        inFlight.insert(key)
+        lock.unlock()
+        github.trace("ask issue \(repoRoot)#\(number)")
+        queue.async { [self] in
+            let out = github.run(["gh", "issue", "view", "\(number)", "--json", "state"], cwd: repoRoot)
+            let state = out.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["state"] as? String
+            lock.lock()
+            inFlight.remove(key)
+            if let state { issues[repoRoot + "#\(number)"] = (state == "OPEN", Date()) }
+            lock.unlock()
+            if state != nil { updated() }
+        }
+    }
+
     func isBusy(repoRoot: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return inFlight.contains { $0.hasSuffix(repoRoot) || $0.hasPrefix(repoRoot + "@") }
@@ -178,7 +205,7 @@ final class PullSource: Intake {
             guard let github = self.github else { return }
             let iso = ISO8601DateFormatter()
             var found: [OpenPR] = []
-            guard let out = github.run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt"], cwd: repoRoot) else {
+            guard let out = github.run(["gh", "pr", "list", "--state", "open", "--limit", "40", "--json", "number,title,author,headRefName,url,createdAt,updatedAt,closingIssuesReferences,body"], cwd: repoRoot) else {
                 github.trace("openPRs \(repoRoot) failed")
                 lock.lock(); failedAt["o:" + repoRoot] = Date(); lock.unlock()
                 return
@@ -192,7 +219,7 @@ final class PullSource: Intake {
                     let isBot = (a?["is_bot"] as? Bool ?? false) || GitHubResolver.isBot(login)
                     found.append(OpenPR(number: o["number"] as? Int ?? 0, title: o["title"] as? String ?? "", author: login, isBot: isBot,
                                         branch: o["headRefName"] as? String ?? "", url: o["url"] as? String ?? "",
-                                        createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? Date()))
+                                        createdAt: (o["createdAt"] as? String).flatMap(iso.date(from:)) ?? Date(), closes: PullSource.closes(o)))
                 }
             }
             lock.lock()
@@ -217,7 +244,7 @@ final class PullSource: Intake {
         queue.async { [self] in
             defer { if landed(key) { refetch(pull: number, branch: "", repoRoot: repoRoot) } }
             guard let github = self.github,
-                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,closingIssuesReferences,headRefOid,baseRefName,mergedAt"], cwd: repoRoot),
+                  let out = github.run(["gh", "pr", "view", "\(number)", "--json", "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,closingIssuesReferences,body,headRefOid,baseRefName,mergedAt"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: out) as? [String: Any] else { return }
             var pr = PullRequest(number: o["number"] as? Int ?? number, title: o["title"] as? String ?? "",
                                  state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
@@ -227,7 +254,7 @@ final class PullSource: Intake {
             pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
             lock.lock(); byNumber[key] = (pr, Date()); lock.unlock()
             github.note(task: pr, repoRoot: repoRoot)
-            github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
+            github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes?.first)
             updated()
         }
     }
@@ -263,10 +290,10 @@ final class PullSource: Intake {
                 pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
                 pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
                 github.note(task: pr, repoRoot: repoRoot)
-                github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes.first)
+                github.note(author: o, number: pr.number, repoRoot: repoRoot, issue: pr.closes?.first)
                 return pr
             }
-            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,statusCheckRollup,closingIssuesReferences,headRefOid,baseRefName,mergedAt"
+            let fields = "number,title,state,reviewDecision,isDraft,url,author,createdAt,mergeCommit,statusCheckRollup,closingIssuesReferences,body,headRefOid,baseRefName,mergedAt"
             var answered = false
             if let out = github.run(["gh", "pr", "list", "--head", branch, "--state", "open", "--limit", "1", "--json", fields], cwd: repoRoot),
                let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]], let o = arr.first {
@@ -445,8 +472,15 @@ final class PullSource: Intake {
 
     // MARK: in flight
 
-    private static func closes(_ o: [String: Any]) -> [Int] {
-        ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
+    static func closes(_ o: [String: Any]) -> [Int] {
+        let linked = ((o["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap { $0["number"] as? Int }
+        let said = closes(saying: o["body"] as? String ?? "")
+        return linked + said.filter { !linked.contains($0) }
+    }
+
+    static func closes(saying body: String) -> [Int] {
+        body.matches(of: #/(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)\b/#).compactMap { Int($0.1) }
+            .reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
     }
 
     struct Dug: Equatable { let number: Int; let state: String; let shipped: Bool }
@@ -562,5 +596,9 @@ final class PullSource: Intake {
 
     func inject(feed events: [FeedEvent], for repoRoot: String) {
         lock.lock(); feeds[repoRoot] = (events, Date()); lock.unlock()
+    }
+
+    func inject(issue number: Int, open: Bool, repoRoot: String) {
+        lock.lock(); issues[repoRoot + "#\(number)"] = (open, Date()); lock.unlock()
     }
 }

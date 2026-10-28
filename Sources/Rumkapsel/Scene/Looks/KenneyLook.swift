@@ -327,7 +327,7 @@ struct KenneyLook: Look {
     }
 
     func dress(office room: Room, in station: Station, sign: OfficeSign) -> SCNNode? {
-        guard let wall = station.officeWall(room) else { return nil }
+        guard !station.isEpic(room.key), let wall = station.officeWall(room) else { return nil }
         let d = wall.out
         guard let desk = Kit.prop("desk_computer", scale: 0.8, yaw: atan2(-d.x, -d.y), color: NSColor(room.color)) else { return nil }
         let at = station.desk(room, theme: .kenney) ?? SIMD2(Double(wall.cell.x), Double(wall.cell.y))

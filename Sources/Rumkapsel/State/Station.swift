@@ -319,6 +319,14 @@ final class Station {
         return lingeringAt[cell].flatMap { lingering[$0] }
     }
 
+    private(set) var epics: [String: OfficeFact.Epic] = [:]
+
+    func show(epics: [String: OfficeFact.Epic]) {
+        guard epics != self.epics else { return }
+        self.epics = epics
+        forgetFloorPlan()
+    }
+
     func linger(_ shown: [String: Room]) {
         guard Set(shown.keys) != Set(lingering.keys) || shown.contains(where: { lingering[$0.key]?.cells != $0.value.cells }) else { return }
         lingering = shown

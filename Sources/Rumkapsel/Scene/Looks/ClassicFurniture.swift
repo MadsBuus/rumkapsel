@@ -478,14 +478,43 @@ extension Classic {
         return f
     }
 
+    static func epic(_ room: Room, in station: Station, epic: OfficeFact.Epic, color: NSColor) -> Furnishing {
+        var f = Furnishing()
+        guard let console = station.planningConsole(room.key) else { return f }
+        let o = station.offset
+        func at(_ n: SCNNode, _ spot: SIMD2<Double>, _ y: Double = 0, yaw: Double) -> SCNNode {
+            n.position = v3(o.x + spot.x, y, o.y + spot.y)
+            n.eulerAngles.y = CGFloat(yaw)
+            return n
+        }
+        let desk = EpicRoom.console(color: color)
+        desk.addChildNode(EpicRoom.tallyBoard(epic.shipped, color: color))
+        f.props.append(at(desk, console.at, yaw: console.yaw))
+        if let seat = console.place(0) {
+            let chair = at(chair(height: Seat.height), seat.chair, yaw: seat.facing + .pi)
+            f.props.append(chair)
+            f.chairs[FixtureRef(room: room.key, fixture: 0, anchor: 0)] = chair
+        }
+        if let pole = station.byTheDoor(room) { f.fixtures.append(at(EpicRoom.pennant(color: color), pole.at, yaw: atan2(-pole.inward.y, pole.inward.x))) }
+        return f
+    }
+
     static func chair(height: Double) -> SCNNode {
         let chair = SCNNode()
         let dark = lit(NSColor(rgb: (0.16, 0.17, 0.2)))
         let under = -Seat.back / 2
         chair.addChildNode(MissionRoom.box(Seat.width, 0.03, Seat.depth, dark, at: v3(0, height - 0.015, under), chamfer: 0.01))
         chair.addChildNode(MissionRoom.box(0.03, height - 0.03, 0.03, lit(NSColor(rgb: (0.3, 0.31, 0.35))), at: v3(0, (height - 0.03) / 2, under)))
-        chair.addChildNode(MissionRoom.box(Seat.width, 0.24, Seat.back, dark, at: v3(0, height + 0.14, Seat.depth / 2), chamfer: 0.01))
+        let back = SCNNode()
+        back.name = "back"
+        back.position = v3(0, height, Seat.depth / 2)
+        back.addChildNode(MissionRoom.box(Seat.width, 0.24, Seat.back, dark, at: v3(0, 0.14, 0), chamfer: 0.01))
+        chair.addChildNode(back)
         return chair
+    }
+
+    static func recline(_ chair: SCNNode, by angle: Double) {
+        chair.childNode(withName: "back", recursively: false)?.eulerAngles.x = CGFloat(angle)
     }
 
     static func bed(floorTop: Double) -> SCNNode {

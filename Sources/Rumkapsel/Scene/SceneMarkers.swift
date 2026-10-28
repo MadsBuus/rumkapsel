@@ -75,12 +75,15 @@ extension StationController {
                         : checks == "pending" ? NSColor(rgb: (1.0, 0.72, 0.25)) : (status ?? NSColor(rgb: (0.4, 0.82, 0.45)))
                     let blink = checks == "pending" && !closed
                     let mine = world.isMine(office: key)
-                    let task = world.taskNumber(room) ?? pr?.number
+                    let task = marks.number
                     let words = crateWords(repo: room.repo, number: task)
-                    let built = "\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)|\(words.title ?? "")|\(words.who ?? "")"
+                    let built = "\(task ?? 0)|\(closed)|\(mine)|\(room.color.r),\(room.color.g),\(room.color.b)|\(words.title ?? "")|\(words.who ?? "")"
                     signatures[key] = "package"
                     var pkg = packages[key]
-                    if let p = pkg, p.parent == nil || packageBuilt[key] != built { p.removeFromParentNode(); packages[key] = nil; pkg = nil }
+                    if let p = pkg, p.parent == nil || packageBuilt[key] != built {
+                        if !crateNodes.values.contains(where: { $0 === p }) { p.removeFromParentNode() }
+                        packages[key] = nil; pkg = nil
+                    }
                     if pkg == nil {
                         let p = Props.package(color: closed ? NSColor(rgb: (0.75, 0.2, 0.2)) : NSColor(room.color), band: light, size: size, blink: blink, mine: mine,
                                               number: task, title: words.title, who: words.who)
@@ -88,10 +91,11 @@ extension StationController {
                         markerRoot.addChildNode(p)
                         packages[key] = p
                         packageBuilt[key] = built
+                        packageNumber[key] = task
                         pkg = p
                     }
                     guard let p = pkg else { continue }
-                    drawn.filter { $0 !== p }.forEach { $0.removeFromParentNode() }
+                    drawn.filter { n in n !== p && !crateNodes.values.contains { $0 === n } }.forEach { $0.removeFromParentNode() }
                     let at = v3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
                     if p.position.x != at.x || p.position.z != at.z { p.position = at }
                     relight(p, light: light, blink: blink, failing: failing, size: size)
@@ -349,6 +353,7 @@ extension StationController {
             if case .office = at {} else if let n = crateNodes[key], let office = packages.first(where: { $0.value === n })?.key {
                 packages[office] = nil
                 packageBuilt[office] = nil
+                packageNumber[office] = nil
             }
             let pos: SIMD3<Double>, yaw: Double, zone: Zone
             switch at {
@@ -364,16 +369,20 @@ extension StationController {
             case .office(let room):
                 live.insert(key)
                 let office = station.name + "|" + room
-                if let pkg = packages[office] {
+                if let pkg = packages[office], packageNumber[office].map({ $0 == id.number }) ?? true {
                     if let old = crateNodes[key], old !== pkg { stopCrate(old); old.removeFromParentNode() }
                     crateNodes[key] = pkg
                     crateLooks[key] = nil
                     keep.insert(ObjectIdentifier(pkg))
-                } else if let n = crateNodes[key] ?? (station.facts.crates[id]?.place != .office(room) ? crateNode(station, id, zone: .waiting, at: officeAt(station, room), yaw: 0) : nil) {
-                    rack(n)
-                    let to = officeAt(station, room)
-                    if !crateMoving(n), simd_distance(position(n), to) > 0.001 { n.position = v3(to.x, to.y, to.z) }
-                    keep.insert(ObjectIdentifier(n))
+                } else {
+                    if let n = crateNodes[key], n === packages[office] { crateNodes[key] = nil }
+                    let beside = packages[office] != nil
+                    if let n = crateNodes[key] ?? (station.facts.crates[id]?.place != .office(room) || beside ? crateNode(station, id, zone: .waiting, at: officeAt(station, room, beside: beside), yaw: 0) : nil) {
+                        rack(n)
+                        let to = officeAt(station, room, beside: beside)
+                        if !crateMoving(n), simd_distance(position(n), to) > 0.001 { n.position = v3(to.x, to.y, to.z) }
+                        keep.insert(ObjectIdentifier(n))
+                    }
                 }
                 continue
             case .row(let s): pos = s.pos; yaw = s.yaw; zone = s.zone
@@ -431,9 +440,11 @@ extension StationController {
 
     private func position(_ n: SCNNode) -> SIMD3<Double> { SIMD3(Double(n.position.x), Double(n.position.y), Double(n.position.z)) }
 
-    private func officeAt(_ station: Station, _ room: String) -> SIMD3<Double> {
+    private func officeAt(_ station: Station, _ room: String, beside: Bool = false) -> SIMD3<Double> {
         let shown = simulation.shown[station.name]?.offices[room]
-        let cell = simulation.packageCell(station, room) ?? shown?.door ?? Cell(x: 0, y: 0)
+        let packed = simulation.packageCell(station, room)
+        let next = beside ? shown.flatMap { o in station.farCells(o.room(room)).first { $0 != packed } } : nil
+        let cell = next ?? packed ?? shown?.door ?? Cell(x: 0, y: 0)
         return SIMD3(station.offset.x + Double(cell.x), 0, station.offset.y + Double(cell.y))
     }
 

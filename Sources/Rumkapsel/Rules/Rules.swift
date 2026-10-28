@@ -16,9 +16,11 @@ struct WorkNews: Equatable {
 enum OfficeNews: Equatable {
     case opened(String, repo: String?, via: OfficeFact.Via)
     case renamed(from: String, to: String)
-    case status(String, crate: CrateID?, merged: Bool, closedAt: Date?)
+    case status(String, crate: CrateID?, merged: Bool, closedAt: Date?, epic: EpicNews? = nil)
     case gone(String)
 }
+
+enum EpicNews: Equatable { case open(shipped: Int), closed }
 
 enum StagingNews: Equatable { case opened(Int), merged(Int), closed(Int), deploy(StagingFact.Deploy) }
 
@@ -127,10 +129,20 @@ enum Rules {
     }
 
     static func officeEnds(_ o: OfficeFact, now: Date, mine: Bool, lan: Bool) -> String? {
+        if o.epic?.closed == true, !lan { return "issue closed" }
+        if o.epic != nil, !o.merged { return nil }
         guard !mine, !lan else { return nil }
         if o.merged { return "merged" }
         if let at = o.closedAt, now.timeIntervalSince(at) > closedFor { return "closed, not merged" }
         return nil
+    }
+
+    static func epic(_ was: OfficeFact.Epic?, _ news: EpicNews?) -> OfficeFact.Epic? {
+        switch news {
+        case .open(let shipped)?: return OfficeFact.Epic(shipped: shipped)
+        case .closed?: return OfficeFact.Epic(shipped: was?.shipped ?? 0, closed: true)
+        case nil: return was?.closed == true ? was : nil
+        }
     }
 
     static func place(_ stage: Stage, _ r: RepoFacts, office: String?, old: CrateFact.Place?) -> CrateFact.Place? {
@@ -212,9 +224,10 @@ enum Rules {
             guard let o = f.offices.removeValue(forKey: from) else { return }
             if f.offices[to] == nil { f.offices[to] = o.keyed(to) }
             fx.append(.renamed(.office(from), to: .office(to)))
-        case .status(let key, let crate, let merged, let closedAt):
+        case .status(let key, let crate, let merged, let closedAt, let epic):
             guard var o = f.offices[key] else { return }
             o.crate = crate; o.merged = merged
+            o.epic = Rules.epic(o.epic, epic)
             o.closedAt = closedAt.map { at in o.closedAt.map { min($0, at) } ?? at }
             f.offices[key] = o
         case .gone(let key):

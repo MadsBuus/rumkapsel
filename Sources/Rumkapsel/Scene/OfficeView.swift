@@ -26,6 +26,10 @@ extension StationController {
         var sinking: Set<String> = []
         for station in fleet.stations.values {
             let view = simulation.shown[station.name] ?? Shown()
+            for (key, o) in view.offices where o.epic != nil && clock - o.epicAt < ShownOffice.furnishSeconds + 0.2 {
+                let grown = CGFloat(max(0.01, o.furnished(at: clock)))
+                for n in epicProps[station.name + "|" + key] ?? [] { n.scale = SCNVector3(1, grown, 1) }
+            }
             for (key, o) in view.offices where o.phase != .built {
                 let full = station.name + "|" + key
                 let base = tileBase(o.look)

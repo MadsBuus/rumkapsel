@@ -983,10 +983,21 @@ struct KingdomLook: Look {
         let made = Self.banners[key] ?? built(banner: room, sign: sign)
         Self.banners[key] = made
         let n = made.clone()
+        if station.isEpic(room.key), let pole = station.byTheDoor(room) {
+            n.eulerAngles.y = atan2(-pole.inward.y, pole.inward.x)
+            n.position = v3(pole.at.x, 0, pole.at.y)
+            return n
+        }
         n.eulerAngles.y = atan2(wall.out.x, wall.out.y)
         let at = station.desk(room, theme: .kingdom) ?? SIMD2(Double(wall.cell.x), Double(wall.cell.y))
         n.position = v3(at.x, 0, at.y)
         return n
+    }
+
+    func furnishEpic(_ office: Room, in station: Station, epic: OfficeFact.Epic, color: NSColor) -> Furnishing {
+        var f = Classic.epic(office, in: station, epic: epic, color: color)
+        f.fixtures = []
+        return f
     }
 
     private func built(banner room: Room, sign: OfficeSign) -> SCNNode {

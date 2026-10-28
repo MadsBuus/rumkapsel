@@ -221,6 +221,52 @@ enum SimulationTests {
             expect(m.bathing && m.place == .bath, "and a floor change leaves it alone")
         }
 
+        test("an epic's minion sits at its planning console instead of the lounge, and a normal office's minion still goes to the lounge") {
+            let (sim, station, m) = fixture()
+            sim.hooks = SimHooks()
+            sim.hooks?.night = false
+            let key = "task:web#455"
+            _ = station.ensureRoom(key: key, name: "#455", repo: "web", color: RGB(r: 0.9, g: 0.5, b: 0.5), lastActive: Date())
+            station.facts.offices[key] = OfficeFact(key: key, repo: "web")
+            sim.loaded()
+            m.home = Home(key: key, name: "#455", repo: "web", issue: 455)
+            m.activity = .sleeping
+            expect(sim.restPlace(m) == .lounge, "an ordinary office's quiet minion rests in the lounge")
+            station.facts.offices[key]?.epic = OfficeFact.Epic(shipped: 1)
+            expect(station.planningConsole(key) == nil, "the console waits for the picture to catch up")
+            sim.officesChanged(station, [])
+            expect(station.planningConsole(key) != nil, "the epic's office has its console")
+            expect(sim.restPlace(m) == .room(key), "the epic's quiet minion rests in its office")
+            sim.send(m, to: sim.restPlace(m))
+            expect(step(sim, seconds: 60, until: { m.inPlace && m.sittingOn != nil }), "seated at the console: \(m.words)")
+            expect(kind(m) == .planningConsole && m.place == .room(key), "on the planning console in its office")
+            m.mugUntil = sim.clock + 300
+            sim.send(m, to: .room(key))
+            expect(m.inPlace && m.mugUntil > sim.clock, "sent home while seated, it stays put with its coffee")
+            _ = step(sim, seconds: 5, until: { false })
+            expect(m.inPlace && m.idle.armed, "its idle clock runs at the console, as on a couch: \(m.words)")
+            expect(m.isFree, "seated at the console it is free for orders, like a minion at its desk")
+            m.place = .lounge
+            expect(sim.start(m, Command(kind: .goTo(place: .lounge), words: "a look round")) && m.risingUntil > sim.clock, "an order takes it, rising out of the chair first")
+            expect(!m.inPlace && m.using == nil, "the order is its own at once")
+            _ = step(sim, seconds: 0.3, until: { false })
+            expect(m.risingUntil > sim.clock, "still getting up")
+            expect(m.seatLeft != nil && m.seatDown != nil, "it swivels out of the chair the way it sat down")
+            sim.send(m, to: .room(key))
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "home again, back in the chair: \(m.words)")
+            sim.send(m, to: .quarters)
+            expect(m.using == nil && m.risingUntil > sim.clock, "sent to bed from the chair, it gets up and goes: \(m.words)")
+            expect(step(sim, seconds: 60, until: { m.place == .quarters && m.risingUntil == 0 }), "to the dorm: \(m.words)")
+            sim.send(m, to: .room(key))
+            expect(step(sim, seconds: 60, until: { m.inPlace }), "and back to the chair: \(m.words)")
+            m.activity = .waiting
+            expect(step(sim, seconds: 20, until: { m.using == nil }), "waiting for you, it gets up to pace: \(m.words)")
+            expect(m.place == .room(key), "in its office")
+            station.facts.offices[key]?.epic?.closed = true
+            sim.officesChanged(station, [])
+            expect(sim.console(of: m, station: station) == nil, "a closed epic has no console to come back to")
+        }
+
         test("a lounger's idle clock is armed on the couch and dropped by work") {
             let (sim, _, m) = fixture()
             sim.send(m, to: .lounge)

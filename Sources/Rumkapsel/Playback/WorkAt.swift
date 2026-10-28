@@ -7,6 +7,23 @@ extension Simulation {
         return station.anchors(in: room).filter { !taken.contains($0) }
     }
 
+    static var atTheConsole: Double { 24 * 3600 }
+
+    func console(of m: B, station: Station) -> FixtureRef? {
+        guard !m.isSubagent, !m.isPeer, m.state != .leaving, m.activity != .waiting, station.facts.offices[m.home.key] != nil, station.epics[m.home.key]?.closed == false,
+              station.planningConsole(m.home.key) != nil else { return nil }
+        let ref = FixtureRef(room: m.home.key, fixture: 0, anchor: 0)
+        return m.using == ref || freeAnchors(m, station: station, in: m.home.key).contains(ref) ? ref : nil
+    }
+
+    func leaveConsole(_ m: B, station: Station) {
+        guard case .use(let ref, .planningConsole, _, _)? = m.current?.kind,
+              console(of: m, station: station) != ref || restPlace(m) != .room(m.home.key) else { return }
+        guard m.inPlace else { return finish(m, to: restPlace(m)) }
+        let t = clock - m.actStartedAt, rise = 2 * Seat.swivel + Seat.sitDown
+        if m.actFor - t > rise { m.actFor = t + rise; m.phaseUntil = m.actStartedAt + m.actFor }
+    }
+
     @discardableResult
     func use(_ m: B, _ ref: FixtureRef, station: Station, seconds: Double, back: Place? = nil) -> Bool {
         guard let place = station.place(ref), let kind = station.fixtures(in: ref.room)[safe: ref.fixture]?.kind,
@@ -41,6 +58,12 @@ extension Simulation {
             m.settledOn = (order, s.down ? height : nil, s.home)
         }
         guard clock >= m.phaseUntil else { return false }
+        if m.isCrew, m.busy, case .use(_, .planningConsole, _, _)? = m.current?.kind {
+            m.busy = false
+            m.activity = .sleeping
+            m.pyramidCell = nil
+            cue(.clearCones(m.id))
+        }
         var back = restPlace(m)
         if !m.busy, case .use(_, _, let where_, _) = m.current?.kind { back = where_ }
         if let fare = m.fare { served(m, fare) }

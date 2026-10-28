@@ -64,6 +64,7 @@ protocol Look {
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing
     func furnishGalley(_ galley: Room, in station: Station) -> Furnishing
     func furnishMission(_ mission: Room, in station: Station) -> Furnishing
+    func furnishEpic(_ office: Room, in station: Station, epic: OfficeFact.Epic, color: NSColor) -> Furnishing
     func bed() -> SCNNode
 
     // MARK: the growth zone: offices, fixed rooms' floors and the hallway
@@ -127,6 +128,9 @@ extension Look {
     func furnishGym(_ gym: Room, in station: Station) -> Furnishing { Classic.gym(gym, in: station) }
     func furnishGalley(_ galley: Room, in station: Station) -> Furnishing { Classic.galley(galley, in: station) }
     func furnishMission(_ mission: Room, in station: Station) -> Furnishing { Classic.mission(mission, in: station) }
+    func furnishEpic(_ office: Room, in station: Station, epic: OfficeFact.Epic, color: NSColor) -> Furnishing {
+        Classic.epic(office, in: station, epic: epic, color: color)
+    }
     func bed() -> SCNNode { Classic.bed(floorTop: floorTop) }
 
     var floorTop: Double { 0 }

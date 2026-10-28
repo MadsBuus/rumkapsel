@@ -279,11 +279,14 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var markerSignatures: [String: String] = [:]
     var packages: [String: SCNNode] = [:]
     var packageBuilt: [String: String] = [:]
+    var packageNumber: [String: Int] = [:]
+    var epicProps: [String: [SCNNode]] = [:]
     var crateMotions: [ObjectIdentifier: CrateMotion] = [:]
     private var localSignature = ""
     var hangarAnchors: [String: SCNNode] = [:]
     var gymProps: [String: (bar: SCNNode, bag: SCNNode)] = [:]
     var chairs: [String: [FixtureRef: SCNNode]] = [:]
+    var epicChairs: [String: (ref: FixtureRef, chair: SCNNode)] = [:]
     var holos: [String: HoloView] = [:]
     var holoTendedAt = 0.0
     var missionScreens: [String: MissionScreens] = [:]

@@ -17,6 +17,7 @@ extension StationController {
                 switch m.currentPose(at: clock) {
                 case .standing: pose = "standing"
                 case .seated(let h): pose = String(format: "seated %.2f", h)
+                case .reclined(let h): pose = String(format: "reclined %.2f", h)
                 case .flat(let h): pose = String(format: "flat %.2f", h)
                 }
                 let cmd: String

@@ -229,6 +229,18 @@ closed unmerged ten minutes ago.
 | A teammate pushes | boxes: one plus the pushes | `World.swift` |
 | A neighbour's boxes | as the neighbour counts them | `World.applyPeer` |
 
+### An issue and its pull requests
+
+A pull request **closes** an issue when GitHub links it (`closingIssuesReferences`) or its description says
+so in GitHub's closing words (close, fix, resolve and their forms, then `#N`), which covers pull requests
+into a branch other than the default, where GitHub links nothing. One that is linked to an issue by its
+branch and does not close it is a **slice** (`WorkBook.note(closes:)`, `Record.epic`): a record and a crate
+of its own, working in the issue's office. A record kept from before that still holds a slice is split
+once its pull request has been read (`World.checkSlices`); the issue then goes back to what its other
+sources say. An issue is an epic while it is open, read from its board item, else `gh issue view` at the
+base interval (`World.epic(of:)`), and one of its slices has merged; the office's fact carries it
+(`OfficeFact.epic`) and `Rules.officeEnds` ends it when the issue closes.
+
 ### Ready
 
 | Trigger | Event | Code |
@@ -310,6 +322,7 @@ or `webhook`.
 | Branches that are not work | `main`, `master`, `develop`, `HEAD` | `State/Work.swift` |
 | Release branch patterns | `release*`, `hotfix*` | `Integrations/Pipelines.swift` |
 | Issue branch pattern | `gh-<N>/...` | `State/Work.swift` |
+| Closing words | `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, then `#N` | `Integrations/PullRequests.swift` |
 | Default branch names | `develop`, `main`, `master`; `staging`; `production` | `Integrations/Pipelines.swift` |
 | Ships on tags | a version tag from the last 365 days | `Integrations/Pipelines.swift` |
 | Board field | `Status` | `Integrations/Config.swift` |

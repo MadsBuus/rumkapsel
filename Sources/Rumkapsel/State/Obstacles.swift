@@ -55,7 +55,7 @@ extension Station {
                 return [own] + (kingdom && f.kind == .shower ? [Footprint(at: f.point(SIMD2(0, Hands.arm)), radius: 0.208)] : [])
             })
         }
-        for key in ["kind:mission", "kind:galley"] {
+        for key in ["kind:mission", "kind:galley"] + offices.map(\.key).filter(isEpic) {
             let fixtures = self.fixtures(in: key)
             let seats = fixtures.flatMap { f in f.kind.anchors.indices.compactMap { f.place($0) }.filter { $0.use != .stand } }
             place(rooms[key], fixtures.map { Footprint(at: $0.at, radius: max($0.kind.size.x, $0.kind.size.y) / 2 * 0.8) }

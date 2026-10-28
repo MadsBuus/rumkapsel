@@ -161,13 +161,14 @@ final class Simulation<B: Body> {
     // MARK: commands
 
     func handOver(_ m: B, _ c: Command, announce: Bool = false) {
+        standUp(m)
         m.current = nil
         begin(m, c, announce: announce)
     }
 
     @discardableResult
     func start(_ m: B, _ c: Command, announce: Bool = false) -> Bool {
-        guard m.current == nil || (m.wakeUntil == 0 && !m.onJob && m.phaseKind.interruptible) else { return false }
+        guard m.current == nil || (m.wakeUntil == 0 && !m.onJob && (m.phaseKind.interruptible || m.atConsole)) else { return false }
         begin(m, c, announce: announce)
         return true
     }
@@ -187,6 +188,7 @@ final class Simulation<B: Body> {
         if let old = m.current, old.kindName != c.kindName, m.state == .settled {
             if case .work = c.kind { m.wonderUntil = clock + 0.15 } else { m.wonderUntil = clock + 0.5 }
         }
+        standUp(m)
         rouse(m)
         if let old = m.current, old.kindName != c.kindName { dropLeftovers(m, of: old) }
         if !c.isRest, !c.holdsMug { m.mugUntil = 0; m.mealUntil = 0 }
@@ -215,6 +217,7 @@ final class Simulation<B: Body> {
     }
 
     func finish(_ m: B, to place: Place? = nil) {
+        standUp(m)
         let last = m.current.map { rank(of: $0) }
         m.current = nil
         m.phase = 0
@@ -237,7 +240,7 @@ final class Simulation<B: Body> {
             m.showering = shower
             if !visitBath(m, station: station) { send(m, to: restPlace(m)) }
         case .roam:
-            if !startRoam(m, station: station) { send(m, to: restPlace(m)) }
+            if console(of: m, station: station) != nil || !startRoam(m, station: station) { send(m, to: restPlace(m)) }
         case .galley(let fare):
             if !visitGalley(m, station: station, fare: fare) { send(m, to: restPlace(m)) }
         }
@@ -273,6 +276,7 @@ final class Simulation<B: Body> {
     func restPlace(_ m: B) -> Place {
         if m.isSubagent { return probePlace(m) }
         let place = Place.forActivity(m.activity, home: m.home.key, isSubagent: m.isSubagent, night: fleet.stations[m.station].map(isNight) ?? true)
+        if place == .lounge, let st = fleet.stations[m.station], console(of: m, station: st) != nil { return .room(m.home.key) }
         if case .room(let key) = place, let st = fleet.stations[m.station], !standing(st, key) { return .lounge }
         return place
     }
@@ -294,9 +298,16 @@ final class Simulation<B: Body> {
     }
 
     func send(_ m: B, to place: Place) {
+        if case .use(_, .planningConsole, _, _)? = m.current?.kind, place != .room(m.home.key) {
+            standUp(m)
+            m.current = nil; m.phase = 0; m.phaseUntil = 0
+        }
         if let c = m.current, !c.isRest { return }
         guard let station = fleet.stations[m.station] else { return }
         if case .room(let key) = place, !standing(station, key) { return send(m, to: m.isSubagent ? probePlace(m) : .lounge) }
+        if place == .room(m.home.key), let ref = console(of: m, station: station) {
+            if m.using == ref || use(m, ref, station: station, seconds: Simulation.atTheConsole, back: place) { return }
+        }
         if place == .lounge, m.place == .lounge, m.couchSeated, m.path.isEmpty { return }
         if place == .quarters, m.place == .quarters, m.bunk != nil, m.risingUntil == 0, m.path.isEmpty { return }
         if place != .quarters {
@@ -345,6 +356,20 @@ final class Simulation<B: Body> {
     }
 
     func walk(_ m: B, to cell: Cell) { m.path = route(m, to: cell) }
+
+    func standUp(_ m: B) {
+        guard m.atConsole, m.risingUntil == 0, let ref = m.using, m.actStartedAt + m.actFor - clock > B.seatRise else { return }
+        m.seatLeft = (ref, clock)
+        m.risingUntil = clock + B.seatRise
+    }
+
+    func risingOut(_ m: B, station: Station) {
+        guard let left = m.seatLeft, let place = station.place(left.ref), case .sit(let height) = place.use else { return }
+        let s = place.sitting(B.seatRise + clock - left.at, of: 2 * B.seatRise)
+        m.pos = s.pos
+        m.facing = s.facing
+        m.seatDown = s.down ? height : nil
+    }
 
     func rouse(_ m: B) {
         if m.couchSeated {
@@ -660,6 +685,14 @@ final class Simulation<B: Body> {
         m.activity = activity
         m.busy = true
         if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
+        if place == .room(m.home.key), let station = fleet.stations[m.station], let ref = console(of: m, station: station) {
+            if m.using == ref, m.inPlace {
+                m.actFor = clock - m.actStartedAt + minutes * 60
+                m.phaseUntil = m.actStartedAt + m.actFor
+                return
+            }
+            if !m.onJob, use(m, ref, station: station, seconds: minutes * 60, back: place) { return }
+        }
         rouse(m)
         post(.react(activity, place: place, for: minutes * 60, words: words), for: m, rank: .crew, at: m.cell, place: place)
     }
@@ -670,7 +703,12 @@ final class Simulation<B: Body> {
         m.pyramidCell = nil
         cue(.clearCones(m.id))
         if case .react = m.current?.kind, let id = m.current?.id { ownOrders[id] = nil; m.current = nil; m.phase = 0; m.phaseUntil = 0 }
-        send(m, to: .quarters)
+        send(m, to: crewRest(m))
+    }
+
+    func crewRest(_ m: B) -> Place {
+        guard let station = fleet.stations[m.station], !isNight(station), console(of: m, station: station) != nil else { return .quarters }
+        return .room(m.home.key)
     }
 
     // MARK: the step
@@ -702,8 +740,9 @@ final class Simulation<B: Body> {
             return .waking
         }
         if m.risingUntil > 0 {
+            risingOut(m, station: station)
             if clock < m.risingUntil { return .waking }
-            m.risingUntil = 0
+            m.risingUntil = 0; m.seatLeft = nil; m.seatDown = nil
         }
         if m.wakeUntil > 0 {
             if clock < m.wakeUntil { return .waking }
@@ -730,7 +769,7 @@ final class Simulation<B: Body> {
             switch c.kind {
             case .goTo, .use, .chore, .qa, .sleep, .work, .react, .leave, .pack, .stow:
                 advance(m)
-                if case .work = c.kind { ownOrders[c.id] = nil }
+                if case .work = c.kind { ownOrders[c.id] = nil; if m.place == .room(m.home.key), console(of: m, station: station) != nil { send(m, to: m.place); return .spent } }
                 if m.actFor > 0 { m.phaseUntil = clock + m.actFor; m.actStartedAt = clock }
             default: break
             }
@@ -761,6 +800,7 @@ final class Simulation<B: Body> {
                 let stretch = clock - m.busySince
                 if stretch > 20 * 60 { m.bathDue = clock + Double.random(in: 3...20); m.showering = true }
                 else if stretch > 3 * 60 { m.shortStretches += 1; if m.shortStretches % 2 == 0 { m.bathDue = clock + Double.random(in: 3...20); m.showering = false } }
+                if m.bathDue == 0, m.inPlace, case .use(_, .planningConsole, _, _)? = m.current?.kind { idle(m, after: .message) }
             }
             m.wasBusy = m.busy
             let settled = m.path.isEmpty
@@ -770,17 +810,26 @@ final class Simulation<B: Body> {
                 if clock >= m.watchCheckAt {
                     m.watchCheckAt = clock + Double.random(in: 2...6)
                     if watchLaunch(m, station: station) { return .spent }
+                    if restPlace(m) != .lounge, clock >= m.mealUntil { send(m, to: restPlace(m)); return .spent }
                 }
-                if m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); return .spent }
+                if restPlace(m) == .lounge, m.idle.tick(at: clock, lounging: true, busy: false) { pickIdle(m, station: station); return .spent }
+            } else if m.inPlace, !m.busy, m.bathDue == 0, case .use(_, .planningConsole, _, _)? = m.current?.kind {
+                if m.idle.tick(at: clock, lounging: true, busy: false), let fare = galleyFare(m, station: station), visitGalley(m, station: station, fare: fare) { return .spent }
             }
             if m.busy { _ = m.idle.tick(at: clock, lounging: false, busy: true) }
             if m.bathing, stepBath(m, station: station, dt: dt) { return .spent }
             if m.place != .bath, m.bathDue > 0, clock >= m.bathDue, !m.busy, !m.onJob, !m.hasLoad, !m.isSubagent, m.fare == nil, m.place != .quarters, settled, station.rooms["kind:bath"] != nil {
                 if !visitBath(m, station: station) { return .spent }
             }
+            if m.using != nil { leaveConsole(m, station: station) }
             if m.using != nil, stepUse(m, station: station, dt: dt) { return .spent }
             if m.isSubagent, settled { makeRoom(m, station: station); tripOn(m, station: station) }
-            if let pc = m.pyramidCell, !m.onJob, m.place == .room(m.home.key) {
+            if m.isResting, m.using == nil, settled, m.place == .room(m.home.key), clock >= m.nextWanderAt, console(of: m, station: station) != nil {
+                m.nextWanderAt = clock + 2
+                send(m, to: m.place)
+                return .spent
+            }
+            if let pc = m.pyramidCell, !m.onJob, m.using == nil, m.place == .room(m.home.key) {
                 if abs(m.cell.x - pc.x) + abs(m.cell.y - pc.y) > 1 { walk(m, to: pc) }
             } else if clock >= m.nextWanderAt, m.activity != .sleeping, !m.bathing, !m.exercising, m.using == nil, m.place != .quarters, !(m.place == .lounge && m.couch != nil), !m.isJumping(at: clock) {
                 let door: Cell? = { if case .room(let k) = m.place { return station.doorCell(of: k) }; return nil }()

@@ -69,7 +69,7 @@ final class Minion: Body {
         staticNode?.isHidden = !staticSeen
     }
     private var staticSpot: SCNVector3 {
-        guard case .seated(let h) = posed else { return v3(0, bodyHeight * 0.3, 0) }
+        guard let h = posed.seat else { return v3(0, bodyHeight * 0.3, 0) }
         return v3(0, h + bodyDepth * 0.4, bodyDepth * 0.9)
     }
     static let seat = Seat.height
@@ -80,9 +80,11 @@ final class Minion: Body {
     func currentPose(at clock: Double) -> Pose {
         if onBench { return .flat(height: Minion.seat) }
         if let bunk { return bunk.flat ? .flat(height: bunk.height) : bunk.sat ? .seated(height: bunk.height) : .standing }
+        if risingUntil > clock, seatLeft != nil { return seatDown.map { .seated(height: $0) } ?? .standing }
         if risingUntil > clock {
             return risingUntil - clock > Minion.riseSit ? .seated(height: Minion.couchSeat) : .standing
         }
+        if seated, !busy, case .use(_, .planningConsole, _, _)? = current?.kind { return .reclined(height: seatHeight) }
         if seated { return .seated(height: seatHeight) }
         return .standing
     }
@@ -321,7 +323,15 @@ final class Minion: Body {
     enum Pose: Equatable {
         case standing
         case seated(height: Double)
+        case reclined(height: Double)
         case flat(height: Double)
+
+        var seat: Double? {
+            switch self {
+            case .seated(let h), .reclined(let h): return h
+            case .standing, .flat: return nil
+            }
+        }
     }
 
     func mirror(station: Station, clock: Double, dt: Double, outfit: Routines.Outfit, hover: Double = 0) {
@@ -378,7 +388,7 @@ final class Minion: Body {
     var showsTowel: Bool { towelNode != nil }
     var holding: Tool? { tool }
 
-    func setPose(_ p: Pose) {
+    func setPose(_ p: Pose, atOnce: Bool = false) {
         guard p != posed else { return }
         let was = posed
         posed = p
@@ -394,20 +404,30 @@ final class Minion: Body {
             boxHeight = torso; pitch = -0.1
             at = v3(0, height + torso / 2, -Minion.seatReach)
             legs.position = v3(0, height, -Minion.seatReach)
+        case .reclined(let height):
+            boxHeight = torso; pitch = -Minion.recline
+            at = v3(0, height + torso / 2 * cos(Minion.recline), -Minion.seatReach - torso / 2 * sin(Minion.recline))
+            legs.position = v3(0, height, -Minion.seatReach)
         case .flat(let height):
             boxHeight = bodyHeight; pitch = -.pi / 2
             at = v3(0, height + bodyDepth / 2, 0)
         }
         let sitting = boxHeight == torso
 
-        let t = Minion.poseSeconds(from: was, to: p)
-        let move = SCNAction.group([.rotateTo(x: pitch, y: 0, z: 0, duration: t, usesShortestUnitArc: true),
-                                    .move(to: at, duration: t)])
-        move.timingMode = .easeOut
-        body.runAction(move)
-
-        hold.runAction(.move(to: v3(0, (boxHeight - bodyHeight) / 2, 0), duration: t))
-        visor.runAction(.move(to: v3(0, boxHeight * 0.3, bodyDepth / 2 + 0.004), duration: t))
+        let t = atOnce ? 0 : Minion.poseSeconds(from: was, to: p)
+        if atOnce {
+            body.eulerAngles = v3(pitch, 0, 0)
+            body.position = at
+            hold.position = v3(0, (boxHeight - bodyHeight) / 2, 0)
+            visor.position = v3(0, boxHeight * 0.3, bodyDepth / 2 + 0.004)
+        } else {
+            let move = SCNAction.group([.rotateTo(x: pitch, y: 0, z: 0, duration: t, usesShortestUnitArc: true),
+                                        .move(to: at, duration: t)])
+            move.timingMode = .easeOut
+            body.runAction(move)
+            hold.runAction(.move(to: v3(0, (boxHeight - bodyHeight) / 2, 0), duration: t))
+            visor.runAction(.move(to: v3(0, boxHeight * 0.3, bodyDepth / 2 + 0.004), duration: t))
+        }
         SCNTransaction.begin()
         SCNTransaction.animationDuration = t
         if let figure {
@@ -417,11 +437,13 @@ final class Minion: Body {
             legs.opacity = sitting ? 1 : 0
         }
         SCNTransaction.commit()
-        staticNode?.runAction(.move(to: staticSpot, duration: t))
+        if atOnce { staticNode?.position = staticSpot } else { staticNode?.runAction(.move(to: staticSpot, duration: t)) }
     }
 
+    static let recline = 0.38
+
     private static func poseSeconds(from: Pose, to: Pose) -> Double {
-        if case .flat = from, case .seated = to { return 0.45 }
+        if case .flat = from, to.seat != nil { return 0.45 }
         if case .flat = to { return 0.7 }
         if case .standing = to { return 0.45 }
         return 0.5
@@ -566,7 +588,7 @@ final class Minion: Body {
     }
 
     func fidget() {
-        guard case .seated = posed, !body.hasActions else { return }
+        guard posed.seat != nil, !body.hasActions else { return }
         let side = Bool.random() ? 0.08 : -0.08
         let over = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(side), duration: 0.18); over.timingMode = .easeInEaseOut
         let back = SCNAction.rotateBy(x: 0, y: 0, z: CGFloat(-side), duration: 0.28); back.timingMode = .easeInEaseOut

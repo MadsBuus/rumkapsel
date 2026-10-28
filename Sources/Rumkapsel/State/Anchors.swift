@@ -9,7 +9,7 @@ struct Anchor: Equatable {
 }
 
 enum FixtureKind: String {
-    case console, holoTable, couch, counter, coffeeMachine, foodPrinter
+    case console, planningConsole, holoTable, couch, counter, coffeeMachine, foodPrinter
     case treadmill, bench, bag, mat
     case bowl, shower, towelRail
     case bed
@@ -17,6 +17,7 @@ enum FixtureKind: String {
     var size: SIMD2<Double> {
         switch self {
         case .console: return SIMD2(0.86, 0.26)
+        case .planningConsole: return SIMD2(0.9, 0.42)
         case .holoTable: return SIMD2(1.2, 1.2)
         case .couch: return SIMD2(0.8, 0.3)
         case .counter: return SIMD2(0.32, 0.26)
@@ -33,11 +34,11 @@ enum FixtureKind: String {
         }
     }
 
-    var swivels: Bool { self == .console }
+    var swivels: Bool { self == .console || self == .planningConsole }
 
     var anchors: [Anchor] {
         switch self {
-        case .console:
+        case .console, .planningConsole:
             return [Anchor(at: SIMD2(0, size.y / 2 + Seat.knees), use: .sit(height: Seat.height))]
         case .holoTable:
             return [.pi, .pi / 3, -.pi / 3].map { Anchor(at: SIMD2(sin($0), cos($0)) * size.x / 2 * cos(.pi / 6), use: .stand) }
@@ -67,6 +68,7 @@ enum FixtureKind: String {
     var doing: String {
         switch self {
         case .console: return "watching the boards in \(Words.current.theMission)"
+        case .planningConsole: return "planning at the console"
         case .holoTable: return "studying the holo table"
         case .couch: return "resting on \(Words.current.theCouch)"
         case .counter: return "leaning on the counter"
@@ -86,6 +88,7 @@ enum FixtureKind: String {
     var going: String {
         switch self {
         case .console: return "sit at a console"
+        case .planningConsole: return "sit at the planning console"
         case .holoTable: return "watch the holo table"
         case .couch: return "rest on \(Words.current.theCouch)"
         case .counter: return "lean on the counter"
@@ -226,6 +229,7 @@ extension Station {
     }
 
     func fixtures(in key: String) -> [PlacedFixture] {
+        if key.hasPrefix("task:") { return planningConsole(key).map { [$0] } ?? [] }
         guard let origin = roomOrigin(key) else { return [] }
         if key == "kind:lounge", let lounge = rooms[key] {
             let xs = lounge.cells.map(\.x)

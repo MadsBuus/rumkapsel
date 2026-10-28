@@ -62,6 +62,71 @@ enum WorkTests {
             expect(c.mismatches.contains { $0.hasPrefix("the \(Words.current.crate) stands") } && c.mismatches.contains { $0.hasPrefix("drawn") }, "misplaced and drawn elsewhere: \(c.mismatches)")
         }
 
+        test("a pull request that doesn't close the issue its branch names is a crate of its own, in the issue's office") {
+            let book = WorkBook()
+            let issue = book.note(repo: "api", branch: "gh-5770/tables", folder: "/w/a")
+            let slice = book.note(repo: "api", branch: "gh-5770/tables", folder: "/w/a", pull: 5778, pullState: "OPEN", closes: [])
+            expect(slice !== issue && slice.epic == 5770 && slice.number == 5778, "#5778 is its own work, a slice of #5770: number \(String(describing: slice.number))")
+            expect(book.find(repo: "api", issue: 5770) === issue && book.find(repo: "api", branch: "gh-5770/tables") === issue, "the branch and the issue stay the issue's")
+            expect(book.find(repo: "api", crate: 5778) === slice && issue.pulls.isEmpty, "the pull request is the slice's alone")
+            expect(slice.officeKeys.first == "task:api#5770" && issue.work().officeKey == "task:api#5770", "both work in the issue's office: \(slice.officeKeys)")
+            expect(book.note(repo: "api", branch: "gh-5770/tables", pull: 5778, pullState: "MERGED") === slice, "heard again without its links, it is still the slice")
+            expect(book.slices(repo: "api", of: 5770).map(\.id) == [slice.id], "the issue knows its slice")
+        }
+
+        test("a pull request that closes its issue is the issue's crate, as ever") {
+            let book = WorkBook()
+            let issue = book.note(repo: "api", branch: "gh-5884/stop-a-chat", folder: "/w/b")
+            let pr = book.note(repo: "api", branch: "gh-5884/stop-a-chat", folder: "/w/b", issue: 5884, pull: 5885, pullState: "OPEN", closes: [5884])
+            expect(pr === issue && pr.epic == nil && pr.number == 5884, "one record, crate #5884: \(String(describing: pr.number))")
+            expect(book.slices(repo: "api", of: 5884).isEmpty, "no slices")
+            let unknown = book.note(repo: "api", branch: "gh-14/x", pull: 15)
+            expect(unknown.number == 14 && unknown.epic == nil, "with its links unknown, a pull request joins its branch's issue as before")
+        }
+
+        test("closing words in a description close; a mention doesn't") {
+            expect(PullSource.closes(saying: "Closes #12\nfixes: #13, resolved #14") == [12, 13, 14], "the closing words")
+            expect(PullSource.closes(saying: "Part of #5770. Related to #14053 (found while testing #14063)").isEmpty, "mentions are not closes")
+            let o: [String: Any] = ["closingIssuesReferences": [["number": 9]], "body": "Fixes #9 and closes #10"]
+            expect(PullSource.closes(o) == [9, 10], "GitHub's links and the words together: \(PullSource.closes(o))")
+        }
+
+        test("a slice kept in its issue's record from before is split off: the issue goes back to work, so it leaves the deck") {
+            let t = Date(timeIntervalSince1970: 1_800_000_000)
+            let book = WorkBook()
+            book.clock = { t }
+            let issue = book.note(repo: "api", branch: "gh-5770/tables", folder: "/w/a", pull: 5778, pullState: "MERGED")
+            book.report(issue, .working, by: .board, at: t)
+            book.report(issue, .stored, by: .pulls, at: t)
+            book.report(issue, .qa, by: .git, at: t)
+            expect(issue.number == 5770 && issue.stage == .qa, "the old way: one #5770 on the deck")
+            var moves: [String] = []
+            book.onTransition = { r, m in moves.append("#\(r.number ?? 0) \(m.from.map { "\($0)" } ?? "-")→\(m.to)") }
+            let slice = book.heard(repo: "api", pull: 5778, closes: [], pullState: "MERGED")
+            expect(slice !== issue && slice?.epic == 5770 && slice?.number == 5778, "#5778 split off")
+            expect(issue.stage == .working && moves == ["#5770 QA→working"], "#5770 back to the board's word: \(moves)")
+            expect(book.heard(repo: "api", pull: 5778, closes: []) === slice, "hearing it again changes nothing")
+        }
+
+        test("a follow-up after its issue shipped is a crate of its own, not swallowed by the shipped issue") {
+            let t = Date(timeIntervalSince1970: 1_800_000_000)
+            let book = WorkBook()
+            let issue = book.note(repo: "api", branch: "gh-5731/take-payment", issue: 5731, pull: 5847, pullState: "MERGED", closes: [5731])
+            book.report(issue, .shipped, by: .git, at: t)
+            let follow = book.note(repo: "api", branch: "gh-5731/index-drafts", folder: "/w/c", pull: 5852, pullState: "MERGED", closes: [])
+            book.report(follow, .stored, by: .pulls, at: t)
+            expect(follow !== issue && follow.number == 5852 && follow.stage == .stored, "#5852 in storage on its own: \(String(describing: follow.stage))")
+            expect(issue.stage == .shipped && issue.pulls.keys.sorted() == [5847], "#5731 untouched")
+        }
+
+        test("a slice's link survives a restart") {
+            let book = WorkBook()
+            book.note(repo: "api", branch: "gh-5770/tables", pull: 5778, closes: [])
+            let again = WorkBook()
+            again.restore(book.saved)
+            expect(again.find(repo: "api", pull: 5778)?.epic == 5770 && again.find(repo: "api", issue: 5770)?.pulls.isEmpty == true, "still a slice of #5770")
+        }
+
         test("a branch named for its issue is that issue: office, crate and name agree") {
             let w = Work(repo: "web", branch: "gh-128/artist-search-fixes")
             expect(w.issue == 128 && w.number == 128, "issue read off the branch")

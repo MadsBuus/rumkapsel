@@ -7,6 +7,7 @@ enum LookDev {
         if shot == "crates" { crates(out: out) }
         if shot == "rockets" { rockets(out: out) }
         if shot == "signs" { signs(out: out) }
+        if shot.hasPrefix("epic") { epic(out: out, shot: shot) }
         if shot == "poster:row" { image(out: out, PosterArt.object(PosterRow.row(), yaw: 0.35, pitch: -0.25, pixels: 1100, margin: 1.05)) }
         if shot.hasPrefix("poster:"), let p = Poster(rawValue: String(shot.dropFirst(7))) { poster(out: out, p) }
         if shot.hasPrefix("wall") {
@@ -144,6 +145,104 @@ enum LookDev {
         eye.camera = cam
         eye.position = v3(0, 0.42, 0.55)
         eye.look(at: v3(0, 0.42, -0.5), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
+        scene.rootNode.addChildNode(eye)
+        render(scene, from: eye, to: out)
+    }
+
+    private static func epic(out: String, shot: String) -> Never {
+        Bulkhead.prepareNow()
+        let scene = SCNScene()
+        scene.background.contents = NSColor(rgb: (0.015, 0.02, 0.035))
+        let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional; sun.light!.intensity = 700
+        sun.eulerAngles = v3(-.pi / 3, .pi / 3, 0)
+        scene.rootNode.addChildNode(sun)
+        let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light!.type = .ambient; ambient.light!.intensity = 550
+        scene.rootNode.addChildNode(ambient)
+        let repo = NSColor(Colors.repos[1])
+        let world = World(demo: true)
+        let station = world.fleet.station("work")
+        let key = "task:web#5770"
+        _ = station.ensureRoom(key: key, name: "#5770", repo: "web", color: Colors.repos[1], lastActive: Date())
+        let epic = OfficeFact.Epic(shipped: 7)
+        station.show(epics: [key: epic])
+        guard let room = station.rooms[key], let console = station.planningConsole(key), let seat = console.place(0) else { exit(1) }
+        let o = station.offset
+        func flat(_ c: Cell) -> SIMD2<Double> { SIMD2(o.x + Double(c.x), o.y + Double(c.y)) }
+        let cells = Set(room.cells)
+        let door = station.doorCell(of: key), outside = station.doorOutside(of: key)
+        let behind = -SIMD2(sin(console.yaw), cos(console.yaw))
+        for c in room.cells {
+            let tile = SCNNode(geometry: SCNBox(width: 0.96, height: 0.02, length: 0.96, chamferRadius: 0.01))
+            tile.geometry!.firstMaterial = lit(repo.blended(withFraction: 0.72, of: NSColor(rgb: (0.2, 0.2, 0.22)))!)
+            tile.position = v3(flat(c).x, -0.01, flat(c).y)
+            scene.rootNode.addChildNode(tile)
+            for (k, d) in [(0, 1), (0, -1), (1, 0), (-1, 0)].enumerated() {
+                let n = Cell(x: c.x + d.0, y: c.y + d.1)
+                guard !cells.contains(n), !(c == door && n == outside), shot != "epic-far" else { continue }
+                let toward = SIMD2(Double(d.0), Double(d.1))
+                guard simd_dot(toward, behind) > 0.1 else { continue }
+                let mid = (flat(c) + flat(n)) / 2
+                let box = SCNBox(width: d.0 == 0 ? 1 : 0.07, height: Walker.wallHeight, length: d.0 == 0 ? 0.07 : 1, chamferRadius: 0)
+                var faces = Array(repeating: Bulkhead.steel, count: 6)
+                for f in 0..<4 { faces[f] = Bulkhead.material(k + f, style: .office) }
+                box.materials = faces
+                let wall = SCNNode(geometry: box)
+                wall.position = v3(mid.x, Walker.wallHeight / 2, mid.y)
+                scene.rootNode.addChildNode(wall)
+            }
+        }
+        if let outside {
+            let hall = SCNNode(geometry: SCNBox(width: 0.96, height: 0.02, length: 0.96, chamferRadius: 0.01))
+            hall.geometry!.firstMaterial = lit(NSColor(rgb: (0.42, 0.33, 0.27)))
+            hall.position = v3(flat(outside).x, -0.012, flat(outside).y)
+            scene.rootNode.addChildNode(hall)
+        }
+        let f = Classic.epic(room, in: station, epic: epic, color: repo)
+        for n in f.props + f.fixtures { scene.rootNode.addChildNode(n) }
+        let sat = seat.sitting(10, of: 20)
+        if !shot.hasSuffix("-work"), let chair = f.chairs.values.first { Classic.recline(chair, by: Minion.recline) }
+        let m = Minion(id: "resident", station: "look", home: Home(key: "x", name: "x", repo: "x", issue: nil), cwd: "", toolCount: 0,
+                       isSubagent: false, start: Cell(x: 0, y: 0))
+        m.wearSuit(badge: repo)
+        m.node.opacity = 1
+        m.setPose(shot.hasSuffix("-work") ? .seated(height: Seat.height) : .reclined(height: Seat.height), atOnce: true)
+        m.node.position = v3(o.x + sat.pos.x, 0, o.y + sat.pos.y)
+        m.node.eulerAngles.y = CGFloat(sat.facing)
+        scene.rootNode.addChildNode(m.node)
+        if let cell = station.farCells(room).first {
+            let crate = Props.package(color: repo, band: NSColor(rgb: (0.4, 0.82, 0.45)), size: Zone.waiting.crateSize, mine: true, number: 5778,
+                                      title: "Station rental tables", who: "Mads")
+            crate.position = v3(flat(cell).x, 0, flat(cell).y)
+            scene.rootNode.addChildNode(crate)
+        }
+        let mid = room.cells.reduce(SIMD2<Double>(0, 0)) { $0 + flat($1) } / Double(room.cells.count)
+        let aim = SIMD2(o.x + console.at.x, o.y + console.at.y)
+
+        let eye = SCNNode()
+        let cam = SCNCamera()
+        cam.zNear = 0.02; cam.zFar = 200
+        let inward = SIMD2(sin(console.yaw), cos(console.yaw))
+        if shot == "epic-side" {
+            cam.fieldOfView = 40
+            let side = SIMD2(inward.y, -inward.x)
+            eye.position = v3(aim.x + side.x * 2.2, 0.5, aim.y + side.y * 2.2)
+            eye.look(at: v3(aim.x, 0.25, aim.y), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
+        } else if shot == "epic-far" {
+            cam.usesOrthographicProjection = true
+            cam.orthographicScale = 2.2
+            let pitch = Double.pi / 5, yaw = Double.pi / 4, d = 40.0
+            eye.position = v3(mid.x + d * cos(pitch) * sin(yaw), d * sin(pitch), mid.y + d * cos(pitch) * cos(yaw))
+            eye.look(at: v3(mid.x, 0.2, mid.y), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
+        } else {
+            cam.fieldOfView = 46
+            FlightCraft.film(cam)
+            cam.exposureOffset = -0.3
+            cam.bloomThreshold = 1.4
+            let from = aim + inward * 2.6 + SIMD2(inward.y, -inward.x) * 1.0
+            eye.position = v3(from.x, 1.6, from.y)
+            eye.look(at: v3(aim.x + inward.x * 0.5, 0.3, aim.y + inward.y * 0.5), up: v3(0, 1, 0), localFront: v3(0, 0, -1))
+        }
+        eye.camera = cam
         scene.rootNode.addChildNode(eye)
         render(scene, from: eye, to: out)
     }
