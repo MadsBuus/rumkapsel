@@ -39,6 +39,38 @@ enum IntakeTests {
             expect(station(rig).facts.offices[key]?.epic == OfficeFact.Epic(shipped: 0), "it stands as an epic: \(String(describing: station(rig).facts.offices[key]))")
         }
 
+        test("an issue shipped as one record before slices were known: once the issue is seen open, its pull request becomes a shipped slice and the issue keeps no crate") {
+            let (rig, sim) = org([("Target: ios#298", 0)])
+            let w = rig.world, root = w.repoRoots.first { $0.value.repo == "ios" }?.key ?? ""
+            let old = w.works.note(repo: "ios", branch: "gh-298/onboarding", pull: 301, pullState: "MERGED")
+            w.works.report(old, .stored, by: .pulls, at: rig.now)
+            w.works.report(old, .shipped, by: .git, at: rig.now)
+            then(rig, sim, [("Scan: again", 600)])
+            expect(place(rig, "ios", 298) == nil, "#298 flown: \(describe(place(rig, "ios", 298)))")
+            expect(old.number == 298 && w.works.slices(repo: "ios", of: 298).isEmpty, "the old way: #298 shipped as one record")
+            var pr = PullRequest(number: 301, title: "tables", state: "MERGED", reviewDecision: "", isDraft: false, url: "")
+            pr.closes = []
+            w.github.inject(pull: pr, number: 301, repoRoot: root)
+            then(rig, sim, [("GitHub: Poll", 10)])
+            let slices = w.works.slices(repo: "ios", of: 298)
+            expect(slices.map { $0.pulls.keys.sorted() } == [[301]] && slices.first?.stage == .shipped, "#301 is a shipped slice of #298: \(slices.map { ($0.pulls.keys.sorted(), $0.stage) })")
+            expect(place(rig, "ios", 298) == nil, "#298 has no crate: \(describe(place(rig, "ios", 298)))")
+            expect(station(rig).facts.offices["task:ios#298"]?.epic == OfficeFact.Epic(shipped: 1), "the office stands as an epic with one shipped: \(String(describing: station(rig).facts.offices["task:ios#298"]))")
+        }
+
+        test("my epic outlives its workspace: the office passes to the board, its chair empty") {
+            let (rig, sim) = org([("Target: ios#298", 0), ("Open PR, part of the issue", 32), ("Merge PR", 4.8)])
+            let key = "task:ios#298"
+            try? FileManager.default.removeItem(atPath: station(rig).rooms[key]?.worktree ?? "")
+            then(rig, sim, [("Session ends", 1), ("Scan: again", 60), ("GitHub: Poll", 10)])
+            let room = station(rig).rooms[key]
+            expect(room != nil && room?.worktree == nil, "the office stands with no workspace: \(String(describing: room?.worktree))")
+            expect(station(rig).facts.offices[key]?.epic == OfficeFact.Epic(shipped: 0), "still an epic: \(String(describing: station(rig).facts.offices[key]))")
+            expect(count(sim, .officeOpened(key), after: "Session ends") == 0, "not closed and opened again")
+            let rosters = sim.records.compactMap { r -> [String: CrewMember]? in if case .event(.crewRoster(let m)) = r { return m }; return nil }
+            expect(!rosters.isEmpty && rosters.allSatisfy { $0["me"] == nil }, "nobody moves in for me: \(rosters.last.map { Array($0.keys) } ?? [])")
+        }
+
         test("a pull request that closes its issue, merged: the issue's crate in storage and no epic") {
             let (rig, _) = org([("Target: ios#298", 0), ("Open PR", 32), ("Merge PR", 4.8)])
             expect(place(rig, "ios", 298) == .waiting && rig.world.works.slices(repo: "ios", of: 298).isEmpty, "#298 in storage: \(describe(place(rig, "ios", 298)))")

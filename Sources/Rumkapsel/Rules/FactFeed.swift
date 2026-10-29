@@ -70,7 +70,7 @@ extension World {
         feed.numbered[record.id] = crate
         let state = t.to == .ready ? "OPEN" : t.to >= .stored ? "MERGED" : nil
         let pull = record.pulls.filter { state == nil || $0.value == state }.keys.max()
-        var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: t.to, quiet: t.from == nil, by: t.by,
+        var news = WorkNews(crate: crate, office: office(for: record)?.room.key, stage: works.crateless(record) ? min(t.to, .working) : t.to, quiet: t.from == nil, by: t.by,
                             pull: pull == crate.number ? nil : pull)
         news.untested = offBoard(record)
         news.housekeeping = record.housekeeping

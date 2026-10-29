@@ -236,10 +236,15 @@ so in GitHub's closing words (close, fix, resolve and their forms, then `#N`), w
 into a branch other than the default, where GitHub links nothing. One that is linked to an issue by its
 branch and does not close it is a **slice** (`WorkBook.note(closes:)`, `Record.epic`): a record and a crate
 of its own, working in the issue's office. A record kept from before that still holds a slice is split
-once its pull request has been read (`World.checkSlices`); the issue then goes back to what its other
-sources say. An issue is an epic while it is open, read from its board item, else `gh issue view` at the
-base interval (`World.epic(of:)`), and one of its slices has merged; the office's fact carries it
-(`OfficeFact.epic`) and `Rules.officeEnds` ends it when the issue closes.
+once its pull request has been read (`World.checkSlices`); a shipped one, holding a pull request not read
+yet, once its issue is read open, its slices then born shipped; a closed answer is not asked again that
+run. The issue then goes back to what its other sources say, with no crate while it holds no pull request
+of its own (`WorkBook.crateless`, used by `FactFeed.learn` and `World.status`). An issue is an epic while it
+is open, read from its board item (live, else the saved board), else `gh issue view` at the base interval
+(`World.issueOpen`), and one of its slices has merged (`WorkBook.hasMergedSlice`); the office's fact
+carries it (`OfficeFact.epic`) and `Rules.officeEnds` ends it when the issue closes. Your own epic in
+development on the board is a board office with no crew member when no workspace holds it; a workspace
+that goes hands it over instead of dropping it (`World.ownEpicOnBoard`).
 
 ### Ready
 

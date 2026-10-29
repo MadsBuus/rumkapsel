@@ -348,29 +348,37 @@ final class World {
     private func status(_ station: Station, _ room: Room) {
         let record = room.repo.flatMap { works.find(officeKey: room.key, repo: $0) }
         let epic = record.flatMap(epic(of:))
-        let crated = epic == nil || (record?.stage).map { $0 >= .ready } == true
+        let crated = !(record.map(works.crateless) ?? false)
         let crate = crated ? record.flatMap { r in r.number.map { CrateID(repo: r.repo, number: $0) } } : nil
-        let merged = record?.stage.map { $0 >= .stored } ?? false
+        let merged = crated && record?.stage.map { $0 >= .stored } ?? false
         let closed = closedAt[roomKey(station, room)]
         if let o = station.facts.offices[room.key], o.crate == crate, o.merged == merged, o.closedAt == closed, o.epic == Rules.epic(o.epic, epic) { return }
         learn(.status(room.key, crate: crate, merged: merged, closedAt: closed, epic: epic), station: station.name)
     }
 
     func epic(of r: WorkBook.Record) -> EpicNews? {
-        guard r.epic == nil, let n = r.number else { return nil }
+        guard r.epic == nil, let n = r.number, works.hasMergedSlice(repo: r.repo, of: n) else { return nil }
         let slices = works.slices(repo: r.repo, of: n)
-        guard slices.contains(where: { ($0.stage ?? .inbound) >= .stored }) else { return nil }
-        let root = repoRoots.first { $0.value.repo == r.repo }?.key
-        if let item = github.board.liveItems?.first(where: { $0.repo == r.repo && $0.number == n }) { r.issueOpen = !item.isClosed }
-        else if let root {
-            github.pulls.refresh(issue: n, repoRoot: root)
-            if let open = github.pulls.issueOpen(n, repoRoot: root) { r.issueOpen = open }
-        }
+        if let open = issueOpen(repo: r.repo, n) { r.issueOpen = open }
         switch r.issueOpen {
         case true?: return .open(shipped: slices.filter { $0.stage == .shipped }.count)
         case false?: return .closed
         case nil: return nil
         }
+    }
+
+    private func ownEpicOnBoard(_ station: Station, _ room: Room) -> Bool {
+        let cfg = ConfigStore.shared.current
+        guard station.name == "work", cfg.showCrew, let repo = room.repo, cfg.crewEnabled(repo: repo), let n = Work.number(inOfficeKey: room.key),
+              works.hasMergedSlice(repo: repo, of: n), let me = github.myLogin(), let items = github.board.liveItems ?? github.board.items else { return false }
+        return items.contains { $0.repo == repo && $0.number == n && !$0.isClosed && $0.status == cfg.statuses.development && $0.assignees.first == me }
+    }
+
+    private func issueOpen(repo: String, _ n: Int) -> Bool? {
+        if let item = (github.board.liveItems ?? github.board.items)?.first(where: { $0.repo == repo && $0.number == n }) { return !item.isClosed }
+        guard let root = repoRoots.first(where: { $0.value.repo == repo })?.key else { return nil }
+        github.pulls.refresh(issue: n, repoRoot: root)
+        return github.pulls.issueOpen(n, repoRoot: root)
     }
 
     func checkSlices() {
@@ -385,8 +393,14 @@ final class World {
                     }
                     continue
                 }
-                guard let n = r.branchIssue ?? r.issue, (r.stage ?? .inbound) < .shipped || epics.contains(n) else { continue }
-                for p in r.pulls.keys.sorted() where p != n && slicesChecked.insert("\(info.repo)!\(p)").inserted {
+                guard let n = r.branchIssue ?? r.issue else { continue }
+                let shipped = (r.stage ?? .inbound) >= .shipped
+                let unchecked = r.pulls.keys.filter { $0 != n && !slicesChecked.contains("\(info.repo)!\($0)") }.sorted()
+                if shipped, !epics.contains(n) {
+                    guard !unchecked.isEmpty, !shippedSettled.contains("\(info.repo)#\(n)"), let open = issueOpen(repo: info.repo, n) else { continue }
+                    guard open else { shippedSettled.insert("\(info.repo)#\(n)"); continue }
+                }
+                for p in unchecked where slicesChecked.insert("\(info.repo)!\(p)").inserted {
                     github.pulls.refresh(pull: p, repoRoot: root)
                     guard let pr = github.pulls.pull(number: p, repoRoot: root), let closes = pr.closes else {
                         slicesChecked.remove("\(info.repo)!\(p)")
@@ -394,7 +408,7 @@ final class World {
                     }
                     guard let s = works.heard(repo: info.repo, pull: p, closes: closes, pullState: pr.state), s !== r else { continue }
                     StationLog.write("stage", "\(info.repo) #\(p): part of #\(n), not closing it: a \(Words.current.crate) of its own")
-                    report(pullState: pr.state, record: s, shipped: pr.shipped, at: now)
+                    report(pullState: pr.state, record: s, shipped: pr.shipped || shipped, at: now)
                     yardStamps[root] = nil
                 }
             }
@@ -528,6 +542,12 @@ final class World {
                     let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
                     let lan = peerOffices[key] != nil
                     let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, mine: mine, lan: lan) }
+                    if gone, ended == nil, ownEpicOnBoard(station, room) {
+                        room.worktree = nil; room.branch = nil; room.repoRoot = nil
+                        crewRoomInfo[key] = CrewRoomInfo(state: "OPEN", last: now)
+                        changed = true
+                        continue
+                    }
                     if gone || ended != nil || orphan {
                         if ended != nil { retired[key] = now }
                         events += drop(station: station, room: room, announce: !firstRun, reason: gone ? "workspace archived" : ended ?? "nobody's")
@@ -653,7 +673,8 @@ final class World {
             for it in items where it.status == cfg.statuses.development && workRepos.contains(it.repo) {
                 if it.isClosed { continue }
                 let key = Work(repo: it.repo, issue: it.number).officeKey
-                guard let login = it.assignees.first, login != me else { continue }
+                guard let login = it.assignees.first else { continue }
+                if login == me, !works.hasMergedSlice(repo: it.repo, of: it.number) || station.rooms[key]?.worktree != nil { continue }
                 if open.contains(where: { $0.repo == it.repo && crewKey(repo: $0.repo, branch: $0.pr.branch) == key }) { continue }
                 let working = !it.prURLs.isEmpty || branched.contains("\(it.repo)#\(it.number)") || peerOffices[sk + key] != nil || station.rooms[key]?.worktree != nil
                     || !works.slices(repo: it.repo, of: it.number).isEmpty
@@ -741,15 +762,15 @@ final class World {
             works.note(repo: repo, issue: it.number, pull: it.prURLs.first.flatMap { Int($0.split(separator: "/").last ?? "") },
                        author: login, title: it.title, url: it.url)
             let name = "#\(it.number) " + String(it.title.prefix(22))
-            if let r = station.rooms[key], r.worktree == nil, r.name != name { r.name = name; changed = true }
+            if let r = station.rooms[key], r.worktree == nil, r.name != name, login != me { r.name = name; changed = true }
             if station.rooms[key] == nil {
                 guard afresh || placed < World.placementsPerPass else { placementsLeft = true; continue }
                 placed += 1
             }
             if station.ensureRoom(key: key, name: name, repo: repo, color: fleet.color(forRepo: repo), lastActive: now) {
                 changed = true
-                events.append(opened(station, key, repo: repo, via: isReady(repo) && !afresh ? .shuttle(for: "crew:" + login) : .appear))
-                if isReady(repo) && !afresh {
+                events.append(opened(station, key, repo: repo, via: isReady(repo) && !afresh && login != me ? .shuttle(for: "crew:" + login) : .appear))
+                if isReady(repo) && !afresh && login != me {
                     report(office: key, repo: repo, .inbound, by: .board, at: now)
                     events.append(.issueStarted(repo: repo, number: it.number, author: login, roomKey: key))
                 }
@@ -759,11 +780,11 @@ final class World {
         }
 
         var logins = Set(open.filter { !$0.pr.isBot && $0.pr.author != me }.map(\.pr.author))
-        logins.formUnion(boardOffices.map(\.login))
+        logins.formUnion(boardOffices.map(\.login).filter { $0 != me })
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
         for (repo, e) in feed where !e.isBot { seen(e.actor, in: repo, at: e.at) }
         for (repo, pr) in open where !pr.isBot { seen(pr.author, in: repo, at: pr.createdAt) }
-        for o in boardOffices { seen(o.login, in: o.repo, at: o.item.updatedAt ?? now) }
+        for o in boardOffices where o.login != me { seen(o.login, in: o.repo, at: o.item.updatedAt ?? now) }
         var roster: [String: CrewMember] = [:]
         for login in logins {
             let epic = boardOffices.first { $0.login == login && station.facts.offices[Work(repo: $0.repo, issue: $0.item.number).officeKey]?.epic != nil }
@@ -931,6 +952,7 @@ final class World {
 
     private var deconSettled: Set<CrateID> = []
     private var slicesChecked: Set<String> = []
+    private var shippedSettled: Set<String> = []
     private var deconHeard: Set<String> = []
 }
 

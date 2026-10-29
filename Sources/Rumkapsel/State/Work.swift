@@ -222,6 +222,8 @@ final class WorkBook {
     }
 
     func slices(repo: String, of issue: Int) -> [Record] { records.values.filter { $0.repo == repo && $0.epic == issue }.sorted { $0.id < $1.id } }
+    func hasMergedSlice(repo: String, of issue: Int) -> Bool { slices(repo: repo, of: issue).contains { ($0.stage ?? .inbound) >= .stored } }
+    func crateless(_ r: Record) -> Bool { r.pulls.isEmpty && r.number.map { !slices(repo: r.repo, of: $0).isEmpty } ?? false }
 
     private func isSlice(_ repo: String, pull: Int, of issue: Int, closes: [Int]?) -> Bool {
         guard pull != issue else { return false }
@@ -230,15 +232,15 @@ final class WorkBook {
     }
 
     private func slice(_ repo: String, pull: Int, of epic: Int, issue: Int?, pullState: String?, author: String?, title: String?, url: String?) -> Record {
-        if let held = find(repo: repo, pull: pull), held.epic == nil { split(pull, from: held) }
+        let held = find(repo: repo, pull: pull).flatMap { $0.epic == nil ? $0 : nil }
+        if let held { held.pulls[pull] = nil; byPull["\(repo)!\(pull)"] = nil }
         let s = enter(repo: repo, issue: issue == epic ? nil : issue, pull: pull, pullState: pullState, author: author, title: title, url: url)
         s.epic = epic
+        if let held { settle(held) }
         return s
     }
 
-    private func split(_ pull: Int, from r: Record) {
-        r.pulls[pull] = nil
-        byPull["\(r.repo)!\(pull)"] = nil
+    private func settle(_ r: Record) {
         guard r.pulls.isEmpty, let was = r.stage, was > .working else { return }
         for s in [Source.pulls, .git, .deploy] { r.words[s] = nil }
         let to = r.words.values.max() ?? .working

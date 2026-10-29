@@ -215,6 +215,9 @@ moves through it one way: in from the hallway at the back, out through the field
 - An issue is an **epic** while it is open and one of its pull requests has merged without closing it. That
   pull request is a **slice**: a crate of its own, packed beside the epic's console and carried out like
   any other. An issue with no pull request yet is ordinary work; so is one whose pull request closes it.
+  The issue itself has no crate while it holds no pull request of its own. A record that shipped with a
+  slice inside it is split once its issue is seen open: the pull request becomes a slice, shipped, and
+  counts on the tally.
 - The epic's office stays while the issue is open. Against its far wall stands a 1950s planning console:
   a tilted drafting board under a lit blueprint, a swivel chair, a lamp, and on two posts above it a tally
   plate that gets a mark for each slice that ships. A pennant in the repository's colour stands on its
@@ -227,6 +230,11 @@ moves through it one way: in from the hallway at the back, out through the field
   carries as from a desk, goes to the bath and, at night, to bed. Out of the chair it always swivels and
   steps out the same way. A teammate's resident works seated at the console while their pushes and
   reviews come in.
+- Your own epic has an office with no session in it while the board has it in development and assigned
+  to you, on the work station with crew shown: when its workspace goes, the office passes to the board
+  instead of closing, and with no workspace here it simply stands. Nobody moves in; the chair at the
+  console waits empty until a session of yours comes back, and the office ends when the issue closes.
+  Without a board, your epic's office lives only while a session of yours works in it.
 - When the issue closes, the office ends like any finished office, even in your own checkout.
 
 ## Rockets
