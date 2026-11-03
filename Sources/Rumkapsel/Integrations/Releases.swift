@@ -215,17 +215,19 @@ extension World {
         for n in c.deckNumbers where !c.clearedNumbers.contains(n) { report(crate: n, repo: repo, .qa, by: c.source, at: c.updated[n] ?? now) }
         for n in c.clearedNumbers { report(crate: n, repo: repo, .cleared, by: c.source, at: c.updated[n] ?? now) }
         for pull in c.staged {
-            guard let r = works.find(repo: repo, pull: pull) ?? github.task(repo: repo, pull: pull).flatMap({ works.find(repo: repo, crate: $0) }),
+            guard let r = works.find(repo: repo, crate: pull) ?? github.task(repo: repo, pull: pull).flatMap({ works.find(repo: repo, crate: $0) }),
                   r.stage == .stored else { continue }
             works.report(r, .qa, by: .git, at: now)
         }
         let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
+        let onGit: (numbers: Set<Int>, at: Date)? = c.source == .git ? (c.exact ? (listed, c.at) : nil) : c.git.map { (Set($0.storageNumbers + $0.deckNumbers), $0.at) }
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
             guard let n = r.number, let stage = r.stage, stage >= .stored, stage < .shipped else { continue }
-            if c.source == .git, c.exact, !listed.contains(n), !r.pulls.keys.contains(where: listed.contains),
-               let at = r.stagedAt, at < c.at {
-                works.report(r, .shipped, by: .git, at: c.at)
+            let pullOnly = r.issue == nil && !r.pulls.isEmpty && r.pulls.values.allSatisfy { $0 == "MERGED" }
+            if let onGit, c.source == .git || pullOnly, !listed.contains(n), !onGit.numbers.contains(n),
+               !r.pulls.keys.contains(where: { listed.contains($0) || onGit.numbers.contains($0) }), let at = r.stagedAt, at < onGit.at {
+                works.report(r, .shipped, by: .git, at: onGit.at)
             } else if !shippedColumn.isEmpty, github.board.liveItems?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {
                 works.report(r, .shipped, by: .board, at: now)
             }
