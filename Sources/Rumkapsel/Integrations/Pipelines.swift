@@ -31,9 +31,10 @@ struct Pipeline: Equatable {
     var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
     var ships: Bool { ship != .never }
     var hasStaging: Bool { !staging.isEmpty }
-    func isReleaseHead(_ head: String) -> Bool {
+    func isReleaseHead(_ head: String) -> Bool { releases(head: head, into: production) }
+    func releases(head: String, into base: String) -> Bool {
         if head == trunk { return true }
-        if hasStaging { return head == staging }
+        if hasStaging, base == production { return head == staging }
         return releaseBranches.contains { PipelineDetection.matches(head, $0) }
     }
 

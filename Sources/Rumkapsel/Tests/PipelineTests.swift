@@ -40,6 +40,8 @@ enum PipelineTests {
             expect(p.isReleaseHead("staging") && p.isReleaseHead("develop"), "staging and the trunk are release heads")
             expect(!p.isReleaseHead("release/guides") && !p.isReleaseHead("hotfix/typo") && !p.isReleaseHead("gh-14275/search-titles"),
                    "a release branch, a hotfix branch and a feature branch into production are hotfixes")
+            expect(p.releases(head: "release/1.2", into: "staging") && p.releases(head: "develop", into: "staging") && !p.releases(head: "gh-1/work", into: "staging"),
+                   "into staging, a release branch still releases")
         }
 
         test("without staging, a hotfix branch into production is a hotfix, a release branch a release") {

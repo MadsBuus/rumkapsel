@@ -194,8 +194,9 @@ repository, and hourly again:
 A `.github/rumkapsel.json` on the default branch says it for everyone and wins. Settings › Repositories
 answers each question by hand (trunk, how it ships and its release branch, the testing phase and its
 branch); an answer left alone stays detected. Until a repository's way is read, its facts keep what they
-had (`.policy` waits). Releases come from the trunk and, with staging, from staging alone; without
-staging, from a release branch too. Anything else into production is a hotfix, `hotfix/*` included.
+had (`.policy` waits). Into staging, releases come from the trunk or a release branch. Into production,
+with staging, from staging or the trunk alone; without staging, from a release branch too. Anything else
+into production is a hotfix, `hotfix/*` included.
 
 - **Ships on merge**: each merged crate goes straight up in a rocket of its own.
 - **Ships on tags**: what the trunk has that the newest tag (by date, and a version) has not waits in
