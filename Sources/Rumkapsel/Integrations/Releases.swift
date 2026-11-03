@@ -96,6 +96,11 @@ extension World {
                     events.append(.log("\(info.repo): hotfix #\(pr.number) \(Words.current.onThePad)"))
                 }
             }
+            for pr in all where pr.state == "MERGED" {
+                let record = hotfixRecord(repo: info.repo, pr: pr)
+                guard record.stage.map({ $0 < .shipped }) ?? true else { continue }
+                works.report(record, .shipped, by: .pulls, at: pr.mergedAt ?? now)
+            }
             learn(.hotfixes(repo: info.repo, open: open, quiet: quiet), repo: info.repo)
         }
         return events

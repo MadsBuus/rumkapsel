@@ -32,6 +32,23 @@ enum PipelineTests {
             expect(p.isReleaseHead("release/v9.7.1") && !p.isReleaseHead("gh-12/work"), "a release branch is a release head, a feature branch is not")
         }
 
+        test("with staging, only staging and the trunk release into production: a release or hotfix branch into it is a hotfix") {
+            let p = PipelineDetection.detect(branches: ["develop", "staging", "production"],
+                                             merges: features("develop", 12) + times(M(base: "staging", head: "develop"), 4) + times(M(base: "production", head: "staging"), 3),
+                                             file: nil)
+            expect(flow(p) == "develop → staging → production", "got \(flow(p))")
+            expect(p.isReleaseHead("staging") && p.isReleaseHead("develop"), "staging and the trunk are release heads")
+            expect(!p.isReleaseHead("release/guides") && !p.isReleaseHead("hotfix/typo") && !p.isReleaseHead("gh-14275/search-titles"),
+                   "a release branch, a hotfix branch and a feature branch into production are hotfixes")
+        }
+
+        test("without staging, a hotfix branch into production is a hotfix, a release branch a release") {
+            let merges = features("develop", 10) + [M(base: "master", head: "release/v9.7.1"), M(base: "master", head: "hotfix/crash")] + times(M(base: "develop", head: "master"), 2)
+            let p = PipelineDetection.detect(branches: ["develop", "master"], merges: merges, file: nil)
+            expect(flow(p) == "develop → - → master", "got \(flow(p)): \(p.why)")
+            expect(p.isReleaseHead("release/v9.7.1") && !p.isReleaseHead("hotfix/crash"), "release yes, hotfix no")
+        }
+
         test("a staging branch nobody releases through is not used") {
             let p = PipelineDetection.detect(branches: ["develop", "staging", "production"],
                                              merges: features("develop", 6) + times(M(base: "production", head: "develop"), 3), file: nil)

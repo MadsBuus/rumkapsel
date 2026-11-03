@@ -271,10 +271,11 @@ moves through it one way: in from the hallway at the back, out through the field
   and shrinking into the hold. The rocket climbs only once every crate it carries is in. It does not
   lift off: the pad lets go, its thrusters puff it clear, and only well away does the kick stage light.
   After it, the empty deck sinks and the iris closes.
-- **A hotfix** (a pull request into production from anything but the trunk, staging or a release
-  branch) stands by as an express rocket with a red tip, on a slot of its own. Merged, its crate is
-  carried from its office into storage and pulled into the express rocket, which goes up alone. The
-  release rocket keeps its cargo.
+- **A hotfix** (a pull request into production from anything but the trunk or staging; without
+  staging, a release branch is a release too) stands by as an express rocket with a red tip, on a slot
+  of its own. Merged, its crate is carried from its office into storage and pulled into the express
+  rocket, which goes up alone. The release rocket keeps its cargo. A hotfix found already merged, with
+  nobody having seen it open, ships its crate without a flight.
 - **A repository that ships on every merge** sends each merged crate up in a rocket of its own.
 - A production deploy is flown: an onboard camera rides the rocket to its repository's planet and
   lands it at the colony, timed on how long its deploys usually take. Every rocket that lifts off gets

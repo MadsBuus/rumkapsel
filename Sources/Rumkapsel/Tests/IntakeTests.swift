@@ -96,6 +96,22 @@ enum IntakeTests {
             expect(place(rig, "ios", 280) == .testing, "the release's cargo stays on the deck: \(describe(place(rig, "ios", 280)))")
         }
 
+        test("a hotfix found already merged, never seen open: its crate is shipped and gone, and no rocket flies") {
+            let (rig, sim) = org([("Target: ios#298", 0)])
+            guard let root = rig.world.repoRoots.first(where: { $0.value.repo == "ios" })?.key else { return expect(false, "ios' checkout") }
+            var pr = ReleasePR(number: 299, title: "hotfix: onboarding", base: Pipeline.productionName, head: "gh-298/onboarding", state: "MERGED",
+                               url: "https://example.invalid/ios/299", labels: [], mergedAt: rig.now.addingTimeInterval(-3600), production: true, staging: false)
+            pr.hotfix = true
+            rig.world.github.inject(hotfixes: [pr], for: root)
+            rig.simulateGitHub()
+            rig.advance(20)
+            let r = rig.world.works.find(repo: "ios", issue: 298)
+            expect(r?.stage == .shipped && r?.pulls[299] == "MERGED", "#298 shipped by its hotfix: \(r?.stage.map { "\($0)" } ?? "unheard") \(r?.pulls ?? [:])")
+            expect(place(rig, "ios", 298) == nil, "the crate is gone: \(describe(place(rig, "ios", 298)))")
+            expect(station(rig).facts.rockets["ios|hotfix#299"] == nil, "no hotfix rocket: \(station(rig).facts.rockets.keys.sorted())")
+            expect(count(sim, .log("hotfix #299")) == 0, "nothing said of a merge nobody saw")
+        }
+
         test("a teammate's branch, then its PR: one office by shuttle for him, and his work heard as it happens") {
             let (rig, sim) = org([("Target: api#5158", 0), ("Teammate: New branch", 48), ("Teammate: Open PR", 30)])
             saw(sim, [.officeOpened("task:api#", .shuttle(for: "crew:leo")), .crewActivity("leo", "branch_create"), .crewActivity("leo", "pr_open")])
