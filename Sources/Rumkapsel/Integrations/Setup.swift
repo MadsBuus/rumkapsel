@@ -77,6 +77,11 @@ enum Setup {
         return out
     }
 
+    static func changed(_ repo: String, from old: Pipeline, to new: Pipeline) -> String {
+        func said(_ p: Pipeline) -> String { p.remote ? "merges into \(p.trunk), \(way(p))" : way(p) }
+        return "\(repo): \(said(new)); was: \(said(old))"
+    }
+
     static func phrase(_ s: Ships) -> String {
         switch s {
         case .release: return "ships from a release branch"

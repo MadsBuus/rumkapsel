@@ -616,7 +616,17 @@ final class World {
             let run = timed ?? { _, b in b() }
             placementsLeft = false
             checkSlices()
-            var events = run("gh.releases") { self.applyReleases() }
+            var events: [WorldEvent] = []
+            var saidWay: Set<String> = []
+            for c in github.pipelineChanges() {
+                guard let info = repoRoots[c.root], saidWay.insert(info.repo).inserted else { continue }
+                let o = Pipeline.override(forRoot: c.root)
+                let from = c.from.overridden(by: o), to = c.to.overridden(by: o)
+                StationLog.write("github", "\(info.repo): way to production read anew, \(c.to.source): \(c.to.why)")
+                guard !from.sameWay(as: to) else { continue }
+                events.append(.log(Setup.changed(info.repo, from: from, to: to)))
+            }
+            events += run("gh.releases") { self.applyReleases() }
             events += run("gh.board") { self.applyBoardMoves() }
             events += run("gh.crew") { self.rebuildCrew(now: now) }
             if didLoadLayout { afresh = false }

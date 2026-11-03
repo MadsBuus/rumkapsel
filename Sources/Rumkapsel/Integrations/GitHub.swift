@@ -127,8 +127,28 @@ final class GitHubResolver {
         var exact = false
         var at = Date.distantPast
     }
-    private var pipelines: [String: Pipeline] = [:]
+    private var pipelines: [String: Pipeline] = GitHubResolver.loadPipelines()
+    private var pipelineChanged: [(root: String, from: Pipeline, to: Pipeline)] = []
     func pipelineKnown(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pipelines[repoRoot] != nil }
+    func pipelineChanges() -> [(root: String, from: Pipeline, to: Pipeline)] {
+        lock.lock(); defer { lock.unlock() }
+        let out = pipelineChanged; pipelineChanged = []
+        return out
+    }
+    private static var pipelinesURL: URL { AppSupport.root.appendingPathComponent("Rumkapsel/pipelines.json") }
+    private static func loadPipelines() -> [String: Pipeline] {
+        guard let data = try? Data(contentsOf: pipelinesURL) else { return [:] }
+        return (try? JSONDecoder().decode([String: Pipeline].self, from: data)) ?? [:]
+    }
+    private func store(pipeline p: Pipeline?, for repoRoot: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let old = pipelines[repoRoot]
+        let changed = p.map { old != $0 } ?? (old != nil)
+        if let p, let old, !old.sameWay(as: p) { pipelineChanged.append((repoRoot, old, p)) }
+        pipelines[repoRoot] = p
+        if changed, !frozen, let data = try? JSONEncoder().encode(pipelines) { try? data.write(to: GitHubResolver.pipelinesURL, options: .atomic) }
+        return changed
+    }
     func watchedRoots() -> [String] { lock.lock(); defer { lock.unlock() }; return frozen ? [] : Array(watched.keys) }
     var baseInterval: TimeInterval { interval }
     private var branchesOnGitHub: [String: Set<String>] = [:]
@@ -528,10 +548,7 @@ final class GitHubResolver {
             if !failed { lock.lock(); pipelineCheckedAt[repoRoot] = Date(); lock.unlock() }
         }
         let pipe = (settled ?? .unread).overridden(by: Pipeline.override(forRoot: repoRoot))
-        lock.lock()
-        let changed = settled.map { pipelines[repoRoot] != $0 } ?? (pipelines[repoRoot] != nil)
-        pipelines[repoRoot] = settled
-        lock.unlock()
+        let changed = store(pipeline: settled, for: repoRoot)
         if changed {
             trace("pipeline \(repoRoot): \(pipe.trunk) → \(pipe.staging.isEmpty ? "-" : pipe.staging) → \(pipe.production.isEmpty ? "-" : pipe.production) · \(pipe.source): \(pipe.why)")
         }
@@ -582,7 +599,7 @@ extension GitHubResolver {
     func simulationReset() {
         guard frozen else { return }
         lock.lock()
-        pipelines = [:]; owners = [:]
+        pipelines = [:]; pipelineChanged = []; owners = [:]
         me = nil
         lock.unlock()
         pulls.reset()
@@ -638,7 +655,7 @@ extension GitHubResolver {
 
     func inject(pipeline p: Pipeline, for repoRoot: String) {
         guard frozen else { return }
-        lock.lock(); pipelines[repoRoot] = p; lock.unlock()
+        _ = store(pipeline: p, for: repoRoot)
         notify()
     }
 

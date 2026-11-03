@@ -31,7 +31,7 @@ ships. What is optional:
 
 - **A testing phase**: a `staging` branch releases go through.
 - **How it ships**: a production branch (release pull requests), release tags (`v1.2`), or a workflow that
-  deploys on every push. None of them: it doesn't ship, and merged crates wait in storage.
+  deploys on every push. None of them: every merge into the trunk ships.
 - **A GitHub project board** and issues (Settings › GitHub), to lay the yard out from its columns.
 - **Neighbours**: sharing on the local network, per repository (Settings › General and Repositories).
 
