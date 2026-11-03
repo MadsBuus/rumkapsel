@@ -116,7 +116,7 @@ enum PipelineTests {
             let p = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil, deploysOnPush: true)
             expect(p.shipsOnMerge && p.trunk == "main" && p.source == "workflow", "ships on merge from main, got \(p.ship) from \(p.trunk), \(p.source)")
             let q = PipelineDetection.detect(branches: ["main"], merges: features("main", 20), file: nil)
-            expect(!q.shipsOnMerge, "without a deploying workflow it does not")
+            expect(q.shipsOnMerge && q.source == "trunk", "without a deploying workflow it still does, the trunk being all there is: \(q.source)")
             let r = PipelineDetection.detect(branches: ["develop", "staging", "production"],
                                              merges: features("develop", 6) + times(M(base: "production", head: "staging"), 2) + times(M(base: "staging", head: "develop"), 2),
                                              file: nil, deploysOnPush: true)
@@ -217,10 +217,12 @@ enum PipelineTests {
             expect(PipelineDetection.settle(cached: local, read: partial, failed: true) == nil, "a cache from before the remote changed is not kept")
         }
 
-        test("a plain repository: main only, nothing tagged, no deploy: it doesn't ship") {
+        test("a plain repository: main only, nothing tagged, no deploy workflow: what merges into main has shipped") {
             let p = PipelineDetection.detect(branches: ["main", "claude/x"], merges: features("main", 8), file: nil, defaultBranch: "main")
-            expect(p.trunk == "main" && p.ship == .never && !p.ships && p.production.isEmpty && !p.hasStaging, "got \(flow(p)), \(p.ship)")
-            expect(Setup.way(p) == "doesn't ship", "says so: \(Setup.way(p))")
+            expect(p.trunk == "main" && p.ship == .merge && p.ships && p.production.isEmpty && !p.hasStaging, "got \(flow(p)), \(p.ship)")
+            expect(Setup.way(p) == "ships on every merge", "says so: \(Setup.way(p))")
+            let develop = PipelineDetection.detect(branches: ["main", "develop"], merges: features("main", 8) + times(M(base: "main", head: "develop"), 2), file: nil, defaultBranch: "main")
+            expect(develop.trunk == "main" && develop.ship == .merge && !develop.hasStaging, "a develop merged into main now and then changes nothing: \(flow(develop)), \(develop.ship)")
         }
 
         test("tags only, no GitHub releases, no production branch: it ships on tags, as rumkapsel does with release.sh") {
@@ -243,8 +245,8 @@ enum PipelineTests {
             expect(merge.ship == .merge, "a deploy on push to the trunk ships every merge: \(merge.ship)")
             let tag = PipelineDetection.detect(branches: ["main"], merges: [], file: nil, defaultBranch: "main", tagged: true)
             expect(tag.ship == .tag, "tags ship: \(tag.ship)")
-            let never = PipelineDetection.detect(branches: ["main"], merges: [], file: nil, defaultBranch: "main")
-            expect(never.ship == .never, "nothing ships: \(never.ship)")
+            let plain = PipelineDetection.detect(branches: ["main"], merges: [], file: nil, defaultBranch: "main")
+            expect(plain.ship == .merge, "none of them: the trunk is production, every merge ships: \(plain.ship)")
         }
 
         test("no GitHub remote: local work only") {

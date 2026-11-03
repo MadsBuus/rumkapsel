@@ -11,7 +11,7 @@ struct ReleaseFile: Codable, Equatable {
     var ship: Ships?
 }
 
-struct Pipeline: Equatable {
+struct Pipeline: Equatable, Codable {
     static let trunkNames = ["develop", "main", "master"]
     static let stagingName = "staging"
     static let productionName = "production"
@@ -43,6 +43,10 @@ struct Pipeline: Equatable {
         if shipsOnTag, let tag { return "\(repo)/compare/\(tag)...\(trunk)" }
         guard ship == .release, !production.isEmpty else { return repo }
         return "\(repo)/compare/\(production)...\(hasStaging ? staging : trunk)"
+    }
+
+    func sameWay(as o: Pipeline) -> Bool {
+        trunk == o.trunk && staging == o.staging && production == o.production && ship == o.ship && remote == o.remote
     }
 
     func overridden(by o: AppConfig.RepoOverride?) -> Pipeline {
@@ -145,8 +149,10 @@ enum PipelineDetection {
                 ship = .merge; source = "workflow"; why = "deploys on every push to \(trunk)"
             } else if tagged {
                 ship = .tag; source = "tags"; why = "no release branch: what is tagged on \(trunk) has shipped"
+            } else if staging.isEmpty {
+                ship = .merge; source = "trunk"; why = "no release branch and no tags: what merges into \(trunk) has shipped"
             } else {
-                ship = .never; why = "no release branch, no recent tags and no deploy on push to \(trunk)"
+                ship = .never; why = "tested on \(staging), with no release branch, no recent tags and no deploy on push to \(trunk)"
             }
         }
 

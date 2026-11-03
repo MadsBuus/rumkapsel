@@ -14,6 +14,16 @@ enum SetupTests {
             expect(local == ["New repository: notes", "Local work only · not shared"], "got \(local)")
         }
 
+        test("a repository's way to production changed: one line, new way then old") {
+            let was = Pipeline(trunk: "main", staging: "", production: "", ship: .never)
+            let now = Pipeline(trunk: "main", staging: "", production: "", ship: .merge)
+            expect(Setup.changed("notes", from: was, to: now) == "notes: merges into main, ships on every merge; was: merges into main, doesn't ship", "got \(Setup.changed("notes", from: was, to: now))")
+            expect(!was.sameWay(as: now) && was.sameWay(as: { var p = was; p.why = "another count"; p.source = "history"; p.releaseBranches = ["cut/*"]; return p }()),
+                   "a changed count or release pattern is not a changed way: the line would say the same words twice")
+            var renamed = was; renamed.trunk = "develop"
+            expect(!was.sameWay(as: renamed) && Setup.changed("notes", from: was, to: renamed).hasPrefix("notes: merges into develop,"), "a trunk change is said")
+        }
+
         test("the new-repository card, several at once: one card listing them") {
             let card = Setup.card([Setup.Repo(name: "web", pipeline: tattoodo, shared: true), Setup.Repo(name: "rumkapsel", pipeline: tags),
                                    Setup.Repo(name: "bot", pipeline: Pipeline(trunk: "main", staging: "", production: "", ship: .merge))])

@@ -183,12 +183,21 @@ repository, and hourly again:
 - **How it ships**, the first that holds: a **production** branch (`production`, else `master` or `main`
   when not the trunk, or the branch releases end in) ships by release pull requests; a workflow that
   deploys on every push to the trunk **ships on merge**; a version tag (`v1.2`, `1.2.3`) from the last
-  year **ships on tags**, pushed tags alone, no GitHub Release needed; else it **doesn't ship**: merged
-  crates wait in storage and no rocket stands by. A `master` or `main` guessed as production by its name
-  alone, with no release into it, gives way to a deploy on push or to tags.
+  year **ships on tags**, pushed tags alone, no GitHub Release needed; else the trunk is all there is and
+  it **ships on merge** too, since most such repositories deploy from the trunk by something GitHub never
+  sees. It **doesn't ship** only by its file or by hand: merged crates then wait in storage and no rocket
+  stands by. A `master` or `main` guessed as production by its name alone, with no release into it, gives
+  way to a deploy on push or to tags.
 - **A read that fails** (the merged pull requests, or `.github/rumkapsel.json` other than a 404) keeps
   the way already known; with none known, nothing is stored and the next scan asks again. A way known
   from before the repository gained or lost its GitHub remote is not kept.
+- **Across launches**: the way last read is kept in `pipelines.json` in the support folder and is what
+  the station starts from, so the yard needs no wait for GitHub; the first read of a launch then asks
+  again. Whenever a read gives another way than the one known (trunk, testing branch, production, release
+  how it ships; not its release patterns, nor a changed count in its reason), the log says so once per
+  repository, in station words: "web: merges into main, ships on every merge; was: merges into main,
+  doesn't ship" (`Setup.changed`, drained by `World.applyGitHub`). The comparison is made after the
+  repository's hand-set answers are applied, so a way the station does not follow is not announced.
 - **No GitHub remote**: local work only, nothing asked of GitHub.
 
 A `.github/rumkapsel.json` on the default branch says it for everyone and wins. Settings › Repositories
@@ -273,7 +282,7 @@ The counts, by source:
 | Git, staging and production exist | pull request numbers in `staging..trunk` commit subjects | `production..staging` |
 | Git, ships on tags | `<newest tag>..trunk` | |
 | Git, no staging | `production..trunk` | |
-| Git, none of those | pull requests merged into the trunk since the last release, the last 80 and 30 days at most | merged before the last staging release |
+| Git, a repository that doesn't ship (by its file or by hand) | pull requests merged into the trunk since the last release, the last 80 and 30 days at most | merged before the last staging release |
 
 Board or git, per repository: the repository's file decides if it says; else a repository goes to the
 board the first time one of its issues stands in the storage, QA or cleared column, and stays there,
@@ -345,4 +354,4 @@ or `webhook`.
 | Neighbour's offices held | 24 h | `Integrations/World.swift` |
 | Offices shared | worked in within 12 h | `Scene/Scene.swift` |
 | Closed crate kept | 10 min | `Rules/Rules.swift` |
-| Stored crate kept, repository that doesn't ship | 24 h | `Rules/Rules.swift` |
+| Stored crate kept, repository that doesn't ship | 3 h | `Rules/Rules.swift` |

@@ -561,6 +561,29 @@ enum IntakeTests {
             }
         }
 
+        test("a repository's way to production read differently from last time: said once in the log, in station words") {
+            let (rig, sim) = org([("Target: web#455", 0)])
+            let roots = rig.world.repoRoots.filter { $0.value.repo == "web" }.map(\.key)
+            let was = rig.world.github.pipeline(repoRoot: roots[0])
+            var now = was; now.staging = ""; now.why = "no staging any more"
+            for root in roots { rig.world.github.inject(pipeline: now, for: root) }
+            rig.simulateGitHub()
+            rig.advance(5)
+            expect(count(sim, .log(Setup.changed("web", from: was, to: now))) == 1, "said once: \(count(sim, .log("web: ships")))")
+            var counted = now; counted.why = "a merge more"
+            for root in roots { rig.world.github.inject(pipeline: counted, for: root) }
+            rig.simulateGitHub()
+            rig.advance(5)
+            expect(count(sim, .log("; was: ")) == 1, "a new count of the same way says nothing: \(count(sim, .log("; was: ")))")
+            ConfigStore.shared.update { $0.repos["web", default: .init()].ships = .never }
+            defer { ConfigStore.shared.update { $0.repos["web"]?.ships = nil } }
+            var tagged = counted; tagged.ship = .tag
+            for root in roots { rig.world.github.inject(pipeline: tagged, for: root) }
+            rig.simulateGitHub()
+            rig.advance(5)
+            expect(count(sim, .log("; was: ")) == 1, "a change under a hand-set way the station does not follow says nothing: \(count(sim, .log("; was: ")))")
+        }
+
         test("today's flow, detected: develop, staging and production; staging takes the stored crates, the release takes the deck up") {
             let (rig, sim) = org([])
             let detected = PipelineDetection.detect(branches: ["develop", "staging", "production"],
