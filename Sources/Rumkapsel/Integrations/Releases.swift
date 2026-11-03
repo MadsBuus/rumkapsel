@@ -96,6 +96,11 @@ extension World {
                     events.append(.log("\(info.repo): hotfix #\(pr.number) \(Words.current.onThePad)"))
                 }
             }
+            for pr in all where pr.state == "MERGED" {
+                let record = hotfixRecord(repo: info.repo, pr: pr)
+                guard record.stage.map({ $0 < .shipped }) ?? true else { continue }
+                works.report(record, .shipped, by: .pulls, at: pr.mergedAt ?? now)
+            }
             learn(.hotfixes(repo: info.repo, open: open, quiet: quiet), repo: info.repo)
         }
         return events
@@ -375,8 +380,8 @@ final class ReleaseSource: Intake {
         var found: [ReleasePR] = []
         var foundHotfixes: [ReleasePR] = []
         let bases = pipe.remote ? [stagingBranch, productionBranch].filter { !$0.isEmpty } : []
-        func isReleaseHead(_ head: String) -> Bool { pipe.isReleaseHead(head) }
         for base in bases {
+            func isReleaseHead(_ head: String) -> Bool { pipe.releases(head: head, into: base) }
             guard let out = github.run(["gh", "pr", "list", "--base", base, "--state", "all", "--limit", "5",
                                  "--json", "number,title,baseRefName,headRefName,state,url,labels,mergedAt"], cwd: repoRoot),
                   let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { continue }

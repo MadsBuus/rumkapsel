@@ -31,8 +31,11 @@ struct Pipeline: Equatable {
     var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
     var ships: Bool { ship != .never }
     var hasStaging: Bool { !staging.isEmpty }
-    func isReleaseHead(_ head: String) -> Bool {
-        head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
+    func isReleaseHead(_ head: String) -> Bool { releases(head: head, into: production) }
+    func releases(head: String, into base: String) -> Bool {
+        if head == trunk { return true }
+        if hasStaging, base == production { return head == staging }
+        return releaseBranches.contains { PipelineDetection.matches(head, $0) }
     }
 
     func waitingURL(owner: String, tag: String?) -> String {
@@ -62,7 +65,8 @@ struct Pipeline: Equatable {
 enum PipelineDetection {
     struct Merge: Equatable { let base: String; let head: String }
 
-    static let defaultReleaseBranches = ["release*", "hotfix*"]
+    static let defaultReleaseBranches = ["release*"]
+    static let releaseOrHotfix = ["release*", "hotfix*"]
 
     static func matches(_ branch: String, _ pattern: String) -> Bool {
         pattern.hasSuffix("*") ? branch.hasPrefix(String(pattern.dropLast())) : branch == pattern
@@ -80,7 +84,7 @@ enum PipelineDetection {
     static func detect(branches: Set<String>, merges: [Merge], file: ReleaseFile?, defaultBranch: String? = nil, history: Bool = true,
                        deploysOnPush: Bool = false, tagged: Bool = false, remote: Bool = true) -> Pipeline {
         let exists: (String) -> Bool = { b in !b.isEmpty && (branches.isEmpty || branches.contains(b)) }
-        let releaseLike: (String) -> Bool = { h in defaultReleaseBranches.contains { matches(h, $0) } }
+        let releaseLike: (String) -> Bool = { h in releaseOrHotfix.contains { matches(h, $0) } }
         let named = [defaultBranch].compactMap { $0 }.filter { !$0.isEmpty && $0 != Pipeline.stagingName && $0 != Pipeline.productionName }
         let longLived = Set(named + Pipeline.trunkNames + [Pipeline.stagingName, Pipeline.productionName])
 

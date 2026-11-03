@@ -194,7 +194,9 @@ repository, and hourly again:
 A `.github/rumkapsel.json` on the default branch says it for everyone and wins. Settings › Repositories
 answers each question by hand (trunk, how it ships and its release branch, the testing phase and its
 branch); an answer left alone stays detected. Until a repository's way is read, its facts keep what they
-had (`.policy` waits). Releases come from the trunk, from staging, or from a release or hotfix branch.
+had (`.policy` waits). Into staging, releases come from the trunk or a release branch. Into production,
+with staging, from staging or the trunk alone; without staging, from a release branch too. Anything else
+into production is a hotfix, `hotfix/*` included.
 
 - **Ships on merge**: each merged crate goes straight up in a rocket of its own.
 - **Ships on tags**: what the trunk has that the newest tag (by date, and a version) has not waits in
@@ -305,8 +307,9 @@ The first exact count after launch takes away row crates it does not list (`.swe
 | A new tag | ships on tags; not the first answer | `.launched` | `GitHub.swift`, `World.applyReleases` |
 | A crate lands in storage | ships on merge | a rocket of its own with the crate aboard | `Rules.mergeRocket` |
 | Work shipped by another source | the board's shipped column, git not listing it | `.launched` with those crates | `World.launchShipped` |
-| A hotfix pull request is open | into production from anything but the trunk, staging or a release branch | `.hotfixes`: an express rocket on its own slot | `World.applyHotfixes` |
-| A hotfix merges | | `.launched(hotfix:)` with its crate; the release rocket keeps its cargo | the same |
+| A hotfix pull request is open | into production from anything but the trunk or staging (or, without staging, a release branch) | `.hotfixes`: an express rocket on its own slot | `World.applyHotfixes` |
+| A hotfix merges | seen open, or merged since the last look | `.launched(hotfix:)` with its crate; the release rocket keeps its cargo | the same |
+| A hotfix found merged | never seen open | its crate Shipped by pull requests, no flight | the same |
 | A production deploy starts | | the flight | `Scene/Mission.swift` |
 
 Offices fold at Stored, never at Shipped.
@@ -325,7 +328,7 @@ or `webhook`.
 | Trunk names | `develop`, `main`, `master` | `Integrations/Pipelines.swift` |
 | Long-lived branches | those plus `staging`, `production` | `State/Work.swift`, `Integrations/Pipelines.swift` |
 | Branches that are not work | `main`, `master`, `develop`, `HEAD` | `State/Work.swift` |
-| Release branch patterns | `release*`, `hotfix*` | `Integrations/Pipelines.swift` |
+| Release branch patterns | `release*`; `hotfix*` counts as a release only when reading the history for the production branch | `Integrations/Pipelines.swift` |
 | Issue branch pattern | `gh-<N>/...` | `State/Work.swift` |
 | Closing words | `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, then `#N` | `Integrations/PullRequests.swift` |
 | Default branch names | `develop`, `main`, `master`; `staging`; `production` | `Integrations/Pipelines.swift` |
