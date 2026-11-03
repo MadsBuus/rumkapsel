@@ -224,7 +224,7 @@ extension World {
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
             guard let n = r.number, let stage = r.stage, stage >= .stored, stage < .shipped else { continue }
-            let pullOnly = r.issue == nil && !r.pulls.isEmpty && r.pulls.values.allSatisfy { $0 == "MERGED" }
+            let pullOnly = r.issue == nil && !r.pulls.isEmpty && r.pulls.values.allSatisfy { $0 == "MERGED" } && r.words[.git] != nil
             if let onGit, c.source == .git || pullOnly, !listed.contains(n), !onGit.numbers.contains(n),
                !r.pulls.keys.contains(where: { listed.contains($0) || onGit.numbers.contains($0) }), let at = r.stagedAt, at < onGit.at {
                 works.report(r, .shipped, by: .git, at: onGit.at)
