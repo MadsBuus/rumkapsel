@@ -126,6 +126,8 @@ final class GitHubResolver {
         var source: Source = .git
         var exact = false
         var at = Date.distantPast
+        var git: Counted?
+        struct Counted: Equatable { var storageNumbers: [Int]; var deckNumbers: [Int]; var at: Date }
     }
     private var pipelines: [String: Pipeline] = [:]
     func pipelineKnown(repoRoot: String) -> Bool { lock.lock(); defer { lock.unlock() }; return pipelines[repoRoot] != nil }
@@ -146,9 +148,11 @@ final class GitHubResolver {
             let deck = mine.filter { $0.status == st.deck || $0.status == st.cleared }.map(\.number).sorted()
             let cleared = mine.filter { $0.status == st.cleared }.map(\.number).sorted()
             let updated = Dictionary(mine.compactMap { it in it.updatedAt.map { (it.number, $0) } }, uniquingKeysWith: { a, _ in a })
-            let staged = git.counted(repoRoot: repoRoot).flatMap { $0.exact ? $0.deckNumbers : nil } ?? []
-            return Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated,
-                         staged: staged, source: .board)
+            let exact = git.counted(repoRoot: repoRoot).flatMap { $0.exact ? $0 : nil }
+            var c = Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated,
+                          staged: exact?.deckNumbers ?? [], source: .board)
+            c.git = exact.map { Cargo.Counted(storageNumbers: $0.storageNumbers, deckNumbers: $0.deckNumbers, at: $0.at) }
+            return c
             }
         }
         guard var c = git.counted(repoRoot: repoRoot) else { return nil }

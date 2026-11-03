@@ -287,6 +287,40 @@ enum IntakeTests {
             expect(object?.place == .waiting && crates(rig, [.decon], "ios") == 0, "the object is in storage: \(describe(object?.place))")
         }
 
+        test("a bot's crate the station only ever saw merged: git puts it on the deck, and git takes it out once production has it") {
+            let (rig, _) = org([("Target: ios#298", 0), ("Bot: Open PR", 32), ("Bot: Merge PR", 10)])
+            guard let object = station(rig).facts.crates.values.first(where: { $0.id.repo == "ios" && $0.alien }), object.place == .waiting,
+                  let root = rig.world.repoRoots.first(where: { $0.value.repo == "ios" })?.key else { return expect(false, "the object in storage") }
+            let n = object.id.number
+            var git = GitHubResolver.Cargo(storage: 0, deck: 1, storageNumbers: [], deckNumbers: [n])
+            git.exact = true; git.at = rig.now
+            rig.world.github.inject(cargo: git, for: root)
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(place(rig, "ios", n) == .cleared, "staging has it: on the deck, cleared from the start as a bot's crate is: \(describe(place(rig, "ios", n)))")
+            git = GitHubResolver.Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
+            git.exact = true; git.at = rig.now
+            rig.world.github.inject(cargo: git, for: root)
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(rig.world.works.find(repo: "ios", crate: n)?.stage == .shipped, "production has it, so it shipped: \(rig.world.works.find(repo: "ios", crate: n)?.stage.map { "\($0)" } ?? "unheard")")
+            expect(launchedWith(rig, "ios", n), "and went up: \(describe(place(rig, "ios", n)))")
+        }
+
+        test("a pull-only crate git never listed is not shipped by git: a stacked pull request stays in storage") {
+            let (rig, _) = org([("Target: ios#298", 0), ("Bot: Open PR", 32), ("Bot: Merge PR", 10)])
+            guard let object = station(rig).facts.crates.values.first(where: { $0.id.repo == "ios" && $0.alien }), object.place == .waiting,
+                  let root = rig.world.repoRoots.first(where: { $0.value.repo == "ios" })?.key else { return expect(false, "the object in storage") }
+            let n = object.id.number
+            var git = GitHubResolver.Cargo(storage: 0, deck: 0, storageNumbers: [], deckNumbers: [])
+            git.exact = true; git.at = rig.now
+            rig.world.github.inject(cargo: git, for: root)
+            rig.simulateGitHub()
+            rig.advance(20)
+            expect(place(rig, "ios", n) == .waiting && rig.world.works.find(repo: "ios", crate: n)?.stage == .stored,
+                   "still in storage: \(describe(place(rig, "ios", n)))")
+        }
+
         test("a bot's PR closed unmerged: ejected from decon, never cleared, gone") {
             let (rig, sim) = org([("Target: web#455", 0), ("Bot: Open PR", 32), ("Bot: Close PR", 10)])
             saw(sim, [.log("in decon"), .log("ejected from decon, never cleared")])

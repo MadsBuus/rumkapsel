@@ -845,7 +845,7 @@ final class World {
                 if state == "MERGED", station.hasPad {
                     events.append(.log("#\(n) \(Words.current.clearedDecon)"))
                     learn(.work(WorkNews(crate: CrateID(repo: info.repo, number: n), stage: .stored)), repo: info.repo)
-                    report(crate: n, repo: info.repo, .stored, by: .pulls, at: now)
+                    works.report(works.note(repo: info.repo, pull: n, pullState: "MERGED"), .stored, by: .pulls, at: now)
                 } else {
                     learn(.deconClosed(CrateID(repo: info.repo, number: n)), repo: info.repo)
                 }
