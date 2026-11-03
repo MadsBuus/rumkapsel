@@ -31,9 +31,6 @@ struct Pipeline: Equatable, Codable {
     var shipsAtOnce: Bool { shipsOnMerge || shipsOnTag }
     var ships: Bool { ship != .never }
     var hasStaging: Bool { !staging.isEmpty }
-    func sameWay(as o: Pipeline) -> Bool {
-        trunk == o.trunk && staging == o.staging && production == o.production && ship == o.ship && remote == o.remote
-    }
     func isReleaseHead(_ head: String) -> Bool {
         head == trunk || (hasStaging && head == staging) || releaseBranches.contains { PipelineDetection.matches(head, $0) }
     }
@@ -43,6 +40,10 @@ struct Pipeline: Equatable, Codable {
         if shipsOnTag, let tag { return "\(repo)/compare/\(tag)...\(trunk)" }
         guard ship == .release, !production.isEmpty else { return repo }
         return "\(repo)/compare/\(production)...\(hasStaging ? staging : trunk)"
+    }
+
+    func sameWay(as o: Pipeline) -> Bool {
+        trunk == o.trunk && staging == o.staging && production == o.production && ship == o.ship && remote == o.remote
     }
 
     func overridden(by o: AppConfig.RepoOverride?) -> Pipeline {
