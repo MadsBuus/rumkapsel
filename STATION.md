@@ -57,6 +57,8 @@ three round the **monolith**, arms out of it that wander in runs and jogs with s
 and rooms on both sides. The floor is drawn offline per theme (`floor/`) and lit slot by slot as offices
 arrive, so it never re-plans and two machines that share a station draw the same one. Hallway that no
 office needs is taken up again from its far end once nobody is on it, so a quiet station shrinks back.
+An office opens beside its repository's others. A repository's first office opens near the middle, clear
+of the others, where the least new hallway reaches it, so a station grows in short alleys, not one long line.
 
 The monolith is the ancient artefact the game's minions researched. Here it stands for the outside
 world: a session or a probe searching the web goes to it, and it answers with cones of light, never

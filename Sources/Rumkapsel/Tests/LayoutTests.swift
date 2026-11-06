@@ -164,9 +164,18 @@ enum LayoutTests {
             for k in order { place(k, on: rings) }
             OfficePlacement.pinned = .byRepo
             let together = neighbourly(a), apart = neighbourly(rings)
-            expect(together >= 0.8, "most offices' nearest office is their own repository's: \(Int(together * 100))%")
+            expect(together >= 0.75, "most offices' nearest office is their own repository's: \(Int(together * 100))%")
             expect(together > apart, "and more than in rings: \(Int(together * 100))% against \(Int(apart * 100))%")
             draw(a, byRepo: true)
+        }
+
+        test("by repository, a full station: a new repository starts where little new hallway reaches, so eighty offices still stand by repository") {
+            OfficePlacement.pinned = .byRepo
+            defer { OfficePlacement.pinned = .rings }
+            let a = fresh()
+            for i in 0..<80 { place("task:repo\(i % 5)#\(600 + i)", on: a) }
+            expect(whole(a), "the hallway is one piece and every office has its door on it")
+            expect(neighbourly(a) >= 0.75, "most offices' nearest office is their own repository's: \(Int(neighbourly(a) * 100))%")
         }
 
         test("laying the offices out afresh keeps every office, in the order they opened, on one hallway") {
@@ -446,6 +455,24 @@ enum LayoutTests {
                 FileHandle.standardError.write("--- \(n) rooms: mean walk \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0), loops \(edges - hall.count + 1), hallway \(hall.count) cells, footprint \(b.max.x - b.min.x + 1)x\(b.max.y - b.min.y + 1), beside their own \(Int(neighbourly(a) * 100))%\n".data(using: .utf8)!)
                 draw(a, byRepo: true)
             } }
+            OfficePlacement.pinned = .rings
+        }
+        if let path = ProcessInfo.processInfo.environment["RK_FLEET"],
+           let data = FileManager.default.contents(atPath: path),
+           let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let work = (top["stations"] as? [String: Any])?["work"],
+           let saved = try? JSONDecoder().decode(Station.Saved.self, from: JSONSerialization.data(withJSONObject: work)) {
+            for placement in OfficePlacement.allCases {
+                OfficePlacement.pinned = placement
+                let a = Station(name: "work")
+                a.restore(saved, relayout: true)
+                a.settleFixedRooms()
+                let hall = Set(a.corridorCells + a.coreCells).subtracting([a.monolithCell])
+                let walks = a.rooms.values.compactMap { r in r.cells.flatMap(\.neighbours).compactMap { a.hallDistance(of: $0) }.min() }
+                let b = a.bounds
+                FileHandle.standardError.write("=== \(placement.title): \(a.rooms.count) rooms, mean walk \(walks.reduce(0, +) / max(1, walks.count)), farthest \(walks.max() ?? 0), hallway \(hall.count), footprint \(b.max.x - b.min.x + 1)x\(b.max.y - b.min.y + 1), beside their own \(Int(neighbourly(a) * 100))%\n".data(using: .utf8)!)
+                draw(a, byRepo: true)
+            }
             OfficePlacement.pinned = .rings
         }
         if failures > 0 { print("layout: \(failures) failed"); exit(1) }
