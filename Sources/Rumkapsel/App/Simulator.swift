@@ -40,12 +40,14 @@ struct SimOffice: Identifiable {
     var pushed = false
     var commits = 0
     var pull: PullRequest?
+    var pulled = 0
     var prOpen = false
     var startedAt = Date()
 
     var id: String { uid }
     var home: Home { Home.from(repo: repo, branch: branch, cwd: cwd) }
     var label: String { "\(repo)#\(number) \(title) (\(who))" }
+    var unshipped: Bool? { pull.map { _ in commits > pulled } }
 }
 
 private struct SimSession {
@@ -239,7 +241,7 @@ final class SimulatorModel: ObservableObject {
     private func pushScan() {
         for o in offices where o.owner == .me {
             guard sessions[o.uid] != nil else { continue }
-            github.inject(commits: o.commits, pushed: o.pushed, worktree: o.cwd)
+            github.inject(commits: o.commits, pushed: o.pushed, unshipped: o.unshipped, worktree: o.cwd)
         }
         var live = offices.compactMap { o in sessions[o.uid].map { info(o, $0) } }
         for o in offices {
@@ -306,6 +308,7 @@ final class SimulatorModel: ObservableObject {
 
     private func setPull(_ pr: PullRequest?, on uid: String) {
         guard let i = index(uid) else { return }
+        if pr != nil, offices[i].pull == nil || pr?.state == "OPEN" { offices[i].pulled = offices[i].commits }
         offices[i].pull = pr
         if let pr { pullFates["\(offices[i].repo)#\(pr.number)"] = pr.state }
         github.inject(pull: pr, for: offices[i].branch, repoRoot: root(offices[i].repo))
@@ -987,6 +990,7 @@ final class SimulatorModel: ObservableObject {
         case "Commit":
             guard let o = office, let i = index(o.uid) else { return }
             offices[i].commits += 1
+            if offices[i].pull?.state == "OPEN" { offices[i].pulled = offices[i].commits }
             pushScan()
             station.simulateGitHub()
         case "Prompt":

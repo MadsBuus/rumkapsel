@@ -77,12 +77,14 @@ enum IntakeTests {
             expect(station(rig).facts.offices["task:ios#298"]?.epic == nil, "no epic")
         }
 
-        test("a branch with no issue, opened, merged and prompted again: one office, its crate in storage") {
-            let (rig, sim) = org([("Target: ios#298", 0), ("New branch, no issue", 48), ("Open PR", 32), ("Merge PR", 4.8), ("Prompt", 30)])
-            expect(count(sim, .officeOpened("task:ios/claude/"), after: "Merge PR") == 0, "no office opened for the branch after the merge")
+        test("a branch with no issue, opened, merged and prompted again: its office ends with nothing past the merge, no second one opens, its crate in storage") {
+            let (rig, sim) = org([("Target: ios#298", 0), ("New branch, no issue", 48), ("Open PR", 32)])
             let rooms = station(rig).rooms.values.filter { $0.branch?.hasPrefix("claude/new-work-") == true }
-            expect(rooms.count == 1 && rooms[0].key.hasPrefix("task:ios#"), "offices for the branch: \(rooms.map(\.key).sorted())")
+            expect(rooms.count == 1 && rooms[0].key.hasPrefix("task:ios#"), "one office for the branch: \(rooms.map(\.key).sorted())")
             let n = rooms.first.flatMap { Work.number(inOfficeKey: $0.key) } ?? 0
+            then(rig, sim, [("Merge PR", 4.8), ("Prompt", 30), ("Scan: again", 10)])
+            expect(count(sim, .officeOpened("task:ios/claude/"), after: "Merge PR") == 0, "no office opened for the branch after the merge")
+            expect(!station(rig).rooms.values.contains { $0.branch?.hasPrefix("claude/new-work-") == true }, "the merged office ended")
             expect(place(rig, "ios", n) == .waiting, "#\(n) in storage: \(describe(place(rig, "ios", n)))")
         }
 
@@ -269,30 +271,52 @@ enum IntakeTests {
             expect(place(rig, "web", 431) == .testing, "#431 on the untested rows: \(describe(place(rig, "web", 431)))")
         }
 
-        test("my PR closed unmerged: its office goes red and stays mine, nothing is stored") {
+        test("my PR closed unmerged: its office goes red, then ends ten minutes on with nothing past it in the checkout; nothing is stored") {
             let (rig, sim) = org([("Target: web#455", 0), ("Open PR", 32), ("Close PR", 10)])
             saw(sim, [.log("PR #455 open"), .log("#455 booking flow: pull request closed, not merged")])
             expect(station(rig).facts.offices["task:web#455"]?.closedAt != nil, "the office is red")
-            rig.advance(Rules.closedFor)
-            expect(station(rig).rooms["task:web#455"] != nil, "and stays: it is mine")
+            then(rig, sim, [("Scan: again", Rules.closedFor + 10), ("Scan: again", 10)])
+            expect(station(rig).facts.offices["task:web#455"] == nil, "and ends: the checkout holds nothing past the pull request")
             expect(count(sim, .arrived(455, in: .waiting)) == 0 && place(rig, "web", 455) == nil, "never stored: \(describe(place(rig, "web", 455)))")
         }
 
-        test("a teammate's PR closed unmerged: red, the office held ten minutes, then cleared") {
-            let (rig, sim) = org([("Target: api#5140", 0), ("Teammate: Close PR", 200)])
-            saw(sim, [.log("pull request closed, not merged")])
-            expect(station(rig).rooms["task:api#5140"] != nil, "the office stands for now")
-            then(rig, sim, [("Scan: again", 200), ("Scan: again", 200), ("Scan: again", 120), ("GitHub: Poll", 10)])
-            saw(sim, [.officeGone("work|task:api#5140", reason: "pull request closed")])
-            expect(station(rig).rooms["task:api#5140"] == nil && station(rig).facts.offices["task:api#5140"] == nil, "the office is gone")
-            expect(count(sim, .arrived(5140, in: .waiting)) == 0, "never stored")
+        test("my PR closed unmerged with a commit since: the office stays while the checkout holds it") {
+            let (rig, sim) = org([("Target: web#455", 0), ("Open PR", 32), ("Close PR", 10), ("Commit", 5)])
+            then(rig, sim, [("Scan: again", Rules.closedFor + 10), ("Scan: again", 10)])
+            expect(station(rig).rooms["task:web#455"] != nil, "the office stays: there is work past the closed pull request")
         }
 
-        test("a teammate's PR merges: its crate is in storage and the office ends at once") {
-            let (rig, sim) = org([("Target: api#5140", 0), ("Teammate: Merge PR", 10)])
-            saw(sim, [.arrived(5140, in: .waiting), .officeGone("work|task:api#5140", reason: "pull request closed")])
-            expect(place(rig, "api", 5140) == .waiting, "#5140 in storage: \(describe(place(rig, "api", 5140)))")
-            expect(station(rig).rooms["task:api#5140"] == nil && station(rig).facts.offices["task:api#5140"] == nil, "the office is gone from the facts")
+        test("my PR merges with nothing past it: the office ends; with a commit since, it stays") {
+            let (rig, sim) = org([("Target: web#455", 0), ("Open PR", 32), ("Merge PR", 10), ("Scan: again", 120), ("Scan: again", 120)])
+            saw(sim, [.arrived(455, in: .waiting)])
+            expect(station(rig).facts.offices["task:web#455"] == nil, "ended: \(String(describing: station(rig).facts.offices["task:web#455"]))")
+            let (rig2, sim2) = org([("Target: web#455", 0), ("Open PR", 32), ("Merge PR", 10), ("Commit", 5), ("Scan: again", 120), ("Scan: again", 120)])
+            expect(place(rig2, "web", 455) == .waiting && station(rig2).rooms["task:web#455"] != nil, "stays: a commit past the merge")
+            _ = sim2
+        }
+
+        test("my own open PR with no checkout of mine gets no office; a teammate's does") {
+            let rig = Rig(), github = rig.world.github
+            let base = NSTemporaryDirectory() + "rumkapsel-nocheckout-\(UUID().uuidString)"
+            let root = base + "/notes", cwd = base + "/notes-ws"
+            for d in [root, cwd] { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            github.inject(login: "me")
+            github.inject(owner: "me/notes", for: root)
+            github.inject(releases: [], for: root)
+            github.inject(openPRs: [OpenPR(number: 13, title: "put away", author: "me", isBot: false, branch: "claude/put-away",
+                                           url: "https://example.invalid/notes/13", createdAt: rig.now),
+                                    OpenPR(number: 14, title: "kim's", author: "kim", isBot: false, branch: "kim/theirs",
+                                           url: "https://example.invalid/notes/14", createdAt: rig.now)], for: root)
+            let s = SessionInfo(id: "ws", cwd: cwd, repo: "notes", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                                area: nil, title: nil, branch: "claude/here", toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 1,
+                                queuedCount: 0, eventMarkers: [:])
+            rig.simulate(scan: ScanResult(sessions: [s]))
+            rig.simulateGitHub()
+            rig.advance(16)
+            let keys = station(rig).rooms.keys.sorted()
+            expect(keys.contains(Work(repo: "notes", branch: "kim/theirs").officeKey), "kim's pull request has an office: \(keys)")
+            expect(!keys.contains { $0.contains("put-away") || $0.hasSuffix("#13") }, "mine has none: \(keys)")
         }
 
         test("a bot's PR: an object in decon, merged, cleared into storage, and no office for it") {

@@ -339,18 +339,18 @@ enum RuleTests {
             expect(g.crates[id("web", 6)]?.place == .office("task:web#6b"), "with no office fact, the crate still follows the rename")
         }
 
-        test("an office ends on its facts: merged and not mine at once, mine and a neighbour's stay, closed after ten minutes") {
+        test("an office ends on its facts: merged at once, closed after ten minutes, unless its checkout holds unshipped work or a neighbour shows it") {
             var o = OfficeFact(key: "task:web#5", repo: "web")
-            expect(Rules.officeEnds(o, now: t0, mine: false, lan: false) == nil, "open: stays")
+            expect(Rules.officeEnds(o, now: t0, unshipped: false, lan: false) == nil, "open: stays")
             o.merged = true
-            expect(Rules.officeEnds(o, now: t0, mine: false, lan: false) == "merged", "merged and not mine: ends at once")
-            expect(Rules.officeEnds(o, now: t0, mine: true, lan: false) == nil, "mine: stays")
-            expect(Rules.officeEnds(o, now: t0, mine: false, lan: true) == nil, "a neighbour's on the LAN: stays")
+            expect(Rules.officeEnds(o, now: t0, unshipped: false, lan: false) == "merged", "merged, nothing left in the checkout: ends at once")
+            expect(Rules.officeEnds(o, now: t0, unshipped: true, lan: false) == nil, "merged, with commits or changes past it: stays")
+            expect(Rules.officeEnds(o, now: t0, unshipped: false, lan: true) == nil, "a neighbour's on the LAN: stays")
             o.merged = false
             o.closedAt = t0
-            expect(Rules.officeEnds(o, now: t0 + 540, mine: false, lan: false) == nil, "closed nine minutes: stays")
-            expect(Rules.officeEnds(o, now: t0 + 660, mine: false, lan: false) == "closed, not merged", "closed past ten minutes: ends")
-            expect(Rules.officeEnds(o, now: t0 + 660, mine: true, lan: false) == nil, "closed but mine: stays")
+            expect(Rules.officeEnds(o, now: t0 + 540, unshipped: false, lan: false) == nil, "closed nine minutes: stays")
+            expect(Rules.officeEnds(o, now: t0 + 660, unshipped: false, lan: false) == "closed, not merged", "closed past ten minutes: ends")
+            expect(Rules.officeEnds(o, now: t0 + 660, unshipped: true, lan: false) == nil, "closed, with work past it: stays")
             var f = Facts()
             apply(&f, [.office(.opened("task:web#5", repo: "web", via: .appear)),
                        .office(.status("task:web#5", crate: id("web", 5), merged: false, closedAt: t0))])
