@@ -597,7 +597,10 @@ final class Station {
         if !own.isEmpty {
             return free.min { (gap($0, own), floor.slots[$0].ring, $0) < (gap($1, own), floor.slots[$1].ring, $1) }
         }
-        func cost(_ i: Int) -> Int { floor.slots[i].ring * Station.newRepoRingCost - min(gap(i, others), Station.newRepoClearance) }
+        let lit = blocks.hallway.subtracting([plan.monolith])
+        func cost(_ i: Int) -> Int {
+            floor.slots[i].ring * Station.newRepoRingCost + way(to: floor.slots[i], lit: lit).count - min(gap(i, others), Station.newRepoClearance)
+        }
         return free.min { (cost($0), $0) < (cost($1), $1) }
     }
 
@@ -612,7 +615,10 @@ final class Station {
     }
 
     private func lightWay(to slot: Floorplan.Slot) {
-        let lit = blocks.hallway.subtracting([plan.monolith])
+        light(way(to: slot, lit: blocks.hallway.subtracting([plan.monolith])))
+    }
+
+    private func way(to slot: Floorplan.Slot, lit: Set<Cell>) -> [Cell] {
         let run = Set(slot.hall)
         var reached = Set<Cell>(), queue = slot.hall.filter { $0.neighbours.contains(where: lit.contains) }, head = 0
         reached.formUnion(queue)
@@ -622,10 +628,10 @@ final class Station {
         }
         let floorAfter = lit.union(run)
         if reached.count == run.count, slot.cells.contains(where: { $0.neighbours.contains(where: floorAfter.contains) }) {
-            light(slot.hall); return
+            return slot.hall.filter { !lit.contains($0) }
         }
         let room = Set(slot.cells)
-        if slot.cells.contains(where: { $0.neighbours.contains(where: lit.contains) }) { return }
+        if slot.cells.contains(where: { $0.neighbours.contains(where: lit.contains) }) { return [] }
         var prev: [Cell: Cell] = [:], seen = lit
         var walk = lit.sorted { ($0.y, $0.x) < ($1.y, $1.x) }
         head = 0
@@ -634,11 +640,11 @@ final class Station {
             if !lit.contains(c), c.neighbours.contains(where: room.contains) {
                 var path = [c], q = c
                 while let p = prev[q], !lit.contains(p) { path.append(p); q = p }
-                light(Array(path.reversed())); return
+                return path.reversed()
             }
             for n in c.neighbours where floor.allHall.contains(n) && !seen.contains(n) { seen.insert(n); prev[n] = c; walk.append(n) }
         }
-        light(slot.hall)
+        return slot.hall.filter { !lit.contains($0) }
     }
 
     func spareHallway() -> [Cell] {

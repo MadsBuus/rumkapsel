@@ -41,7 +41,7 @@ struct AppConfig: Codable, Equatable {
     var theme: Theme { Theme(rawValue: themeName ?? "") ?? .classic }
     var placementName: String?
     var dramaticLight: Bool?
-    var officePlacement: OfficePlacement { OfficePlacement(rawValue: placementName ?? "") ?? .rings }
+    var officePlacement: OfficePlacement { OfficePlacement(rawValue: placementName ?? "") ?? .byRepo }
     var shareOnLAN: Bool = false
     var shareName: String = NSUserName()
     var projectOwner: String?
