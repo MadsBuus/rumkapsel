@@ -540,8 +540,9 @@ final class World {
                     let orphan = unclaimed && (held[key].map { now.timeIntervalSince($0) > World.holdWindow } ?? true)
                         || unread && now.timeIntervalSince(max(held[key] ?? .distantPast, room.lastActive)) > World.holdWindow
                     let mine = room.worktree.map { Workspaces.isOpen($0) && (sessionRooms.contains(key) || !livedIn.contains($0)) } ?? false
+                    let unshipped = mine && (room.worktree.flatMap { github.git.unshipped(worktree: $0) } ?? true)
                     let lan = peerOffices[key] != nil
-                    let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, mine: mine, lan: lan) }
+                    let ended = crewRoomInfo[key] != nil ? nil : station.facts.offices[room.key].flatMap { Rules.officeEnds($0, now: now, unshipped: unshipped, lan: lan) }
                     if gone, ended == nil, ownEpicOnBoard(station, room) {
                         room.worktree = nil; room.branch = nil; room.repoRoot = nil
                         crewRoomInfo[key] = CrewRoomInfo(state: "OPEN", last: now)
@@ -603,7 +604,7 @@ final class World {
             .work(branch: s.branch).home
         let closedEpic = home.issue.flatMap { works.find(repo: s.repo, issue: $0) }.map { $0.issueOpen == false && !works.slices(repo: s.repo, of: $0.number ?? 0).isEmpty } ?? false
         if closedEpic { return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil) }
-        if let at = retired["\(station)|\(home.key)"], now.timeIntervalSince(at) < World.holdWindow {
+        if let at = retired["\(station)|\(home.key)"], now.timeIntervalSince(at) < World.holdWindow, github.git.unshipped(worktree: s.cwd) != true {
             return Home(key: "kind:lounge", name: home.name, repo: home.repo, issue: nil)
         }
         return home
@@ -662,8 +663,7 @@ final class World {
         var feed: [(repo: String, e: FeedEvent)] = []
         for (root, info) in repoRoots where info.station == "work" && cfg.crewEnabled(repo: info.repo) {
             for pr in github.pulls.teamOpenPRs(repoRoot: root) ?? [] where !Work.longLived.contains(pr.branch) {
-                let checkedOutHere = station.rooms.values.contains { $0.worktree != nil && $0.repo == info.repo && ($0.branch == pr.branch || $0.key == Work(repo: info.repo, branch: pr.branch, pull: pr.number).officeKey) }
-                if pr.author != me || !checkedOutHere { open.append((info.repo, pr)) }
+                if pr.author != me { open.append((info.repo, pr)) }
             }
             for e in github.pulls.feed(repoRoot: root) ?? [] where e.actor != me { feed.append((info.repo, e)) }
         }
@@ -702,7 +702,7 @@ final class World {
             return events
         }
 
-        func work(_ repo: String, _ pr: OpenPR) -> Work { pr.author == me ? Work(repo: repo, branch: pr.branch, pull: pr.number) : Work(repo: repo, branch: pr.branch) }
+        func work(_ repo: String, _ pr: OpenPR) -> Work { Work(repo: repo, branch: pr.branch) }
         var liveKeys = Set(open.filter { !$0.pr.isBot }.map { work($0.repo, $0.pr).officeKey })
         liveKeys.formUnion(boardOffices.map { Work(repo: $0.repo, issue: $0.item.number).officeKey })
         for k in liveKeys where crewRoomInfo[sk + k] != nil { closedAt[sk + k] = nil }
@@ -715,7 +715,7 @@ final class World {
             if let known, known.pulls.isEmpty, let n = known.number, case let slices = works.slices(repo: known.repo, of: n), !slices.isEmpty {
                 status(station, room)
                 if station.facts.offices[room.key]?.epic != nil {
-                    guard let fact = station.facts.offices[room.key], let why = Rules.officeEnds(fact, now: now, mine: false, lan: false) else { continue }
+                    guard let fact = station.facts.offices[room.key], let why = Rules.officeEnds(fact, now: now, unshipped: false, lan: false) else { continue }
                     crewRoomInfo[key] = nil; crewBoxes[key] = nil
                     events += drop(station: station, room: room, announce: false, reason: why)
                     changed = true
@@ -741,7 +741,7 @@ final class World {
                 events.append(.log("\(room.name): pull request closed, not merged"))
             }
             status(station, room)
-            guard let fact = station.facts.offices[room.key], Rules.officeEnds(fact, now: now, mine: false, lan: false) != nil else { continue }
+            guard let fact = station.facts.offices[room.key], Rules.officeEnds(fact, now: now, unshipped: false, lan: false) != nil else { continue }
             if merged, isReady(room.repo) { events.append(.pullRequestClosed(repo: room.repo ?? "", author: author, roomKey: room.key)) }
             closedAt[key] = nil
             crewRoomInfo[key] = nil; crewBoxes[key] = nil
@@ -789,7 +789,7 @@ final class World {
             crewBoxes[sk + key] = (1, "NONE", fleet.color(forRepo: repo))
         }
 
-        var logins = Set(open.filter { !$0.pr.isBot && $0.pr.author != me }.map(\.pr.author))
+        var logins = Set(open.filter { !$0.pr.isBot }.map(\.pr.author))
         logins.formUnion(boardOffices.map(\.login).filter { $0 != me })
         logins.formUnion(feed.filter { !$0.e.isBot && now.timeIntervalSince($0.e.at) < 2 * 3600 }.map(\.e.actor))
         for (repo, e) in feed where !e.isBot { seen(e.actor, in: repo, at: e.at) }

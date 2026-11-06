@@ -9,6 +9,7 @@ final class GitSource: Intake {
     private var commits: [String: (Int, Date)] = [:]
     private var pushed: [String: Bool] = [:]
     private var dirty: [String: Int] = [:]
+    private var unshippedWork: [String: Bool] = [:]
     private var checkedOut: [String: String] = [:]
     private var counts: [String: GitHubResolver.Cargo] = [:]
     private var fetchedAt: [String: Date] = [:]
@@ -39,6 +40,11 @@ final class GitSource: Intake {
     func dirtyFiles(worktree: String) -> Int {
         lock.lock(); defer { lock.unlock() }
         return dirty[worktree] ?? 0
+    }
+
+    func unshipped(worktree: String) -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return unshippedWork[worktree]
     }
 
     func currentBranch(worktree: String) -> String? {
@@ -102,9 +108,18 @@ final class GitSource: Intake {
                 isPushed = github.run(["git", "rev-parse", "--verify", "--quiet", "origin/" + branch], cwd: worktree) != nil
                 onBranch = branch
             }
-            var changed = 0
+            var changed = 0, tracked = 0
             if let out = github.run(["git", "status", "--porcelain"], cwd: worktree), let text = String(data: out, encoding: .utf8) {
-                changed = text.split(separator: "\n").count
+                let lines = text.split(separator: "\n")
+                changed = lines.count
+                tracked = lines.filter { !$0.hasPrefix("??") }.count
+            }
+            var unshipped: Bool?
+            if let branch = onBranch, let root = GitWatch.link(ofWorktree: worktree)?.root,
+               let head = github.pulls.pull(branch: branch, repoRoot: root)?.head,
+               let out = github.run(["git", "rev-list", "--count", "HEAD", "^" + base, "^" + head], cwd: worktree),
+               let text = String(data: out, encoding: .utf8), let beyond = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                unshipped = beyond > 0 || tracked > 0
             }
             var n = 0
             if let out = github.run(["git", "rev-list", "--count", "\(base)..HEAD"], cwd: worktree),
@@ -112,10 +127,11 @@ final class GitSource: Intake {
                 n = v
             }
             lock.lock()
-            let changedResult = commits[worktree]?.0 != n || pushed[worktree] != isPushed || dirty[worktree] != changed
+            let changedResult = commits[worktree]?.0 != n || pushed[worktree] != isPushed || dirty[worktree] != changed || unshippedWork[worktree] != unshipped
             commits[worktree] = (n, Date())
             pushed[worktree] = isPushed
             dirty[worktree] = changed
+            unshippedWork[worktree] = unshipped
             checkedOut[worktree] = onBranch
             lock.unlock()
             if landed(worktree) {
@@ -209,12 +225,12 @@ final class GitSource: Intake {
     }
 
     func reset() {
-        lock.lock(); counts = [:]; commits = [:]; pushed = [:]; dirty = [:]; lock.unlock()
+        lock.lock(); counts = [:]; commits = [:]; pushed = [:]; dirty = [:]; unshippedWork = [:]; lock.unlock()
     }
 
     func inject(cargo c: GitHubResolver.Cargo, for repoRoot: String) { lock.lock(); counts[repoRoot] = c; lock.unlock() }
 
-    func inject(commits n: Int, pushed isPushed: Bool, dirty files: Int, worktree: String) {
-        lock.lock(); commits[worktree] = (n, Date()); pushed[worktree] = isPushed; dirty[worktree] = files; lock.unlock()
+    func inject(commits n: Int, pushed isPushed: Bool, dirty files: Int, unshipped: Bool? = nil, worktree: String) {
+        lock.lock(); commits[worktree] = (n, Date()); pushed[worktree] = isPushed; dirty[worktree] = files; unshippedWork[worktree] = unshipped; lock.unlock()
     }
 }

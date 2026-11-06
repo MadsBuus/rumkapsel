@@ -202,9 +202,12 @@ moves through it one way: in from the hallway at the back, out through the field
   order, whatever the office is called by the time it lands. A crate nobody is fetching goes to the next
   free hands, its own session's minion first. If the office is gone by then, the crate folds away where
   it lies.
-- An office ends on the facts alone: a teammate's or a stray office once its work is merged, any office
-  ten minutes after its pull request closed unmerged. One in your own open checkout, or held by a
-  neighbour, stays.
+- An office ends on the facts alone. Your own work keeps its office while one of your checkouts is on its
+  branch and still open: the folder is there and, where the session app keeps records, one of its
+  sessions there is not archived. Your own pull request alone brings no office. A teammate's work keeps
+  its office while its pull request is open. Once a pull request has merged, or ten minutes after it
+  closed unmerged, its office ends, unless a checkout holds work past it: a later commit or an
+  uncommitted change. One held by a neighbour stays.
 - An office that has ended still shows until its crate has been hauled out and whoever is inside has
   stepped out. Then the name goes, the floor rolls up tile by tile toward the door into a hexagon, and
   the hexagon sinks through the floor.

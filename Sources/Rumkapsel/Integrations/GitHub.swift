@@ -11,6 +11,7 @@ struct PullRequest: Equatable {
     var closes: [Int]?
     var shipped = false
     var backMerge = false
+    var head: String?
 
     var summary: String {
         var s = "PR #\(number) " + (isDraft ? "draft" : state.lowercased())
@@ -694,9 +695,9 @@ extension GitHubResolver {
         notify()
     }
 
-    func inject(commits n: Int, pushed isPushed: Bool, dirty files: Int = 0, worktree: String) {
+    func inject(commits n: Int, pushed isPushed: Bool, dirty files: Int = 0, unshipped: Bool? = nil, worktree: String) {
         guard frozen else { return }
-        git.inject(commits: n, pushed: isPushed, dirty: files, worktree: worktree)
+        git.inject(commits: n, pushed: isPushed, dirty: files, unshipped: unshipped, worktree: worktree)
         notify()
     }
 

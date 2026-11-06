@@ -53,6 +53,6 @@ enum Workspaces {
         guard FileManager.default.fileExists(atPath: path) else { return false }
         guard path.contains("/.claude/worktrees/") else { return sessionFolders()[(path as NSString).standardizingPath] ?? true }
         if (path as NSString).lastPathComponent.hasPrefix("agent-") { return false }
-        return held().contains(path)
+        return held().contains(path) && sessionFolders()[(path as NSString).standardizingPath] != false
     }
 }

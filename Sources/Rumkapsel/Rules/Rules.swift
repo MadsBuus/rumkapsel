@@ -128,10 +128,10 @@ enum Rules {
         return fx
     }
 
-    static func officeEnds(_ o: OfficeFact, now: Date, mine: Bool, lan: Bool) -> String? {
+    static func officeEnds(_ o: OfficeFact, now: Date, unshipped: Bool, lan: Bool) -> String? {
         if o.epic?.closed == true, !lan { return "issue closed" }
         if o.epic != nil, !o.merged { return nil }
-        guard !mine, !lan else { return nil }
+        guard !unshipped, !lan else { return nil }
         if o.merged { return "merged" }
         if let at = o.closedAt, now.timeIntervalSince(at) > closedFor { return "closed, not merged" }
         return nil

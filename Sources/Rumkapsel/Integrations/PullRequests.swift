@@ -250,6 +250,7 @@ final class PullSource: Intake {
                                  state: o["state"] as? String ?? "", reviewDecision: o["reviewDecision"] as? String ?? "",
                                  isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
             pr.closes = PullSource.closes(o)
+            pr.head = o["headRefOid"] as? String
             pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
             pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
             lock.lock(); byNumber[key] = (pr, Date()); lock.unlock()
@@ -287,6 +288,7 @@ final class PullSource: Intake {
                                      isDraft: o["isDraft"] as? Bool ?? false, url: o["url"] as? String ?? "")
                 pr.checks = checks
                 pr.closes = PullSource.closes(o)
+                pr.head = o["headRefOid"] as? String
                 pr.shipped = PullSource.shipped(o, repoRoot: repoRoot, github: github)
                 pr.backMerge = PullSource.backMerge(o, repoRoot: repoRoot, github: github)
                 github.note(task: pr, repoRoot: repoRoot)
