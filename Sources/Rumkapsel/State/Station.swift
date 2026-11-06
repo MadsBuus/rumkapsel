@@ -891,7 +891,7 @@ final class Fleet {
         ConfigStore.shared.current.station(cwd: cwd, owner: owner, repo: repo)
     }
 
-    func unload() { stations = [:]; loaded = false }
+    func unload() { loading.lock(); stations = [:]; loaded = false; loading.unlock() }
     func removeStation(named name: String) { stations[name] = nil }
 
     func recolorRooms() {
@@ -1006,16 +1006,20 @@ final class Fleet {
     static let writing = DispatchQueue(label: "rumkapsel.save", qos: .utility)
 
     private var loaded = false
+    private let loading = NSRecursiveLock()
 
     func save() {
-        guard persists, loaded else { return }
+        loading.lock()
+        guard persists, loaded else { loading.unlock(); return }
         let s = Saved(stations: stations.mapValues(\.saved), repoColors: repoColors, palette: Fleet.paletteVersion, works: works?.saved)
+        loading.unlock()
         guard let json = try? JSONEncoder().encode(s) else { return }
         Fleet.writing.async { try? json.write(to: Fleet.saveURL) }
     }
 
     func load(alone: Bool) {
-        loaded = true
+        loading.lock()
+        defer { loaded = true; loading.unlock() }
         guard persists else { return }
         guard let data = try? Data(contentsOf: Fleet.saveURL) else { return }
         let saved: Saved
