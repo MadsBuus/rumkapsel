@@ -40,6 +40,25 @@ enum WorkTests {
             expect(world.works.find(repo: "api", pull: 12)?.stage == .stored, "and its work book, stage and all")
         }
 
+        test("quitting while the station loads saves the whole station, never the work book alone") {
+            let world = World(demo: false)
+            world.fleet.load(alone: true)
+            _ = world.fleet.station("work").ensureRoom(key: "task:api#12", name: "#12", repo: "api", color: RGB(r: 0.4, g: 0.6, b: 0.9), lastActive: Date())
+            for n in 0..<4000 { world.works.report(world.works.note(repo: "api", branch: "gh-\(n)/thing", pull: n), .stored, by: .pulls, at: Date()) }
+            world.fleet.save()
+            Fleet.writing.sync {}
+            world.fleet.unload()
+            let loaded = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async { world.fleet.load(alone: true); loaded.signal() }
+            Thread.sleep(forTimeInterval: 0.005)
+            world.fleet.save()
+            Fleet.writing.sync {}
+            loaded.wait()
+            let again = World(demo: false)
+            again.fleet.load(alone: true)
+            expect(again.fleet.stations["work"]?.rooms["task:api#12"] != nil, "the station is in the save")
+        }
+
         test("a recheck lists only what disagrees: a stale word, a source ahead, an unknown pull request, proof of production, a misplaced crate") {
             var c = CrateCheck(id: CrateID(repo: "api", number: 5820), at: Date())
             c.answers = [.init(source: .board, says: "status QA", stage: .qa), .init(source: .pulls, says: "pull request #5822 merged", stage: .stored),
