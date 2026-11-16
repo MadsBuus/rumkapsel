@@ -124,11 +124,12 @@ final class GitHubResolver {
         var storage: Int; var deck: Int; var storageNumbers: [Int]; var deckNumbers: [Int]; var clearedNumbers: [Int] = []
         var updated: [Int: Date] = [:]
         var staged: [Int] = []
+        var inProduction: [Int] = []
         var source: Source = .git
         var exact = false
         var at = Date.distantPast
         var git: Counted?
-        struct Counted: Equatable { var storageNumbers: [Int]; var deckNumbers: [Int]; var at: Date }
+        struct Counted: Equatable { var storageNumbers: [Int]; var deckNumbers: [Int]; var inProduction: [Int] = []; var at: Date }
     }
     private var pipelines: [String: Pipeline] = GitHubResolver.loadPipelines()
     private var pipelineChanged: [(root: String, from: Pipeline, to: Pipeline)] = []
@@ -172,7 +173,7 @@ final class GitHubResolver {
             let exact = git.counted(repoRoot: repoRoot).flatMap { $0.exact ? $0 : nil }
             var c = Cargo(storage: storage.count, deck: deck.count, storageNumbers: storage, deckNumbers: deck, clearedNumbers: cleared, updated: updated,
                           staged: exact?.deckNumbers ?? [], source: .board)
-            c.git = exact.map { Cargo.Counted(storageNumbers: $0.storageNumbers, deckNumbers: $0.deckNumbers, at: $0.at) }
+            c.git = exact.map { Cargo.Counted(storageNumbers: $0.storageNumbers, deckNumbers: $0.deckNumbers, inProduction: $0.inProduction, at: $0.at) }
             return c
             }
         }

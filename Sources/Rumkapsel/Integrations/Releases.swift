@@ -226,11 +226,15 @@ extension World {
         }
         let listed = Set(c.storageNumbers + c.deckNumbers + c.clearedNumbers)
         let onGit: (numbers: Set<Int>, at: Date)? = c.source == .git ? (c.exact ? (listed, c.at) : nil) : c.git.map { (Set($0.storageNumbers + $0.deckNumbers), $0.at) }
+        let inProduction: (numbers: Set<Int>, at: Date)? = c.source == .git ? (c.exact ? (Set(c.inProduction), c.at) : nil) : c.git.map { (Set($0.inProduction), $0.at) }
         let shippedColumn = ConfigStore.shared.current.statuses.shipped
         for r in works.records(repo: repo) {
             guard let n = r.number, let stage = r.stage, stage >= .stored, stage < .shipped else { continue }
-            let pullOnly = r.issue == nil && !r.pulls.isEmpty && r.pulls.values.allSatisfy { $0 == "MERGED" } && r.words[.git] != nil
-            if let onGit, c.source == .git || pullOnly, !listed.contains(n), !onGit.numbers.contains(n),
+            let merged = r.issue == nil && !r.pulls.isEmpty && r.pulls.values.allSatisfy { $0 == "MERGED" }
+            let pullOnly = merged && r.words[.git] != nil
+            if merged, let inProduction, r.pulls.keys.allSatisfy(inProduction.numbers.contains) {
+                works.report(r, .shipped, by: .git, at: inProduction.at)
+            } else if let onGit, c.source == .git || pullOnly, !listed.contains(n), !onGit.numbers.contains(n),
                !r.pulls.keys.contains(where: { listed.contains($0) || onGit.numbers.contains($0) }), let at = r.stagedAt, at < onGit.at {
                 works.report(r, .shipped, by: .git, at: onGit.at)
             } else if !shippedColumn.isEmpty, github.board.liveItems?.contains(where: { $0.repo == repo && $0.number == n && $0.status == shippedColumn }) == true {

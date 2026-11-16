@@ -64,7 +64,7 @@ extension StationController {
             enqueue { [self] in
                 guard storyOf?.id == id else { return }
                 let check = world.crateCheck(id, station: st, asked: asked, drawn: simulation.shown[station]?.crates[id]?.zone)
-                StationLog.write("recheck", "\(id): " + (check.mismatches.isEmpty ? "everything agrees" : check.mismatches.joined(separator: " · ")))
+                StationLog.write("recheck", "\(id): " + (check.failed ?? (check.mismatches.isEmpty ? "everything agrees" : check.mismatches.joined(separator: " · "))))
                 storyCheck = (id, check)
                 drawStory()
             }

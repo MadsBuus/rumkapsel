@@ -176,6 +176,7 @@ final class GitSource: Intake {
                 newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
                 newCargo.deck = newCargo.deckNumbers.count
                 newCargo.storage = newCargo.storageNumbers.count
+                newCargo.inProduction = prNumbers("origin/\(productionBranch)") ?? []
                 exact = true
             }
         }
@@ -184,6 +185,7 @@ final class GitSource: Intake {
             if let storage = prNumbers("\(tag)..origin/\(trunk)") {
                 newCargo.storageNumbers = storage
                 newCargo.storage = storage.count
+                newCargo.inProduction = prNumbers(tag) ?? []
                 exact = true
             }
         }
@@ -193,6 +195,7 @@ final class GitSource: Intake {
                 let releaseNumbers = Set(found.map(\.number))
                 newCargo.storageNumbers = storage.filter { !releaseNumbers.contains($0) }
                 newCargo.storage = newCargo.storageNumbers.count
+                newCargo.inProduction = prNumbers("origin/\(productionBranch)") ?? []
                 exact = true
             }
         }
