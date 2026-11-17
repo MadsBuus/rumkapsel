@@ -1,3 +1,4 @@
-## What's new in 0.86
+## What's new in 0.87
 
-- A repository that ships on merge docks a rocket while a pull request waits
+- The floor settles: the lounge keeps its name and the work book keeps only findable work
+- A neighbour's repository colours settle instead of looping
