@@ -638,6 +638,38 @@ enum IntakeTests {
             expect([430, 431, 440, 441].allSatisfy { launchedWith(rig, "web", $0) }, "the deck went up: \([430, 431, 440, 441].map { describe(place(rig, "web", $0)) })")
         }
 
+        test("sessions sent to the lounge leave its name alone, so a scan heard again rebuilds nothing") {
+            ConfigStore.shared.update { $0.useProject = false }
+            defer { ConfigStore.shared.update { $0.useProject = nil } }
+            let rig = Rig(), github = rig.world.github, works = rig.world.works
+            let base = NSTemporaryDirectory() + "rumkapsel-lounge-\(UUID().uuidString)"
+            let root = base + "/notes"
+            let spots = [(cwd: base + "/notes-a", branch: "gh-10/alpha", issue: 10), (cwd: base + "/notes-b", branch: "gh-20/beta", issue: 20)]
+            for d in [root] + spots.map(\.cwd) { try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
+            defer { try? FileManager.default.removeItem(atPath: base) }
+            github.inject(login: "me")
+            github.inject(owner: "me/notes", for: root)
+            github.inject(openPRs: [], for: root)
+            github.inject(releases: [], for: root)
+            for spot in spots {
+                _ = works.note(repo: "notes", branch: spot.branch, pull: spot.issue + 1, pullState: "MERGED", closes: [])
+                works.find(repo: "notes", issue: spot.issue)?.issueOpen = false
+            }
+            let sessions = spots.enumerated().map { i, spot in
+                SessionInfo(id: "s\(i)", cwd: spot.cwd, repo: "notes", repoRoot: root, owner: "me", lastModified: rig.now, activity: .coding("src"),
+                            area: nil, title: nil, branch: spot.branch, toolCount: 0, isSubagent: false, cwdExists: true, promptCount: 1,
+                            queuedCount: 0, eventMarkers: [:])
+            }
+            let lounge = station(rig).rooms["kind:lounge"]?.name
+            rig.simulate(scan: ScanResult(sessions: sessions))
+            rig.advance(16)
+            expect(spots.allSatisfy { rig.world.homeFor(sessions[0], station: "work").key == "kind:lounge" && works.find(repo: "notes", issue: $0.issue)?.issueOpen == false },
+                   "both sessions are sent to the lounge")
+            expect(station(rig).rooms["kind:lounge"]?.name == lounge, "the lounge keeps its name: \(station(rig).rooms["kind:lounge"]?.name ?? "none")")
+            let restless = rig.restless()
+            expect(restless.isEmpty, "the same scan heard again changes nothing: \(restless)")
+        }
+
         say(failures == 0 ? "intake: all passed" : "intake: \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -696,6 +728,10 @@ enum IntakeTests {
         }
         let presses = sim.records.compactMap { r -> String? in if case .press(let n) = r { return n }; return nil }
         expect(presses == pressed, "every step pressed, in order: \(presses)")
+        if let rig = sim.station as? Rig {
+            let restless = rig.restless()
+            expect(restless.isEmpty, "the same scan, GitHub answers and neighbour heard again change nothing: \(restless.joined(separator: ", "))")
+        }
     }
 
     private static func saw(_ sim: SimulatorModel, _ expects: [Expect]) {
@@ -794,7 +830,22 @@ final class Rig: SimStation {
         if world.placementsLeft { later.append { [unowned self] in github() } }
     }
 
-    func simulate(peer: PeerSnapshot) { pending.append { [unowned self] in handle(world.applyPeer(peer, now: now)) } }
+    private var peers: [String: PeerSnapshot] = [:]
+
+    func simulate(peer: PeerSnapshot) { pending.append { [unowned self] in peers[peer.name] = peer; handle(world.applyPeer(peer, now: now)) } }
+
+    func restless() -> [String] {
+        func rebuilds(_ events: [WorldEvent]) -> Bool { events.contains { if case .layoutChanged = $0 { return true }; return false } }
+        func round() -> [String] {
+            var asked: [String] = []
+            if rebuilds(world.applyScan(scan, now: now, minionHomes: [:])) { asked.append("scan") }
+            if rebuilds(world.applyGitHub(now: now)) { asked.append("github") }
+            for p in peers.values.sorted(by: { $0.name < $1.name }) where rebuilds(world.applyPeer(p, now: now)) { asked.append("peer \(p.name)") }
+            return asked
+        }
+        _ = round()
+        return round() + round()
+    }
     func simulatePeerLeft(_ name: String) { pending.append { [unowned self] in handle(world.dropPeer(name)) } }
     func simulateKick(roomKey key: String) { pending.append { [unowned self] in handle(world.kick(roomKey: key)) } }
     func simulate(_ nudge: SimNudge) {}

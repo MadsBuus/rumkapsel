@@ -26,6 +26,25 @@ enum WorkTests {
             expect(moves == ["QA→stored"] && back.stage == .stored, "the board, which decides QA, can still take it back: \(moves)")
         }
 
+        test("an issue number is read only from a gh-<number>/ branch") {
+            let cases: [(String, Int?)] = [("gh-12/thing", 12), ("gh-12/a/b", 12), ("gh-12/", 12), ("gh-12", nil), ("gh-/thing", nil),
+                                           ("gh-1a/thing", nil), ("xgh-12/thing", nil), ("feature/gh-12/thing", nil), ("main", nil)]
+            for (branch, want) in cases { expect(Work.issue(inBranch: branch, repo: "api") == want, "\(branch) reads \(String(describing: want))") }
+        }
+
+        test("work with nothing to find it by is never kept, and a save full of such records loads without them") {
+            let book = WorkBook()
+            _ = book.note(repo: "api", branch: "gh-12/thing", pull: 12)
+            for _ in 0..<50 { _ = book.note(repo: "ios"); _ = book.note(repo: "ios", branch: "main") }
+            expect(book.saved.records.count == 1, "fifty snapshots of an office on main add nothing: \(book.saved.records.count) records")
+            var saved = book.saved
+            saved.records += Array(repeating: WorkBook.Saved.Entry(repo: "ios", branches: [], folders: [], issue: nil, pulls: [:], crate: nil, author: nil, title: nil,
+                                                                    url: nil, stage: nil, stagedAt: nil, stagedBy: nil, quiet: false, words: [:]), count: 100)
+            let again = WorkBook()
+            again.restore(saved)
+            expect(again.saved.records.count == 1 && again.find(repo: "api", pull: 12) != nil, "the empty ones are dropped on load: \(again.saved.records.count) records")
+        }
+
         test("a settings change reloads the station from its save: a save in between can't empty it") {
             let world = World(demo: false)
             world.fleet.load(alone: true)
