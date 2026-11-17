@@ -35,7 +35,9 @@ struct Work: Hashable {
     static let longLived: Set<String> = ["develop", "staging", "main", "master", "production"]
 
     static func issue(inBranch branch: String, repo: String) -> Int? {
-        guard let n = branch.firstMatch(of: #/^gh-(\d+)\//#).flatMap({ Int($0.1) }) else { return nil }
+        guard branch.hasPrefix("gh-"), let slash = branch.firstIndex(of: "/") else { return nil }
+        let digits = branch[branch.index(branch.startIndex, offsetBy: 3)..<slash]
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber), let n = Int(digits) else { return nil }
         return BoardNumbers.elsewhere(n, than: repo) ? nil : n
     }
 
@@ -125,7 +127,23 @@ final class WorkBook {
         }
     }
 
-    private var records: [Int: Record] = [:]
+    private struct Table {
+        private var byId: [Int: Record] = [:]
+        private var byRepo: [String: Set<Int>] = [:]
+        var values: Dictionary<Int, Record>.Values { byId.values }
+        var count: Int { byId.count }
+        subscript(id: Int) -> Record? {
+            get { byId[id] }
+            set {
+                if let old = byId[id] { byRepo[old.repo]?.remove(id) }
+                byId[id] = newValue
+                if let r = newValue { byRepo[r.repo, default: []].insert(id) }
+            }
+        }
+        func of(repo: String) -> [Record] { (byRepo[repo] ?? []).sorted().compactMap { byId[$0] } }
+    }
+
+    private var records = Table()
     private var byBranch: [String: Int] = [:]
     private var byFolder: [String: Int] = [:]
     private var byIssue: [String: Int] = [:]
@@ -136,7 +154,7 @@ final class WorkBook {
     var onTransition: ((Record, Transition) -> Void)?
 
     func reset() {
-        records = [:]; byBranch = [:]; byFolder = [:]; byIssue = [:]; byPull = [:]; byCrate = [:]
+        records = Table(); byBranch = [:]; byFolder = [:]; byIssue = [:]; byPull = [:]; byCrate = [:]
     }
 
     func find(repo: String, branch: String) -> Record? { byBranch["\(repo)|\(branch)"].flatMap { records[$0] } }
@@ -200,7 +218,8 @@ final class WorkBook {
             for other in found where other.id != record.id { merge(other, into: record) }
         } else {
             record = Record(id: nextId, repo: repo); nextId += 1
-            records[record.id] = record
+            let named = branch.map { !Work.notWork.contains($0) } ?? false
+            if named || folder != nil || issue != nil || pull != nil { records[record.id] = record }
         }
         if let branch, !Work.notWork.contains(branch) { record.branches.insert(branch); byBranch["\(repo)|\(branch)"] = record.id }
         if let folder { record.folders.insert(folder); byFolder["\(repo)|\(folder)"] = record.id }
@@ -221,7 +240,7 @@ final class WorkBook {
         return slice(repo, pull: pull, of: n, issue: closes.first, pullState: pullState ?? held.pulls[pull], author: nil, title: nil, url: nil)
     }
 
-    func slices(repo: String, of issue: Int) -> [Record] { records.values.filter { $0.repo == repo && $0.epic == issue }.sorted { $0.id < $1.id } }
+    func slices(repo: String, of issue: Int) -> [Record] { records.of(repo: repo).filter { $0.epic == issue } }
     func hasMergedSlice(repo: String, of issue: Int) -> Bool { slices(repo: repo, of: issue).contains { ($0.stage ?? .inbound) >= .stored } }
     func crateless(_ r: Record) -> Bool { r.pulls.isEmpty && r.number.map { !slices(repo: r.repo, of: $0).isEmpty } ?? false }
 
@@ -292,7 +311,7 @@ final class WorkBook {
 
     func restore(_ saved: Saved) {
         reset()
-        for e in saved.records {
+        for e in saved.records where !(e.branches.isEmpty && e.folders.isEmpty && e.issue == nil && e.pulls.isEmpty && e.crate == nil && e.epic == nil) {
             let r = Record(id: nextId, repo: e.repo); nextId += 1
             r.branches = Set(e.branches); r.folders = Set(e.folders); r.issue = e.issue; r.crate = e.crate
             r.pulls = Dictionary(uniqueKeysWithValues: e.pulls.compactMap { k, v in Int(k).map { ($0, v) } })
@@ -311,5 +330,5 @@ final class WorkBook {
 
     func record(id: Int) -> Record? { records[id] }
     var count: Int { records.count }
-    func records(repo: String) -> [Record] { records.values.filter { $0.repo == repo }.sorted { $0.id < $1.id } }
+    func records(repo: String) -> [Record] { records.of(repo: repo) }
 }

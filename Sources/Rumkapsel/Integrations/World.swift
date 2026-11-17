@@ -471,7 +471,7 @@ final class World {
                     if promoted { events.append(.log("\(home.name): branch created")) }
                     changed = true
                 }
-                if let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
+                if !home.key.hasPrefix("kind:"), let r = station.rooms[home.key], r.worktree == nil, r.name != home.name { r.name = home.name; changed = true }
                 if !held, station.ensureRoom(key: home.key, name: home.name, repo: home.repo, color: fleet.color(forRepo: home.repo), lastActive: s.lastModified) {
                     changed = true
                     roomCreated["\(stationName)|\(home.key)"] = now
