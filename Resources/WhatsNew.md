@@ -1,3 +1,3 @@
-## What's new in 0.85
+## What's new in 0.86
 
-- A merged pull request ships once production's history holds it
+- A repository that ships on merge docks a rocket while a pull request waits
