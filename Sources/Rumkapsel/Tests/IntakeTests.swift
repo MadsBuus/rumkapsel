@@ -212,12 +212,15 @@ enum IntakeTests {
             expect(crates(rig, [.testing, .cleared], "web") == 2, "only the deck's own two on the deck")
         }
 
-        test("a repository whose merges deploy: the merge is a launched rocket with the crate aboard") {
-            let (rig, sim) = org([("Target: ios#298", 0), ("Repo: Ships on merge", 4.8), ("Open PR", 32), ("Merge PR", 10)])
+        test("a repository whose merges deploy: a rocket stands docked while the pull request is open, and the merge launches it with the crate aboard") {
+            let (rig, sim) = org([("Target: ios#298", 0), ("Repo: Ships on merge", 4.8), ("Open PR", 32)])
+            let stood = station(rig).facts.rockets.values.filter { $0.repo == "ios" }
+            expect(stood.count == 1 && stood[0].kind == .merge && stood[0].docked && !stood[0].launched, "one docked merge rocket while #298 is open: \(stood)")
+            then(rig, sim, [("Merge PR", 10)])
             saw(sim, [.log("ios: #298 merged, 1 crate aboard")])
             guard case .aboard(let id)? = place(rig, "ios", 298), let r = station(rig).facts.rockets[id] else { return expect(false, "#298 aboard: \(describe(place(rig, "ios", 298)))") }
-            expect(r.kind == .merge && r.launched, "aboard a launched merge rocket: \(r)")
-            expect(count(sim, .standing("ios"), after: "Repo: Ships on merge") == 0, "no release rocket stood for it")
+            expect(r.kind == .merge && r.launched && r.id == stood.first?.id, "aboard the rocket that stood, launched: \(r)")
+            expect(count(sim, .standing("ios"), after: "Repo: Ships on merge") == 1, "it stood once")
         }
 
         test("a repository without staging: merged work waits in storage, the release loads from there and goes") {

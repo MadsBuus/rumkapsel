@@ -275,7 +275,9 @@ extension StationController {
     func padRocket(_ m: Mission, climbing: Bool = false) -> (key: String, rocket: ShownRocket, launched: Bool)? {
         guard let st = fleet.stations[RocketKey.parts(m.rocket).station] else { return nil }
         let all = simulation.shownRockets(st).filter { missionFlies(m, $0.key) }
-            .map { ($0.key, $0.rocket, st.facts.rockets[String($0.key.dropFirst(st.name.count + 1))]?.launched == true) }
+            .map { ($0.key, $0.rocket, st.facts.rockets[String($0.key.dropFirst(st.name.count + 1))]) }
+            .filter { $0.2.map { $0.kind != .merge || $0.launched } ?? true }
+            .map { ($0.0, $0.1, $0.2?.launched == true) }
         if climbing { return all.filter { $0.1.climbing != nil }.max { $0.1.climbing! < $1.1.climbing! } }
         return all.first { $0.2 && $0.1.climbing == nil } ?? all.first { $0.1.climbing == nil } ?? all.first
     }
