@@ -253,7 +253,8 @@ moves through it one way: in from the hallway at the back, out through the field
 - Clicking a rocket opens its release: the release pull request when one is open, else what the next
   release would carry: production against staging, or against the trunk where there is no staging, or
   the trunk since the last tag.
-- A rocket stands on a pad slot wherever a repository has work waiting to ship. A fresh launch, a
+- A rocket stands on a pad slot wherever a repository has work waiting to ship, or, shipping on every
+  merge, work in review. A fresh launch, a
   docked rocket, a hotfix and a rocket being welded come first; a rocket only standing by gives its slot
   to them.
 - **The pad lift.** Under each slot is an iris over a shaft whose deck holds the kick stage. When the
@@ -281,7 +282,11 @@ moves through it one way: in from the hallway at the back, out through the field
   of its own. Merged, its crate is carried from its office into storage and pulled into the express
   rocket, which goes up alone. The release rocket keeps its cargo. A hotfix found already merged, with
   nobody having seen it open, ships its crate without a flight.
-- **A repository that ships on every merge** sends each merged crate up in a rocket of its own.
+- **A repository that ships on every merge** docks a rocket while one of its crates waits in an office
+  (an open pull request), one rocket however many there are. At the merge that crate goes up in it and,
+  if another still waits, a new rocket docks. When the last closes unmerged, the rocket undocks and goes.
+  It stands by: a release with crates waiting takes its pad. A merge with no rocket standing still gets a
+  rocket of its own.
 - A production deploy is flown: an onboard camera rides the rocket to its repository's planet and
   lands it at the colony, timed on how long its deploys usually take. Every rocket that lifts off gets
   its own flight and screen at once, whatever else is in the air: screens stack at the side, up to three,

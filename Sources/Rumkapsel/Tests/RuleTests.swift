@@ -391,17 +391,57 @@ enum RuleTests {
             expect(f.rockets.isEmpty && f.crates.keys.sorted() == [id("web", 1)], "the tombstone goes with its crates: \(f.crates.keys.sorted())")
         }
 
-        test("a repository that ships on merge: each merge is a launched rocket of its own with its crate aboard, and nothing stands") {
+        test("a repository that ships on merge, work stored with no office: each merge is a launched rocket of its own with its crate aboard") {
             var f = Facts()
-            apply(&f, [.policy(repo: "ios", RepoFacts(shipsOnMerge: true, shipsAtOnce: true)), work("ios", 1, .ready, office: true), work("ios", 2, .ready, office: true)])
-            let fx = apply(&f, [work("ios", 1, .stored, office: true)])
-            apply(&f, [work("ios", 2, .stored, office: true), .release(repo: "ios", production: nil, label: "")], at: t0 + 5)
+            apply(&f, [.policy(repo: "ios", RepoFacts(shipsOnMerge: true, shipsAtOnce: true))])
+            let fx = apply(&f, [work("ios", 1, .stored)])
+            apply(&f, [work("ios", 2, .stored), .release(repo: "ios", production: nil, label: "")], at: t0 + 5)
             guard case .aboard(let a)? = f.crates[id("ios", 1)]?.place, case .aboard(let b)? = f.crates[id("ios", 2)]?.place else {
                 return expect(false, "both aboard: \(f.crates.values.map(\.place))")
             }
             expect(a != b && [a, b].allSatisfy { f.rockets[$0].map { $0.kind == .merge && $0.launched && $0.slot != nil } == true }, "two merge rockets on pads: \(f.rockets)")
             expect(f.rockets.count == 2, "no release rocket stands for a repository that ships at once")
             expect(logs(fx) == ["ios: #1 merged, 1 \(Words.current.crate) \(Words.current.aboard)"], "said: \(logs(fx))")
+        }
+
+        test("a repository that ships on merge: the office closing merged is the merge, and the rocket that stood takes the crate") {
+            var f = Facts()
+            apply(&f, [.policy(repo: "ios", RepoFacts(shipsOnMerge: true, shipsAtOnce: true)), .office(.opened("task:ios#5", repo: "ios", via: .appear)),
+                       work("ios", 5, .ready, office: true)])
+            guard let standing = f.rockets.values.first(where: { !$0.launched }) else { return expect(false, "a rocket stands: \(f.rockets)") }
+            apply(&f, [.office(.status("task:ios#5", crate: id("ios", 5), merged: true, closedAt: nil)), .office(.gone("task:ios#5"))], at: t0 + 2)
+            expect(f.crates[id("ios", 5)]?.place == .aboard(standing.id) && f.rockets[standing.id]?.launched == true, "aboard the rocket that stood: \(f.rockets)")
+            apply(&f, [work("ios", 5, .stored, office: true), work("ios", 5, .shipped)], at: t0 + 4)
+            expect(f.rockets.count == 1 && f.crates[id("ios", 5)]?.place == .aboard(standing.id), "the merge heard later changes nothing: \(f.rockets)")
+        }
+
+        test("a repository that ships on merge: one rocket stands docked while a crate waits in an office, and the merge flies it") {
+            var f = Facts()
+            let merges = RepoFacts(shipsOnMerge: true, shipsAtOnce: true)
+            apply(&f, [.policy(repo: "bot", merges), work("bot", 1, .working)])
+            expect(f.rockets.isEmpty, "a branch with no pull request: nothing stands")
+            let fx = apply(&f, [work("bot", 1, .ready, office: true), work("bot", 2, .ready, office: true)])
+            guard let standing = f.rockets.values.first, f.rockets.count == 1 else { return expect(false, "one rocket for the repository: \(f.rockets)") }
+            expect(standing.kind == .merge && standing.docked && !standing.launched && standing.slot != nil, "docked on a pad: \(standing)")
+            expect(standing.label == "rocket:|bot · 2 pull requests open · ships on merge", "says how many: \(standing.label)")
+            expect(logs(fx).contains("bot \(Words.current.standingBy)"), "said: \(logs(fx))")
+            apply(&f, [work("bot", 1, .stored, office: true)], at: t0 + 5)
+            expect(f.crates[id("bot", 1)]?.place == .aboard(standing.id) && f.rockets[standing.id]?.launched == true, "#1 flies in the rocket that stood")
+            let next = f.rockets.values.filter { !$0.launched }
+            expect(next.count == 1 && next[0].id != standing.id && next[0].label == "rocket:|bot · #2 open · ships on merge", "the next one stands for #2 at once: \(f.rockets)")
+            apply(&f, [work("bot", 2, .working, office: true)], at: t0 + 7)
+            expect(f.rockets.values.allSatisfy(\.launched) && f.rockets[standing.id] != nil, "#2 closed unmerged: its rocket goes, the flown one keeps its time")
+            apply(&f, [.policy(repo: "web", RepoFacts()), work("web", 3, .ready, office: true)], at: t0 + 8)
+            expect(!f.rockets.values.contains { $0.repo == "web" }, "a repository that ships by release gets none for an open pull request")
+        }
+
+        test("a rocket standing for open pull requests gives its pad to a release with crates waiting") {
+            var f = Facts()
+            let repos = (0..<g.pads).map { "r\($0)" }
+            apply(&f, [.policy(repo: "bot", RepoFacts(shipsOnMerge: true, shipsAtOnce: true)), work("bot", 1, .ready, office: true)])
+            for r in repos { apply(&f, [.policy(repo: r, RepoFacts()), work(r, 1, .stored, quiet: true), .release(repo: r, production: true, label: r)]) }
+            let merge = f.rockets.values.first { $0.repo == "bot" }
+            expect(merge?.slot == nil, "every pad to a docked release: \(String(describing: merge))")
         }
 
         test("a hotfix: its own rocket and pad beside the release, which keeps its cargo when the hotfix goes up") {

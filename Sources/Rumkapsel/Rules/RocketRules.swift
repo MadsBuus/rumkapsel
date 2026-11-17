@@ -59,13 +59,32 @@ extension Rules {
         fx.append(.log("\(repo): \(what), \(aboard(f.aboard(rocket.id).count))"))
     }
 
+    static func boarding(_ f: inout Facts) {
+        let open = Dictionary(grouping: f.crates.values.filter { c in
+            guard case .office = c.place, c.closedAt == nil else { return false }
+            return f.repo(c.id.repo).shipsOnMerge
+        }, by: \.id.repo)
+        for r in f.rockets.values.sorted(by: { $0.id < $1.id }) where r.kind == .merge && !r.launched && open[r.repo] == nil { f.rockets[r.id] = nil }
+        for (repo, crates) in open.sorted(by: { $0.key < $1.key }) {
+            let standing = f.rockets.values.filter { $0.repo == repo && $0.kind == .merge && !$0.launched }.sorted { $0.id < $1.id }
+            for r in standing.dropFirst() { f.rockets[r.id] = nil }
+            let numbers = crates.map(\.id.number).sorted()
+            let label = "rocket:|\(repo) · " + (numbers.count == 1 ? "#\(numbers[0]) open" : "\(numbers.count) pull requests open") + " · ships on merge"
+            if let r = standing.first { f.rockets[r.id]?.label = label; continue }
+            let id = "\(repo)|merge#\(f.take())"
+            f.rockets[id] = RocketFact(id: id, repo: repo, kind: .merge, label: label, docked: true)
+        }
+    }
+
     static func mergeRocket(_ crate: CrateID, link: String, quiet: Bool, _ now: Date, _ f: inout Facts, _ fx: inout [Effect]) -> RocketID {
-        let id = "\(crate.repo)|merge#\(f.nextSeq)"
-        var rocket = RocketFact(id: id, repo: crate.repo, kind: .merge, label: "rocket:\(link)|\(crate.repo) · deployed on merge", docked: true)
+        let standing = f.rockets.values.filter { $0.repo == crate.repo && $0.kind == .merge && !$0.launched }.min { $0.id < $1.id }
+        var rocket = standing ?? RocketFact(id: "\(crate.repo)|merge#\(f.take())", repo: crate.repo, kind: .merge, label: "", docked: true)
+        rocket.label = "rocket:\(link)|\(crate.repo) · #\(crate.number) deployed on merge"
+        rocket.docked = true
         rocket.launchedAt = now
-        f.rockets[id] = rocket
-        fx.append(quiet ? .quiet(.rocket(id)) : .log("\(crate.repo): #\(crate.number) merged, \(aboard(1))"))
-        return id
+        f.rockets[rocket.id] = rocket
+        fx.append(quiet ? .quiet(.rocket(rocket.id)) : .log("\(crate.repo): #\(crate.number) merged, \(aboard(1))"))
+        return rocket.id
     }
 
     private static func aboard(_ n: Int) -> String {
@@ -73,6 +92,7 @@ extension Rules {
     }
 
     static func ready(_ f: inout Facts) {
+        boarding(&f)
         for r in f.rockets.values.sorted(by: { $0.id < $1.id }) where !r.launched {
             if r.kind == .release, f.repo(r.repo).shipsAtOnce { f.rockets[r.id] = nil; continue }
             let cargo = f.cargo(r.repo)
@@ -85,6 +105,7 @@ extension Rules {
         func flying(_ r: RocketFact) -> Bool { r.launchedAt.map { now.timeIntervalSince($0) < flightWindow } ?? false }
         func rank(_ r: RocketFact) -> Int {
             if r.launched { return flying(r) ? 2 : 0 }
+            if r.kind == .merge { return 1 }
             if r.kind != .release || r.docked || f.staging[r.repo]?.underway == true { return 2 }
             return 1
         }

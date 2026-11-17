@@ -56,6 +56,7 @@ enum Rules {
         var fx: [Effect] = []
         var arrived: [String: [Zone: [Int]]] = [:]
         let go = Set(f.rockets.values.filter(\.go).map(\.id))
+        let had = Set(f.rockets.keys)
         for event in events {
             switch event {
             case .policy(let repo, let r):
@@ -68,7 +69,7 @@ enum Rules {
             case .work(let news):
                 work(news, now, &f, g, &fx, &arrived)
             case .office(let news):
-                office(news, &f, g, &fx)
+                office(news, now, &f, g, &fx)
             case .decon(let repo, let open, let quiet):
                 let new = Set(open).sorted().filter { f.crates[CrateID(repo: repo, number: $0)] == nil }
                 guard !new.isEmpty else { continue }
@@ -122,6 +123,13 @@ enum Rules {
             }
         }
         normalize(&f, at: now, yard: g)
+        for r in f.rockets.values.sorted(by: { $0.id < $1.id }) where r.kind == .merge && !r.launched && !had.contains(r.id) {
+            let quietly = f.crates.values.contains { c in
+                guard c.id.repo == r.repo, case .office = c.place else { return false }
+                return fx.contains(.quiet(.crate(c.id)))
+            }
+            fx.append(quietly ? .quiet(.rocket(r.id)) : .log("\(r.repo) \(Words.current.standingBy)"))
+        }
         for r in f.rockets.values.sorted(by: { $0.id < $1.id }) where r.go && !go.contains(r.id) && !fx.contains(.quiet(.rocket(r.id))) {
             fx.append(.log("\(r.repo) \(Words.current.steaming), waiting for the release to merge"))
         }
@@ -212,7 +220,7 @@ enum Rules {
         else if let zone = to?.zone { arrived[id.repo, default: [:]][zone, default: []].append(id.number) }
     }
 
-    private static func office(_ news: OfficeNews, _ f: inout Facts, _ g: YardGeometry, _ fx: inout [Effect]) {
+    private static func office(_ news: OfficeNews, _ now: Date, _ f: inout Facts, _ g: YardGeometry, _ fx: inout [Effect]) {
         switch news {
         case .opened(let key, let repo, let via):
             guard f.offices[key] == nil else { return }
@@ -231,8 +239,11 @@ enum Rules {
             o.closedAt = closedAt.map { at in o.closedAt.map { min($0, at) } ?? at }
             f.offices[key] = o
         case .gone(let key):
-            guard f.offices.removeValue(forKey: key) != nil else { return }
-            for c in f.crates.values.filter({ $0.place == .office(key) }).sorted(by: { $0.id < $1.id }) { put(c.id, nil, &f, g) }
+            guard let o = f.offices.removeValue(forKey: key) else { return }
+            for c in f.crates.values.filter({ $0.place == .office(key) }).sorted(by: { $0.id < $1.id }) {
+                let flies = o.merged && f.repo(c.id.repo).shipsOnMerge && c.closedAt == nil
+                put(c.id, flies ? .aboard(mergeRocket(c.id, link: "", quiet: false, now, &f, &fx)) : nil, &f, g)
+            }
         }
     }
 

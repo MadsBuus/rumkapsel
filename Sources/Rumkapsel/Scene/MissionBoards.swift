@@ -93,7 +93,7 @@ extension StationController {
             let checks: MissionBoards.Lamp = offices.contains(where: world.checksFailing) ? .red : offices.isEmpty ? .dark : .green
             let rows = station.facts.crates.values.filter { $0.id.repo == repo && ($0.zone == .testing || $0.zone == .cleared) }
             let waiting: MissionBoards.Lamp = rows.isEmpty ? .dark : rows.contains { $0.zone == .testing } ? .amber : .green
-            let rocket = station.facts.rockets.values.first { $0.repo == repo && !$0.launched && $0.kind != .merge }
+            let rocket = station.facts.rockets.values.first { $0.repo == repo && !$0.launched }
             let release: MissionBoards.Lamp = rocket.map { $0.go ? .green : .amber } ?? .dark
             let errors: MissionBoards.Lamp
             switch world.errors(repo: repo).map({ Sentry.trend($0, at: now).level }) {

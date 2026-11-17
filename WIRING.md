@@ -207,7 +207,8 @@ had (`.policy` waits). Into staging, releases come from the trunk or a release b
 with staging, from staging or the trunk alone; without staging, from a release branch too. Anything else
 into production is a hotfix, `hotfix/*` included.
 
-- **Ships on merge**: each merged crate goes straight up in a rocket of its own.
+- **Ships on merge**: while a crate waits in an office, one rocket stands docked; each merged crate goes
+  up in it, or in a rocket of its own when none stood.
 - **Ships on tags**: what the trunk has that the newest tag (by date, and a version) has not waits in
   storage; no rocket stands by, and a new tag launches one.
 
@@ -314,7 +315,8 @@ The first exact count after launch takes away row crates it does not list (`.swe
 | Work waiting, no release open | the repository ships, and not on merge or tags | `.release(production: nil)`: a rocket standing by | the same |
 | A production release merges | | `.launched`: the cargo aboard; Shipped for what waited | the same |
 | A new tag | ships on tags; not the first answer | `.launched` | `GitHub.swift`, `World.applyReleases` |
-| A crate lands in storage | ships on merge | a rocket of its own with the crate aboard | `Rules.mergeRocket` |
+| A crate waits in an office | ships on merge | one `.merge` rocket docked, derived on every apply | `Rules.boarding` |
+| A crate lands in storage, or its office closes merged | ships on merge | the standing rocket (or a new one) launches with the crate aboard | `Rules.mergeRocket` |
 | Work shipped by another source | the board's shipped column, git not listing it | `.launched` with those crates | `World.launchShipped` |
 | A hotfix pull request is open | into production from anything but the trunk or staging (or, without staging, a release branch) | `.hotfixes`: an express rocket on its own slot | `World.applyHotfixes` |
 | A hotfix merges | seen open, or merged since the last look | `.launched(hotfix:)` with its crate; the release rocket keeps its cargo | the same |
