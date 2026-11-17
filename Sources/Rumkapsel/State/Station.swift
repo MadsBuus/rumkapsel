@@ -874,6 +874,7 @@ extension Station.Saved {
 final class Fleet {
     private(set) var stations: [String: Station] = [:]
     private(set) var repoColors: [String: Int] = [:]
+    private var adopted: Set<String> = []
     var persists = true
 
     static let order = ["work"]
@@ -915,8 +916,8 @@ final class Fleet {
         let holders = repoColors.filter { cfg.repos[$0.key]?.color == nil }
         let n = Colors.repos.count
         var free = (0..<n).filter { i in !holders.values.contains(i) }
-        if free.isEmpty {
-            let idle = holders.filter { !onFloor.contains($0.key) }
+        if free.isEmpty, onFloor.contains(repo) {
+            let idle = holders.filter { !onFloor.contains($0.key) && !adopted.contains($0.key) }
             for r in idle.keys { repoColors[r] = nil }
             free = idle.values.filter { $0 < n }.sorted()
         }
@@ -932,6 +933,7 @@ final class Fleet {
     func adopt(_ slots: [String: Int]) -> Bool {
         let n = Colors.repos.count * 3
         let wanted = slots.filter { !$0.key.isEmpty && $0.value >= 0 && $0.value < n && repoColors[$0.key] != $0.value }
+        adopted = Set(slots.keys)
         guard !wanted.isEmpty else { return false }
         let taken = Set(slots.values)
         for (r, i) in repoColors where slots[r] == nil && taken.contains(i) { repoColors[r] = nil }
@@ -943,6 +945,7 @@ final class Fleet {
 
     func resetColors() {
         repoColors = [:]
+        adopted = []
         Fleet.publish(repoColors)
         recolorRooms()
     }

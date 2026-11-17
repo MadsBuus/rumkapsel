@@ -475,6 +475,33 @@ enum LayoutTests {
             }
             OfficePlacement.pinned = .rings
         }
+
+        test("a neighbour's colours are adopted once, even when they fill every slot and an own repository needs one") {
+            let world = World(demo: true)
+            let fleet = world.fleet
+            let s = fleet.station("work")
+            _ = s.ensureRoom(key: "task:api#1", name: "#1", repo: "api", color: Colors.repos[0], lastActive: Date(timeIntervalSince1970: 0))
+            let n = Colors.repos.count
+            var theirs: [String: Int] = [:]
+            for i in 0..<(n + 5) { theirs["theirs-\(i)"] = i }
+            expect(fleet.adopt(theirs), "the first snapshot changes the colours")
+            _ = fleet.color(forRepo: "api")
+            fleet.recolorRooms()
+            for round in 1...3 {
+                expect(!fleet.adopt(theirs), "snapshot \(round + 1) with the same colours changes nothing")
+            }
+            expect(theirs.allSatisfy { fleet.repoColors[$0.key] == $0.value }, "every adopted colour is still held")
+            expect(fleet.repoColors["api"] != nil, "and the own repository has one too")
+        }
+
+        test("a repository off the floor asking for a colour never takes one from another") {
+            let fleet = World(demo: true).fleet
+            for i in 0..<Colors.repos.count { _ = fleet.color(forRepo: "planet-\(i)") }
+            let before = fleet.repoColors
+            for _ in 0..<3 { _ = fleet.color(forRepo: "planet-late"); _ = fleet.color(forRepo: "planet-0") }
+            expect(before.allSatisfy { fleet.repoColors[$0.key] == $0.value }, "every earlier colour is still held")
+        }
+
         if failures > 0 { print("layout: \(failures) failed"); exit(1) }
         print("layout: all passed")
         exit(0)
