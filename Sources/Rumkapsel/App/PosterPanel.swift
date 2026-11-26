@@ -17,6 +17,7 @@ extension StationController {
     func openPoster(_ poster: Poster) {
         DispatchQueue.main.async { [self] in
             closeStory()
+            if repoPanel?.isHidden == false { closeRepoPanel() }
             if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
             if neighboursPanel?.isHidden == false { toggleNeighbours() }
             posterPanel?.show(poster)

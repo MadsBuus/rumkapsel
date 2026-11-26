@@ -203,6 +203,39 @@ enum SetupTests {
             expect(Discovery.githubRemote(repo) && Discovery.githubRemote(tree), "a GitHub remote, seen from the worktree too")
         }
 
+        test("a repository's folder: what git holds that is found nowhere else, and when it is safe to throw out") {
+            let repo = GitWatch.real(NSTemporaryDirectory()) + "/rk-folder-\(UUID().uuidString)"
+            defer { try? FileManager.default.removeItem(atPath: repo) }
+            func run(_ args: [String], _ cwd: String) -> Data? {
+                let p = Process(), out = Pipe(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args; p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+                p.standardOutput = out; p.standardError = FileHandle.nullDevice; try? p.run(); let d = out.fileHandleForReading.readDataToEndOfFile(); p.waitUntilExit()
+                return p.terminationStatus == 0 ? d : nil
+            }
+            try? FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+            _ = run(["git", "init", "-q", "-b", "main"], repo)
+            _ = run(["git", "config", "user.email", "me@here"], repo); _ = run(["git", "config", "user.name", "me"], repo)
+            _ = run(["git", "-c", "user.email=them@there", "commit", "-q", "--allow-empty", "-m", "theirs"], repo)
+            var g = RepoFolder.readGit(root: repo, run: run)
+            expect(g.lastCommit != nil && g.lastOwnCommit == nil && g.unpushed == 1 && g.changed == 0 && g.untracked == 0 && g.remote == nil, "someone else's commit, no remote: \(g)")
+            FileManager.default.createFile(atPath: repo + "/notes.txt", contents: Data("x".utf8))
+            _ = run(["git", "commit", "-q", "--allow-empty", "-m", "mine"], repo)
+            g = RepoFolder.readGit(root: repo, run: run)
+            expect(g.lastOwnCommit != nil && g.untracked == 1 && g.unpushed == 2, "my commit and a new file: \(g)")
+
+            let now = Date(), old = now.addingTimeInterval(-90 * 86400)
+            let clean = RepoFolder.Git(lastCommit: old, lastOwnCommit: old, remote: "git@github.com:me/notes.git")
+            func folder(_ g: RepoFolder.Git?, active: Date = old) -> RepoFolder { RepoFolder(repo: "notes", root: repo, lastActive: active, git: g) }
+            expect(folder(clean, active: now).advice(now: now) == nil, "in use: no advice")
+            expect(folder(clean).advice(now: now)?.contains("everything is pushed") == true, "old and pushed: hide or trash: \(folder(clean).advice(now: now) ?? "-")")
+            var theirs = clean; theirs.lastOwnCommit = nil
+            expect(folder(theirs).advice(now: now)?.contains("someone else's project") == true, "never committed here: a download")
+            var dirty = theirs; dirty.changed = 2
+            expect(folder(dirty).advice(now: now)?.contains("work found nowhere else") == true, "uncommitted work wins over everything")
+            expect(folder(dirty).unsaved() == ["2 changed files never committed"], "says what: \(folder(dirty).unsaved())")
+            expect(folder(nil).advice(now: now) == nil, "nothing said before git is read")
+            expect(RepoFolder.words(90 * 86400) == "3 months" && RepoFolder.words(30 * 3600) == "30 hours" && RepoFolder.words(1) == "a moment", "spans in words")
+        }
+
         test("Conductor: workspaces join their repository; stubs, stale worktrees and phantom folders are no repositories") {
             let home = GitWatch.real(NSTemporaryDirectory()) + "/rk-home-\(UUID().uuidString)"
             defer { try? FileManager.default.removeItem(atPath: home) }

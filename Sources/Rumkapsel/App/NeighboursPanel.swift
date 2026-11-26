@@ -48,6 +48,7 @@ extension StationController {
         if panel.isHidden {
             if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
             if storyPanel?.isHidden == false { closeStory() }
+            if repoPanel?.isHidden == false { closeRepoPanel() }
             panel.isHidden = false
         } else {
             panel.isHidden = true

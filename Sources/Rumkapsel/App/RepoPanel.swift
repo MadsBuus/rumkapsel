@@ -1,0 +1,237 @@
+import AppKit
+
+enum RepoAct { case folder, terminal, github, hide, trash }
+
+extension StationController {
+    // MARK: repo details
+
+    func installRepoPanel() {
+        let w = view.bounds.width
+        let panel = RepoPanel(frame: NSRect(x: w - 472, y: 40, width: 460, height: max(200, view.bounds.height - 110)))
+        panel.autoresizingMask = [.minXMargin, .height]
+        panel.isHidden = true
+        panel.onAct = { [weak self] act in self?.enqueue { self?.repoAct(act) } }
+        view.addSubview(panel)
+        repoPanel = panel
+    }
+
+    func titleClick(at p: NSPoint) -> Bool {
+        bubbleLock.lock(); let repo = titleHits.first { $0.rect.contains(p) }?.repo; bubbleLock.unlock()
+        guard let repo else { return false }
+        enqueue { [self] in openRepo(repo) }
+        return true
+    }
+
+    func openRepo(_ repo: String) {
+        guard let facts = repoFacts(repo) else { return }
+        repoOf = repo
+        let color = NSColor(fleet.color(forRepo: repo))
+        DispatchQueue.main.async { [self] in
+            closeStory()
+            closePoster()
+            if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
+            if neighboursPanel?.isHidden == false { toggleNeighbours() }
+            repoPanel?.show(facts, color: color, now: world.now)
+            repoPanel?.isHidden = false
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let git = RepoFolder.readGit(root: facts.root) { github.run($0, cwd: $1) }
+            enqueue { [self] in
+                guard repoOf == repo, var now = repoFacts(repo) else { return }
+                now.git = git
+                DispatchQueue.main.async { [self] in
+                    guard repoPanel?.isHidden == false else { return }
+                    repoPanel?.show(now, color: color, now: world.now)
+                }
+            }
+        }
+    }
+
+    private func repoFacts(_ repo: String) -> RepoFolder? {
+        guard let root = world.root(ofRepo: repo) else { return nil }
+        let rooms = fleet.stations.values.flatMap { st in st.rooms.values.filter { $0.repo == repo && world.isOurs(st, $0) } }
+        let crates = fleet.stations.values.reduce(0) { n, st in n + st.facts.crates.keys.filter { $0.repo == repo }.count }
+        let p = github.pipelineRead(repoRoot: root) ? github.pipeline(repoRoot: root) : nil
+        return RepoFolder(repo: repo, root: root, via: world.repoVia[repo], lastSession: world.repoLastSession[repo], lastActive: world.lastActive(repo: repo),
+                         offices: rooms.count, crates: crates, github: github.nameWithOwner(repoRoot: root),
+                         way: p.map { Setup.way($0) + ($0.why.isEmpty ? "" : ": \($0.why)") })
+    }
+
+    func closeRepoPanel() {
+        repoPanel?.isHidden = true
+        enqueue { [self] in repoOf = nil }
+    }
+
+    func repoPanelTakes(point p: NSPoint) -> Bool {
+        guard let panel = repoPanel, !panel.isHidden else { return false }
+        return panel.frame.contains(p)
+    }
+
+    private func repoAct(_ act: RepoAct) {
+        guard let repo = repoOf, let facts = repoFacts(repo) else { return }
+        let url = URL(fileURLWithPath: facts.root, isDirectory: true)
+        switch act {
+        case .folder: DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+        case .terminal:
+            DispatchQueue.main.async {
+                guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
+                NSWorkspace.shared.open([url], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+            }
+        case .github:
+            guard let owner = facts.github, let u = URL(string: "https://github.com/\(owner)") else { return }
+            DispatchQueue.main.async { NSWorkspace.shared.open(u) }
+        case .hide:
+            DispatchQueue.main.async { [self] in
+                closeRepoPanel()
+                ConfigStore.shared.update(byUser: true) { c in
+                    var o = c.repos[repo] ?? AppConfig.RepoOverride()
+                    o.shown = false; o.answered = true
+                    c.repos[repo] = o
+                }
+            }
+        case .trash:
+            DispatchQueue.global(qos: .userInitiated).async { [self] in
+                let unsaved = RepoFolder(repo: repo, root: facts.root, lastActive: facts.lastActive,
+                                        git: RepoFolder.readGit(root: facts.root) { github.run($0, cwd: $1) }).unsaved()
+                DispatchQueue.main.async { [self] in confirmTrash(repo: repo, url: url, unsaved: unsaved) }
+            }
+        }
+    }
+
+    private func confirmTrash(repo: String, url: URL, unsaved: [String]) {
+        let alert = NSAlert()
+        alert.messageText = "Move \(repo) to the Trash?"
+        alert.informativeText = (url.path as NSString).abbreviatingWithTildeInPath + ", with every worktree inside it, goes to the Trash."
+            + (unsaved.isEmpty ? " Everything in it is committed and pushed." : "\n\nIt still holds work found nowhere else:\n• " + unsaved.joined(separator: "\n• "))
+        alert.alertStyle = unsaved.isEmpty ? .informational : .critical
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "\(repo) stays where it is"
+            failed.informativeText = error.localizedDescription
+            failed.runModal()
+            return
+        }
+        StationLog.write("event", "repo \(repo) moved to the Trash from \(url.path)")
+        closeRepoPanel()
+        enqueue { [self] in
+            world.forget(repo: repo)
+            legendSignature = ""
+            handle([.layoutChanged])
+        }
+    }
+}
+
+final class RepoPanel: NSView {
+    private let text = LinkedText()
+    private let scroll = NSScrollView()
+    var onAct: ((RepoAct) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        scroll.frame = bounds.insetBy(dx: 10, dy: 6)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.drawsBackground = false
+        scroll.contentView.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
+        scroll.scrollerKnobStyle = .light
+        text.isEditable = false
+        text.isSelectable = false
+        text.drawsBackground = false
+        text.textContainerInset = NSSize(width: 14, height: 12)
+        text.autoresizingMask = [.width]
+        text.frame = NSRect(origin: .zero, size: scroll.contentSize)
+        text.isVerticallyResizable = true
+        text.textContainer?.widthTracksTextView = true
+        text.onGo = { [weak self] t in if let act = t as? RepoAct { self?.onAct?(act) } }
+        scroll.documentView = text
+        addSubview(scroll)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let deep = Palette.void
+        NSGradient(colors: [deep.withAlphaComponent(0), deep.withAlphaComponent(0.7), deep.withAlphaComponent(0.88), deep.withAlphaComponent(0.92)],
+                   atLocations: [0, 0.07, 0.2, 1], colorSpace: .deviceRGB)!.draw(in: bounds, angle: 0)
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {}
+    override func mouseDragged(with event: NSEvent) {}
+    override func rightMouseDown(with event: NSEvent) {}
+
+    func show(_ f: RepoFolder, color: NSColor, now: Date) {
+        let out = NSMutableAttributedString()
+        func add(_ s: String, _ attrs: [NSAttributedString.Key: Any]) { out.append(NSAttributedString(string: s, attributes: attrs)) }
+        let indent: CGFloat = 30
+        func para(spacing: CGFloat = 3, before: CGFloat = 0) -> NSMutableParagraphStyle {
+            let p = NSMutableParagraphStyle(); p.firstLineHeadIndent = indent; p.headIndent = indent; p.paragraphSpacing = spacing; p.paragraphSpacingBefore = before
+            return p
+        }
+
+        let head = NSMutableParagraphStyle()
+        head.headIndent = indent; head.tabStops = [NSTextTab(textAlignment: .left, location: indent)]; head.paragraphSpacing = 3
+        let mark = NSTextAttachment()
+        let g = SpaceLogStyle.glyph(.office, color: color, size: 18)
+        mark.image = g
+        mark.bounds = NSRect(x: 0, y: -2, width: g.size.width, height: g.size.height)
+        out.append(NSAttributedString(attachment: mark))
+        add("\t", [.font: NSFont.systemFont(ofSize: 18), .paragraphStyle: head])
+        add(f.repo + "\n", [.font: NSFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: Palette.text, .paragraphStyle: head])
+        add((f.root as NSString).abbreviatingWithTildeInPath + "\n", [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 6)])
+        var acts: [(String, RepoAct, NSColor)] = [("Open folder", .folder, Palette.text), ("Terminal", .terminal, Palette.text)]
+        if f.github != nil { acts.append(("GitHub", .github, Palette.text)) }
+        acts += [("Hide", .hide, Palette.text), ("Move to Trash…", .trash, SpaceLogStyle.amber)]
+        for (i, (title, act, ink)) in acts.enumerated() {
+            if i > 0 { add("   ", [.font: NSFont.systemFont(ofSize: 12.5), .paragraphStyle: para(spacing: 20)]) }
+            add(title, [LinkedText.target: act, .font: NSFont.systemFont(ofSize: 12.5, weight: .medium), .foregroundColor: ink, .paragraphStyle: para(spacing: 20)])
+        }
+        add("\n", [.font: NSFont.systemFont(ofSize: 12.5), .paragraphStyle: para(spacing: 20)])
+
+        let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: Palette.text, .paragraphStyle: para(spacing: 10)]
+        let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para()]
+        add(f.whyHere(window: StationController.scanWindow, now: now) + "\n", big)
+
+        var when: [String] = []
+        if let s = f.lastSession { when.append("Last Claude session \(RepoFolder.words(now.timeIntervalSince(s))) ago") }
+        if let g = f.git {
+            if let c = g.lastCommit { when.append("last commit \(RepoFolder.words(now.timeIntervalSince(c))) ago") }
+            if let own = g.lastOwnCommit { when.append("yours \(RepoFolder.words(now.timeIntervalSince(own))) ago") }
+            else if g.remote != nil { when.append("you never committed here") }
+        }
+        if !when.isEmpty { add(Self.sentence(when.joined(separator: ", ")) + ".\n", big) }
+
+        if f.git == nil {
+            add("Looking through the folder…\n", [.font: SpaceLogStyle.italic(12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 10)])
+        } else {
+            if let advice = f.advice(now: now) {
+                add(advice + "\n", [.font: NSFont.systemFont(ofSize: 15, weight: .semibold), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: para(spacing: 10)])
+            }
+            let unsaved = f.unsaved()
+            if unsaved.isEmpty {
+                add("Everything here is committed and pushed.\n", [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: RepoStatus.calm.color, .paragraphStyle: para(spacing: 10)])
+            } else {
+                for u in unsaved { add("• " + Self.sentence(u) + "\n", [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: SpaceLogStyle.amber, .paragraphStyle: para()]) }
+                add("\n", [.font: NSFont.systemFont(ofSize: 6), .paragraphStyle: para()])
+            }
+        }
+
+        var station = ["\(f.offices) office\(f.offices == 1 ? "" : "s")", "\(f.crates) \(f.crates == 1 ? Words.current.crate : Words.current.crates)"]
+        if let g = f.git { station.append("\(g.branches) branch\(g.branches == 1 ? "" : "es")"); if g.worktrees > 0 { station.append("\(g.worktrees) worktree\(g.worktrees == 1 ? "" : "s")") } }
+        add(Self.sentence(station.joined(separator: " · ")) + "\n", small)
+        if let way = f.way { add(Self.sentence(way) + "\n", small) }
+        if let gh = f.github { add("On GitHub as \(gh)\n", small) } else if let remote = f.git?.remote { add("Remote \(remote)\n", small) } else if f.git != nil { add("No remote: this folder is the only copy\n", small) }
+
+        text.textStorage?.setAttributedString(out)
+        needsDisplay = true
+    }
+
+    private static func sentence(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
+}

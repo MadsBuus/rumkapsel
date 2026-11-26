@@ -204,6 +204,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NS
                 station.enqueue { station.openStory(id) }
             }
         }
+        if let i = args.firstIndex(of: "--repo"), args.count > i + 1 {
+            let repo = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(1, (num("--delay") ?? 4) - 2)) { [weak self] in
+                guard let station = self?.simulator?.station ?? self?.controller else { return }
+                station.enqueue { station.openRepo(repo) }
+            }
+        }
         if let i = args.firstIndex(of: "--card"), args.count > i + 1 {
             let names = args[i + 1].split(separator: ",").map(String.init)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in

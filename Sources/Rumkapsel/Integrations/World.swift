@@ -46,10 +46,27 @@ final class World {
 
     func announce(new repos: [String]) { for r in repos where !newRepos.contains(r) { newRepos.append(r) } }
 
-    private func register(root: String, repo: String, station: String) {
+    enum RepoVia: Equatable { case sessions, conductor, settings }
+    private(set) var repoVia: [String: RepoVia] = [:]
+    private(set) var repoLastSession: [String: Date] = [:]
+
+    func lastActive(repo: String) -> Date {
+        let rooms = fleet.stations.values.flatMap { $0.rooms.values.filter { $0.repo == repo && !$0.key.hasPrefix("kind:") } }.map(\.lastActive)
+        return (rooms + [repoLastSession[repo] ?? .distantPast]).filter { $0 != .distantFuture }.max() ?? .distantPast
+    }
+
+    func root(ofRepo repo: String) -> String? { repoRoots.first { $0.value.repo == repo }?.key }
+
+    func forget(repo: String) {
+        repoRoots = repoRoots.filter { $0.value.repo != repo }
+        repoVia[repo] = nil; repoLastSession[repo] = nil
+    }
+
+    private func register(root: String, repo: String, station: String, via: RepoVia) {
         let real = GitWatch.real(root)
         guard !repoRoots.values.contains(where: { $0.repo == repo }), !repoRoots.keys.contains(where: { GitWatch.real($0) == real }) else { return }
         repoRoots[root] = (repo, station)
+        repoVia[repo] = via
         if station == "work" { _ = fleet.color(forRepo: repo) }
         guard let seen else { return }
         if !simulated, !seen.contains(repo), ConfigStore.shared.current.repos[repo] == nil, !newRepos.contains(repo) { newRepos.append(repo) }
@@ -180,7 +197,7 @@ final class World {
         Fleet.writing.sync {}
         fleet.unload()
         log.forget()
-        repoRoots = [:]
+        repoRoots = [:]; repoVia = [:]; repoLastSession = [:]
         readyRepos = []
         didLoadLayout = false
         yardStamps = [:]
@@ -479,7 +496,10 @@ final class World {
                                          via: firstRun || scans <= World.officeGraceScans + 1 ? .appear : .shuttle(for: s.id)))
                     report(office: home.key, repo: home.repo, .inbound, by: .session, at: s.lastModified)
                 }
-                if let root = s.repoRoot { register(root: root, repo: s.repo, station: stationName) }
+                if let root = s.repoRoot {
+                    register(root: root, repo: s.repo, station: stationName, via: .sessions)
+                    if !s.isSubagent { repoLastSession[s.repo] = max(repoLastSession[s.repo] ?? .distantPast, s.lastModified) }
+                }
                 let marker = s.eventMarkers[.prompt] ?? ""
                 if let seen = sessionPrompts[s.id], seen.marker != marker, !firstRun, !s.isSubagent {
                     events.append(.prompt(station: stationName, key: home.key, minionId: s.id,
@@ -560,11 +580,11 @@ final class World {
             if firstRun, !simulated {
                 for (repo, root) in Discovery.conductor(home: FileManager.default.homeDirectoryForCurrentUser) {
                     guard cfg.shown(repo: repo) else { continue }
-                    register(root: root, repo: repo, station: "work")
+                    register(root: root, repo: repo, station: "work", via: .conductor)
                 }
                 for (repo, o) in cfg.repos.sorted(by: { $0.key < $1.key }) where cfg.shown(repo: repo) {
                     guard let root = o.path, FileManager.default.fileExists(atPath: root + "/.git") else { continue }
-                    register(root: root, repo: repo, station: "work")
+                    register(root: root, repo: repo, station: "work", via: .settings)
                 }
             }
             if firstRun, seen == nil { remember(Set(repoRoots.values.map(\.repo)).union(cfg.repos.keys).union(fleet.repoColors.keys)) }
