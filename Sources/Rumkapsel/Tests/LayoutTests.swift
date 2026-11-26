@@ -285,6 +285,10 @@ enum LayoutTests {
             a.rooms["proj:home"]?.worktree = cwd
             _ = world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
             expect(a.rooms["proj:home"] == nil && !a.rooms.keys.contains { $0.hasPrefix("proj:") }, "no office: \(a.rooms.keys.sorted())")
+            _ = a.ensureRoom(key: "proj:scratch", name: "scratch", repo: "scratch", color: Colors.repos[0], lastActive: now)
+            a.rooms["proj:scratch"]?.worktree = cwd
+            _ = world.applyScan(ScanResult(), now: now, minionHomes: [:])
+            expect(a.rooms["proj:scratch"] == nil, "with no session pointing at it, a plain folder's office still closes: \(a.rooms.keys.sorted())")
         }
 
         test("a workspace that moved on from its merged office gets an office of its own, once, beside it") {
