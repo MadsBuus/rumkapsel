@@ -68,8 +68,8 @@ extension StationController {
     }
 
     private func repoFacts(_ repo: String) -> RepoFolder? {
-        guard let root = world.root(ofRepo: repo) else { return nil }
         let rooms = fleet.stations.values.flatMap { st in st.rooms.values.filter { $0.repo == repo && world.isOurs(st, $0) } }
+        guard let root = world.root(ofRepo: repo) ?? rooms.compactMap(\.worktree).first else { return nil }
         let crates = fleet.stations.values.reduce(0) { n, st in n + st.facts.crates.keys.filter { $0.repo == repo }.count }
         let p = github.pipelineRead(repoRoot: root) ? github.pipeline(repoRoot: root) : nil
         return RepoFolder(repo: repo, root: root, via: world.repoVia[repo], lastSession: world.repoLastSession[repo], lastActive: world.lastActive(repo: repo),
@@ -111,8 +111,10 @@ extension StationController {
             }
         case .trash:
             DispatchQueue.global(qos: .userInitiated).async { [self] in
-                let unsaved = RepoFolder(repo: repo, root: facts.root, lastActive: facts.lastActive,
-                                        git: RepoFolder.readGit(root: facts.root) { github.run($0, cwd: $1) }).unsaved()
+                let folder = RepoFolder(repo: repo, root: facts.root, lastActive: facts.lastActive,
+                                        git: RepoFolder.readGit(root: facts.root) { github.run($0, cwd: $1) })
+                guard folder.trashable else { return }
+                let unsaved = folder.unsaved()
                 DispatchQueue.main.async { [self] in confirmTrash(repo: repo, url: url, unsaved: unsaved) }
             }
         }
@@ -187,11 +189,11 @@ final class RepoPanel: NSView {
 
     private let actions = NSPopUpButton(frame: .zero, pullsDown: true)
 
-    private func fillActions(github: Bool) {
+    private func fillActions(github: Bool, trash: Bool) {
         let menu = NSMenu()
         menu.addItem(withTitle: "Actions", action: nil, keyEquivalent: "")
         var groups: [[(String, RepoAct)]] = [[("Open the Folder", .folder), ("Open in Terminal", .terminal)] + (github ? [("Open on GitHub", .github)] : []),
-                                             [("Hide from the Station", .hide)], [("Move to Trash…", .trash)]]
+                                             [("Hide from the Station", .hide)], trash ? [("Move to Trash…", .trash)] : []]
         groups = groups.filter { !$0.isEmpty }
         for (i, group) in groups.enumerated() {
             if i > 0 { menu.addItem(.separator()) }
@@ -239,7 +241,7 @@ final class RepoPanel: NSView {
         add("\t", [.font: NSFont.systemFont(ofSize: 18), .paragraphStyle: head])
         add(f.repo + "\n", [.font: NSFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: Palette.text, .paragraphStyle: head])
         add((f.root as NSString).abbreviatingWithTildeInPath + "\n", [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 18)])
-        fillActions(github: f.github != nil)
+        fillActions(github: f.github != nil, trash: f.trashable)
         actions.isHidden = false
 
         let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: Palette.text, .paragraphStyle: para(spacing: 10)]
@@ -255,7 +257,9 @@ final class RepoPanel: NSView {
         }
         if !when.isEmpty { add(Self.sentence(when.joined(separator: ", ")) + ".\n", big) }
 
-        if f.git == nil {
+        if f.git?.isRepo == false {
+            add("A plain folder, not a git repository.\n", [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 10)])
+        } else if f.git == nil {
             add("Looking through the folder…\n", [.font: SpaceLogStyle.italic(12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 10)])
         } else {
             if let advice = f.advice(now: now) {
@@ -271,10 +275,10 @@ final class RepoPanel: NSView {
         }
 
         var station = ["\(f.offices) office\(f.offices == 1 ? "" : "s")", "\(f.crates) \(f.crates == 1 ? Words.current.crate : Words.current.crates)"]
-        if let g = f.git { station.append("\(g.branches) branch\(g.branches == 1 ? "" : "es")"); if g.worktrees > 0 { station.append("\(g.worktrees) worktree\(g.worktrees == 1 ? "" : "s")") } }
+        if let g = f.git, g.isRepo { station.append("\(g.branches) branch\(g.branches == 1 ? "" : "es")"); if g.worktrees > 0 { station.append("\(g.worktrees) worktree\(g.worktrees == 1 ? "" : "s")") } }
         add(Self.sentence(station.joined(separator: " · ")) + "\n", small)
         if let way = f.way { add(Self.sentence(way) + "\n", small) }
-        if let gh = f.github { add("On GitHub as \(gh)\n", small) } else if let remote = f.git?.remote { add("Remote \(remote)\n", small) } else if f.git != nil { add("No remote: this folder is the only copy\n", small) }
+        if let gh = f.github { add("On GitHub as \(gh)\n", small) } else if let remote = f.git?.remote { add("Remote \(remote)\n", small) } else if f.git?.isRepo == true { add("No remote: this folder is the only copy\n", small) }
 
         text.textStorage?.setAttributedString(out)
         needsDisplay = true
