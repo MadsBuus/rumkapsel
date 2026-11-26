@@ -621,7 +621,7 @@ final class World {
         return station.rooms.values.first { $0.key.hasPrefix("proj:") && $0.repo == home.repo && $0.worktree == s.cwd && $0.key != home.key }
     }
 
-    static func plainFolder(_ s: SessionInfo) -> Bool { s.repoRoot == nil && (s.branch ?? "").isEmpty }
+    static func plainFolder(_ s: SessionInfo) -> Bool { s.repoRoot == nil && ["", "HEAD"].contains(s.branch ?? "") }
 
     func homeFor(_ s: SessionInfo, station: String) -> Home {
         if World.plainFolder(s) { return Home(key: "kind:lounge", name: Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd).name, repo: s.repo, issue: nil) }

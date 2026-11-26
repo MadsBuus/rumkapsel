@@ -277,7 +277,7 @@ enum LayoutTests {
             defer { try? FileManager.default.removeItem(atPath: cwd) }
             let now = Date()
             let s = SessionInfo(id: "s", cwd: cwd, repo: "home", repoRoot: nil, owner: nil, lastModified: now, activity: .waiting,
-                                area: nil, title: nil, branch: nil, toolCount: 0, isSubagent: false, cwdExists: true,
+                                area: nil, title: nil, branch: "HEAD", toolCount: 0, isSubagent: false, cwdExists: true,
                                 promptCount: 0, queuedCount: 0, eventMarkers: [:])
             for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
             expect(world.homeFor(s, station: "work").key == "kind:lounge", "the lounge: \(world.homeFor(s, station: "work").key)")
