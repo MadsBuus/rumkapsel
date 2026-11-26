@@ -173,14 +173,41 @@ final class RepoPanel: NSView {
         text.frame = NSRect(origin: .zero, size: scroll.contentSize)
         text.isVerticallyResizable = true
         text.textContainer?.widthTracksTextView = true
-        text.onGo = { [weak self] t in
-            if let act = t as? RepoAct { self?.onAct?(act) }
-            if let pick = t as? RepoPick { self?.onPick?(pick.repo) }
-        }
+        text.onGo = { [weak self] t in if let pick = t as? RepoPick { self?.onPick?(pick.repo) } }
         scroll.documentView = text
         addSubview(scroll)
+        actions.frame = NSRect(x: bounds.width - 150, y: bounds.height - 46, width: 120, height: 26)
+        actions.autoresizingMask = [.minXMargin, .minYMargin]
+        actions.appearance = NSAppearance(named: .darkAqua)
+        actions.bezelStyle = .recessed
+        actions.isHidden = true
+        addSubview(actions)
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    private let actions = NSPopUpButton(frame: .zero, pullsDown: true)
+
+    private func fillActions(github: Bool) {
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Actions", action: nil, keyEquivalent: "")
+        var groups: [[(String, RepoAct)]] = [[("Open the Folder", .folder), ("Open in Terminal", .terminal)] + (github ? [("Open on GitHub", .github)] : []),
+                                             [("Hide from the Station", .hide)], [("Move to Trash…", .trash)]]
+        groups = groups.filter { !$0.isEmpty }
+        for (i, group) in groups.enumerated() {
+            if i > 0 { menu.addItem(.separator()) }
+            for (title, act) in group {
+                let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = act
+                menu.addItem(item)
+            }
+        }
+        actions.menu = menu
+    }
+
+    @objc private func picked(_ item: NSMenuItem) {
+        if let act = item.representedObject as? RepoAct { onAct?(act) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let deep = Palette.void
@@ -211,15 +238,9 @@ final class RepoPanel: NSView {
         out.append(NSAttributedString(attachment: mark))
         add("\t", [.font: NSFont.systemFont(ofSize: 18), .paragraphStyle: head])
         add(f.repo + "\n", [.font: NSFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: Palette.text, .paragraphStyle: head])
-        add((f.root as NSString).abbreviatingWithTildeInPath + "\n", [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 6)])
-        var acts: [(String, RepoAct, NSColor)] = [("Open folder", .folder, Palette.text), ("Terminal", .terminal, Palette.text)]
-        if f.github != nil { acts.append(("GitHub", .github, Palette.text)) }
-        acts += [("Hide", .hide, Palette.text), ("Move to Trash…", .trash, SpaceLogStyle.amber)]
-        for (i, (title, act, ink)) in acts.enumerated() {
-            if i > 0 { add("   ", [.font: NSFont.systemFont(ofSize: 12.5), .paragraphStyle: para(spacing: 20)]) }
-            add(title, [LinkedText.target: act, .font: NSFont.systemFont(ofSize: 12.5, weight: .medium), .foregroundColor: ink, .paragraphStyle: para(spacing: 20)])
-        }
-        add("\n", [.font: NSFont.systemFont(ofSize: 12.5), .paragraphStyle: para(spacing: 20)])
+        add((f.root as NSString).abbreviatingWithTildeInPath + "\n", [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para(spacing: 18)])
+        fillActions(github: f.github != nil)
+        actions.isHidden = false
 
         let big: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: Palette.text, .paragraphStyle: para(spacing: 10)]
         let small: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: para()]
@@ -260,6 +281,7 @@ final class RepoPanel: NSView {
     }
 
     func showList(_ rows: [Row], now: Date) {
+        actions.isHidden = true
         let out = NSMutableAttributedString()
         func add(_ s: String, _ attrs: [NSAttributedString.Key: Any]) { out.append(NSAttributedString(string: s, attributes: attrs)) }
         let indent: CGFloat = 30
