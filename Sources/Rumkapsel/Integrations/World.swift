@@ -570,7 +570,9 @@ final class World {
                         changed = true
                         continue
                     }
-                    let plain = room.key.hasPrefix("proj:") && room.worktree.map(plainFolders.contains) == true
+                    let plain = room.key.hasPrefix("proj:") && room.worktree.map { w in
+                        plainFolders.contains(w) || !repoRoots.values.contains { $0.repo == room.repo } && Discovery.root(of: w) == nil
+                    } == true
                     if gone || ended != nil || orphan || plain {
                         if ended != nil { retired[key] = now }
                         events += drop(station: station, room: room, announce: !firstRun && !plain,
