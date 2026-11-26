@@ -1354,6 +1354,7 @@ final class SimulatorModel: ObservableObject {
         case .log(let t): return "log: \(t)"
         case .errorsClimbed(let repo, let level, let n): return "errorsClimbed \(repo) \(level.words) \(n) in the last hour"
         case .chime(let s): return "chime \(s)"
+        case .wayChanged(let repo): return "wayChanged \(repo)"
         case .deployStarted(_, let repo, let production, let expected, let release, _): return "deployStarted \(repo) \(release) \(production ? "production" : "staging") ~\(Int(expected))s"
         case .deployEnded(_, let repo, let production, let outcome): return "deployEnded \(repo) \(production ? "production" : "staging") \(outcome)"
         case .prompt(_, let key, _, let n): return "prompt \(key) x\(n)"

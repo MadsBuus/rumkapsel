@@ -1082,7 +1082,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if sim == nil { StationLog.write("event", SimulatorModel.describe(event)) }
         switch event {
         case .worldLoaded:
-            break
+            rebuildOnceAfterUpdate()
         case .log(let text):
             logEvent(text)
         case .errorsClimbed(let repo, let level, let lastHour):
@@ -1090,6 +1090,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if level == .spiking { drone.thud() }
         case .chime(let seed):
             ringBell(seed: seed)
+        case .wayChanged(let repo):
+            rebuildYard(only: repo)
         case .layoutChanged:
             layoutDirty = true
         case .markersChanged:

@@ -20,6 +20,7 @@ enum WorldEvent {
     case log(String)
     case errorsClimbed(repo: String, Sentry.Level, lastHour: Int)
     case chime(Int)
+    case wayChanged(repo: String)
 
     enum Stage { case development, storage, deck, cleared, shipped, other }
 }

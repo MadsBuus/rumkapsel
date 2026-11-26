@@ -646,6 +646,7 @@ final class World {
                 StationLog.write("github", "\(info.repo): way to production read anew, \(c.to.source): \(c.to.why)")
                 guard !from.sameWay(as: to) else { continue }
                 events.append(.log(Setup.changed(info.repo, from: from, to: to)))
+                events.append(.wayChanged(repo: info.repo))
             }
             events += run("gh.releases") { self.applyReleases() }
             events += run("gh.board") { self.applyBoardMoves() }

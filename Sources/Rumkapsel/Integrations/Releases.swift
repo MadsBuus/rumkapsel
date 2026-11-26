@@ -249,18 +249,39 @@ extension World {
         learn(.sweep(repo: repo, keep: listed.union(held).sorted()), repo: repo)
     }
 
-    func yardNumbers() -> [(root: String, repo: String, numbers: [Int])] {
+    static let recheckShippedWithin: TimeInterval = 14 * 24 * 3600
+
+    func shipsCheckedInProduction(repo: String) -> Bool {
+        guard let root = root(ofRepo: repo) else { return false }
+        let p = github.pipeline(repoRoot: root)
+        return p.ship == .release || p.ship == .tag
+    }
+
+    func yardNumbers(only: String? = nil) -> [(root: String, repo: String, numbers: [Int])] {
         var seen = Set<String>()
         return repoRoots.sorted { $0.key < $1.key }.compactMap { root, info in
-            guard seen.insert(info.repo).inserted else { return nil }
-            let numbers = works.records(repo: info.repo).filter { $0.stage.map { $0 >= .stored && $0 < .shipped } == true }.compactMap(\.number)
+            guard only.map({ $0 == info.repo }) ?? true, seen.insert(info.repo).inserted else { return nil }
+            let recheckShips = shipsCheckedInProduction(repo: info.repo)
+            let numbers = works.records(repo: info.repo).filter { r in
+                r.stage.map { $0 >= .stored && $0 < .shipped } == true
+                    || recheckShips && r.shippedOnMerge && r.stagedAt.map { now.timeIntervalSince($0) < World.recheckShippedWithin } == true
+            }.compactMap(\.number)
             return numbers.isEmpty ? nil : (root, info.repo, numbers.sorted())
         }
     }
 
-    func rebuildYard(dug: [(repo: String, found: [Int: [PullSource.Dug]])] = []) {
+    @discardableResult
+    func rebuildYard(dug: [(repo: String, found: [Int: [PullSource.Dug]])] = [], repos only: Set<String>? = nil, restack: Bool = true) -> Int {
+        var back = 0
         for (repo, found) in dug {
+            let recheckShips = shipsCheckedInProduction(repo: repo)
             for (n, pulls) in found.sorted(by: { $0.key < $1.key }) {
+                let merged = pulls.filter { $0.state == "MERGED" }
+                if recheckShips, !merged.isEmpty, !merged.contains(where: \.shipped), let r = works.find(repo: repo, crate: n), r.shippedOnMerge {
+                    StationLog.write("yard", "\(repo) #\(n): shipped, but its merge is not in production: back")
+                    works.notInProduction(r, at: now)
+                    back += 1
+                }
                 for p in pulls {
                     let r = works.note(repo: repo, issue: p.number == n ? nil : n, pull: p.number, pullState: p.state)
                     report(pullState: p.state, record: r, shipped: p.shipped, at: now)
@@ -269,7 +290,7 @@ extension World {
         }
         yardStamps = [:]
         feed.swept = []
-        for repo in Set(repoRoots.values.map(\.repo)).sorted() {
+        for repo in Set(repoRoots.values.map(\.repo)).filter({ only?.contains($0) ?? true }).sorted() {
             let yard = works.records(repo: repo).filter { r in r.number != nil && r.stage.map { $0 >= .stored && $0 < .shipped } == true }
             learn(.sweep(repo: repo, keep: yard.compactMap(\.number).sorted()), repo: repo)
             for r in yard {
@@ -279,7 +300,8 @@ extension World {
                 learn(.work(news), repo: repo)
             }
         }
-        learn(.restack)
+        if restack { learn(.restack) }
+        return back
     }
 
     func padSlots(station: Station) -> [SIMD2<Double>] { station.hall.padSlots }
