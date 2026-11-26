@@ -529,6 +529,7 @@ final class World {
                     }
                 }
             }
+            let plainFolders = Set(result.sessions.filter(World.plainFolder).map(\.cwd))
             let livedIn = Set(sessionRooms.compactMap { key -> String? in
                 let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
                 return parts.count == 2 ? fleet.stations[parts[0]]?.rooms[parts[1]]?.worktree : nil
@@ -569,9 +570,11 @@ final class World {
                         changed = true
                         continue
                     }
-                    if gone || ended != nil || orphan {
+                    let plain = room.key.hasPrefix("proj:") && room.worktree.map(plainFolders.contains) == true
+                    if gone || ended != nil || orphan || plain {
                         if ended != nil { retired[key] = now }
-                        events += drop(station: station, room: room, announce: !firstRun, reason: gone ? "workspace archived" : ended ?? "nobody's")
+                        events += drop(station: station, room: room, announce: !firstRun && !plain,
+                                       reason: plain ? "a plain folder" : gone ? "workspace archived" : ended ?? "nobody's")
                         changed = true
                     }
                 }
@@ -618,7 +621,10 @@ final class World {
         return station.rooms.values.first { $0.key.hasPrefix("proj:") && $0.repo == home.repo && $0.worktree == s.cwd && $0.key != home.key }
     }
 
+    static func plainFolder(_ s: SessionInfo) -> Bool { s.repoRoot == nil && (s.branch ?? "").isEmpty }
+
     func homeFor(_ s: SessionInfo, station: String) -> Home {
+        if World.plainFolder(s) { return Home(key: "kind:lounge", name: Home.from(repo: s.repo, branch: s.branch, cwd: s.cwd).name, repo: s.repo, issue: nil) }
         let pr = s.branch.flatMap { b in s.repoRoot.flatMap { github.pulls.pull(branch: b, repoRoot: $0) } }
         let home = works.note(repo: s.repo, branch: s.branch, folder: s.cwd, issue: pr?.closes?.first, pull: pr?.number, pullState: pr?.state, closes: pr?.closes)
             .work(branch: s.branch).home

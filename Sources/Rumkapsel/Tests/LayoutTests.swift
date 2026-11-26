@@ -269,6 +269,24 @@ enum LayoutTests {
                    "upright from the floor to a crown \(StationHull.section.rise) up, got \(crown)")
         }
 
+        test("a session in a plain folder opens no office: it waits in the lounge, and an old office for it closes") {
+            let world = World(demo: true)
+            let a = world.fleet.station("work")
+            let cwd = FileManager.default.temporaryDirectory.appendingPathComponent("rk-plain-\(getpid())").path
+            try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: cwd) }
+            let now = Date()
+            let s = SessionInfo(id: "s", cwd: cwd, repo: "home", repoRoot: nil, owner: nil, lastModified: now, activity: .waiting,
+                                area: nil, title: nil, branch: nil, toolCount: 0, isSubagent: false, cwdExists: true,
+                                promptCount: 0, queuedCount: 0, eventMarkers: [:])
+            for _ in 0..<20 where world.settling { _ = world.applyScan(ScanResult(), now: now, minionHomes: [:]) }
+            expect(world.homeFor(s, station: "work").key == "kind:lounge", "the lounge: \(world.homeFor(s, station: "work").key)")
+            _ = a.ensureRoom(key: "proj:home", name: "home", repo: "home", color: Colors.repos[0], lastActive: now)
+            a.rooms["proj:home"]?.worktree = cwd
+            _ = world.applyScan(ScanResult(sessions: [s]), now: now, minionHomes: [:])
+            expect(a.rooms["proj:home"] == nil && !a.rooms.keys.contains { $0.hasPrefix("proj:") }, "no office: \(a.rooms.keys.sorted())")
+        }
+
         test("a workspace that moved on from its merged office gets an office of its own, once, beside it") {
             let world = World(demo: true)
             let a = world.fleet.station("work")
