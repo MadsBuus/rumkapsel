@@ -27,25 +27,29 @@ enum Props {
     static func package(color: NSColor, band: NSColor, size: Double, blink: Bool = false, mine: Bool = false, number: Int? = nil,
                         title: String? = nil, who: String? = nil) -> SCNNode {
         let n = SCNNode()
-        let h = size * Zone.crateHeight
+        let h = size * Zone.crateHeight, g = size * Zone.crateGap
         let box = SCNBox(width: size, height: h, length: size, chamferRadius: 0)
         box.materials = [flat(color), flat(color.darker(0.13)), flat(color), flat(color.darker(0.13)), flat(color.lighter(0.14)), flat(color)]
-        for m in box.materials { Detail.apply(Detail.crate(for: number), to: m) }
+        for (i, m) in box.materials.enumerated() { Detail.apply(Detail.crate(for: number), to: m, grounded: i < 4) }
         let body = SCNNode(geometry: box)
-        body.position = v3(0, h / 2, 0)
+        body.position = v3(0, g + h / 2, 0)
         n.addChildNode(body)
+        let base = SCNNode(geometry: SCNBox(width: size * 0.84, height: g, length: size * 0.84, chamferRadius: 0))
+        base.geometry!.firstMaterial = flat(color.darker(0.78))
+        base.position = v3(0, g / 2, 0)
+        n.addChildNode(base)
         let strapColor = mine ? Palette.mine : color.darker(0.3)
         let strap = SCNBox(width: size * 1.02, height: h * 0.16, length: size * 1.02, chamferRadius: 0)
         strap.materials = mine
             ? [flat(strapColor), flat(strapColor.darker(0.12)), flat(strapColor), flat(strapColor.darker(0.12)), flat(strapColor.lighter(0.1)), flat(strapColor)]
             : [flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.3)), flat(color.darker(0.38)), flat(color.darker(0.22)), flat(color.darker(0.3))]
         let s = SCNNode(geometry: strap)
-        s.position = v3(0, h / 2, 0)
+        s.position = v3(0, g + h / 2, 0)
         n.addChildNode(s)
         for side in [0.0, .pi] {
             func stick(_ c: SCNNode) {
                 let p = c.position
-                c.position = side == 0 ? p : SCNVector3(-p.x, p.y, -p.z)
+                c.position = side == 0 ? SCNVector3(p.x, p.y + g, p.z) : SCNVector3(-p.x, p.y + g, -p.z)
                 c.eulerAngles.y = CGFloat(side)
                 n.addChildNode(c)
             }

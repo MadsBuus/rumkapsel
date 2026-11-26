@@ -34,7 +34,7 @@ struct YardSpot: Equatable {
 
 enum Layout {
     static let bandOrder = [3, 1, 2, 0]
-    static let high = 3, deconHigh = 12, deconDrawn = 12
+    static let high = 5, deconHigh = 12, deconDrawn = 12
 
     static func band(_ column: Int) -> Int { (column / 2) % 4 }
     static func columns(_ band: Int) -> [Int] { [0, 1].flatMap { row in [0, 1].map { side in (row * 4 + band) * 2 + side } } }
