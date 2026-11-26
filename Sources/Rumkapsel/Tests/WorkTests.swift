@@ -292,6 +292,23 @@ enum WorkTests {
             expect(r.hear(Signal(stage: .shipped, by: .git, at: at(4)))?.to == .shipped, "git saying shipped first moves it on")
         }
 
+        test("a ship read off a merge that is not in production goes back to what the other sources last said; other ships stay") {
+            let boarded = WorkBook.Record(id: 1, repo: "api")
+            _ = boarded.hear(Signal(stage: .stored, by: .git, at: at(0)))
+            _ = boarded.hear(Signal(stage: .cleared, by: .board, at: at(1)))
+            _ = boarded.hear(Signal(stage: .shipped, by: .pulls, at: at(2)))
+            let t = boarded.notInProduction(at: at(3))
+            expect(t?.from == .shipped && t?.to == .cleared && t?.back == true && boarded.stage == .cleared, "back to the board's cleared: \(String(describing: t))")
+            expect(boarded.words[.pulls] == nil && boarded.notInProduction(at: at(4)) == nil, "the false word is gone; nothing more to take back")
+            let pullOnly = WorkBook.Record(id: 2, repo: "api")
+            _ = pullOnly.hear(Signal(stage: .stored, by: .pulls, at: at(0)))
+            _ = pullOnly.hear(Signal(stage: .shipped, by: .git, at: at(1)))
+            expect(pullOnly.notInProduction(at: at(2))?.to == .stored, "nothing else said: back to storage")
+            let deployed = WorkBook.Record(id: 3, repo: "api")
+            _ = deployed.hear(Signal(stage: .shipped, by: .deploy, at: at(0)))
+            expect(!deployed.shippedOnMerge && deployed.notInProduction(at: at(1)) == nil && deployed.stage == .shipped, "a deploy's ship is not a merge's: it stays")
+        }
+
         test("back, only the first in line takes work back, and only by changing its own word") {
             let r = WorkBook.Record(id: 1, repo: "web")
             _ = r.hear(Signal(stage: .stored, by: .pulls, at: at(0)))

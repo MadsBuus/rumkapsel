@@ -2,6 +2,7 @@ import Foundation
 
 struct RepoFolder {
     struct Git: Equatable {
+        var isRepo = true
         var lastCommit: Date?
         var lastOwnCommit: Date?
         var changed = 0
@@ -40,6 +41,7 @@ struct RepoFolder {
         }
         func date(_ args: [String]) -> Date? { lines(args).first.flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) } }
         var g = Git()
+        guard lines(["git", "rev-parse", "--is-inside-work-tree"]).first == "true" else { return Git(isRepo: false) }
         g.lastCommit = date(["git", "log", "--all", "-1", "--format=%ct"])
         if let me = lines(["git", "config", "user.email"]).first {
             g.lastOwnCommit = date(["git", "log", "--all", "-1", "--format=%ct", "--author=\(me)"])
@@ -61,6 +63,7 @@ struct RepoFolder {
 
     var holdsWork: Bool { (git?.changed ?? 0) + (git?.untracked ?? 0) + (git?.stashes ?? 0) + (git?.unpushed ?? 0) > 0 }
     var download: Bool { git.map { $0.remote != nil && $0.lastOwnCommit == nil } ?? false }
+    var trashable: Bool { git?.isRepo == true && URL(fileURLWithPath: root).standardized.path != FileManager.default.homeDirectoryForCurrentUser.standardized.path }
 
     func whyHere(window: TimeInterval, now: Date) -> String {
         switch via {
@@ -85,7 +88,7 @@ struct RepoFolder {
     }
 
     func advice(now: Date) -> String? {
-        guard git != nil else { return nil }
+        guard git?.isRepo == true else { return nil }
         let quiet = quietFor(now: now)
         guard quiet > Double(RepoFolder.quietDays) * 86400 else { return nil }
         let days = "Quiet for \(RepoFolder.words(quiet))"

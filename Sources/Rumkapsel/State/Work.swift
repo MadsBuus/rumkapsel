@@ -180,6 +180,10 @@ final class WorkBook {
         if let t = record.hear(Signal(stage: stage, by: source, at: at), workflow: workflow(record.repo)) { onTransition?(record, t) }
     }
 
+    func notInProduction(_ record: Record, at: Date) {
+        if let t = record.notInProduction(at: at, workflow: workflow(record.repo)) { onTransition?(record, t) }
+    }
+
     func find(officeKey key: String, repo: String) -> Record? {
         if let n = Work.number(inOfficeKey: key) { return find(repo: repo, issue: n) ?? find(repo: repo, pull: n) }
         guard key.hasPrefix("task:\(repo)/") else { return nil }

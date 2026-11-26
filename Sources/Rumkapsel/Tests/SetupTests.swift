@@ -233,6 +233,13 @@ enum SetupTests {
             expect(folder(dirty).advice(now: now)?.contains("work found nowhere else") == true, "uncommitted work wins over everything")
             expect(folder(dirty).unsaved() == ["2 changed files never committed"], "says what: \(folder(dirty).unsaved())")
             expect(folder(nil).advice(now: now) == nil, "nothing said before git is read")
+            let plain = GitWatch.real(NSTemporaryDirectory()) + "/rk-plain-\(UUID().uuidString)"
+            try? FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(atPath: plain) }
+            let loose = RepoFolder(repo: "notes", root: plain, lastActive: old, git: RepoFolder.readGit(root: plain, run: run))
+            expect(loose.git?.isRepo == false && !loose.trashable && loose.advice(now: now) == nil, "a plain folder is no repository: no advice, no Trash")
+            let home = RepoFolder(repo: "home", root: FileManager.default.homeDirectoryForCurrentUser.path, lastActive: old, git: clean)
+            expect(folder(clean).trashable && !home.trashable, "a repository can go to the Trash, the home folder never")
             expect(RepoFolder.words(90 * 86400) == "3 months" && RepoFolder.words(30 * 3600) == "30 hours" && RepoFolder.words(1) == "a moment", "spans in words")
         }
 

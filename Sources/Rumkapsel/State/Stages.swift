@@ -50,4 +50,17 @@ extension WorkBook.Record {
         }
         return nil
     }
+
+    static let unshippable: Set<Source> = [.pulls, .git]
+
+    var shippedOnMerge: Bool { stage == .shipped && stagedBy.map(Self.unshippable.contains) == true }
+
+    func notInProduction(at: Date, workflow: Workflow = Workflow()) -> Transition? {
+        guard shippedOnMerge, let by = stagedBy else { return nil }
+        for s in Self.unshippable where words[s] == .shipped { words[s] = nil }
+        let said = words.filter { $0.value < .shipped && workflow.inLine($0.value)?.contains($0.key) == true }.values
+        let back = max(said.max() ?? .stored, .stored)
+        stage = back; stagedAt = at; stagedBy = by; quiet = false
+        return Transition(from: .shipped, to: back, by: by, at: at)
+    }
 }

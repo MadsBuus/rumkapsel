@@ -317,20 +317,51 @@ extension StationController {
 enum OfficeLight { case occupied, empty, dark }
 
 extension StationController {
-    func rebuildYard() {
-        lookAgain()
+    private static var rebuiltFor: URL { AppSupport.root.appendingPathComponent("Rumkapsel/yard-rebuilt-for") }
+
+    func rebuildOnceAfterUpdate() {
+        guard !world.simulated, !demo, !Scripted.run,
+              let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !version.isEmpty,
+              (try? String(contentsOf: Self.rebuiltFor, encoding: .utf8)) != version else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [self] in
+            StationLog.write("yard", "rebuild: first launch of \(version)")
+            rebuildYard { try? version.write(to: Self.rebuiltFor, atomically: true, encoding: .utf8) }
+        }
+    }
+
+    func rebuildYard(only repo: String? = nil, done: (() -> Void)? = nil) {
+        if repo == nil { lookAgain() }
         enqueue { [self] in
-            let jobs = world.yardNumbers()
+            let jobs = world.yardNumbers(only: repo)
             let asked = jobs.map(\.numbers.count).reduce(0, +)
             StationLog.write("yard", "rebuild: asking GitHub about \(asked) crates in \(jobs.count) repositories")
+            guard asked > 0 else { done?(); return }
             logEvent("rebuilding the yard: asking GitHub about \(asked) crates")
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
-                let dug = jobs.map { (repo: $0.repo, found: github.pulls.dig($0.numbers, repoRoot: $0.root)) }
-                enqueue { [self] in
-                    let pulls = dug.flatMap { $0.found.values.flatMap { $0 } }
-                    StationLog.write("yard", "rebuild: \(pulls.count) pull request(s) found, \(pulls.filter(\.shipped).count) in production")
-                    world.rebuildYard(dug: dug)
-                    logEvent("the yard rebuilt from what GitHub says now")
+            let batches = jobs.flatMap { job in
+                stride(from: 0, to: job.numbers.count, by: 8).map { (root: job.root, repo: job.repo, numbers: Array(job.numbers[$0..<min($0 + 8, job.numbers.count)])) }
+            }
+            var left = Dictionary(jobs.map { ($0.repo, $0.numbers.count) }, uniquingKeysWith: +), back: [String: Int] = [:], found = 0, inProduction = 0
+            let asking = OperationQueue()
+            asking.maxConcurrentOperationCount = 4
+            asking.qualityOfService = .userInitiated
+            for b in batches {
+                asking.addOperation { [self] in
+                    let dug = github.pulls.dig(b.numbers, repoRoot: b.root)
+                    enqueue { [self] in
+                        let pulls = dug.values.flatMap { $0 }
+                        found += pulls.count; inProduction += pulls.filter(\.shipped).count
+                        back[b.repo, default: 0] += world.rebuildYard(dug: [(b.repo, dug)], repos: [b.repo], restack: false)
+                        left[b.repo, default: 0] -= b.numbers.count
+                        guard left[b.repo] == 0 else { return }
+                        left[b.repo] = nil
+                        let n = back[b.repo] ?? 0
+                        logEvent("\(b.repo) rechecked with GitHub" + (n > 0 ? ": \(n) \(n == 1 ? Words.current.crate : Words.current.crates) back from shipped" : ""))
+                        guard left.isEmpty else { return }
+                        StationLog.write("yard", "rebuild: \(found) pull request(s) found, \(inProduction) in production, \(back.values.reduce(0, +)) back from shipped")
+                        world.rebuildYard(repos: [])
+                        logEvent("the yard rebuilt from what GitHub says now")
+                        done?()
+                    }
                 }
             }
         }
