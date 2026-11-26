@@ -51,7 +51,7 @@ final class World {
     private(set) var repoLastSession: [String: Date] = [:]
 
     func lastActive(repo: String) -> Date {
-        let rooms = fleet.stations.values.flatMap { $0.rooms.values.filter { $0.repo == repo && !$0.key.hasPrefix("kind:") } }.map(\.lastActive)
+        let rooms = fleet.stations.values.flatMap { $0.rooms.values.filter { $0.repo == repo && $0.worktree != nil } }.map(\.lastActive)
         return (rooms + [repoLastSession[repo] ?? .distantPast]).filter { $0 != .distantFuture }.max() ?? .distantPast
     }
 
