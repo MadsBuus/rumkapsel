@@ -216,18 +216,20 @@ extension StationController {
 
     private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
         let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { world.isOurs(st, $0) } }
-        let repos = Set(ours.compactMap(\.repo)).filter { !$0.isEmpty }
-            .sorted { (fleet.repoColors[$0] ?? .max, $0) < (fleet.repoColors[$1] ?? .max, $1) }
-        let showTitles = ConfigStore.shared.current.showTitles
+        let cfg = ConfigStore.shared.current
+        let onStation = world.repoRoots.values.filter { $0.station == "work" }.map(\.repo)
+        let lastActive = Dictionary(Set(ours.compactMap(\.repo) + onStation).filter { !$0.isEmpty && cfg.shown(repo: $0) }.map { ($0, world.lastActive(repo: $0)) },
+                                    uniquingKeysWith: { a, _ in a })
+        let repos = lastActive.keys.sorted { (lastActive[$0]!, $1) > (lastActive[$1]!, $0) }
+        let showTitles = cfg.showTitles
         let others = minions.values.filter { $0.isCrew && $0.state != .leaving && fleet.stations[$0.station] != nil }
         let teammates = others.filter { !$0.isPeer }.map(\.busy).sorted { $0 && !$1 }
         let neighbours = others.filter(\.isPeer).map(\.busy).sorted { $0 && !$1 }
         var signature = "\(hud.size.width)|\(busy)|\(waiting)|\(asleep)|\(showTitles)|\(teammates)|\(neighbours)|"
-        let rootOf = Dictionary(world.repoRoots.map { ($0.value.repo, $0.key) }, uniquingKeysWith: { a, _ in a })
         for repo in repos {
             let offices = ours.filter { $0.repo == repo }.count
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
-            let loading = rootOf[repo].map { github.isBusy(repoRoot: $0) } ?? false
+            let loading = world.root(ofRepo: repo).map { github.isBusy(repoRoot: $0) } ?? false
             signature += "\(repo):\(workers):\(offices):\(loading);"
         }
         let inked = signature + "|" + Looks.theme.rawValue
@@ -236,16 +238,14 @@ extension StationController {
         statusLabel.fontColor = ink.dim; followLabel.fontColor = ink.text
         legendNodes.forEach { $0.removeFromParent() }; legendNodes = []
         jobNodes.forEach { $0.removeFromParent() }; jobNodes = []
-        let slot = hud.size.width / CGFloat(max(1, repos.count))
-        for (i, repo) in repos.enumerated() where showTitles {
-            let x = slot * (CGFloat(i) + 0.5)
+        var titles: [(repo: String, name: SKLabelNode, counts: SKLabelNode, width: CGFloat)] = []
+        for repo in repos where showTitles {
             let name = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
             name.fontSize = 14
             name.fontColor = ink.onLight ? NSColor(fleet.color(forRepo: repo)).darker(0.35) : NSColor(fleet.color(forRepo: repo)).lighter(0.15)
             name.text = repo
             name.horizontalAlignmentMode = .center
             name.verticalAlignmentMode = .top
-            name.position = CGPoint(x: x, y: hud.size.height - 34)
             let offices = ours.filter { $0.repo == repo }.count
             let workers = active.filter { $0.home.repo == repo && !$0.isSubagent }.count
             let counts = SKLabelNode(fontNamed: "HelveticaNeue-LightItalic")
@@ -254,17 +254,30 @@ extension StationController {
             counts.text = "\(workers) minions · \(offices) offices"
             counts.horizontalAlignmentMode = .center
             counts.verticalAlignmentMode = .top
-            counts.position = CGPoint(x: x, y: hud.size.height - 52)
-            hud.addChild(name); hud.addChild(counts)
-            legendNodes.append(name); legendNodes.append(counts)
-            if rootOf[repo].map({ github.isBusy(repoRoot: $0) }) == true {
-                let spinner = SKSpriteNode(color: name.fontColor ?? Palette.dim, size: CGSize(width: 7, height: 7))
-                spinner.position = CGPoint(x: x + name.frame.width / 2 + 12, y: hud.size.height - 41)
+            titles.append((repo, name, counts, max(name.frame.width + 24, counts.frame.width)))
+        }
+        let gap: CGFloat = 28, margin: CGFloat = 16
+        let row = titles.map(\.width).reduce(0, +) + gap * CGFloat(max(0, titles.count - 1))
+        var left = row <= hud.size.width - margin * 2 ? (hud.size.width - row) / 2 : margin
+        var hits: [(repo: String, rect: CGRect)] = []
+        for t in titles {
+            let x = left + t.width / 2
+            left += t.width + gap
+            guard x - t.width / 2 < hud.size.width else { continue }
+            t.name.position = CGPoint(x: x, y: hud.size.height - 34)
+            t.counts.position = CGPoint(x: x, y: hud.size.height - 52)
+            hud.addChild(t.name); hud.addChild(t.counts)
+            legendNodes.append(t.name); legendNodes.append(t.counts)
+            hits.append((t.repo, CGRect(x: x - t.width / 2, y: hud.size.height - 62, width: t.width, height: 34)))
+            if world.root(ofRepo: t.repo).map({ github.isBusy(repoRoot: $0) }) == true {
+                let spinner = SKSpriteNode(color: t.name.fontColor ?? Palette.dim, size: CGSize(width: 7, height: 7))
+                spinner.position = CGPoint(x: x + t.name.frame.width / 2 + 12, y: hud.size.height - 41)
                 spinner.run(.repeatForever(.rotate(byAngle: .pi * 2, duration: 1.1)))
                 spinner.alpha = 0.85
                 hud.addChild(spinner); legendNodes.append(spinner)
             }
         }
+        bubbleLock.lock(); titleHits = hits; bubbleLock.unlock()
         let white = ink.onLight ? ink.text : Palette.minion
         let groups: [(title: String, figures: [(color: NSColor, lit: Bool)], color: NSColor)] = [
             ("neighbours", neighbours.map { (Suit.base(.neighbour), $0) }, Suit.base(.neighbour).lighter(0.15)),

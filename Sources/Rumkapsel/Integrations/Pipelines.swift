@@ -67,7 +67,14 @@ struct Pipeline: Equatable, Codable {
 }
 
 enum PipelineDetection {
-    struct Merge: Equatable { let base: String; let head: String }
+    struct Merge: Equatable { let base: String; let head: String; var number: Int? = nil }
+
+    static let releaseBases = [Pipeline.stagingName, Pipeline.productionName, "main", "master"]
+
+    static func releaseMerges(recent: [Merge], intoBase: [String: [Merge]]) -> [Merge] {
+        let seen = Set(recent.compactMap(\.number))
+        return recent + intoBase.keys.sorted().flatMap { intoBase[$0]! }.filter { $0.number.map { !seen.contains($0) } ?? true }
+    }
 
     static let defaultReleaseBranches = ["release*"]
     static let releaseOrHotfix = ["release*", "hotfix*"]
@@ -121,9 +128,12 @@ enum PipelineDetection {
             for r in releases { perBase[r.base, default: 0] += 1 }
             let byCount: (String, String) -> Bool = { a, b in perBase[a, default: 0] != perBase[b, default: 0] ? perBase[a, default: 0] > perBase[b, default: 0] : a < b }
             let onward = Set(releases.map(\.head))
-            if let p = Set(releases.map(\.base)).filter({ !onward.contains($0) && exists($0) }).sorted(by: byCount).first {
+            let guessed = production
+            if let picked = Set(releases.map(\.base)).filter({ !onward.contains($0) && exists($0) }).sorted(by: byCount).first {
+                let p = picked == Pipeline.stagingName && !guessed.isEmpty ? guessed : picked
                 production = p
-                staging = Set(releases.map(\.base)).filter { b in b != p && exists(b) && releases.contains { $0.base == p && $0.head == b } }.sorted(by: byCount).first ?? ""
+                staging = Set(releases.map(\.base)).filter { b in b != p && exists(b) && releases.contains { $0.base == p && $0.head == b } }.sorted(by: byCount).first
+                    ?? (picked != p ? picked : "")
                 let intoProduction = releases.filter { $0.base == p }
                 var labels: [String] = []
                 for h in Set(intoProduction.map(\.head)).sorted() {
@@ -132,8 +142,11 @@ enum PipelineDetection {
                     if !labels.contains(label) { labels.append(label) }
                 }
                 source = "history"
-                why = "\(intoProduction.count) release\(intoProduction.count == 1 ? "" : "s") into \(p) from \(labels.joined(separator: ", "))"
-                    + (staging.isEmpty ? "" : "; \(releases.filter { $0.base == staging }.count) into \(staging)")
+                let intoStaging = staging.isEmpty ? "" : "\(releases.filter { $0.base == staging }.count) into \(staging)"
+                why = intoProduction.isEmpty
+                    ? "\(intoStaging), none into \(p) among the last \(merges.count) merges"
+                    : "\(intoProduction.count) release\(intoProduction.count == 1 ? "" : "s") into \(p) from \(labels.joined(separator: ", "))"
+                        + (intoStaging.isEmpty ? "" : "; \(intoStaging)")
             }
         }
 

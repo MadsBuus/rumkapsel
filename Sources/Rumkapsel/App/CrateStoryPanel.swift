@@ -52,6 +52,7 @@ extension StationController {
         DispatchQueue.main.async { [self] in
             if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
             if neighboursPanel?.isHidden == false { toggleNeighbours() }
+            if repoPanel?.isHidden == false { closeRepoPanel() }
         }
     }
 

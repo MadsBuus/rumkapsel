@@ -88,6 +88,14 @@ enum PipelineTests {
             expect(!p.why.contains("from develop, production"), "a back-merge is no release: \(p.why)")
         }
 
+        test("no release into production among the merges read, one merge back out of it: staging is still no production, as api's history had it on 2026-11-26") {
+            let merges = features("develop", 64) + times(M(base: "staging", head: "develop"), 33) + [M(base: "staging", head: "production"), M(base: "production", head: "gh-6286/judge-prod")]
+            let p = PipelineDetection.detect(branches: ["develop", "staging", "production"], merges: merges, file: nil)
+            expect(flow(p) == "develop → staging → production" && p.ship == .release, "got \(flow(p)), \(p.ship): \(p.why)")
+            let read = PipelineDetection.releaseMerges(recent: merges, intoBase: ["production": times(M(base: "production", head: "staging"), 3)])
+            expect(read.filter { $0.base == "production" && $0.head == "staging" }.count == 3, "releases into production are read on their own, whatever the trunk's churn")
+        }
+
         test("a rocket waiting for a release links to what that release would carry") {
             let staged = Pipeline(trunk: "develop", staging: "staging", production: "production")
             expect(staged.waitingURL(owner: "o/api", tag: nil) == "https://github.com/o/api/compare/production...staging", "through staging: \(staged.waitingURL(owner: "o/api", tag: nil))")

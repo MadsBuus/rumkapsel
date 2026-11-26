@@ -157,10 +157,11 @@ enum RuleTests {
             apply(&f, [.policy(repo: "web", staged), .policy(repo: "api", staged)])
             apply(&f, [work("web", 1, .stored, quiet: true), work("web", 2, .qa, quiet: true), work("web", 3, .cleared, quiet: true)])
             expect((1...3).map { column(f, "web", $0) } == [6, 6, 6], "the same column in every zone")
-            for n in 10..<23 { apply(&f, [work("web", n, .stored, quiet: true)]) }
-            let bands = (10..<23).map { Layout.band(column(f, "web", $0) ?? -1) }
-            expect(bands.prefix(11).allSatisfy { $0 == 3 } && bands.suffix(2) == [2, 2], "eleven more fill band 3, two spill next door: \(bands)")
-            expect(tallest(f) <= 3, "nothing above three")
+            let more = 10..<(10 + 4 * Layout.high + 1)
+            for n in more { apply(&f, [work("web", n, .stored, quiet: true)]) }
+            let bands = more.map { Layout.band(column(f, "web", $0) ?? -1) }
+            expect(bands.prefix(4 * Layout.high - 1).allSatisfy { $0 == 3 } && bands.suffix(2) == [2, 2], "band 3 fills, two spill next door: \(bands)")
+            expect(tallest(f) <= Layout.high, "nothing above the stack limit")
             apply(&f, [work("api", 1, .stored, quiet: true)])
             expect(f.homes == ["web": 3, "api": 1] && column(f, "api", 1) == 2, "api takes band 1, not web's spill: \(f.homes)")
         }
@@ -168,50 +169,54 @@ enum RuleTests {
         test("a full zone leaves a crate columnless, counted, until room frees") {
             var f = Facts()
             apply(&f, [.policy(repo: "web", staged)])
-            for n in 1...49 { apply(&f, [work("web", n, .stored, quiet: true)]) }
-            expect(f.count(.waiting) == 49 && column(f, "web", 49) == nil, "the forty-ninth has no column")
-            expect(tallest(f) == 3, "forty-eight stand three high")
+            let last = 16 * Layout.high + 1
+            for n in 1...last { apply(&f, [work("web", n, .stored, quiet: true)]) }
+            expect(f.count(.waiting) == last && column(f, "web", last) == nil, "the one past a full zone has no column")
+            expect(tallest(f) == Layout.high, "the rest stand at the stack limit")
             apply(&f, [work("web", 1, .qa)])
-            expect(column(f, "web", 49) == 6 && level(f, "web", 49) == 2, "it takes the room #1 left: c\(column(f, "web", 49) ?? -1)")
-            expect(tallest(f) <= 3, "still nothing above three")
+            expect(column(f, "web", last) == 6 && level(f, "web", last) == Layout.high - 1, "it takes the room #1 left: c\(column(f, "web", last) ?? -1)")
+            expect(tallest(f) <= Layout.high, "still nothing above the stack limit")
         }
 
-        test("the old yard mess: homes never move, nothing above three, an arrival keeps off the spill, the strays go home") {
+        test("the old yard mess: homes never move, nothing above the limit, an arrival keeps off the spill, the strays go home") {
             var f = Facts()
             for repo in ["ios", "android", "web", "api"] { apply(&f, [.policy(repo: repo, staged)]) }
             apply(&f, [work("ios", 1, .stored, quiet: true)])
             apply(&f, [work("android", 2, .stored, quiet: true)])
-            for n in 100..<115 { apply(&f, [work("web", n, .stored, quiet: true)]) }
+            let H = Layout.high, webs = 100..<(100 + 4 * H + 3), first = 100 + 4 * H
+            for n in webs { apply(&f, [work("web", n, .stored, quiet: true)]) }
             expect(f.homes == ["ios": 3, "android": 1, "web": 2], "homes in band order: \(f.homes)")
-            let strays = (100..<115).filter { Layout.band(column(f, "web", $0) ?? -1) != 2 }
-            expect(strays == [112, 113, 114] && strays.allSatisfy { Layout.band(column(f, "web", $0) ?? -1) == 0 }, "web spills three into band 0: \(strays)")
+            let strays = webs.filter { Layout.band(column(f, "web", $0) ?? -1) != 2 }
+            expect(strays == [first, first + 1, first + 2] && strays.allSatisfy { Layout.band(column(f, "web", $0) ?? -1) == 0 }, "web spills three into band 0: \(strays)")
             let homes = f.homes
-            for n in 200..<206 {
+            let onSpill = 200 + H
+            for n in 200..<(onSpill + 3) {
                 apply(&f, [work("api", n, .stored, quiet: true)])
-                expect(homes.allSatisfy { f.homes[$0.key] == $0.value } && tallest(f) <= 3, "api #\(n): homes \(f.homes), tallest \(tallest(f))")
+                expect(homes.allSatisfy { f.homes[$0.key] == $0.value } && tallest(f) <= H, "api #\(n): homes \(f.homes), tallest \(tallest(f))")
             }
             expect(f.homes["api"] == 0, "api's home is the free band, where the spill stands")
-            expect((200..<203).allSatisfy { column(f, "api", $0) == 9 }, "it piles its pure column first: \((200..<203).map { column(f, "api", $0) })")
-            expect(column(f, "api", 203) == column(f, "web", 112) && level(f, "api", 203) == 1, "then it stands on the spill")
+            expect((200..<onSpill).allSatisfy { column(f, "api", $0) == 9 }, "it piles its pure column first: \((200..<onSpill).map { column(f, "api", $0) })")
+            expect(column(f, "api", onSpill) == column(f, "web", first) && level(f, "api", onSpill) == 1, "then it stands on the spill")
             var arrivals = f
             Layout.relayout(&arrivals, yard: g)
             expect(arrivals == f, "nothing has left: a relayout changes nothing")
-            apply(&f, [108, 109, 110].map { work("web", $0, .qa) })
-            expect(Layout.band(column(f, "web", 112) ?? -1) == 2, "room at home: the first stray goes home")
-            expect(level(f, "api", 203) == 0, "and api #203 drops a level")
-            expect(Layout.band(column(f, "web", 113) ?? -1) == 0, "one stray an apply")
+            let top = 100 + 4 * (H - 1)
+            apply(&f, [top, top + 1, top + 2].map { work("web", $0, .qa) })
+            expect(Layout.band(column(f, "web", first) ?? -1) == 2, "room at home: the first stray goes home")
+            expect(level(f, "api", onSpill) == 0, "and the api crate on it drops a level")
+            expect(Layout.band(column(f, "web", first + 1) ?? -1) == 0, "one stray an apply")
             apply(&f, [.tick], at: t0 + 1)
             apply(&f, [.tick], at: t0 + 2)
-            expect((100..<115).compactMap { column(f, "web", $0) }.allSatisfy { Layout.band($0) == 2 }, "every web crate is home")
-            expect(f.homes == homes.merging(["api": 0]) { a, _ in a } && tallest(f) <= 3, "homes as they were, nothing above three: \(f.homes)")
+            expect(webs.compactMap { column(f, "web", $0) }.allSatisfy { Layout.band($0) == 2 }, "every web crate is home")
+            expect(f.homes == homes.merging(["api": 0]) { a, _ in a } && tallest(f) <= H, "homes as they were, nothing above the limit: \(f.homes)")
         }
 
         test("with nothing left since, a relayout gives the same yard") {
             for seed in [UInt64(1), 2] {
                 var step = 0
-                let run = timeline(seed: seed, steps: 220, departures: false) { _, f in
+                let run = timeline(seed: seed, steps: 360, departures: false) { _, f in
                     step += 1
-                    guard step % 110 == 0 else { return }
+                    guard step % 120 == 0 else { return }
                     var r = f
                     Layout.relayout(&r, yard: g)
                     expect(r == f, "seed \(seed), step \(step): relayout moved something")
@@ -223,7 +228,7 @@ enum RuleTests {
             }
         }
 
-        test("random timelines: never above three, no shared spot, every stack from the floor, homes stay while a repo has row crates") {
+        test("random timelines: never above the stack limit, no shared spot, every stack from the floor, homes stay while a repo has row crates") {
             for seed in [UInt64(11), 12, 13] {
                 var problems: [String] = []
                 _ = timeline(seed: seed, steps: 400, departures: true) { before, f in problems += invariants(before, f) }
@@ -241,12 +246,12 @@ enum RuleTests {
             expect(fa == fb, "same effects")
         }
 
-        test("an old ledger from a real save becomes facts: every crate placed, none above three") {
+        test("an old ledger from a real save becomes facts: every crate placed, none above the stack limit") {
             guard let old = try? JSONDecoder().decode(LegacyLedger.self, from: Data(realLedger.utf8)) else { return expect(false, "the save decodes") }
             let f = Facts.migrate(old, yard: g)
             expect(f.crates.count == 35, "all 35 crates came over: \(f.crates.count)")
             expect(f.crates.values.allSatisfy { $0.column != nil }, "every one has a column")
-            expect(tallest(f) <= 3, "the old fourth level is gone: tallest \(tallest(f))")
+            expect(tallest(f) <= Layout.high, "nothing above the stack limit: tallest \(tallest(f))")
             expect(f.crates[id("tattoodo-web", 14053)]?.place == .testing, "wanted on the deck, untested: testing")
             expect(f.count(.decon) == 8 && f.count(.cleared) == 21 && f.count(.testing) == 4 && f.count(.waiting) == 2, "zones \(Zone.allCases.map { "\($0): \(f.count($0))" })")
             let web = f.crates.values.filter { $0.zone == .cleared && $0.id.repo == "tattoodo-web" }.sorted { $0.seq < $1.seq }
@@ -262,7 +267,7 @@ enum RuleTests {
             let fx = apply(&f, [.sweep(repo: "web", keep: [1, 3, 5, 6])])
             expect(fx == [.quiet(.crate(id("web", 4))), .quiet(.crate(id("web", 2)))], "no shrinking: the picture snaps: \(fx)")
             expect(Set(f.crates.keys) == Set([1, 3, 5, 6, 9, 40].map { id("web", $0) }), "#2 and #4 gone, the office and decon untouched: \(f.crates.keys.sorted())")
-            expect(tallest(f) <= 3 && f.homes["web"] == 3, "still a good yard at home")
+            expect(tallest(f) <= Layout.high && f.homes["web"] == 3, "still a good yard at home")
             let before = f
             apply(&f, [.sweep(repo: "ios", keep: [])])
             expect(f == before, "another repository's answer touches nothing of web")
@@ -291,13 +296,14 @@ enum RuleTests {
         test("a crate leaving from under a pile keeps the pile's order when there is nowhere else to go") {
             var f = Facts()
             apply(&f, [.policy(repo: "web", staged)])
-            for n in 1...12 { apply(&f, [work("web", n, .stored, quiet: true)]) }
-            for (k, repo) in ["a", "b", "c"].enumerated() { apply(&f, [.policy(repo: repo, staged)] + (0..<12).map { work(repo, 100 * (k + 1) + $0, .stored, quiet: true) }) }
+            let band = 4 * Layout.high
+            for n in 1...band { apply(&f, [work("web", n, .stored, quiet: true)]) }
+            for (k, repo) in ["a", "b", "c"].enumerated() { apply(&f, [.policy(repo: repo, staged)] + (0..<band).map { work(repo, 100 * (k + 1) + $0, .stored, quiet: true) }) }
             let column = column(f, "web", 1)
             let above = f.crates.values.filter { $0.zone == .waiting && $0.column == column && $0.id != id("web", 1) }.sorted { $0.seq < $1.seq }.map(\.id)
             apply(&f, [work("web", 1, .qa)])
             let after = f.crates.values.filter { $0.zone == .waiting && $0.column == column }.sorted { $0.seq < $1.seq }.map(\.id)
-            expect(above.count == 2 && after == above, "the two above stay in order: \(above) then \(after)")
+            expect(above.count == Layout.high - 1 && after == above, "the ones above stay in order: \(above) then \(after)")
         }
 
         test("aboard a launched rocket, a later word from the source does not bring a crate back to the rows") {
@@ -561,7 +567,7 @@ enum RuleTests {
         for zone in Zone.allCases {
             let here = f.crates.values.filter { $0.zone == zone }
             let stacks = Dictionary(grouping: here.filter { $0.column != nil }) { $0.column! }
-            let (high, columns) = zone.isRow ? (3, 16) : (12, g.deconColumns)
+            let (high, columns) = zone.isRow ? (Layout.high, 16) : (Layout.deconHigh, g.deconColumns)
             for (column, stack) in stacks {
                 if stack.count > high || !(0..<columns).contains(column) { out.append("\(zone) c\(column) holds \(stack.count)") }
                 let levels = stack.compactMap { spots[$0.id]?.level }.sorted()

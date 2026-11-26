@@ -351,6 +351,9 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     let bubbleLock = NSLock()
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
     var bubbleCursor: CGPoint?
+    var titleHits: [(repo: String, rect: CGRect)] = []
+    var repoPanel: RepoPanel?
+    var repoOf: String?
     var legendNodes: [SKNode] = []
     var jobNodes: [SKNode] = []
     var hudClock = 0.0
@@ -471,8 +474,8 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         view.allowsCameraControl = false
         view.overlaySKScene = hud
         view.onHover = { [weak self] node in let n = node?.name; self?.enqueue { self?.hovered = n } }
-        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.posterTakes(point: p) == true || self?.cardTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
-        view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) ?? false }
+        view.hudTakesPoint = { [weak self] p in self?.spaceLogTakes(point: p) == true || self?.storyTakes(point: p) == true || self?.repoPanelTakes(point: p) == true || self?.posterTakes(point: p) == true || self?.cardTakes(point: p) == true || self?.missionTakes(point: p) == true || self?.bubbleTakes(point: p) == true }
+        view.onHUDClick = { [weak self] p in self?.bubbleClick(at: p) == true || self?.titleClick(at: p) == true }
         view.onDoubleClick = { [weak self] node, floor in
             let n = node?.name ?? ""
             self?.enqueue {
@@ -486,6 +489,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
             if let self { DispatchQueue.main.async { for f in self.flights where f.size > 0 { self.setSize(f, 0) } } }
             let n = node?.name ?? ""
             if StationController.crate(named: n) == nil && !n.hasPrefix("box:") { self?.closeStory() }
+            self?.closeRepoPanel()
             if let poster = n.hasPrefix("poster:") ? Poster(rawValue: String(n.dropFirst(7))) : nil { self?.openPoster(poster); return }
             self?.closePoster()
             if n.hasPrefix("minion:") {
@@ -574,6 +578,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
                 if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
                 if neighboursPanel?.isHidden == false { toggleNeighbours() }
                 if storyPanel?.isHidden == false { closeStory() }
+                if repoPanel?.isHidden == false { closeRepoPanel() }
             case "i": togglePosters()
             case "l": toggleSpaceLog()
             case "n": toggleNeighbours()
@@ -590,6 +595,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
         if !simulated { applySharing() }
         if !simulated && !demo { installSpaceLog(); installNeighbours() }
         installStory()
+        installRepoPanel()
         installPosterPanel()
         installCard()
         if !simulated { Bulkhead.prepare() }

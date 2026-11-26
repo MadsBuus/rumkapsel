@@ -45,8 +45,23 @@ enum Detail {
         return image
     }
 
-    static func apply(_ kind: Kind, to m: SCNMaterial, repeats: (Double, Double) = (1, 1)) {
-        guard let image = image(kind) else { return }
+    private static var groundedImages: [Kind: NSImage] = [:]
+    static func grounded(_ kind: Kind) -> NSImage? {
+        guard let base = image(kind) else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        if let made = groundedImages[kind] { return made }
+        let made = NSImage(size: base.size, flipped: false) { r in
+            base.draw(in: r)
+            NSGradient(colors: [NSColor(white: 0, alpha: 0.55), NSColor(white: 0, alpha: 0.18), NSColor(white: 0, alpha: 0)],
+                       atLocations: [0, 0.1, 0.3], colorSpace: .deviceRGB)!.draw(in: r, angle: 90)
+            return true
+        }
+        groundedImages[kind] = made
+        return made
+    }
+
+    static func apply(_ kind: Kind, to m: SCNMaterial, repeats: (Double, Double) = (1, 1), grounded shaded: Bool = false) {
+        guard let image = shaded ? grounded(kind) : image(kind) else { return }
         m.multiply.contents = image
         m.multiply.mipFilter = .linear
         m.multiply.maxAnisotropy = 8

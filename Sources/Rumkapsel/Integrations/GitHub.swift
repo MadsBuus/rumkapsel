@@ -524,13 +524,21 @@ final class GitHubResolver {
         } else {
             var merges: [PipelineDetection.Merge] = []
             var answered = false
-            if let out = run(["gh", "pr", "list", "--state", "merged", "--limit", "100", "--json", "baseRefName,headRefName"], cwd: repoRoot),
-               let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] {
-                answered = true
-                merges = arr.compactMap { o in
+            func merged(_ extra: [String]) -> [PipelineDetection.Merge]? {
+                guard let out = run(["gh", "pr", "list", "--state", "merged"] + extra + ["--json", "number,baseRefName,headRefName"], cwd: repoRoot),
+                      let arr = try? JSONSerialization.jsonObject(with: out) as? [[String: Any]] else { return nil }
+                return arr.compactMap { o in
                     guard let b = o["baseRefName"] as? String, let h = o["headRefName"] as? String else { return nil }
-                    return PipelineDetection.Merge(base: b, head: h)
+                    return PipelineDetection.Merge(base: b, head: h, number: o["number"] as? Int)
                 }
+            }
+            if let recent = merged(["--limit", "100"]) {
+                answered = true
+                var intoBase: [String: [PipelineDetection.Merge]] = [:]
+                for base in PipelineDetection.releaseBases where remoteBranches.contains(base) {
+                    intoBase[base] = merged(["--base", base, "--limit", "20"]) ?? []
+                }
+                merges = PipelineDetection.releaseMerges(recent: recent, intoBase: intoBase)
             }
             let asked = runReporting(["gh", "api", "-H", "Accept: application/vnd.github.raw+json", "repos/{owner}/{repo}/contents/.github/rumkapsel.json"], cwd: repoRoot)
             let file = asked.data.flatMap { try? JSONDecoder().decode(ReleaseFile.self, from: $0) }
