@@ -214,13 +214,19 @@ extension StationController {
         bubbleLock.lock(); bubbleHits = (m.id, f, f.union(column), allowed ? rects : []); bubbleLock.unlock()
     }
 
-    private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
+    func stationRepos() -> [(repo: String, lastActive: Date)] {
         let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { world.isOurs(st, $0) } }
         let cfg = ConfigStore.shared.current
         let onStation = world.repoRoots.values.filter { $0.station == "work" }.map(\.repo)
-        let lastActive = Dictionary(Set(ours.compactMap(\.repo) + onStation).filter { !$0.isEmpty && cfg.shown(repo: $0) }.map { ($0, world.lastActive(repo: $0)) },
-                                    uniquingKeysWith: { a, _ in a })
-        let repos = lastActive.keys.sorted { (lastActive[$0]!, $1) > (lastActive[$1]!, $0) }
+        return Set(ours.compactMap(\.repo) + onStation).filter { !$0.isEmpty && cfg.shown(repo: $0) }
+            .map { ($0, world.lastActive(repo: $0)) }
+            .sorted { ($0.1, $1.0) > ($1.1, $0.0) }
+    }
+
+    private func layoutLegend(active: [Minion], busy: Int, waiting: Int, asleep: Int) {
+        let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { world.isOurs(st, $0) } }
+        let cfg = ConfigStore.shared.current
+        let repos = stationRepos().map(\.repo)
         let showTitles = cfg.showTitles
         let others = minions.values.filter { $0.isCrew && $0.state != .leaving && fleet.stations[$0.station] != nil }
         let teammates = others.filter { !$0.isPeer }.map(\.busy).sorted { $0 && !$1 }
@@ -258,12 +264,19 @@ extension StationController {
         }
         let gap: CGFloat = 28, margin: CGFloat = 16
         let row = titles.map(\.width).reduce(0, +) + gap * CGFloat(max(0, titles.count - 1))
-        var left = row <= hud.size.width - margin * 2 ? (hud.size.width - row) / 2 : margin
+        let fits = row <= hud.size.width - margin * 2
+        let more = SKLabelNode(fontNamed: "HelveticaNeue-Italic")
+        more.fontSize = 14
+        more.fontColor = ink.text
+        more.text = "+\(titles.count) more"
+        let room = hud.size.width - margin - (fits ? 0 : more.frame.width + gap)
+        var left = fits ? (hud.size.width - row) / 2 : margin
         var hits: [(repo: String, rect: CGRect)] = []
+        var hidden = 0
         for t in titles {
             let x = left + t.width / 2
             left += t.width + gap
-            guard x - t.width / 2 < hud.size.width else { continue }
+            guard x + t.width / 2 <= room else { hidden += 1; continue }
             t.name.position = CGPoint(x: x, y: hud.size.height - 34)
             t.counts.position = CGPoint(x: x, y: hud.size.height - 52)
             hud.addChild(t.name); hud.addChild(t.counts)
@@ -277,7 +290,16 @@ extension StationController {
                 hud.addChild(spinner); legendNodes.append(spinner)
             }
         }
-        bubbleLock.lock(); titleHits = hits; bubbleLock.unlock()
+        var moreHit: CGRect?
+        if hidden > 0 {
+            more.text = "+\(hidden) more"
+            more.horizontalAlignmentMode = .right
+            more.verticalAlignmentMode = .top
+            more.position = CGPoint(x: hud.size.width - margin, y: hud.size.height - 34)
+            hud.addChild(more); legendNodes.append(more)
+            moreHit = CGRect(x: more.frame.minX - 8, y: hud.size.height - 62, width: more.frame.width + 16, height: 34)
+        }
+        bubbleLock.lock(); titleHits = hits; moreTitlesHit = moreHit; bubbleLock.unlock()
         let white = ink.onLight ? ink.text : Palette.minion
         let groups: [(title: String, figures: [(color: NSColor, lit: Bool)], color: NSColor)] = [
             ("neighbours", neighbours.map { (Suit.base(.neighbour), $0) }, Suit.base(.neighbour).lighter(0.15)),

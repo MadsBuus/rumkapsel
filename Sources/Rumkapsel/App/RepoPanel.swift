@@ -1,6 +1,7 @@
 import AppKit
 
 enum RepoAct { case folder, terminal, github, hide, trash }
+struct RepoPick { let repo: String }
 
 extension StationController {
     // MARK: repo details
@@ -11,15 +12,34 @@ extension StationController {
         panel.autoresizingMask = [.minXMargin, .height]
         panel.isHidden = true
         panel.onAct = { [weak self] act in self?.enqueue { self?.repoAct(act) } }
+        panel.onPick = { [weak self] repo in self?.enqueue { self?.openRepo(repo) } }
         view.addSubview(panel)
         repoPanel = panel
     }
 
     func titleClick(at p: NSPoint) -> Bool {
-        bubbleLock.lock(); let repo = titleHits.first { $0.rect.contains(p) }?.repo; bubbleLock.unlock()
+        bubbleLock.lock(); let repo = titleHits.first { $0.rect.contains(p) }?.repo; let more = moreTitlesHit?.contains(p) == true; bubbleLock.unlock()
+        if more { enqueue { [self] in openRepoList() }; return true }
         guard let repo else { return false }
         enqueue { [self] in openRepo(repo) }
         return true
+    }
+
+    func openRepoList() {
+        let ours = fleet.stations.values.flatMap { st in st.rooms.values.filter { world.isOurs(st, $0) } }
+        let rows = stationRepos().map { r in
+            RepoPanel.Row(repo: r.repo, color: NSColor(fleet.color(forRepo: r.repo)), lastActive: r.lastActive, offices: ours.filter { $0.repo == r.repo }.count)
+        }
+        repoOf = nil
+        let now = world.now
+        DispatchQueue.main.async { [self] in
+            closeStory()
+            closePoster()
+            if spaceLogPanel?.isHidden == false { toggleSpaceLog() }
+            if neighboursPanel?.isHidden == false { toggleNeighbours() }
+            repoPanel?.showList(rows, now: now)
+            repoPanel?.isHidden = false
+        }
     }
 
     func openRepo(_ repo: String) {
@@ -130,6 +150,9 @@ final class RepoPanel: NSView {
     private let text = LinkedText()
     private let scroll = NSScrollView()
     var onAct: ((RepoAct) -> Void)?
+    var onPick: ((String) -> Void)?
+
+    struct Row { let repo: String; let color: NSColor; let lastActive: Date; let offices: Int }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -150,7 +173,10 @@ final class RepoPanel: NSView {
         text.frame = NSRect(origin: .zero, size: scroll.contentSize)
         text.isVerticallyResizable = true
         text.textContainer?.widthTracksTextView = true
-        text.onGo = { [weak self] t in if let act = t as? RepoAct { self?.onAct?(act) } }
+        text.onGo = { [weak self] t in
+            if let act = t as? RepoAct { self?.onAct?(act) }
+            if let pick = t as? RepoPick { self?.onPick?(pick.repo) }
+        }
         scroll.documentView = text
         addSubview(scroll)
     }
@@ -229,6 +255,32 @@ final class RepoPanel: NSView {
         if let way = f.way { add(Self.sentence(way) + "\n", small) }
         if let gh = f.github { add("On GitHub as \(gh)\n", small) } else if let remote = f.git?.remote { add("Remote \(remote)\n", small) } else if f.git != nil { add("No remote: this folder is the only copy\n", small) }
 
+        text.textStorage?.setAttributedString(out)
+        needsDisplay = true
+    }
+
+    func showList(_ rows: [Row], now: Date) {
+        let out = NSMutableAttributedString()
+        func add(_ s: String, _ attrs: [NSAttributedString.Key: Any]) { out.append(NSAttributedString(string: s, attributes: attrs)) }
+        let indent: CGFloat = 30
+        let title = NSMutableParagraphStyle(); title.firstLineHeadIndent = indent; title.headIndent = indent; title.paragraphSpacing = 16
+        add("Repositories on the station\n", [.font: NSFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: Palette.text, .paragraphStyle: title])
+        for r in rows {
+            let head = NSMutableParagraphStyle()
+            head.headIndent = indent; head.tabStops = [NSTextTab(textAlignment: .left, location: indent)]; head.paragraphSpacing = 1
+            let mark = NSTextAttachment()
+            let g = SpaceLogStyle.glyph(.office, color: r.color, size: 15)
+            mark.image = g
+            mark.bounds = NSRect(x: 0, y: -2, width: g.size.width, height: g.size.height)
+            let pick: [NSAttributedString.Key: Any] = [LinkedText.target: RepoPick(repo: r.repo), .paragraphStyle: head]
+            out.append(NSAttributedString(attachment: mark))
+            add("\t", pick.merging([.font: NSFont.systemFont(ofSize: 15)]) { _, n in n })
+            add(r.repo + "\n", pick.merging([.font: NSFont.systemFont(ofSize: 15, weight: .medium), .foregroundColor: Palette.text]) { _, n in n })
+            let small = NSMutableParagraphStyle(); small.firstLineHeadIndent = indent; small.headIndent = indent; small.paragraphSpacing = 10
+            let when = r.lastActive == .distantPast ? "no Claude session yet" : "last here \(RepoFolder.words(now.timeIntervalSince(r.lastActive))) ago"
+            add("\(Self.sentence(when)) · \(r.offices) office\(r.offices == 1 ? "" : "s")\n",
+                [LinkedText.target: RepoPick(repo: r.repo), .font: NSFont.systemFont(ofSize: 12), .foregroundColor: Palette.dim, .paragraphStyle: small])
+        }
         text.textStorage?.setAttributedString(out)
         needsDisplay = true
     }

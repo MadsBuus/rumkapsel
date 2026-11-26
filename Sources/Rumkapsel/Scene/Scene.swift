@@ -352,6 +352,7 @@ final class StationController: NSObject, SCNSceneRendererDelegate {
     var bubbleHits: (minion: String, plate: CGRect, hold: CGRect, icons: [CGRect])?
     var bubbleCursor: CGPoint?
     var titleHits: [(repo: String, rect: CGRect)] = []
+    var moreTitlesHit: CGRect?
     var repoPanel: RepoPanel?
     var repoOf: String?
     var legendNodes: [SKNode] = []
