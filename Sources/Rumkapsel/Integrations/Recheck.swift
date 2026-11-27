@@ -14,7 +14,7 @@ extension World {
         var answers: [CrateCheck.Answer] = []
         var pulls: [[String: Any]] = []
         var status: String?
-        if let pr = json(["gh", "pr", "view", "\(id.number)", "--json", "number,state,mergeCommit,projectItems,closingIssuesReferences"]) {
+        if let pr = json(["gh", "pr", "view", "\(id.number)", "--json", "number,state,mergeCommit,headRefOid,projectItems,closingIssuesReferences"]) {
             pulls = [pr]
             status = board(pr)
             for n in ((pr["closingIssuesReferences"] as? [[String: Any]]) ?? []).compactMap({ $0["number"] as? Int }) where status == nil {
@@ -23,7 +23,7 @@ extension World {
         } else if let issue = json(["gh", "issue", "view", "\(id.number)", "--json", "state,projectItems,closedByPullRequestsReferences"]) {
             status = board(issue)
             for n in ((issue["closedByPullRequestsReferences"] as? [[String: Any]]) ?? []).compactMap({ $0["number"] as? Int }) {
-                if let pr = json(["gh", "pr", "view", "\(n)", "--json", "number,state,mergeCommit"]) { pulls.append(pr) }
+                if let pr = json(["gh", "pr", "view", "\(n)", "--json", "number,state,mergeCommit,headRefOid"]) { pulls.append(pr) }
             }
         } else {
             return ([], [], "GitHub did not answer about #\(id.number)")
@@ -38,7 +38,7 @@ extension World {
             func on(_ branch: String) -> Bool { !branch.isEmpty && github.run(["git", "merge-base", "--is-ancestor", oid, "origin/" + branch], cwd: root) != nil }
             let shipped = PullSource.shipped(pr, repoRoot: root, github: github)
             let staged = p.hasStaging && on(p.staging)
-            answers.append(CrateCheck.Answer(source: .git, says: shipped ? "#\(n)'s merge commit is in production" : staged ? "#\(n)'s merge commit is on \(p.staging), not in production" : "#\(n)'s merge commit is on neither \(p.staging) nor \(p.production)",
+            answers.append(CrateCheck.Answer(source: .git, says: shipped ? "#\(n)'s commits are in production" : staged ? "#\(n)'s merge commit is on \(p.staging), not in production" : "#\(n)'s merge commit is on neither \(p.staging) nor \(p.production)",
                                              stage: shipped ? .shipped : staged ? .qa : .stored))
         }
         return (answers, pulls.compactMap { $0["number"] as? Int }.filter { $0 != id.number }, nil)
