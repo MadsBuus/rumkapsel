@@ -490,7 +490,7 @@ final class PullSource: Intake {
     func dig(_ numbers: [Int], repoRoot: String) -> [Int: [Dug]] {
         guard let github else { return [:] }
         func pull(_ n: Int) -> Dug? {
-            guard let data = github.run(["gh", "pr", "view", "\(n)", "--json", "number,state,mergeCommit"], cwd: repoRoot),
+            guard let data = github.run(["gh", "pr", "view", "\(n)", "--json", "number,state,mergeCommit,headRefOid"], cwd: repoRoot),
                   let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let state = o["state"] as? String else { return nil }
             return Dug(number: n, state: state, shipped: PullSource.shipped(o, repoRoot: repoRoot, github: github))
         }
@@ -521,11 +521,14 @@ final class PullSource: Intake {
     }
 
     static func shipped(_ o: [String: Any], repoRoot: String, github: GitHubResolver) -> Bool {
-        guard o["state"] as? String == "MERGED", let oid = (o["mergeCommit"] as? [String: Any])?["oid"] as? String else { return false }
+        guard o["state"] as? String == "MERGED" else { return false }
         let p = github.pipeline(repoRoot: repoRoot)
         guard !p.shipsOnMerge else { return false }
-        if !p.production.isEmpty, github.run(["git", "merge-base", "--is-ancestor", oid, "origin/" + p.production], cwd: repoRoot) != nil { return true }
-        return p.shipsOnTag && github.run(["git", "tag", "--contains", oid], cwd: repoRoot).map { !$0.isEmpty } == true
+        let oids = [(o["mergeCommit"] as? [String: Any])?["oid"] as? String, o["headRefOid"] as? String].compactMap { $0 }.filter { !$0.isEmpty }
+        return oids.contains { oid in
+            if !p.production.isEmpty, github.run(["git", "merge-base", "--is-ancestor", oid, "origin/" + p.production], cwd: repoRoot) != nil { return true }
+            return p.shipsOnTag && github.run(["git", "tag", "--contains", oid], cwd: repoRoot).map { !$0.isEmpty } == true
+        }
     }
 
     private func gate(_ key: String, base: TimeInterval) -> TimeInterval {

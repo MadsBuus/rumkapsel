@@ -278,7 +278,7 @@ extension World {
             for (n, pulls) in found.sorted(by: { $0.key < $1.key }) {
                 let merged = pulls.filter { $0.state == "MERGED" }
                 if recheckShips, !merged.isEmpty, !merged.contains(where: \.shipped), let r = works.find(repo: repo, crate: n), r.shippedOnMerge {
-                    StationLog.write("yard", "\(repo) #\(n): shipped, but its merge is not in production: back")
+                    StationLog.write("yard", "\(repo) #\(n): shipped, but its commits are not in production: back")
                     works.notInProduction(r, at: now)
                     back += 1
                 }

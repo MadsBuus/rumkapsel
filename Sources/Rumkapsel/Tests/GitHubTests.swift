@@ -243,7 +243,7 @@ enum GitHubTests {
             withExtendedLifetime((watch, watch2)) {}
         }
 
-        test("a merged pull request has shipped only when its merge commit is in production, or under a tag where tags ship") {
+        test("a merged pull request has shipped only when its merge commit or its head is in production, or under a tag where tags ship") {
             let dir = GitWatch.real(NSTemporaryDirectory()) + "/rk-shipped-\(UUID().uuidString)"
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(atPath: dir) }
@@ -277,6 +277,23 @@ enum GitHubTests {
             let after = commit("after the tag (#3)")
             expect(PullSource.shipped(merged(stored), repoRoot: dir, github: tags), "under the tag: shipped")
             expect(!PullSource.shipped(merged(after), repoRoot: dir, github: tags), "after the tag: not shipped")
+
+            git(["checkout", "-q", "-b", "gh-5/stacked"], dir)
+            let head = commit("stacked work")
+            git(["checkout", "-q", "-b", "gh-4/base", "develop"], dir)
+            git(["merge", "-q", "--no-ff", "-m", "Merge pull request #5", "gh-5/stacked"], dir)
+            let deadMerge = commit("after the stack")
+            git(["checkout", "-q", "-b", "gh-6/lost"], dir)
+            let lost = commit("never brought to develop")
+            git(["checkout", "-q", "develop"], dir)
+            git(["merge", "-q", "--no-ff", "-m", "Merge pull request #7", "gh-5/stacked"], dir)
+            git(["update-ref", "refs/remotes/origin/production", "HEAD"], dir)
+            var stacked = merged(deadMerge)
+            stacked["headRefOid"] = head
+            expect(PullSource.shipped(stacked, repoRoot: dir, github: github), "merged into a dead branch, its commits reached production by another pull request: shipped")
+            var stranded = merged(lost)
+            stranded["headRefOid"] = lost
+            expect(!PullSource.shipped(stranded, repoRoot: dir, github: github), "merged into a dead branch and never brought on: not shipped")
         }
 
         test("a back-merge brings staging's tip into develop for the first time; work branched after an earlier back-merge does not") {
